@@ -1,0 +1,31 @@
+{
+  "comment": "内核与驱动一律使用官方发布二进制，不 fork、不自行编译。更新版本时同步更新此处 sha256。",
+  "singBox": {
+    "tag": "v1.13.15",
+    "version": "1.13.15",
+    "releasePage": "https://github.com/SagerNet/sing-box/releases/tag/v1.13.15",
+    "assets": {
+      "x64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-amd64.zip",
+        "sha256": "599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877",
+        "root": "sing-box-1.13.15-windows-amd64"
+      },
+      "arm64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-arm64.zip",
+        "sha256": "82419193e0f087279fd7add4fbe90a26c93396057477e8c014a534ec8b2d63ec",
+        "root": "sing-box-1.13.15-windows-arm64"
+      }
+    },
+    "files": ["sing-box.exe", "libcronet.dll", "LICENSE"]
+  },
+  "wintun": {
+    "version": "0.14.1",
+    "url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+    "sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+    "dll": {
+      "x64": "wintun/bin/amd64/wintun.dll",
+      "arm64": "wintun/bin/arm64/wintun.dll"
+    },
+    "license": "wintun/LICENSE.txt"
+  }
+}
