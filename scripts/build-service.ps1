@@ -20,10 +20,13 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $env:GOOS = 'windows'
 $env:GOARCH = if ($Arch -eq 'x64') { 'amd64' } else { 'arm64' }
 $env:CGO_ENABLED = '0'
-$env:GOCACHE = 'D:\go-build-cache'
-$env:GOTMPDIR = 'D:\go-tmp'
-$env:GOPATH = 'D:\go'
-New-Item -ItemType Directory -Force -Path $env:GOCACHE, $env:GOTMPDIR | Out-Null
+# 本机仓库在 D 盘，编译缓存不落 C 盘；CI 机器上没有 D 盘，用 Go 默认位置
+if (Test-Path 'D:\') {
+    $env:GOCACHE = 'D:\go-build-cache'
+    $env:GOTMPDIR = 'D:\go-tmp'
+    $env:GOPATH = 'D:\go'
+    New-Item -ItemType Directory -Force -Path $env:GOCACHE, $env:GOTMPDIR | Out-Null
+}
 
 $output = Join-Path $outDir 'ecycloud-service.exe'
 

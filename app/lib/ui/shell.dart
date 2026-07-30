@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../domain/kernel/kernel_update.dart';
+import '../domain/update/app_update.dart';
 import '../state/connection_controller.dart';
+import '../state/update_controller.dart';
 import 'app_scope.dart';
 import 'pages/connections_page.dart';
 import 'pages/home_page.dart';
@@ -26,6 +29,8 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
+  static const int _settingsIndex = 4;
+
   static const List<_Destination> _destinations = <_Destination>[
     _Destination(Icons.home_outlined, Icons.home, '首页', HomePage()),
     _Destination(Icons.dns_outlined, Icons.dns, '节点', NodesPage()),
@@ -40,6 +45,48 @@ class _ShellState extends State<Shell> {
   ];
 
   int _index = 0;
+  UpdateController? _update;
+  bool _announcing = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_update != null) {
+      return;
+    }
+    _update = AppScope.of(context).update..addListener(_announceUpdate);
+    _announceUpdate();
+  }
+
+  @override
+  void dispose() {
+    _update?.removeListener(_announceUpdate);
+    super.dispose();
+  }
+
+  void _announceUpdate() {
+    final UpdateController update = _update!;
+    if (_announcing || !update.shouldAnnounce) {
+      return;
+    }
+    _announcing = true;
+    update.markAnnounced();
+
+    // 通知发出时正处在构建过程中，弹窗要等这一帧画完
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      final bool? toSettings = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => _UpdateDialog(update: update),
+      );
+      _announcing = false;
+      if (toSettings == true && mounted) {
+        setState(() => _index = _settingsIndex);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +145,45 @@ class _ShellState extends State<Shell> {
                 ),
         );
       },
+    );
+  }
+}
+
+class _UpdateDialog extends StatelessWidget {
+  const _UpdateDialog({required this.update});
+
+  final UpdateController update;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppUpdate? app = update.appUpdate;
+    final KernelUpdate? kernel = update.kernelUpdate;
+
+    return AlertDialog(
+      icon: const Icon(Icons.system_update_alt),
+      title: const Text('发现新版本'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 6,
+        children: <Widget>[
+          if (app != null && app.outdated)
+            Text('客户端 ${app.current} → ${app.latest}'),
+          if (kernel != null && kernel.outdated)
+            Text('sing-box 内核 ${kernel.current} → ${kernel.latest}'),
+          const Text('可在设置 - 关于里更新，更新期间连接会短暂中断。'),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('稍后'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('前往更新'),
+        ),
+      ],
     );
   }
 }

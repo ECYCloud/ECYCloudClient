@@ -11,6 +11,7 @@ import 'domain/platform/platform_service.dart';
 import 'platform/platform_factory.dart';
 import 'state/auth_controller.dart';
 import 'state/connection_controller.dart';
+import 'state/update_controller.dart';
 import 'ui/app_scope.dart';
 import 'ui/node_labels.dart';
 import 'ui/pages/login_page.dart';
@@ -40,11 +41,16 @@ Future<void> main() async {
     kernel: kernel,
     settingsStore: settingsStore,
   );
+  final UpdateController update = UpdateController(
+    connection: connection,
+    platform: platform,
+  );
 
   runApp(
     AppScope(
       auth: auth,
       connection: connection,
+      update: update,
       platform: platform,
       settingsStore: settingsStore,
       child: const EcyCloudApp(),
@@ -85,6 +91,8 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
 
     await scope.connection.runPreflight();
     await scope.auth.restore();
+
+    scope.update.start();
   }
 
   void _onAuthChanged() {

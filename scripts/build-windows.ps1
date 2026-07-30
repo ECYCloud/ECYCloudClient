@@ -16,6 +16,9 @@ param(
     # 需要本机已安装 Inno Setup 6（iscc.exe 在 PATH 中）
     [switch]$Installer,
 
+    # CI 机器上没有面板仓库，直接用仓库里已有的随包素材
+    [switch]$SkipAssetSync,
+
     [string]$Version = '1.0.0',
 
     # 客户端内置的面板地址。本机是仓库副本、连不到面板数据库，不填时读取 config/panel.json
@@ -42,14 +45,19 @@ if ($PanelUrl -notmatch '^https?://') {
     throw "面板地址不是合法的 http(s) 地址：$PanelUrl"
 }
 
-$env:TEMP = 'D:\tmp'
-$env:TMP = 'D:\tmp'
-New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+# 本机仓库在 D 盘，临时文件不落 C 盘；CI 机器上没有 D 盘，用默认位置
+if (Test-Path 'D:\') {
+    $env:TEMP = 'D:\tmp'
+    $env:TMP = 'D:\tmp'
+    New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+}
 
 & (Join-Path $scriptDir 'fetch-kernel.ps1') -Arch $Arch
 & (Join-Path $scriptDir 'build-service.ps1') -Arch $Arch
-# 随包素材不入库，每次出包都从面板目录重新拷一遍
-& (Join-Path $scriptDir 'sync-assets.ps1')
+# 面板才是素材的来源，本机出包前重新拷一遍，保证与面板当前内容一致
+if (-not $SkipAssetSync) {
+    & (Join-Path $scriptDir 'sync-assets.ps1')
+}
 
 Push-Location $appDir
 try {

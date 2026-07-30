@@ -1,0 +1,109 @@
+name: 出包与发布
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，如 1.0.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # 安装器脚本用到 6.6.0 起的窗体行为，不能退回更早版本
+  INNO_SETUP_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/windows/service/go.mod
+          cache-dependency-path: native/windows/service/go.sum
+
+      # Flutter 的 Windows 发布包只有 x64；SDK 自举时按宿主架构取产物，
+      # arm64 包只能在 arm64 机器上用 git 检出的 SDK 构建
+      - name: 安装 Flutter
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$env:RUNNER_TEMP\flutter"
+          "$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $env:INNO_SETUP_URL -OutFile $setup -UseBasicParsing
+          Start-Process -FilePath $setup -Wait -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+          "${env:ProgramFiles(x86)}\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 出包
+        shell: pwsh
+        run: |
+          flutter --version
+          ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }} -Version ${{ needs.prepare.outputs.version }} -Installer -SkipAssetSync
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*.exe
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: installer
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          kernel="$(jq -r '.singBox.version' scripts/kernel.lock.json)"
+          {
+            echo "Windows 客户端 v$VERSION，随包 sing-box $kernel。"
+            echo
+            echo "| 安装包 | 适用架构 |"
+            echo "| --- | --- |"
+            echo "| \`ECYCloud-$VERSION-windows-x64.exe\` | x64（Intel / AMD） |"
+            echo "| \`ECYCloud-$VERSION-windows-arm64.exe\` | ARM64 |"
+            echo
+            echo "最低系统版本 Windows 10 1809。安装需要管理员授权以注册后台服务。客户端每 24 小时检查一次自身与 sing-box 内核更新，发现新版会在界面上提示。"
+          } > notes.md
+          gh release create "v$VERSION" installer/*.exe --title "v$VERSION" --notes-file notes.md

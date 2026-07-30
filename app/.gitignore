@@ -43,7 +43,3 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
-
-# 随包素材是 scripts/sync-assets.ps1 从面板目录拷来的产物，不入库（面板才是这些素材的来源）
-/assets/flags/
-/assets/regions.json

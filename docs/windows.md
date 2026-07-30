@@ -72,6 +72,18 @@
 
 安装器 `[Files]` 对整个产物目录用 `ignoreversion`，即不比版本也不比时间戳、一律覆盖（自家 Flutter 与 Go 产物没有可靠的版本资源，去掉它会让新版程序装不上去），因此重装客户端会把内核重置成包内那一份。所以出客户端包前**必须先把 `kernel.lock.json` 抬到当时的最新正式版并回归测试**，否则手动升过内核的用户会被降级；`fetch-kernel.ps1` 会比对上游最新版并在落后时告警（查不到版本时只跳过，不阻断构建）。
 
+## 客户端升级
+
+客户端与内核的版本检查都在 `UpdateController`：启动后查一次，之后每 24 小时一次；首次失败时等隧道连上再补一次（GitHub 在部分网络下要走代理才通）。发现新版时在主界面弹一次窗告知，同一批版本不重复弹，常驻入口在设置 - 关于。
+
+客户端自身的升级由 GUI 发起，不经特权服务：
+
+1. 按 `Abi.current()` 取本机架构，在 `ECYCloud/ECYCloudClient` 的最新正式版里找资产 `ECYCloud-<版本>-windows-<arch>.exe`，命名与 `scripts/installer/ecycloud.iss` 的 `OutputBaseFilename` 同源。
+2. 下载到 `%APPDATA%\ECYCloud\updates`，按 Releases API 的 `digest` 校验 SHA-256，缺校验值即中止——与内核升级同一条底线。
+3. 安装包清单要求管理员权限，`CreateProcess` 会直接失败（`ERROR_ELEVATION_REQUIRED`），只能由原生侧 `installer.run` 走 `ShellExecuteEx`/`runas` 弹 UAC；用户拒绝提权则返回 false，客户端留在原版本。
+4. 提权通过后客户端立刻 `exit(0)`：安装器认单实例互斥体 `Local\ECYCloud.SingleInstance`，GUI 不退出就装不上。内核与系统代理由服务的 `onClientGone` 收尾，不需要 GUI 自己先断开。
+5. 覆盖安装时旧服务占着 `ecycloud-service.exe` 与 `sing-box.exe`，且 `install` 子命令遇到已注册的服务会报错，因此安装器在 `PrepareToInstall` 里先调旧版 `ecycloud-service.exe uninstall`（会停内核并还原系统代理），装完再由 `[Run]` 重新注册。
+
 ## 内核进程的停止
 
 Windows 无法向子进程投递 `SIGINT`，服务无控制台也无法使用 `GenerateConsoleCtrlEvent`，因此停止内核只能 `TerminateProcess`。内核来不及执行自身清理，善后由服务承担（见下）。

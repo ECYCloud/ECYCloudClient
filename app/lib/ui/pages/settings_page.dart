@@ -5,9 +5,10 @@ import 'package:flutter/material.dart';
 import '../../core/app_config.dart';
 import '../../core/logger.dart' show LogLevel, LogLevelName;
 import '../../data/store/settings_store.dart';
-import '../../domain/kernel/kernel_update.dart';
+import '../../domain/update/app_update.dart';
 import '../../state/auth_controller.dart';
 import '../../state/connection_controller.dart';
+import '../../state/update_controller.dart';
 import '../app_scope.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/refresh_button.dart';
@@ -168,41 +169,30 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _Section(
-              icon: Icons.info_outline,
-              title: '关于',
-              children: <Widget>[
-                ListTile(
-                  title: const Text('当前版本'),
-                  subtitle: Text('面板 ${AppConfig.panelHost}'),
-                  trailing: Text(
-                    AppConfig.appVersion,
-                    style: Theme.of(context).textTheme.bodyMedium,
+            ListenableBuilder(
+              listenable: scope.update,
+              builder: (BuildContext context, _) => _Section(
+                icon: Icons.info_outline,
+                title: '关于',
+                children: <Widget>[
+                  ListTile(
+                    title: const Text('当前版本'),
+                    subtitle: Text('面板 ${AppConfig.panelHost}'),
+                    trailing: Text(
+                      AppConfig.appVersion,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   ),
-                ),
-                ListTile(
-                  title: const Text('检查更新'),
-                  subtitle: const Text('从 GitHub Releases 获取新版本'),
-                  trailing: const Icon(Icons.system_update_alt),
-                  onTap: () => _notImplemented(context),
-                ),
-                _KernelTile(connection: connection),
-              ],
+                  _AppUpdateTile(update: scope.update),
+                  _KernelTile(update: scope.update),
+                ],
+              ),
             ),
           ],
         );
       },
     );
   }
-
-  // 检查更新按需求预留入口，尚未接 GitHub Releases
-  static void _notImplemented(BuildContext context) =>
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('检查更新功能尚未开放'),
-          duration: Duration(seconds: 2),
-        ),
-      );
 
   Future<void> _logout(
     BuildContext context,
@@ -284,137 +274,125 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// sing-box 内核版本、更新检查与升级。内核装在 Program Files 下，替换要管理员
-/// 权限，因此下载、校验与替换全在特权服务里完成，这里只发起并回报进度。
-class _KernelTile extends StatefulWidget {
-  const _KernelTile({required this.connection});
+/// 客户端更新：安装包由本进程下载校验，替换文件要管理员权限，交给安装器接手。
+class _AppUpdateTile extends StatelessWidget {
+  const _AppUpdateTile({required this.update});
 
-  final ConnectionController connection;
-
-  @override
-  State<_KernelTile> createState() => _KernelTileState();
-}
-
-class _KernelTileState extends State<_KernelTile> {
-  String _status = '正在读取版本…';
-  String? _upgradable;
-  bool _upgrading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
-
-  Future<void> _load() async {
-    final String version = await widget.connection.kernelVersion();
-    if (mounted) {
-      setState(() => _status = version.isEmpty ? '后台服务未运行，取不到版本' : version);
-    }
-  }
-
-  Future<void> _check() async {
-    try {
-      final KernelUpdate update = await widget.connection.checkKernelUpdate();
-      if (!mounted) {
-        return;
-      }
-      final String text;
-      if (update.current.isEmpty) {
-        text = '最新正式版 ${update.latest}，本机版本取不到';
-      } else if (update.outdated) {
-        text = '${update.current} · 官方已发布 ${update.latest}';
-      } else {
-        text = '${update.current} · 已是最新正式版';
-      }
-      setState(() {
-        _upgradable = update.outdated ? update.latest : null;
-        _status = text;
-      });
-    } on Object catch (e) {
-      if (mounted) {
-        setState(() => _status = '检查失败：$e');
-      }
-    }
-  }
-
-  Future<void> _upgrade(String version) async {
-    if (!await _confirm(version)) {
-      return;
-    }
-
-    setState(() {
-      _upgrading = true;
-      _status = '正在下载并校验 $version，请勿关闭客户端';
-    });
-
-    try {
-      final String installed = await widget.connection.upgradeKernel(version);
-      if (mounted) {
-        setState(() {
-          _upgradable = null;
-          _status = '已更新到 $installed';
-        });
-      }
-    } on Object catch (e) {
-      if (mounted) {
-        setState(() => _status = '升级失败：$e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _upgrading = false);
-      }
-    }
-  }
-
-  Future<bool> _confirm(String version) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text('升级内核到 $version'),
-        content: const Text(
-          '将从 sing-box 官方发布页下载约 20 MB 并校验 SHA-256，'
-          '替换时连接会短暂中断，随后自动重连。'
-          '校验或替换失败会自动回退到当前版本。',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('升级'),
-          ),
-        ],
-      ),
-    );
-    return confirmed == true;
-  }
+  final UpdateController update;
 
   @override
   Widget build(BuildContext context) {
-    final String? upgradable = _upgradable;
+    final AppUpdate? app = update.appInstallable ? update.appUpdate : null;
+
+    return RefreshButton.tile(
+      title: '检查更新',
+      subtitle: update.appStatus,
+      tooltip: '检查客户端更新',
+      action: update.appBusy
+          ? const _Spinner()
+          : app == null
+          ? null
+          : TextButton(
+              onPressed: () => unawaited(_install(context, app.latest)),
+              child: Text('更新到 ${app.latest}'),
+            ),
+      onRefresh: update.checkApp,
+    );
+  }
+
+  Future<void> _install(BuildContext context, String version) async {
+    final bool confirmed = await _confirm(
+      context,
+      title: '更新客户端到 $version',
+      detail:
+          '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。'
+          '客户端会自行退出让安装程序替换文件，期间连接会断开。',
+      action: '下载并安装',
+    );
+    if (confirmed) {
+      await update.installApp();
+    }
+  }
+}
+
+/// sing-box 内核版本与升级。内核装在 Program Files 下，替换要管理员权限，
+/// 因此下载、校验与替换全在特权服务里完成，这里只发起并回报进度。
+class _KernelTile extends StatelessWidget {
+  const _KernelTile({required this.update});
+
+  final UpdateController update;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? upgradable = update.kernelUpgradable;
 
     return RefreshButton.tile(
       title: 'sing-box 内核',
-      subtitle: _status,
+      subtitle: update.kernelStatus,
       tooltip: '检查内核更新',
-      action: _upgrading
-          ? const SizedBox(
-              height: 16,
-              width: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
+      action: update.kernelUpgrading
+          ? const _Spinner()
           : upgradable == null
           ? null
           : TextButton(
-              onPressed: () => unawaited(_upgrade(upgradable)),
+              onPressed: () => unawaited(_upgrade(context, upgradable)),
               child: Text('升级到 $upgradable'),
             ),
-      onRefresh: _check,
+      onRefresh: update.checkKernel,
     );
   }
+
+  Future<void> _upgrade(BuildContext context, String version) async {
+    final bool confirmed = await _confirm(
+      context,
+      title: '升级内核到 $version',
+      detail:
+          '将从 sing-box 官方发布页下载约 20 MB 并校验 SHA-256，'
+          '替换时连接会短暂中断，随后自动重连。'
+          '校验或替换失败会自动回退到当前版本。',
+      action: '升级',
+    );
+    if (confirmed) {
+      await update.upgradeKernel();
+    }
+  }
+}
+
+Future<bool> _confirm(
+  BuildContext context, {
+  required String title,
+  required String detail,
+  required String action,
+}) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(title),
+      content: Text(detail),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(action),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
+class _Spinner extends StatelessWidget {
+  const _Spinner();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+    height: 16,
+    width: 16,
+    child: CircularProgressIndicator(strokeWidth: 2),
+  );
 }
 
 class _PortTile extends StatelessWidget {

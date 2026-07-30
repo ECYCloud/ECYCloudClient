@@ -4,11 +4,13 @@ import '../data/store/settings_store.dart';
 import '../domain/platform/platform_service.dart';
 import '../state/auth_controller.dart';
 import '../state/connection_controller.dart';
+import '../state/update_controller.dart';
 
 class AppScope extends InheritedWidget {
   const AppScope({
     required this.auth,
     required this.connection,
+    required this.update,
     required this.platform,
     required this.settingsStore,
     required super.child,
@@ -17,6 +19,7 @@ class AppScope extends InheritedWidget {
 
   final AuthController auth;
   final ConnectionController connection;
+  final UpdateController update;
   final PlatformService platform;
   final SettingsStore settingsStore;
 
@@ -31,5 +34,6 @@ class AppScope extends InheritedWidget {
   bool updateShouldNotify(AppScope oldWidget) =>
       auth != oldWidget.auth ||
       connection != oldWidget.connection ||
+      update != oldWidget.update ||
       platform != oldWidget.platform;
 }

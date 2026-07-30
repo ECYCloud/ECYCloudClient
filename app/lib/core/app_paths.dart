@@ -24,6 +24,10 @@ class AppPaths {
   static Directory get iconCache =>
       _ensure(Directory(_join(userData.path, 'icons')));
 
+  // 下载回来的客户端安装包，装完由用户或下次安装覆盖，删掉不影响任何功能
+  static Directory get updates =>
+      _ensure(Directory(_join(userData.path, 'updates')));
+
   static File get proxySnapshot =>
       File(_join(machineData.path, 'proxy-snapshot.json'));
 

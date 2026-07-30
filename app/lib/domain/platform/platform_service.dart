@@ -93,5 +93,8 @@ abstract class PlatformService {
 
   Future<String> deviceName();
 
+  /// 以管理员权限启动客户端安装包，返回 false 表示用户拒绝了提权
+  Future<bool> runInstaller(String path);
+
   Future<void> dispose();
 }

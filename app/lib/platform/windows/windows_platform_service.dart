@@ -102,6 +102,13 @@ class WindowsPlatformService implements PlatformService {
   Future<String> deviceName() async => Platform.localHostname;
 
   @override
+  Future<bool> runInstaller(String path) async =>
+      await _channel.invokeMethod<bool>('installer.run', <String, dynamic>{
+        'path': path,
+      }) ??
+      false;
+
+  @override
   Future<void> dispose() async {
     await _channel.invokeMethod<void>('tray.remove');
     await _trayActionController.close();

@@ -115,6 +115,20 @@ begin
   SetForegroundWindow(WizardForm.Handle);
 end;
 
+// 覆盖安装时旧服务还占着 ecycloud-service.exe 与 sing-box.exe，且 install 子命令
+// 遇到已注册的服务会直接报错，必须先让旧版自己注销：它会停内核并还原系统代理。
+// 未注册时 uninstall 会返回非零，忽略即可
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Service: String;
+  Code: Integer;
+begin
+  Result := '';
+  Service := ExpandConstant('{app}\service\{#ServiceExeName}');
+  if FileExists(Service) then
+    Exec(Service, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
 // 卸载器没有向导页，只能自己拼一个窗体来问是否连数据一起删。
 // 默认不勾：重装后用户还能保留登录状态、节点选择与内核缓存。
 function InitializeUninstall(): Boolean;

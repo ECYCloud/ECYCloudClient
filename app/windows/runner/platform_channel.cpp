@@ -92,6 +92,30 @@ void ApplyMenuTheme(bool dark) {
   }
 }
 
+std::wstring WideFromUtf8(const std::string& text) {
+  if (text.empty()) {
+    return std::wstring();
+  }
+  int size = ::MultiByteToWideChar(CP_UTF8, 0, text.data(),
+                                   static_cast<int>(text.size()), nullptr, 0);
+  std::wstring wide(size, L'\0');
+  ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                        wide.data(), size);
+  return wide;
+}
+
+// 安装包清单要求管理员权限，CreateProcess 会直接失败（ERROR_ELEVATION_REQUIRED），
+// 只能由 ShellExecuteEx 弹 UAC；返回 false 即用户拒绝提权
+bool RunElevated(const std::wstring& path) {
+  SHELLEXECUTEINFOW info = {};
+  info.cbSize = sizeof(info);
+  info.fMask = SEE_MASK_NOASYNC;
+  info.lpVerb = L"runas";
+  info.lpFile = path.c_str();
+  info.nShow = SW_SHOWNORMAL;
+  return ::ShellExecuteExW(&info) != FALSE;
+}
+
 std::wstring ExecutablePath() {
   wchar_t buffer[MAX_PATH] = {};
   DWORD length = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
@@ -220,6 +244,24 @@ void PlatformChannel::HandleMethodCall(
     tun_ = ReadBool(*arguments, "tun");
     ApplyMenuTheme(ReadBool(*arguments, "dark"));
     result->Success();
+    return;
+  }
+
+  if (method == "installer.run") {
+    const auto* arguments =
+        std::get_if<flutter::EncodableMap>(call.arguments());
+    if (arguments == nullptr) {
+      result->Error("argument", "缺少参数");
+      return;
+    }
+    auto entry = arguments->find(flutter::EncodableValue("path"));
+    if (entry == arguments->end() ||
+        !std::holds_alternative<std::string>(entry->second)) {
+      result->Error("argument", "缺少 path");
+      return;
+    }
+    result->Success(flutter::EncodableValue(
+        RunElevated(WideFromUtf8(std::get<std::string>(entry->second)))));
     return;
   }
 
