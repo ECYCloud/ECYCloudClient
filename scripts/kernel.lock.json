@@ -1,0 +1,51 @@
+{
+  "comment": "内核与驱动一律使用官方发布二进制，不 fork、不自行编译。Android 的 libbox.aar 例外：官方不发布该产物，由 build-libbox.sh 按同一 tag 的源码用官方 Makefile 目标构建。更新版本时同步更新此处 sha256。",
+  "singBox": {
+    "tag": "v1.13.15",
+    "version": "1.13.15",
+    "releasePage": "https://github.com/SagerNet/sing-box/releases/tag/v1.13.15",
+    "assets": {
+      "windows-x64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-amd64.zip",
+        "sha256": "599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877",
+        "root": "sing-box-1.13.15-windows-amd64"
+      },
+      "windows-arm64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-arm64.zip",
+        "sha256": "82419193e0f087279fd7add4fbe90a26c93396057477e8c014a534ec8b2d63ec",
+        "root": "sing-box-1.13.15-windows-arm64"
+      },
+      "macos-x64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-darwin-amd64.tar.gz",
+        "sha256": "817e04f90f941b718fedd965ff05bfe72abfcc62952888b01751a6dec5547e14",
+        "root": "sing-box-1.13.15-darwin-amd64"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-darwin-arm64.tar.gz",
+        "sha256": "3452d866834c9572389e5ca73e60d4ee45a7d5b79332188c9a9e533c5fd40a6d",
+        "root": "sing-box-1.13.15-darwin-arm64"
+      },
+      "linux-x64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-linux-amd64.tar.gz",
+        "sha256": "a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f",
+        "root": "sing-box-1.13.15-linux-amd64"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-linux-arm64.tar.gz",
+        "sha256": "f0810bbb5722ae36635687c421019defcc8b328d31a0b3c287901f331747ca93",
+        "root": "sing-box-1.13.15-linux-arm64"
+      }
+    },
+    "files": ["sing-box.exe", "libcronet.dll", "LICENSE"]
+  },
+  "wintun": {
+    "version": "0.14.1",
+    "url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+    "sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+    "dll": {
+      "x64": "wintun/bin/amd64/wintun.dll",
+      "arm64": "wintun/bin/arm64/wintun.dll"
+    },
+    "license": "wintun/LICENSE.txt"
+  }
+}

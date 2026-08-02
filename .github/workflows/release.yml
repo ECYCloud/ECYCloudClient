@@ -1,0 +1,238 @@
+name: 出包与发布
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，如 1.0.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # 安装器脚本用到 6.6.0 起的窗体行为，不能退回更早版本
+  INNO_SETUP_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+  FLUTTER_REPO: https://github.com/flutter/flutter.git
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/windows/service/go.mod
+          cache-dependency-path: native/windows/service/go.sum
+
+      # Flutter 的 Windows 发布包只有 x64；SDK 自举时按宿主架构取产物，
+      # arm64 包只能在 arm64 机器上用 git 检出的 SDK 构建
+      - name: 安装 Flutter
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch stable $env:FLUTTER_REPO "$env:RUNNER_TEMP\flutter"
+          "$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $env:INNO_SETUP_URL -OutFile $setup -UseBasicParsing
+          Start-Process -FilePath $setup -Wait -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+          "${env:ProgramFiles(x86)}\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 出包
+        shell: pwsh
+        run: |
+          flutter --version
+          ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }} -Version ${{ needs.prepare.outputs.version }} -Installer -SkipAssetSync
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-windows-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*.exe
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: native/unix/helper/go.sum
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      # pkg 是通用二进制包，随包的内核与 helper 由脚本按两个架构编好再 lipo 合成
+      - name: 出包
+        run: |
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-macos.sh --version ${{ needs.prepare.outputs.version }} --package
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-macos
+          path: build/installer/ECYCloud-*.pkg
+          if-no-files-found: error
+
+  linux:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: native/unix/helper/go.sum
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: 出包
+        run: |
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-linux.sh --arch ${{ matrix.arch }} --version ${{ needs.prepare.outputs.version }} --package
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-linux-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*.deb
+          if-no-files-found: error
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: native/unix/helper/go.sum
+
+      # build_libbox 的 checkJavaVersion 硬性要求 java --version 含 openjdk 17
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      # 未配置签名密钥时 Gradle 退回 debug 签名，装不上已有的正式版，不能进 Release
+      - name: 准备签名密钥
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo '缺少 ANDROID_KEYSTORE，无法产出可覆盖安装的正式包' >&2
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}"
+            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } > app/android/key.properties
+
+      - name: 出包
+        run: |
+          # gomobile 只认 ANDROID_NDK_HOME，运行器镜像给的是 ANDROID_NDK_LATEST_HOME
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:?运行器未提供 Android NDK}"
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-android.sh --version ${{ needs.prepare.outputs.version }} --build-number ${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-android
+          path: build/installer/ECYCloud-*.apk
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, windows, macos, linux, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: installer
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          kernel="$(jq -r '.singBox.version' scripts/kernel.lock.json)"
+          {
+            echo "ECY Cloud 客户端 v$VERSION，随包 sing-box $kernel。"
+            echo
+            echo "| 安装包 | 适用系统 |"
+            echo "| --- | --- |"
+            echo "| \`ECYCloud-$VERSION-windows-x64.exe\` | Windows 10 1809+，x64 |"
+            echo "| \`ECYCloud-$VERSION-windows-arm64.exe\` | Windows 10 1809+，ARM64 |"
+            echo "| \`ECYCloud-$VERSION-macos.pkg\` | macOS 11+，Intel 与 Apple Silicon 通用 |"
+            echo "| \`ECYCloud-$VERSION-linux-x64.deb\` | Debian 12+ / Ubuntu 22.04+，x64 |"
+            echo "| \`ECYCloud-$VERSION-linux-arm64.deb\` | Debian 12+ / Ubuntu 22.04+，ARM64 |"
+            echo "| \`ECYCloud-$VERSION-android.apk\` | Android 7.0+，含全部 ABI |"
+            echo
+            echo "桌面三端安装时需要一次管理员授权以注册后台服务，此后日常使用不再要求提权；Android 首次连接时会弹出系统的 VPN 授权。客户端每 24 小时检查一次自身与 sing-box 内核更新，发现新版会在界面上提示。"
+          } > notes.md
+          gh release create "v$VERSION" installer/* --title "v$VERSION" --notes-file notes.md

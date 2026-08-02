@@ -1,0 +1,5 @@
+#!/bin/sh
+# helper 自己会先 bootout 旧的 LaunchDaemon 再注册新的，覆盖安装无需额外处理
+set -e
+"/Library/Application Support/ECYCloud/bin/ecycloud-helper" install
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/sh
+# 停服务时会还原系统代理并拆掉 TUN，必须赶在删文件之前
+set -e
+if [ -x /opt/ecycloud/ecycloud-helper ]; then
+    /opt/ecycloud/ecycloud-helper uninstall || true
+fi
+exit 0

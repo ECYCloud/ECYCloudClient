@@ -1,0 +1,4 @@
+# 构建产物、下载缓存与内核二进制一律不入库
+/build/
+# libbox.aar 由 scripts/build-libbox.sh 现编，几十 MB 不入库
+/app/android/app/libs/

@@ -1,0 +1,10 @@
+Package: ecycloud
+Version: APP_VERSION
+Architecture: APP_ARCH
+Maintainer: ECY Cloud <support@ecycloud.com>
+Depends: libgtk-3-0, libayatana-appindicator3-1, iproute2
+Section: net
+Priority: optional
+Homepage: https://github.com/ECYCloud/ECYCloudClient
+Description: ECY Cloud 网络助手
+ 基于 sing-box 内核的 ECY Cloud 网络加速客户端，含特权后台服务。
