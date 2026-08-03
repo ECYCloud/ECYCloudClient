@@ -58,6 +58,14 @@ android {
                 ?: signingConfigs.getByName("debug")
         }
     }
+
+    // 默认不压缩 .so（便于直接 mmap），libbox 单 ABI 约 60MB、三合一会到 200MB+；
+    // 改为安装时解压，与官方 SFA 一样把体积压回可下载范围。
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {

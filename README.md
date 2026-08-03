@@ -7,7 +7,7 @@
 | Windows | 10 1809 | x64 / arm64 | `windows-x64.exe` / `windows-arm64.exe` |
 | macOS | 11 | Intel + Apple Silicon 通用 | `macos.pkg` |
 | Linux | 使用 systemd 与 GTK3 的发行版（Debian 12+ / Ubuntu 22.04+ 及衍生版） | x64 / arm64 | `linux-x64.deb` / `linux-arm64.deb` |
-| Android | 7.0（API 24） | 单包含 arm64-v8a / armeabi-v7a / x86_64 | `android.apk` |
+| Android | 7.0（API 24） | arm64-v8a / armeabi-v7a / x86_64（按 ABI 分包） | `android-arm64.apk` / `android-arm.apk` / `android-x64.apk` |
 
 ## 安装与更新
 

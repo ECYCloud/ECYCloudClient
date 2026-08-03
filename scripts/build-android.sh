@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建 Android 客户端：libbox.aar + Flutter APK。
+# 构建 Android 客户端：libbox.aar + 按 ABI 分包的 Flutter APK。
 # 用法: build-android.sh [--version 1.0.1] [--build-number 1] [--panel-url https://面板域名] [--skip-libbox]
 set -euo pipefail
 
@@ -40,23 +40,30 @@ else
 fi
 
 cd "$app_dir"
-# 单包内置全部 ABI：应用内更新按固定资产名下载，不区分机型
-flutter build apk --release \
-    --build-name "$version" --build-number "$build_number" \
-    --target-platform android-arm,android-arm64,android-x64 \
-    --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
-    --dart-define="ECYCLOUD_VERSION=$version"
-cd "$root_dir"
-
-apk="$app_dir/build/app/outputs/flutter-apk/app-release.apk"
-if [[ ! -f "$apk" ]]; then
-    echo "未找到 Flutter 产物：$apk" >&2
-    exit 1
-fi
-
 out_dir="$root_dir/build/installer"
 mkdir -p "$out_dir"
-install -m 0644 "$apk" "$out_dir/ECYCloud-$version-android.apk"
+# 与 AppUpdate.assetSuffix 对齐：android-arm64 / android-arm / android-x64
+# Flutter 目标平台名 → 发布后缀
+targets=(
+    'android-arm64:arm64'
+    'android-arm:arm'
+    'android-x64:x64'
+)
 
-echo ""
-echo "安装包已生成：$out_dir/ECYCloud-$version-android.apk"
+for entry in "${targets[@]}"; do
+    platform="${entry%%:*}"
+    suffix="${entry##*:}"
+    flutter build apk --release \
+        --build-name "$version" --build-number "$build_number" \
+        --target-platform "$platform" \
+        --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
+        --dart-define="ECYCLOUD_VERSION=$version"
+    apk="$app_dir/build/app/outputs/flutter-apk/app-release.apk"
+    if [[ ! -f "$apk" ]]; then
+        echo "未找到 Flutter 产物：$apk" >&2
+        exit 1
+    fi
+    dest="$out_dir/ECYCloud-$version-android-$suffix.apk"
+    install -m 0644 "$apk" "$dest"
+    echo "安装包已生成：$dest"
+done

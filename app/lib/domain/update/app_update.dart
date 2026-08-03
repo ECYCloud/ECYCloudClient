@@ -38,7 +38,7 @@ class AppUpdate {
   }
 
   /// 与 scripts/build-*.{ps1,sh} 的产物名后缀逐字一致。
-  /// macOS 的 Flutter 发布产物是通用二进制，Android 出的是全 ABI 单包，两者不带架构。
+  /// macOS 的 Flutter 发布产物是通用二进制，不带架构；Android 按 ABI 分包。
   static String get assetSuffix {
     if (Platform.isWindows) {
       return 'windows-$arch.exe';
@@ -49,11 +49,17 @@ class AppUpdate {
     if (Platform.isLinux) {
       return 'linux-$arch.deb';
     }
-    return 'android.apk';
+    // Android（及未识别平台的兜底）按 ABI 分包，与 build-android.sh 后缀一致
+    return 'android-$arch.apk';
   }
 
   static String get arch => switch (Abi.current()) {
-    Abi.windowsArm64 || Abi.macosArm64 || Abi.linuxArm64 => 'arm64',
+    Abi.androidArm64 ||
+    Abi.windowsArm64 ||
+    Abi.macosArm64 ||
+    Abi.linuxArm64 =>
+      'arm64',
+    Abi.androidArm => 'arm',
     _ => 'x64',
   };
 

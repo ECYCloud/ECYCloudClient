@@ -215,7 +215,7 @@ jobs:
           pattern: installer-*
           merge-multiple: true
 
-      - name: 创建 Release
+      - name: 创建或更新 Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -231,8 +231,16 @@ jobs:
             echo "| \`ECYCloud-$VERSION-macos.pkg\` | macOS 11+，Intel 与 Apple Silicon 通用 |"
             echo "| \`ECYCloud-$VERSION-linux-x64.deb\` | Debian 12+ / Ubuntu 22.04+，x64 |"
             echo "| \`ECYCloud-$VERSION-linux-arm64.deb\` | Debian 12+ / Ubuntu 22.04+，ARM64 |"
-            echo "| \`ECYCloud-$VERSION-android.apk\` | Android 7.0+，含全部 ABI |"
+            echo "| \`ECYCloud-$VERSION-android-arm64.apk\` | Android 7.0+，arm64-v8a（主流真机） |"
+            echo "| \`ECYCloud-$VERSION-android-arm.apk\` | Android 7.0+，armeabi-v7a |"
+            echo "| \`ECYCloud-$VERSION-android-x64.apk\` | Android 7.0+，x86_64（模拟器） |"
             echo
             echo "桌面三端安装时需要一次管理员授权以注册后台服务，此后日常使用不再要求提权；Android 首次连接时会弹出系统的 VPN 授权。客户端每 24 小时检查一次自身与 sing-box 内核更新，发现新版会在界面上提示。"
           } > notes.md
-          gh release create "v$VERSION" installer/* --title "v$VERSION" --notes-file notes.md
+          # 同版本重跑时 tag 已存在：只覆盖上传资产，避免整次流水线因 create 失败变红
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" installer/* --clobber
+            gh release edit "v$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" installer/* --title "v$VERSION" --notes-file notes.md
+          fi
