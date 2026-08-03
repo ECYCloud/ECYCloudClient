@@ -40,30 +40,25 @@ else
 fi
 
 cd "$app_dir"
+# 必须用 --split-per-abi：仅 --target-platform 不会裁掉 libbox.aar 里其它 ABI 的 .so
+flutter build apk --release --split-per-abi \
+    --build-name "$version" --build-number "$build_number" \
+    --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
+    --dart-define="ECYCLOUD_VERSION=$version"
+
 out_dir="$root_dir/build/installer"
 mkdir -p "$out_dir"
-# 与 AppUpdate.assetSuffix 对齐：android-arm64 / android-arm / android-x64
-# Flutter 目标平台名 → 发布后缀
-targets=(
-    'android-arm64:arm64'
-    'android-arm:arm'
-    'android-x64:x64'
-)
-
-for entry in "${targets[@]}"; do
-    platform="${entry%%:*}"
+apk_dir="$app_dir/build/app/outputs/flutter-apk"
+# Flutter ABI 目录名 → 发布后缀（与 AppUpdate.assetSuffix 对齐；不用关联数组以兼容 macOS bash 3）
+for entry in 'arm64-v8a:arm64' 'armeabi-v7a:arm' 'x86_64:x64'; do
+    abi="${entry%%:*}"
     suffix="${entry##*:}"
-    flutter build apk --release \
-        --build-name "$version" --build-number "$build_number" \
-        --target-platform "$platform" \
-        --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
-        --dart-define="ECYCLOUD_VERSION=$version"
-    apk="$app_dir/build/app/outputs/flutter-apk/app-release.apk"
-    if [[ ! -f "$apk" ]]; then
-        echo "未找到 Flutter 产物：$apk" >&2
+    src="$apk_dir/app-$abi-release.apk"
+    if [[ ! -f "$src" ]]; then
+        echo "未找到 Flutter 产物：$src" >&2
         exit 1
     fi
     dest="$out_dir/ECYCloud-$version-android-$suffix.apk"
-    install -m 0644 "$apk" "$dest"
+    install -m 0644 "$src" "$dest"
     echo "安装包已生成：$dest"
 done
