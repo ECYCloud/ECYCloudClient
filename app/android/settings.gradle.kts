@@ -19,8 +19,9 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "9.0.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.3.20" apply false
+    // AGP 9 + builtInKotlin 与 file_picker / flutter_plugin_android_lifecycle 现状互斥，暂钉 8.9
+    id("com.android.application") version "8.9.2" apply false
+    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
 }
 
 include(":app")
