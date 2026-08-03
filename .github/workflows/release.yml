@@ -81,6 +81,11 @@ jobs:
 
   macos:
     needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    # Apple Silicon runner 可交叉取 Intel 内核并 thin 出 x64 包
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
@@ -95,17 +100,17 @@ jobs:
           git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
-      # pkg 是通用二进制包，随包的内核与 helper 由脚本按两个架构编好再 lipo 合成
       - name: 出包
         run: |
           flutter --version
           chmod +x scripts/*.sh
-          ./scripts/build-macos.sh --version ${{ needs.prepare.outputs.version }} --package
+          ./scripts/build-macos.sh --arch ${{ matrix.arch }} \
+            --version ${{ needs.prepare.outputs.version }} --package
 
       - uses: actions/upload-artifact@v6
         with:
-          name: installer-macos
-          path: build/installer/ECYCloud-*.pkg
+          name: installer-macos-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*-macos-${{ matrix.arch }}.pkg
           if-no-files-found: error
 
   linux:
@@ -228,7 +233,8 @@ jobs:
             echo "| --- | --- |"
             echo "| \`ECYCloud-$VERSION-windows-x64.exe\` | Windows 10 1809+，x64 |"
             echo "| \`ECYCloud-$VERSION-windows-arm64.exe\` | Windows 10 1809+，ARM64 |"
-            echo "| \`ECYCloud-$VERSION-macos.pkg\` | macOS 11+，Intel 与 Apple Silicon 通用 |"
+            echo "| \`ECYCloud-$VERSION-macos-x64.pkg\` | macOS 11+，Intel |"
+            echo "| \`ECYCloud-$VERSION-macos-arm64.pkg\` | macOS 11+，Apple Silicon |"
             echo "| \`ECYCloud-$VERSION-linux-x64.deb\` | Debian 12+ / Ubuntu 22.04+，x64 |"
             echo "| \`ECYCloud-$VERSION-linux-arm64.deb\` | Debian 12+ / Ubuntu 22.04+，ARM64 |"
             echo "| \`ECYCloud-$VERSION-android-arm64.apk\` | Android 7.0+，arm64-v8a（主流真机） |"

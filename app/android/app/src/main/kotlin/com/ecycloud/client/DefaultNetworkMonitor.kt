@@ -61,20 +61,47 @@ class DefaultNetworkMonitor(context: Context) {
         callback = null
     }
 
-    // 网络刚可用时 LinkProperties 与内核接口表都可能还没建好，取不到就短暂重试
+    // 网络刚可用时 LinkProperties 与内核接口表都可能还没建好，取不到就短暂重试；
+    // 部分鸿蒙 / 定制 ROM 上 getByName(LinkProperties.interfaceName) 会失败，
+    // 失败时必须回退到枚举可用物理网卡，否则 sing-box 报 no available network interface
     private fun publish(listener: InterfaceUpdateListener, network: Network) {
         repeat(10) {
             val name = connectivity.getLinkProperties(network)?.interfaceName
-            val index = name?.let {
-                runCatching { JavaNetworkInterface.getByName(it).index }.getOrNull()
-            }
-            if (index != null) {
+            val device = resolveDevice(name)
+            if (device != null) {
                 val metered = connectivity.getNetworkCapabilities(network)
                     ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
-                listener.updateDefaultInterface(name, index, metered, false)
+                listener.updateDefaultInterface(device.name, device.index, metered, false)
                 return
             }
             Thread.sleep(100)
         }
+        val fallback = fallbackDevice() ?: return
+        listener.updateDefaultInterface(fallback.name, fallback.index, false, false)
+    }
+
+    companion object {
+        fun resolveDevice(name: String?): JavaNetworkInterface? {
+            if (name.isNullOrEmpty()) {
+                return null
+            }
+            runCatching { JavaNetworkInterface.getByName(name) }.getOrNull()?.let { return it }
+            return runCatching {
+                JavaNetworkInterface.getNetworkInterfaces()?.toList()?.firstOrNull {
+                    it.name == name || it.displayName == name
+                }
+            }.getOrNull()
+        }
+
+        fun fallbackDevice(): JavaNetworkInterface? = runCatching {
+            JavaNetworkInterface.getNetworkInterfaces()?.toList()?.firstOrNull { iface ->
+                !iface.isLoopback &&
+                    iface.isUp &&
+                    iface.interfaceAddresses.isNotEmpty() &&
+                    !iface.name.startsWith("tun") &&
+                    !iface.name.startsWith("ppp") &&
+                    !iface.name.startsWith("dummy")
+            }
+        }.getOrNull()
     }
 }

@@ -279,13 +279,14 @@ class BoxService :
     @Suppress("DEPRECATION")
     override fun getInterfaces(): NetworkInterfaceIterator {
         val connectivity = getSystemService(ConnectivityManager::class.java)
-        val devices = JavaNetworkInterface.getNetworkInterfaces().toList()
         val interfaces = mutableListOf<LibboxNetworkInterface>()
 
         for (network in connectivity.allNetworks) {
             val properties = connectivity.getLinkProperties(network) ?: continue
             val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
-            val device = devices.find { it.name == properties.interfaceName } ?: continue
+            // 与 DefaultNetworkMonitor 同一套解析：部分 ROM 上 interfaceName 对不上 getByName
+            val device = DefaultNetworkMonitor.resolveDevice(properties.interfaceName)
+                ?: continue
 
             interfaces += LibboxNetworkInterface().also {
                 it.name = device.name
@@ -300,6 +301,23 @@ class BoxService :
                 it.metered = !capabilities.hasCapability(
                     NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
                 )
+            }
+        }
+
+        // ConnectivityManager 一条都拼不出时，仍给内核一份可用物理网卡，避免启动期规则集下载直接失败
+        if (interfaces.isEmpty()) {
+            val fallback = DefaultNetworkMonitor.fallbackDevice()
+            if (fallback != null) {
+                interfaces += LibboxNetworkInterface().also {
+                    it.name = fallback.name
+                    it.index = fallback.index
+                    runCatching { it.mtu = fallback.mtu }
+                    it.addresses = StringArray(fallback.interfaceAddresses.map(::prefixOf))
+                    it.flags = flagsOf(fallback)
+                    it.type = Libbox.InterfaceTypeOther
+                    it.dnsServer = StringArray(emptyList())
+                    it.metered = false
+                }
             }
         }
         return InterfaceArray(interfaces)

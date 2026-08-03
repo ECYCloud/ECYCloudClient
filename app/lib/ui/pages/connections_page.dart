@@ -45,48 +45,79 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   Widget _body(ConnectionController connection) {
     final List<_Row> rows = _rows(connection);
 
+    final SegmentedButton<_Scope> scopeFilter = SegmentedButton<_Scope>(
+      segments: <ButtonSegment<_Scope>>[
+        ButtonSegment<_Scope>(
+          value: _Scope.all,
+          label: Text(
+            '全部 ${connection.connections.length + connection.closedConnections.length}',
+          ),
+        ),
+        ButtonSegment<_Scope>(
+          value: _Scope.active,
+          label: Text('活跃中 ${connection.connections.length}'),
+        ),
+        ButtonSegment<_Scope>(
+          value: _Scope.closed,
+          label: Text('已关闭 ${connection.closedConnections.length}'),
+        ),
+      ],
+      selected: <_Scope>{_scope},
+      onSelectionChanged: (Set<_Scope> value) =>
+          setState(() => _scope = value.first),
+      showSelectedIcon: false,
+    );
+
+    final Widget searchActions = Row(
+      children: <Widget>[
+        Expanded(
+          child: SearchField(
+            hintText: '搜索域名、IP、进程、规则',
+            width: double.infinity,
+            onChanged: (String value) =>
+                setState(() => _keyword = value.trim().toLowerCase()),
+          ),
+        ),
+        const SizedBox(width: 4),
+        RefreshButton(
+          tooltip: '立即刷新',
+          onRefresh: connection.refreshStats,
+        ),
+      ],
+    );
+
     return Column(
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-          child: Row(
-            children: <Widget>[
-              SegmentedButton<_Scope>(
-                segments: <ButtonSegment<_Scope>>[
-                  ButtonSegment<_Scope>(
-                    value: _Scope.all,
-                    label: Text(
-                      '全部 ${connection.connections.length + connection.closedConnections.length}',
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool narrow = constraints.maxWidth < 640;
+            if (narrow) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: scopeFilter,
                     ),
-                  ),
-                  ButtonSegment<_Scope>(
-                    value: _Scope.active,
-                    label: Text('活跃中 ${connection.connections.length}'),
-                  ),
-                  ButtonSegment<_Scope>(
-                    value: _Scope.closed,
-                    label: Text('已关闭 ${connection.closedConnections.length}'),
-                  ),
+                    const SizedBox(height: 8),
+                    searchActions,
+                  ],
+                ),
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+              child: Row(
+                children: <Widget>[
+                  scopeFilter,
+                  const SizedBox(width: 10),
+                  Expanded(child: searchActions),
                 ],
-                selected: <_Scope>{_scope},
-                onSelectionChanged: (Set<_Scope> value) =>
-                    setState(() => _scope = value.first),
-                showSelectedIcon: false,
               ),
-              const Spacer(),
-              SearchField(
-                hintText: '搜索域名、IP、进程、规则',
-                width: 240,
-                onChanged: (String value) =>
-                    setState(() => _keyword = value.trim().toLowerCase()),
-              ),
-              const SizedBox(width: 4),
-              RefreshButton(
-                tooltip: '立即刷新',
-                onRefresh: connection.refreshStats,
-              ),
-            ],
-          ),
+            );
+          },
         ),
         const Divider(height: 1),
         Expanded(

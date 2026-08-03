@@ -438,17 +438,18 @@ class _ShopPageState extends State<ShopPage> {
         if (durations.length > 1) ...<Widget>[
           const SizedBox(height: 12),
           Center(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
+            child: SegmentedButton<int>(
+              segments: <ButtonSegment<int>>[
                 for (final int duration in durations)
-                  ChoiceChip(
+                  ButtonSegment<int>(
+                    value: duration,
                     label: Text('$duration天'),
-                    selected: _duration == duration,
-                    onSelected: (_) => setState(() => _duration = duration),
                   ),
               ],
+              selected: <int>{_duration},
+              onSelectionChanged: (Set<int> selection) =>
+                  setState(() => _duration = selection.first),
+              showSelectedIcon: false,
             ),
           ),
         ],
@@ -541,35 +542,18 @@ class _PlanCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: MetricTile(
-                  label: '等级',
-                  value: 'VIP ${product.userClass}',
-                ),
-              ),
-              Expanded(
-                child: MetricTile(
-                  label: '在线IP数',
-                  value: product.connector == 0
-                      ? '无限制'
-                      : '${product.connector} 个',
-                ),
-              ),
-              Expanded(
-                child: MetricTile(
-                  label: '网络速率',
-                  value: product.speedLimit == 0
-                      ? '无限制'
-                      : '${Format.number(product.speedLimit)} Mbps',
-                ),
-              ),
-            ],
+          InfoRow(label: '等级', value: 'VIP ${product.userClass}'),
+          InfoRow(
+            label: '在线IP数',
+            value: product.connector == 0
+                ? '无限制'
+                : '${product.connector} 个',
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Divider(height: 1),
+          InfoRow(
+            label: '网络速率',
+            value: product.speedLimit == 0
+                ? '无限制'
+                : '${Format.number(product.speedLimit)} Mbps',
           ),
           InfoRow(
             label: 'VIP有效期',

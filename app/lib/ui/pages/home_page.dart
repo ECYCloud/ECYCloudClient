@@ -7,6 +7,7 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/user_profile.dart';
 import '../../data/store/settings_store.dart';
 import '../../domain/kernel/clash_api_client.dart';
+import '../../domain/platform/platform_service.dart';
 import '../../state/announcement_controller.dart';
 import '../../state/auth_controller.dart';
 import '../../state/connection_controller.dart';
@@ -481,36 +482,47 @@ class _ProxyToggles extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppSettings settings = connection.settings;
     final bool active = connection.state == ConnectionPhase.connected;
+    final PlatformService platform = AppScope.of(context).platform;
+    final bool showSystemProxy = platform.supportsSystemProxy;
+    final bool tunLocked = platform.requiresTun;
 
     return Card(
       child: Row(
         children: <Widget>[
-          Expanded(
-            child: SwitchTile(
-              icon: Icons.public,
-              title: '系统代理',
-              subtitle: active
-                  ? '本机 ${settings.mixedPort} 端口'
-                  : '仅连接后占用，当前未生效',
-              value: settings.systemProxyEnabled,
-              onChanged: (bool value) => connection.updateSettings(
-                settings.copyWith(systemProxyEnabled: value),
+          if (showSystemProxy) ...<Widget>[
+            Expanded(
+              child: SwitchTile(
+                icon: Icons.public,
+                title: '系统代理',
+                subtitle: active
+                    ? '本机 ${settings.mixedPort} 端口'
+                    : '仅连接后占用，当前未生效',
+                value: settings.systemProxyEnabled,
+                onChanged: (bool value) => connection.updateSettings(
+                  settings.copyWith(systemProxyEnabled: value),
+                ),
               ),
             ),
-          ),
-          const SizedBox(
-            height: 34,
-            child: VerticalDivider(width: 1, indent: 0, endIndent: 0),
-          ),
+            const SizedBox(
+              height: 34,
+              child: VerticalDivider(width: 1, indent: 0, endIndent: 0),
+            ),
+          ],
           Expanded(
             child: SwitchTile(
               icon: Icons.lan_outlined,
               title: 'TUN 模式',
-              subtitle: active ? '接管系统全部流量' : '仅连接后占用，当前未生效',
+              subtitle: tunLocked
+                  ? 'Android 由系统 VPN 接管，始终开启'
+                  : active
+                  ? '接管系统全部流量'
+                  : '仅连接后占用，当前未生效',
               value: settings.tunEnabled,
-              onChanged: (bool value) => connection.updateSettings(
-                settings.copyWith(tunEnabled: value),
-              ),
+              onChanged: tunLocked
+                  ? null
+                  : (bool value) => connection.updateSettings(
+                      settings.copyWith(tunEnabled: value),
+                    ),
             ),
           ),
         ],

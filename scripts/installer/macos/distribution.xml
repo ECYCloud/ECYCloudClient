@@ -3,7 +3,8 @@
 <installer-gui-script minSpecVersion="2">
     <title>ECY Cloud 网络助手</title>
     <license file="LICENSE.txt" mime-type="text/plain"/>
-    <options customize="never" require-scripts="true" hostArchitectures="x86_64,arm64"/>
+    <!-- HOST_ARCHITECTURES 由 build-macos.sh 换成 x86_64 或 arm64，禁止装到错误芯片 -->
+    <options customize="never" require-scripts="true" hostArchitectures="HOST_ARCHITECTURES"/>
     <volume-check>
         <allowed-os-versions>
             <os-version min="11.0"/>

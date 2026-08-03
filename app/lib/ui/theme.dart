@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
 class AppTheme {
@@ -19,13 +21,14 @@ class AppTheme {
   // 只能整体缩放；桌面端按 0.8 收到约 42×26
   static const double switchScale = 0.8;
 
-  // 中英文同用雅黑 UI（Windows 自带的界面字体）：拆成两套字体时，
-  // 中文的字重与拉丁字形对不上，同一行里高矮粗细都会错开。
-  static const String _fontFamily = 'Microsoft YaHei UI';
-  static const List<String> _fontFamilyFallback = <String>[
-    'Microsoft YaHei',
-    'Segoe UI',
-  ];
+  // 雅黑 UI 只在 Windows 上存在。Android / 鸿蒙 / WSA / macOS / Linux 强制指定
+  // 会走到残缺回退链，中文易糊、缺字或度量错乱，宽屏切换时更像「看不清」。
+  static final bool _windowsUiFont = Platform.isWindows;
+  static final String? _fontFamily =
+      _windowsUiFont ? 'Microsoft YaHei UI' : null;
+  static final List<String> _fontFamilyFallback = _windowsUiFont
+      ? const <String>['Microsoft YaHei', 'Segoe UI']
+      : const <String>[];
 
   // 组件主题里的 TextStyle 必须自带字族。ThemeData.fontFamily 只会应用到
   // textTheme（theme_data.dart 的 defaultTextTheme.apply），而按钮、分段控件、
@@ -93,8 +96,10 @@ class AppTheme {
       fontFamily: _fontFamily,
       fontFamilyFallback: _fontFamilyFallback,
       textTheme: _textTheme(scheme),
-      // 桌面端信息密度：Material 默认按触摸尺寸留白，桌面上显得又大又空
-      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+      // 桌面端收紧留白；Android / iOS 保持默认触摸密度，避免平板上更挤更难辨认
+      visualDensity: Platform.isAndroid || Platform.isIOS
+          ? VisualDensity.standard
+          : const VisualDensity(horizontal: -2, vertical: -2),
       // 底色比卡片更沉一档：卡片靠明度差浮出来，不靠描边和投影
       scaffoldBackgroundColor: brightness == Brightness.dark
           ? scheme.surfaceContainerLowest
@@ -179,6 +184,11 @@ class AppTheme {
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           textStyle: _componentText(12, weight: FontWeight.w600),
+          // 默认 secondaryContainer 偏淡，选中态略加深便于辨认
+          selectedBackgroundColor: scheme.primary.withValues(
+            alpha: brightness == Brightness.dark ? 0.28 : 0.18,
+          ),
+          selectedForegroundColor: scheme.primary,
         ),
       ),
       iconButtonTheme: IconButtonThemeData(

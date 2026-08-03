@@ -37,14 +37,13 @@ class AppUpdate {
     );
   }
 
-  /// 与 scripts/build-*.{ps1,sh} 的产物名后缀逐字一致。
-  /// macOS 的 Flutter 发布产物是通用二进制，不带架构；Android 按 ABI 分包。
+  /// 与 scripts/build-*.{ps1,sh} 的产物名后缀逐字一致。四端均按架构分包。
   static String get assetSuffix {
     if (Platform.isWindows) {
       return 'windows-$arch.exe';
     }
     if (Platform.isMacOS) {
-      return 'macos.pkg';
+      return 'macos-$arch.pkg';
     }
     if (Platform.isLinux) {
       return 'linux-$arch.deb';

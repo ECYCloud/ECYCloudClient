@@ -5,7 +5,7 @@
 | 平台 | 最低版本 | 架构 | 安装包 |
 | ---- | ---- | ---- | ---- |
 | Windows | 10 1809 | x64 / arm64 | `windows-x64.exe` / `windows-arm64.exe` |
-| macOS | 11 | Intel + Apple Silicon 通用 | `macos.pkg` |
+| macOS | 11 | Intel / Apple Silicon（分包） | `macos-x64.pkg` / `macos-arm64.pkg` |
 | Linux | 使用 systemd 与 GTK3 的发行版（Debian 12+ / Ubuntu 22.04+ 及衍生版） | x64 / arm64 | `linux-x64.deb` / `linux-arm64.deb` |
 | Android | 7.0（API 24） | arm64-v8a / armeabi-v7a / x86_64（按 ABI 分包） | `android-arm64.apk` / `android-arm.apk` / `android-x64.apk` |
 
@@ -34,8 +34,8 @@ pwsh scripts/build-windows.ps1 -Arch x64 -Installer
 ```
 
 ```bash
-# macOS：另需 Xcode 命令行工具
-./scripts/build-macos.sh --version 1.0.1 --package
+# macOS：另需 Xcode 命令行工具；Intel 与 Apple Silicon 分别出包
+./scripts/build-macos.sh --arch arm64 --version 1.0.1 --package
 
 # Linux：另需 GTK3 与 libayatana-appindicator 开发包、dpkg-deb
 ./scripts/build-linux.sh --arch x64 --version 1.0.1 --package
@@ -44,7 +44,7 @@ pwsh scripts/build-windows.ps1 -Arch x64 -Installer
 ./scripts/build-android.sh --version 1.0.1
 ```
 
-Flutter 不支持交叉编译桌面产物，arm64 包须在 arm64 机器上构建；macOS 包是通用二进制，随包的内核与 helper 由脚本用 `lipo` 合成。发布流水线见 `.github/workflows/release.yml`。
+Flutter 不支持交叉编译 Windows / Linux 桌面产物，对应 arm64 包须在 arm64 机器上构建；macOS 可在 Apple Silicon 上构建并 thin 出 Intel 包。发布流水线见 `.github/workflows/release.yml`。
 
 ## 许可证
 

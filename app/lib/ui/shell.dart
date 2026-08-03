@@ -162,42 +162,55 @@ class _ShellState extends State<Shell> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool wide = constraints.maxWidth >= 640;
-        final Widget content = IndexedStack(
-          index: _index,
-          children: <Widget>[
-            for (final _Destination destination in _destinations)
-              destination.page,
-          ],
+        // 7 个目的地全文案时矮窗口会纵向溢出（黄黑条 / 裁切），只标选中项
+        final bool railCompact = wide && constraints.maxHeight < 720;
+        // 页本身透明；WSA / 部分 GPU 合成时切换 IndexedStack 易留残影，铺实底色
+        final Widget content = ColoredBox(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: IndexedStack(
+            index: _index,
+            children: <Widget>[
+              for (final _Destination destination in _destinations)
+                destination.page,
+            ],
+          ),
         );
 
+        // 底栏由 Scaffold 自己吃系统手势区；宽屏没有底栏，SafeArea 要包底。
+        // 顶栏必须包：Android / 鸿蒙 edge-to-edge 下内容会画进状态栏。
         return Scaffold(
-          body: wide
-              ? Row(
-                  children: <Widget>[
-                    NavigationRail(
-                      selectedIndex: _index,
-                      onDestinationSelected: (int index) =>
-                          setState(() => _index = index),
-                      labelType: NavigationRailLabelType.all,
-                      // 顶距交给 NavigationRail 默认 padding（约 8），与 PageHeader 对齐
-                      leading: const Padding(
-                        padding: EdgeInsets.only(bottom: 18),
-                        child: _Brand(),
+          body: SafeArea(
+            bottom: wide,
+            child: wide
+                ? Row(
+                    children: <Widget>[
+                      NavigationRail(
+                        selectedIndex: _index,
+                        onDestinationSelected: (int index) =>
+                            setState(() => _index = index),
+                        labelType: railCompact
+                            ? NavigationRailLabelType.selected
+                            : NavigationRailLabelType.all,
+                        // 顶距交给 NavigationRail 默认 padding（约 8），与 PageHeader 对齐
+                        leading: const Padding(
+                          padding: EdgeInsets.only(bottom: 18),
+                          child: _Brand(),
+                        ),
+                        destinations: <NavigationRailDestination>[
+                          for (final _Destination destination in _destinations)
+                            NavigationRailDestination(
+                              icon: Icon(destination.icon),
+                              selectedIcon: Icon(destination.selectedIcon),
+                              label: Text(destination.label),
+                            ),
+                        ],
                       ),
-                      destinations: <NavigationRailDestination>[
-                        for (final _Destination destination in _destinations)
-                          NavigationRailDestination(
-                            icon: Icon(destination.icon),
-                            selectedIcon: Icon(destination.selectedIcon),
-                            label: Text(destination.label),
-                          ),
-                      ],
-                    ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: content),
-                  ],
-                )
-              : content,
+                      const VerticalDivider(width: 1),
+                      Expanded(child: content),
+                    ],
+                  )
+                : content,
+          ),
           bottomNavigationBar: wide
               ? null
               : NavigationBar(

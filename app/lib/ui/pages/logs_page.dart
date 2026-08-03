@@ -78,6 +78,48 @@ class _LogsPageState extends State<LogsPage> {
     _ => scheme.onSurfaceVariant,
   };
 
+  Widget _levelFilter() => SegmentedButton<LogLevel?>(
+    segments: <ButtonSegment<LogLevel?>>[
+      const ButtonSegment<LogLevel?>(value: null, label: Text('全部')),
+      for (final LogLevel level in LogLevel.values)
+        ButtonSegment<LogLevel?>(value: level, label: Text(level.label)),
+    ],
+    selected: <LogLevel?>{_level},
+    onSelectionChanged: (Set<LogLevel?> value) {
+      _level = value.first;
+      _refresh();
+    },
+    showSelectedIcon: false,
+  );
+
+  Widget _searchActions(ThemeData theme, List<LogEntry> visible) => Row(
+    children: <Widget>[
+      Text('${visible.length} 条', style: theme.textTheme.bodySmall),
+      const SizedBox(width: 10),
+      Expanded(
+        child: SearchField(
+          hintText: '搜索日志内容',
+          width: double.infinity,
+          onChanged: (String value) {
+            _keyword = value.trim().toLowerCase();
+            _refresh();
+          },
+        ),
+      ),
+      const SizedBox(width: 4),
+      IconButton(
+        tooltip: '复制当前列表',
+        icon: const Icon(Icons.copy_all_outlined, size: 16),
+        visualDensity: VisualDensity.compact,
+        onPressed: () => Clipboard.setData(
+          ClipboardData(
+            text: visible.map((LogEntry entry) => entry.toString()).join('\n'),
+          ),
+        ),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -87,57 +129,37 @@ class _LogsPageState extends State<LogsPage> {
     return Column(
       children: <Widget>[
         const PageHeader(title: '日志'),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-          child: Row(
-            children: <Widget>[
-              SegmentedButton<LogLevel?>(
-                segments: <ButtonSegment<LogLevel?>>[
-                  const ButtonSegment<LogLevel?>(
-                    value: null,
-                    label: Text('全部'),
-                  ),
-                  for (final LogLevel level in LogLevel.values)
-                    ButtonSegment<LogLevel?>(
-                      value: level,
-                      label: Text(level.label),
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            // 与 Shell 宽屏断点一致：窄屏级别条会吃光整行，搜索/复制必须换行
+            final bool narrow = constraints.maxWidth < 640;
+            if (narrow) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: _levelFilter(),
                     ),
+                    const SizedBox(height: 8),
+                    _searchActions(theme, visible),
+                  ],
+                ),
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+              child: Row(
+                children: <Widget>[
+                  _levelFilter(),
+                  const SizedBox(width: 10),
+                  Expanded(child: _searchActions(theme, visible)),
                 ],
-                selected: <LogLevel?>{_level},
-                onSelectionChanged: (Set<LogLevel?> value) {
-                  _level = value.first;
-                  _refresh();
-                },
-                showSelectedIcon: false,
               ),
-              const SizedBox(width: 10),
-              Text('${visible.length} 条', style: theme.textTheme.bodySmall),
-              const Spacer(),
-              // 级别按钮占的宽度是固定的，窗口收窄时只能让搜索框先让位
-              Flexible(
-                child: SearchField(
-                  hintText: '搜索日志内容',
-                  onChanged: (String value) {
-                    _keyword = value.trim().toLowerCase();
-                    _refresh();
-                  },
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                tooltip: '复制当前列表',
-                icon: const Icon(Icons.copy_all_outlined, size: 16),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => Clipboard.setData(
-                  ClipboardData(
-                    text: visible
-                        .map((LogEntry entry) => entry.toString())
-                        .join('\n'),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
         const Divider(height: 1),
         Expanded(

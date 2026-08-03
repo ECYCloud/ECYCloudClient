@@ -1,5 +1,6 @@
 import 'package:ecycloud_client/core/logger.dart';
 import 'package:ecycloud_client/ui/pages/logs_page.dart';
+import 'package:ecycloud_client/ui/widgets/search_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -33,6 +34,19 @@ void main() {
 
     expect(find.text('一条 debug'), findsOneWidget);
     expect(find.text('一条 info'), findsOneWidget);
+  });
+
+  testWidgets('窄屏仍显示搜索框与复制按钮', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LogsPage())),
+    );
+
+    expect(find.byType(SearchField), findsOneWidget);
+    expect(find.byIcon(Icons.copy_all_outlined), findsOneWidget);
   });
 }
 

@@ -108,9 +108,19 @@ class PanelApiClient {
 
   Map<String, String> _headers({bool json = false}) => <String, String>{
     'Accept': 'application/json',
-    'User-Agent': 'ECYCloud/${device.appVersion} (${device.platform})',
+    'User-Agent':
+        'ECYCloud/${device.appVersion} (${_uaPlatform(device.platform)})',
     if (json) 'Content-Type': 'application/json; charset=utf-8',
     if (_token != null) 'Authorization': 'Bearer $_token',
+  };
+
+  // UA 展示用；platformId / 登录体仍保持小写标识，避免影响服务端既有匹配
+  static String _uaPlatform(String platform) => switch (platform) {
+    'android' => 'Android',
+    'windows' => 'Windows',
+    'linux' => 'Linux',
+    'macos' => 'macOS',
+    _ => platform,
   };
 
   Future<LoginResult> login({
