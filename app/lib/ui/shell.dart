@@ -163,8 +163,6 @@ class _ShellState extends State<Shell> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool wide = constraints.maxWidth >= 640;
-        // 7 个目的地全文案时矮窗口会纵向溢出（黄黑条 / 裁切），只标选中项
-        final bool railCompact = wide && constraints.maxHeight < 720;
         final Color pageColor = Theme.of(context).scaffoldBackgroundColor;
         // Android（含 WSA）：IndexedStack 常驻多页 + 弹窗关闭后 Impeller/Skia
         // 合成易透出旧层；只挂当前页并铺不透明 Material，业务状态在 AppScope。
@@ -194,26 +192,44 @@ class _ShellState extends State<Shell> {
             child: wide
                 ? Row(
                     children: <Widget>[
-                      NavigationRail(
-                        selectedIndex: _index,
-                        onDestinationSelected: (int index) =>
-                            setState(() => _index = index),
-                        labelType: railCompact
-                            ? NavigationRailLabelType.selected
-                            : NavigationRailLabelType.all,
-                        // 顶距交给 NavigationRail 默认 padding（约 8），与 PageHeader 对齐
-                        leading: const Padding(
-                          padding: EdgeInsets.only(bottom: 18),
-                          child: _Brand(),
-                        ),
-                        destinations: <NavigationRailDestination>[
-                          for (final _Destination destination in _destinations)
-                            NavigationRailDestination(
-                              icon: Icon(destination.icon),
-                              selectedIcon: Icon(destination.selectedIcon),
-                              label: Text(destination.label),
+                      // 7 个目的地全文案在矮窗口里高过可用高度，NavigationRail 自身
+                      // 不滚动，直接放进 Row 会出黄黑溢出条；IntrinsicHeight 是让它
+                      // 内部的 Expanded 能在无界高度下定高的唯一办法
+                      LayoutBuilder(
+                        builder:
+                            (
+                              BuildContext context,
+                              BoxConstraints railConstraints,
+                            ) => SingleChildScrollView(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: railConstraints.maxHeight,
+                                ),
+                                child: IntrinsicHeight(
+                                  child: NavigationRail(
+                                    selectedIndex: _index,
+                                    onDestinationSelected: (int index) =>
+                                        setState(() => _index = index),
+                                    // 顶距交给 NavigationRail 默认 padding（约 8），与 PageHeader 对齐
+                                    leading: const Padding(
+                                      padding: EdgeInsets.only(bottom: 18),
+                                      child: _Brand(),
+                                    ),
+                                    destinations: <NavigationRailDestination>[
+                                      for (final _Destination destination
+                                          in _destinations)
+                                        NavigationRailDestination(
+                                          icon: Icon(destination.icon),
+                                          selectedIcon: Icon(
+                                            destination.selectedIcon,
+                                          ),
+                                          label: Text(destination.label),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
-                        ],
                       ),
                       const VerticalDivider(width: 1),
                       Expanded(child: content),

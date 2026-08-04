@@ -184,11 +184,8 @@ class AppTheme {
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           textStyle: _componentText(12, weight: FontWeight.w600),
-          // 默认 secondaryContainer 偏淡，选中态略加深便于辨认
-          selectedBackgroundColor: scheme.primary.withValues(
-            alpha: brightness == Brightness.dark ? 0.28 : 0.18,
-          ),
-          selectedForegroundColor: scheme.primary,
+          selectedBackgroundColor: scheme.primary,
+          selectedForegroundColor: scheme.onPrimary,
         ),
       ),
       iconButtonTheme: IconButtonThemeData(

@@ -511,81 +511,140 @@ class _PlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
     final bool unlimitedExpire = product.classExpire == 36500;
 
-    return SectionCard(
+    return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(product.name, style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _ProductChips(product: product),
-          const SizedBox(height: 12),
-          Text(
-            '¥ ${product.price}',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          if (product.classExpire > 1 && !unlimitedExpire)
-            Text(
-              '≈ ${(product.amount / product.classExpire).toStringAsFixed(2)} 元 / 天',
-              style: theme.textTheme.bodySmall,
-            ),
-          if (product.hasLimitedSale)
-            Text(
-              '原价 ¥ ${product.basePrice}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                decoration: TextDecoration.lineThrough,
-                color: theme.colorScheme.onSurfaceVariant,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.06),
+              border: Border(
+                bottom: BorderSide(
+                  color: scheme.outlineVariant.withValues(alpha: 0.6),
+                ),
               ),
             ),
-          const SizedBox(height: 10),
-          InfoRow(label: '等级', value: 'VIP ${product.userClass}'),
-          InfoRow(
-            label: '在线IP数',
-            value: product.connector == 0
-                ? '无限制'
-                : '${product.connector} 个',
-          ),
-          InfoRow(
-            label: '网络速率',
-            value: product.speedLimit == 0
-                ? '无限制'
-                : '${Format.number(product.speedLimit)} Mbps',
-          ),
-          InfoRow(
-            label: 'VIP有效期',
-            value: unlimitedExpire ? '不限时' : '${product.classExpire} 天',
-          ),
-          InfoRow(
-            label: product.classExpire == 1 ? '试用流量' : '每月流量',
-            value: product.bandwidth == 10000
-                ? '无限制'
-                : '${Format.number(product.bandwidth)} GB',
-          ),
-          for (final String service in product.contentExtra)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    Icons.check_circle_outline,
-                    size: 13,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(service, style: theme.textTheme.bodySmall),
-                  ),
-                ],
-              ),
+            child: Column(
+              spacing: 8,
+              children: <Widget>[
+                Text(
+                  product.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge,
+                ),
+                _ProductChips(
+                  product: product,
+                  alignment: WrapAlignment.center,
+                ),
+              ],
             ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: product.inStock ? () => onBuy(product) : null,
-            child: Text(product.inStock ? '购买' : '已售罄'),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  '¥ ${product.price}',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+                if (product.classExpire > 1 && !unlimitedExpire)
+                  Text(
+                    '≈ ${(product.amount / product.classExpire).toStringAsFixed(2)} 元 / 天',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                if (product.hasLimitedSale)
+                  Text(
+                    '原价 ¥ ${product.basePrice}',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                const SizedBox(height: 14),
+                Row(
+                  children: <Widget>[
+                    for (final (String label, String value)
+                        in <(String, String)>[
+                          ('等级', 'VIP ${product.userClass}'),
+                          (
+                            '在线IP数',
+                            product.connector == 0
+                                ? '无限制'
+                                : '${product.connector} 个',
+                          ),
+                          (
+                            '网络速率',
+                            product.speedLimit == 0
+                                ? '无限制'
+                                : '${Format.number(product.speedLimit)} Mbps',
+                          ),
+                        ])
+                      Expanded(
+                        child: Column(
+                          spacing: 2,
+                          children: <Widget>[
+                            Text(
+                              value,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                            Text(label, style: theme.textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                InfoRow(
+                  label: 'VIP有效期',
+                  value: unlimitedExpire ? '不限时' : '${product.classExpire} 天',
+                ),
+                InfoRow(
+                  label: product.classExpire == 1 ? '试用流量' : '每月流量',
+                  value: product.bandwidth == 10000
+                      ? '无限制'
+                      : '${Format.number(product.bandwidth)} GB',
+                ),
+                for (final String service in product.contentExtra)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Icon(
+                          Icons.check_circle_outline,
+                          size: 13,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            service,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 14),
+                FilledButton(
+                  onPressed: product.inStock ? () => onBuy(product) : null,
+                  child: Text(product.inStock ? '购买' : '已售罄'),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -660,15 +719,20 @@ class _CompactCard extends StatelessWidget {
 }
 
 class _ProductChips extends StatelessWidget {
-  const _ProductChips({required this.product});
+  const _ProductChips({
+    required this.product,
+    this.alignment = WrapAlignment.start,
+  });
 
   final ShopProduct product;
+  final WrapAlignment alignment;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return Wrap(
+      alignment: alignment,
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
