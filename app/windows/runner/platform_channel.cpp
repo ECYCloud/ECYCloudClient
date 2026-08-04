@@ -14,7 +14,7 @@
 #define WIDEN_(x) L##x
 #define WIDEN(x) WIDEN_(x)
 const wchar_t kWindowTitle[] =
-    L"ECY Cloud \u7F51\u7EDC\u52A9\u624B " WIDEN(FLUTTER_VERSION);
+    L"ECY Cloud " WIDEN(FLUTTER_VERSION);
 
 namespace {
 

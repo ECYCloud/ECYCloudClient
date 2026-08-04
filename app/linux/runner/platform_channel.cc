@@ -133,7 +133,7 @@ static void install_tray(PlatformChannel* self) {
   self->indicator = app_indicator_new(kIndicatorId, kIndicatorIcon,
                                       APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
   app_indicator_set_status(self->indicator, APP_INDICATOR_STATUS_ACTIVE);
-  app_indicator_set_title(self->indicator, "ECY Cloud 网络助手");
+  app_indicator_set_title(self->indicator, "ECY Cloud");
   update_menu(self);
 }
 

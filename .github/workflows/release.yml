@@ -124,19 +124,26 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # 产物链接的是构建机的 glibc，跟着 runner 镜像走会把可安装范围顶到 Ubuntu 24.04 一级。
+    # 固定在 22.04 容器里出包，基线锁死在 glibc 2.35，且不受 runner 镜像换代影响。
+    container: ubuntu:22.04
     steps:
+      # 容器是裸镜像，git 与 safe.directory 必须早于 checkout：工作区在宿主上属普通用户，
+      # 容器内以 root 跑 git 会判定为 dubious ownership
+      - name: 安装构建依赖
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates clang cmake curl file git jq ninja-build \
+            pkg-config rpm unzip xz-utils zip libgtk-3-dev libayatana-appindicator3-dev
+          git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: native/unix/helper/go.mod
           cache-dependency-path: native/unix/helper/go.sum
-
-      - name: 安装构建依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config \
-            libgtk-3-dev libayatana-appindicator3-dev
 
       - name: 安装 Flutter
         run: |
@@ -152,7 +159,10 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: installer-linux-${{ matrix.arch }}
-          path: build/installer/ECYCloud-*.deb
+          path: |
+            build/installer/ECYCloud-*.deb
+            build/installer/ECYCloud-*.rpm
+            build/installer/ECYCloud-*.tar.gz
           if-no-files-found: error
 
   android:
@@ -235,8 +245,12 @@ jobs:
             echo "| \`ECYCloud-$VERSION-windows-arm64.exe\` | Windows 10 1809+，ARM64 |"
             echo "| \`ECYCloud-$VERSION-macos-x64.pkg\` | macOS 11+，Intel |"
             echo "| \`ECYCloud-$VERSION-macos-arm64.pkg\` | macOS 11+，Apple Silicon |"
-            echo "| \`ECYCloud-$VERSION-linux-x64.deb\` | Debian 12+ / Ubuntu 22.04+，x64 |"
-            echo "| \`ECYCloud-$VERSION-linux-arm64.deb\` | Debian 12+ / Ubuntu 22.04+，ARM64 |"
+            echo "| \`ECYCloud-$VERSION-linux-x64.deb\` | Debian 12+ / Ubuntu 22.04+ 及衍生版，x64 |"
+            echo "| \`ECYCloud-$VERSION-linux-arm64.deb\` | Debian 12+ / Ubuntu 22.04+ 及衍生版，ARM64 |"
+            echo "| \`ECYCloud-$VERSION-linux-x64.rpm\` | Fedora 36+ / openSUSE Leap 15.6+ / RHEL 10+ 系，x64 |"
+            echo "| \`ECYCloud-$VERSION-linux-arm64.rpm\` | Fedora 36+ / openSUSE Leap 15.6+ / RHEL 10+ 系，ARM64 |"
+            echo "| \`ECYCloud-$VERSION-linux-x64.tar.gz\` | 其它 systemd 发行版（Arch 等），x64；解包后 \`sudo ./install.sh\` |"
+            echo "| \`ECYCloud-$VERSION-linux-arm64.tar.gz\` | 其它 systemd 发行版（Arch 等），ARM64；解包后 \`sudo ./install.sh\` |"
             echo "| \`ECYCloud-$VERSION-android-arm64.apk\` | Android 7.0+，arm64-v8a（主流真机） |"
             echo "| \`ECYCloud-$VERSION-android-arm.apk\` | Android 7.0+，armeabi-v7a |"
             echo "| \`ECYCloud-$VERSION-android-x64.apk\` | Android 7.0+，x86_64（模拟器） |"

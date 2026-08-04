@@ -11,7 +11,7 @@
 // 版本号取编译期注入的 FLUTTER_VERSION（由 flutter build --build-name 给出），
 // 与安装包版本同源，不另存一份
 static constexpr const char kWindowTitle[] =
-    "ECY Cloud 网络助手 " FLUTTER_VERSION;
+    "ECY Cloud " FLUTTER_VERSION;
 
 struct _MyApplication {
   GtkApplication parent_instance;

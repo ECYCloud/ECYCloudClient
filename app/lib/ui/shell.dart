@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -164,17 +165,26 @@ class _ShellState extends State<Shell> {
         final bool wide = constraints.maxWidth >= 640;
         // 7 个目的地全文案时矮窗口会纵向溢出（黄黑条 / 裁切），只标选中项
         final bool railCompact = wide && constraints.maxHeight < 720;
-        // 页本身透明；WSA / 部分 GPU 合成时切换 IndexedStack 易留残影，铺实底色
-        final Widget content = ColoredBox(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          child: IndexedStack(
-            index: _index,
-            children: <Widget>[
-              for (final _Destination destination in _destinations)
-                destination.page,
-            ],
-          ),
+        final Color pageColor = Theme.of(context).scaffoldBackgroundColor;
+        // Android（含 WSA）：IndexedStack 常驻多页 + 弹窗关闭后 Impeller/Skia
+        // 合成易透出旧层；只挂当前页并铺不透明 Material，业务状态在 AppScope。
+        // 桌面仍用 IndexedStack 保滚动位置。
+        final Widget page = Material(
+          color: pageColor,
+          child: _destinations[_index].page,
         );
+        final Widget content = Platform.isAndroid
+            ? page
+            : ColoredBox(
+                color: pageColor,
+                child: IndexedStack(
+                  index: _index,
+                  children: <Widget>[
+                    for (final _Destination destination in _destinations)
+                      destination.page,
+                  ],
+                ),
+              );
 
         // 底栏由 Scaffold 自己吃系统手势区；宽屏没有底栏，SafeArea 要包底。
         // 顶栏必须包：Android / 鸿蒙 edge-to-edge 下内容会画进状态栏。

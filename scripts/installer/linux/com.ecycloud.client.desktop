@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=ECY Cloud 网络助手
-Comment=ECY Cloud 网络加速客户端
+Name=ECY Cloud
+Comment=ECY Cloud
 Exec=/opt/ecycloud/ECYCloud
 Icon=com.ecycloud.client
 Terminal=false

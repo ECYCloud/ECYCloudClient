@@ -22,7 +22,7 @@ func install() error {
 	}
 
 	unit := fmt.Sprintf(`[Unit]
-Description=ECY Cloud 网络服务
+Description=ECY Cloud
 After=network.target
 
 [Service]

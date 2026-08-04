@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ECY Cloud 网络助手</string>
+    <string name="app_name">ECY Cloud</string>
     <string name="notification_channel_status">连接状态</string>
     <string name="notification_starting">正在启动内核</string>
     <string name="notification_running">已连接</string>

@@ -76,6 +76,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Impeller 在 WSA / 部分 Android GPU 上切换页、关弹窗会留下字形残影；
+             同机其它非 Flutter 应用正常，属本应用渲染路径问题，改回 Skia -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

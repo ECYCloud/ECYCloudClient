@@ -320,6 +320,13 @@ class _AppUpdateTile extends StatelessWidget {
       tooltip: '检查客户端更新',
       action: update.appBusy
           ? const _Spinner()
+          : update.appManualOnly
+          ? TextButton(
+              onPressed: () => unawaited(
+                AppScope.of(context).platform.openUrl(AppUpdate.releasesUrl),
+              ),
+              child: const Text('打开发布页'),
+            )
           : app == null
           ? null
           : TextButton(

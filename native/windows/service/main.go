@@ -13,7 +13,7 @@ import (
 
 const (
 	serviceName        = "ECYCloudService"
-	serviceDisplayName = "ECY Cloud 网络服务"
+	serviceDisplayName = "ECY Cloud"
 	serviceDescription = "为 ECY Cloud 客户端托管 sing-box 内核、系统代理与 TUN 网卡。"
 	serviceVersion     = "1.0.0"
 )

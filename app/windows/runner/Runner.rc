@@ -90,12 +90,12 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "CompanyName", "ECY Cloud" "\0"
-            VALUE "FileDescription", "ECY Cloud 网络助手" "\0"
+            VALUE "FileDescription", "ECY Cloud" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "ECYCloud" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 ECY Cloud. Licensed under GPL-3.0-or-later." "\0"
             VALUE "OriginalFilename", "ECYCloud.exe" "\0"
-            VALUE "ProductName", "ECY Cloud 网络助手" "\0"
+            VALUE "ProductName", "ECY Cloud" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

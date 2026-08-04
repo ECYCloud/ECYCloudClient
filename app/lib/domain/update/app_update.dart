@@ -33,9 +33,16 @@ class AppUpdate {
     return AppUpdate(
       current: AppConfig.appVersion,
       latest: release.version,
-      installer: release.assetEndingWith(assetSuffix),
+      installer: selfInstallable ? release.assetEndingWith(assetSuffix) : null,
     );
   }
+
+  static String get releasesUrl => 'https://github.com/$repo/releases';
+
+  /// Linux 的 tar.gz 要 root 解包再跑 install.sh，没有能接手的安装器，
+  /// 客户端不下载也不代装，只把用户引到发布页。
+  static bool get selfInstallable =>
+      !Platform.isLinux || _linuxPackageFormat != 'tar.gz';
 
   /// 与 scripts/build-*.{ps1,sh} 的产物名后缀逐字一致。四端均按架构分包。
   static String get assetSuffix {
@@ -46,10 +53,24 @@ class AppUpdate {
       return 'macos-$arch.pkg';
     }
     if (Platform.isLinux) {
-      return 'linux-$arch.deb';
+      return 'linux-$arch.$_linuxPackageFormat';
     }
     // Android（及未识别平台的兜底）按 ABI 分包，与 build-android.sh 后缀一致
     return 'android-$arch.apk';
+  }
+
+  /// Linux 同一架构出 deb / rpm / tar.gz 三种包，装的是哪种只有安装器知道，
+  /// 由 build-linux.sh 写在安装目录里；调试构建没有这份标记，退回 deb。
+  static final String _linuxPackageFormat = _readPackageFormat();
+
+  static String _readPackageFormat() {
+    final File marker = File(
+      '${File(Platform.resolvedExecutable).parent.path}/package-format',
+    );
+    final String format = marker.existsSync()
+        ? marker.readAsStringSync().trim()
+        : '';
+    return format.isEmpty ? 'deb' : format;
   }
 
   static String get arch => switch (Abi.current()) {

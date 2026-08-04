@@ -15,7 +15,7 @@ class MainFlutterWindow: NSWindow {
     let version =
       Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
       as? String ?? ""
-    self.title = "ECY Cloud 网络助手 \(version)"
+    self.title = "ECY Cloud \(version)"
 
     // 界面按窄窗排版：节点卡最小 210 逻辑像素，这个宽度正好排四列，再宽只会留白
     self.setContentSize(NSSize(width: 1000, height: 720))

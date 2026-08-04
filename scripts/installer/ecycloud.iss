@@ -13,7 +13,7 @@
   #define OutputDir "..\..\build\installer"
 #endif
 
-#define AppName "ECY Cloud 网络助手"
+#define AppName "ECY Cloud"
 #define AppExeName "ECYCloud.exe"
 #define ServiceExeName "ecycloud-service.exe"
 #define IconFile "..\..\app\windows\runner\resources\app_icon.ico"

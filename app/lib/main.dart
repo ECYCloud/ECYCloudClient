@@ -126,7 +126,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     return ListenableBuilder(
       listenable: scope.connection,
       builder: (BuildContext context, _) => MaterialApp(
-        title: 'ECY Cloud 网络助手',
+        title: 'ECY Cloud',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
@@ -157,7 +157,7 @@ class _MisconfiguredApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'ECY Cloud 网络助手',
+    title: 'ECY Cloud',
     debugShowCheckedModeBanner: false,
     darkTheme: AppTheme.dark(),
     theme: AppTheme.light(),

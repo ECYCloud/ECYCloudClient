@@ -232,7 +232,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'ECY Cloud 网络助手',
+                        'ECY Cloud',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.headlineSmall,
                       ),

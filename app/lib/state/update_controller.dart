@@ -65,6 +65,9 @@ class UpdateController extends ChangeNotifier {
     if (!app.outdated) {
       return '已是最新版本 ${app.latest}';
     }
+    if (!AppUpdate.selfInstallable) {
+      return '已发布 ${app.latest}，tar.gz 需自行下载并重新执行 install.sh';
+    }
     return app.installer == null
         ? '已发布 ${app.latest}，但该版本未提供 ${AppUpdate.assetSuffix} 安装包'
         : '已发布 ${app.latest}，可直接下载安装';
@@ -72,6 +75,9 @@ class UpdateController extends ChangeNotifier {
 
   bool get appInstallable =>
       _app?.outdated == true && _app?.installer != null && _appStage == null;
+
+  bool get appManualOnly =>
+      _app?.outdated == true && !AppUpdate.selfInstallable;
 
   bool get appBusy => _appStage != null;
 
