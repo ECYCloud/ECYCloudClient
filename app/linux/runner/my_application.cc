@@ -162,8 +162,14 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
-  // 单实例：第二次启动只会把 activate 转给已在运行的那个进程
+  // 单实例：第二次启动只会把 activate 转给已在运行的那个进程。
+  // DEFAULT_FLAGS 是 2.74 起的名字，值与 FLAGS_NONE 同为 0；CI 基线是 jammy (2.72)。
+#if GLIB_CHECK_VERSION(2, 74, 0)
+  const GApplicationFlags app_flags = G_APPLICATION_DEFAULT_FLAGS;
+#else
+  const GApplicationFlags app_flags = G_APPLICATION_FLAGS_NONE;
+#endif
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_DEFAULT_FLAGS, nullptr));
+                                     app_flags, nullptr));
 }
