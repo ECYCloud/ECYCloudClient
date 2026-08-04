@@ -232,10 +232,8 @@ class _ShopPageState extends State<ShopPage> {
         return;
       }
       await _submit(
-        () => api.buyTrafficPackage(
-          shop: product.id,
-          epayType: method.epayType,
-        ),
+        () =>
+            api.buyTrafficPackage(shop: product.id, epayType: method.epayType),
       );
     } on ApiException catch (e) {
       await _showMessage(e.message);
@@ -385,10 +383,7 @@ class _ShopPageState extends State<ShopPage> {
           ],
         ),
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: _load,
-            child: _body(catalog),
-          ),
+          child: RefreshIndicator(onRefresh: _load, child: _body(catalog)),
         ),
       ],
     );
@@ -483,9 +478,10 @@ class _ShopPageState extends State<ShopPage> {
       builder: (BuildContext context, BoxConstraints constraints) {
         const double spacing = 10;
         const double minWidth = 320;
-        final int columns = (constraints.maxWidth / minWidth)
-            .floor()
-            .clamp(1, 3);
+        final int columns = (constraints.maxWidth / minWidth).floor().clamp(
+          1,
+          3,
+        );
         final double width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
 
@@ -540,6 +536,7 @@ class _PlanCard extends StatelessWidget {
                 _ProductChips(
                   product: product,
                   alignment: WrapAlignment.center,
+                  alwaysShowRegistration: true,
                 ),
               ],
             ),
@@ -607,16 +604,48 @@ class _PlanCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                InfoRow(
-                  label: 'VIP有效期',
-                  value: unlimitedExpire ? '不限时' : '${product.classExpire} 天',
-                ),
-                InfoRow(
-                  label: product.classExpire == 1 ? '试用流量' : '每月流量',
-                  value: product.bandwidth == 10000
-                      ? '无限制'
-                      : '${Format.number(product.bandwidth)} GB',
-                ),
+                // 与上方三等分指标行同一栅格：标签落在左列、取值落在右列，
+                // 列宽不一致就会出现与上方内容错位的视觉效果
+                for (final (String label, String value) in <(String, String)>[
+                  (
+                    'VIP有效期',
+                    unlimitedExpire ? '不限时' : '${product.classExpire} 天',
+                  ),
+                  (
+                    product.classExpire == 1 ? '试用流量' : '每月流量',
+                    product.bandwidth == 10000
+                        ? '无限制'
+                        : '${Format.number(product.bandwidth)} GB',
+                  ),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2.5),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        const Spacer(),
+                        Expanded(
+                          child: Text(
+                            value,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 for (final String service in product.contentExtra)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
@@ -722,10 +751,14 @@ class _ProductChips extends StatelessWidget {
   const _ProductChips({
     required this.product,
     this.alignment = WrapAlignment.start,
+    this.alwaysShowRegistration = false,
   });
 
   final ShopProduct product;
   final WrapAlignment alignment;
+
+  // 网页套餐卡三态显示注册天数（含「不限注册天数」），流量包 / 卡密仅有限制时才显示
+  final bool alwaysShowRegistration;
 
   @override
   Widget build(BuildContext context) {
@@ -757,12 +790,14 @@ class _ProductChips extends StatelessWidget {
           TagChip(
             icon: Icons.person_add_alt,
             label: '需注册未满${product.newUserDaysLimit}天',
-          ),
-        if (product.minRegistrationDays > 0)
+          )
+        else if (product.minRegistrationDays > 0)
           TagChip(
             icon: Icons.person_add_alt,
             label: '需注册满${product.minRegistrationDays}天',
-          ),
+          )
+        else if (alwaysShowRegistration)
+          const TagChip(icon: Icons.person_add_alt, label: '不限注册天数'),
         for (final ShopCountdown countdown in product.countdowns)
           TagChip(
             icon: Icons.schedule,
@@ -861,9 +896,9 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
         return;
       }
       if (quote.cooldown) {
-        Navigator.of(context).pop(
-          _PlanOrder.cooldown(quote.cooldownMsg, quote.cooldownRemaining),
-        );
+        Navigator.of(
+          context,
+        ).pop(_PlanOrder.cooldown(quote.cooldownMsg, quote.cooldownRemaining));
         return;
       }
       setState(() {
@@ -926,7 +961,8 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   ],
                 ),
               ],
-              if (quote.hasValidOrder && quote.upgradeMsg.isNotEmpty) ...<Widget>[
+              if (quote.hasValidOrder &&
+                  quote.upgradeMsg.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 10),
                 _DetailBlock(
                   title: '剩余价值抵扣',
@@ -1346,7 +1382,10 @@ class _MessageDialog extends StatelessWidget {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已复制卡密'), behavior: SnackBarBehavior.floating),
+      const SnackBar(
+        content: Text('已复制卡密'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 

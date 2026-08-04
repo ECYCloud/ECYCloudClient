@@ -1,39 +1,39 @@
 {
   "comment": "内核与驱动一律使用官方发布二进制，不 fork、不自行编译。Android 的 libbox.aar 例外：官方不发布该产物，由 build-libbox.sh 按同一 tag 的源码用官方 Makefile 目标构建。更新版本时同步更新此处 sha256。",
   "singBox": {
-    "tag": "v1.13.15",
-    "version": "1.13.15",
-    "releasePage": "https://github.com/SagerNet/sing-box/releases/tag/v1.13.15",
+    "tag": "v1.13.16",
+    "version": "1.13.16",
+    "releasePage": "https://github.com/SagerNet/sing-box/releases/tag/v1.13.16",
     "assets": {
       "windows-x64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-amd64.zip",
-        "sha256": "599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877",
-        "root": "sing-box-1.13.15-windows-amd64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-windows-amd64.zip",
+        "sha256": "6cbf90ec4ee87122ffce09b73928fb31e763bc1c75a119f79c61d24734c78807",
+        "root": "sing-box-1.13.16-windows-amd64"
       },
       "windows-arm64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-arm64.zip",
-        "sha256": "82419193e0f087279fd7add4fbe90a26c93396057477e8c014a534ec8b2d63ec",
-        "root": "sing-box-1.13.15-windows-arm64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-windows-arm64.zip",
+        "sha256": "8412e9751a776a1cd5138fde8a6b60784af91b0fe596cba1b6efcd05144ef511",
+        "root": "sing-box-1.13.16-windows-arm64"
       },
       "macos-x64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-darwin-amd64.tar.gz",
-        "sha256": "817e04f90f941b718fedd965ff05bfe72abfcc62952888b01751a6dec5547e14",
-        "root": "sing-box-1.13.15-darwin-amd64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-darwin-amd64.tar.gz",
+        "sha256": "2bfad58d034e280c773e194be03649555e5a7040c48b559dd0898ad293fe793d",
+        "root": "sing-box-1.13.16-darwin-amd64"
       },
       "macos-arm64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-darwin-arm64.tar.gz",
-        "sha256": "3452d866834c9572389e5ca73e60d4ee45a7d5b79332188c9a9e533c5fd40a6d",
-        "root": "sing-box-1.13.15-darwin-arm64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-darwin-arm64.tar.gz",
+        "sha256": "32fa21fd75ad62d86a2dcb7e0be77359c35e12798cdbb6a0e30654ef487d90d6",
+        "root": "sing-box-1.13.16-darwin-arm64"
       },
       "linux-x64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-linux-amd64.tar.gz",
-        "sha256": "a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f",
-        "root": "sing-box-1.13.15-linux-amd64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-linux-amd64.tar.gz",
+        "sha256": "e37c312859dfa84cba148f41072ff6369f08361ae91d622dc1fd3aab49611a8d",
+        "root": "sing-box-1.13.16-linux-amd64"
       },
       "linux-arm64": {
-        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-linux-arm64.tar.gz",
-        "sha256": "f0810bbb5722ae36635687c421019defcc8b328d31a0b3c287901f331747ca93",
-        "root": "sing-box-1.13.15-linux-arm64"
+        "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-linux-arm64.tar.gz",
+        "sha256": "d587fb00bdc3c044227f35d15d154f271bc75108475091eda2542e4b82bb2949",
+        "root": "sing-box-1.13.16-linux-arm64"
       }
     },
     "files": ["sing-box.exe", "libcronet.dll", "LICENSE"]

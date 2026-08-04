@@ -1054,8 +1054,6 @@ class ConnectionController extends ChangeNotifier {
     unawaited(_pollStats());
   }
 
-  Future<void> refreshStats() => _pollStats();
-
   Future<void> _pollStats() async {
     final ClashApiClient? clash = _clash;
     // 流量按两次快照差分，取数慢于轮询间隔时并发进来会把同一段增量算两遍

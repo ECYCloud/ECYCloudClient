@@ -6,7 +6,6 @@ import '../format.dart';
 import '../node_labels.dart';
 import '../theme.dart';
 import '../widgets/page_header.dart';
-import '../widgets/refresh_button.dart';
 import '../widgets/search_field.dart';
 import '../widgets/tag_chip.dart';
 
@@ -68,22 +67,11 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
       showSelectedIcon: false,
     );
 
-    final Widget searchActions = Row(
-      children: <Widget>[
-        Expanded(
-          child: SearchField(
-            hintText: '搜索域名、IP、进程、规则',
-            width: double.infinity,
-            onChanged: (String value) =>
-                setState(() => _keyword = value.trim().toLowerCase()),
-          ),
-        ),
-        const SizedBox(width: 4),
-        RefreshButton(
-          tooltip: '立即刷新',
-          onRefresh: connection.refreshStats,
-        ),
-      ],
+    final Widget searchActions = SearchField(
+      hintText: '搜索域名、IP、进程、规则',
+      width: double.infinity,
+      onChanged: (String value) =>
+          setState(() => _keyword = value.trim().toLowerCase()),
     );
 
     return Column(
