@@ -1,0 +1,10 @@
+# 下列文件要么在 Linux / macOS 上执行，要么被原样打进安装包。仓库 core.autocrlf=true，
+# 不锁死行尾的话 Windows 检出会写成 CRLF，`#!/bin/sh` 随即变成无效解释器，
+# control 与 desktop 的字段值也会被尾随的 CR 污染。
+*.sh                                text eol=lf
+*.spec                              text eol=lf
+*.desktop                           text eol=lf
+installer/linux/control             text eol=lf
+installer/linux/postinst            text eol=lf
+installer/linux/prerm               text eol=lf
+installer/macos/scripts/postinstall text eol=lf

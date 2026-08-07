@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- APP_VERSION 由 build-macos.sh 替换 -->
+<installer-gui-script minSpecVersion="2">
+    <title>ECY Cloud</title>
+    <license file="LICENSE.txt" mime-type="text/plain"/>
+    <!-- HOST_ARCHITECTURES 由 build-macos.sh 换成 x86_64 或 arm64，禁止装到错误芯片 -->
+    <options customize="never" require-scripts="true" hostArchitectures="HOST_ARCHITECTURES"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+    <choice id="default" title="ECY Cloud">
+        <pkg-ref id="com.ecycloud.client"/>
+    </choice>
+    <pkg-ref id="com.ecycloud.client" version="APP_VERSION" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

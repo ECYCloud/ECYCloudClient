@@ -1,0 +1,316 @@
+name: 出包与发布
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，如 1.0.0
+        required: true
+      channel:
+        description: 发布通道
+        type: choice
+        options: [last, pre]
+        default: last
+
+permissions:
+  contents: write
+
+env:
+  # 安装器脚本用到 6.6.0 起的窗体行为，不能退回更早版本
+  INNO_SETUP_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+  FLUTTER_REPO: https://github.com/flutter/flutter.git
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+        run: |
+          # 通道跟着 tag 走：v1.0.3 是正式版，v1.0.3-pre 是测试版。
+          # 号段（version）到处都用纯 X.Y.Z，Pre 只体现在展示串与 GitHub 的 pre-release 标记上
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+            channel="$INPUT_CHANNEL"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            channel=last
+            case "$version" in
+              *-pre) version="${version%-pre}"; channel=pre ;;
+            esac
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "版本号必须是 X.Y.Z，实际是「$version」" >&2
+            exit 1
+          fi
+          if [ "$channel" = pre ]; then
+            tag="v$version-pre"
+          else
+            tag="v$version"
+          fi
+          {
+            echo "version=$version"
+            echo "channel=$channel"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/windows/service/go.mod
+          cache-dependency-path: native/windows/service/go.sum
+
+      # Flutter 的 Windows 发布包只有 x64；SDK 自举时按宿主架构取产物，
+      # arm64 包只能在 arm64 机器上用 git 检出的 SDK 构建
+      - name: 安装 Flutter
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch stable $env:FLUTTER_REPO "$env:RUNNER_TEMP\flutter"
+          "$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $env:INNO_SETUP_URL -OutFile $setup -UseBasicParsing
+          Start-Process -FilePath $setup -Wait -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+          "${env:ProgramFiles(x86)}\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: 出包
+        shell: pwsh
+        run: |
+          flutter --version
+          ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }} -Version ${{ needs.prepare.outputs.version }} -Channel ${{ needs.prepare.outputs.channel }} -Installer -SkipAssetSync
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-windows-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*.exe
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    # Apple Silicon runner 可交叉取 Intel 内核并 thin 出 x64 包
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: native/unix/helper/go.sum
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: 出包
+        run: |
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-macos.sh --arch ${{ matrix.arch }} \
+            --version ${{ needs.prepare.outputs.version }} \
+            --channel ${{ needs.prepare.outputs.channel }} --package
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-macos-${{ matrix.arch }}
+          path: build/installer/ECYCloud-*-macos-${{ matrix.arch }}.pkg
+          if-no-files-found: error
+
+  linux:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # 产物链接的是构建机的 glibc，跟着 runner 镜像走会把可安装范围顶到 Ubuntu 24.04 一级。
+    # 固定在 22.04 容器里出包，基线锁死在 glibc 2.35，且不受 runner 镜像换代影响。
+    container: ubuntu:22.04
+    steps:
+      # 容器是裸镜像，git 与 safe.directory 必须早于 checkout：工作区在宿主上属普通用户，
+      # 容器内以 root 跑 git 会判定为 dubious ownership
+      - name: 安装构建依赖
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates clang cmake curl file git jq ninja-build \
+            pkg-config rpm unzip xz-utils zip libgtk-3-dev libayatana-appindicator3-dev
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: native/unix/helper/go.sum
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: 出包
+        run: |
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-linux.sh --arch ${{ matrix.arch }} --version ${{ needs.prepare.outputs.version }} \
+            --channel ${{ needs.prepare.outputs.channel }} --package
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-linux-${{ matrix.arch }}
+          path: |
+            build/installer/ECYCloud-*.deb
+            build/installer/ECYCloud-*.rpm
+            build/installer/ECYCloud-*.tar.gz
+          if-no-files-found: error
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # 这个 job 编的是 Android 的内核绑定，缓存键跟着它自己的依赖走
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/android/mihomo/go.mod
+          cache-dependency-path: native/android/mihomo/go.sum
+
+      # Android Gradle 插件要求 JDK 17
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Flutter
+        run: |
+          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      # 未配置签名密钥时 Gradle 退回 debug 签名，装不上已有的正式版，不能进 Release
+      - name: 准备签名密钥
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo '缺少 ANDROID_KEYSTORE，无法产出可覆盖安装的正式包' >&2
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}"
+            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } > app/android/key.properties
+
+      - name: 出包
+        run: |
+          # gomobile 只认 ANDROID_NDK_HOME，运行器镜像给的是 ANDROID_NDK_LATEST_HOME
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:?运行器未提供 Android NDK}"
+          flutter --version
+          chmod +x scripts/*.sh
+          ./scripts/build-android.sh --version ${{ needs.prepare.outputs.version }} \
+            --channel ${{ needs.prepare.outputs.channel }} --build-number ${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-android
+          path: build/installer/ECYCloud-*.apk
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, windows, macos, linux, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: installer
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          kernel="$(jq -r '.mihomo.version' scripts/kernel.lock.json)"
+          # 客户端按 GitHub 的 pre-release 标记判通道，标记与包内版本串必须同时切
+          if [ "$CHANNEL" = pre ]; then
+            title="Pre $VERSION"
+            is_pre=true
+          else
+            title="v$VERSION"
+            is_pre=false
+          fi
+          {
+            echo "ECY Cloud 客户端 $title，随包 mihomo $kernel。"
+            if [ "$is_pre" = true ]; then
+              echo
+              echo "> **Pre 测试版**：用于验证新功能，可能仍有未修复的问题；日常使用请优先等待正式版（非 Pre-release）。"
+            fi
+            echo
+            echo "## 该下载哪个？"
+            echo
+            echo "多数用户按设备选下面这一行即可，不要下错架构："
+            echo
+            echo "| 你的设备 | 下载这个 |"
+            echo "| --- | --- |"
+            echo "| Windows 电脑（常见 64 位） | \`ECYCloud-$VERSION-windows-x64.exe\` |"
+            echo "| Windows on ARM（部分 Surface / ARM 笔记本） | \`ECYCloud-$VERSION-windows-arm64.exe\` |"
+            echo "| Mac（Apple 芯片：M1 / M2 / M3 / M4） | \`ECYCloud-$VERSION-macos-arm64.pkg\` |"
+            echo "| Mac（Intel） | \`ECYCloud-$VERSION-macos-x64.pkg\` |"
+            echo "| Android 手机 / 平板（主流） | \`ECYCloud-$VERSION-android-arm64.apk\` |"
+            echo "| Debian / Ubuntu 及衍生版 | \`ECYCloud-$VERSION-linux-x64.deb\` 或 \`...-linux-arm64.deb\` |"
+            echo "| Fedora / openSUSE / RHEL 系 | \`ECYCloud-$VERSION-linux-x64.rpm\` 或 \`...-linux-arm64.rpm\` |"
+            echo "| 其它 Linux（Arch 等） | \`ECYCloud-$VERSION-linux-*.tar.gz\`，解包后 \`sudo ./install.sh\` |"
+            echo
+            echo "不确定 Windows / Mac 架构时：Windows 看「设置 → 系统 → 关于 → 系统类型」；Mac 看「关于本机」，芯片写 Apple 则选 arm64，写 Intel 则选 x64。Android 真机几乎都是 arm64；\`android-arm.apk\` 仅旧 32 位设备，\`android-x64.apk\` 仅模拟器。"
+            echo
+            echo "桌面三端安装时需要一次管理员授权以注册后台服务，此后日常使用不再要求提权；Android 首次连接时会弹出系统的 VPN 授权。客户端每 24 小时检查一次自身与 mihomo 内核更新，发现新版会在界面上提示。"
+          } > notes.md
+          # 同版本重跑时 tag 已存在：只覆盖上传资产，避免整次流水线因 create 失败变红
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" installer/* --clobber
+            gh release edit "$TAG" --title "$title" --notes-file notes.md --prerelease="$is_pre"
+          else
+            gh release create "$TAG" installer/* --title "$title" --notes-file notes.md --prerelease="$is_pre"
+          fi

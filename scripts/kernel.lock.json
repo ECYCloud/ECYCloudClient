@@ -1,0 +1,51 @@
+{
+  "comment": "内核一律使用官方发布二进制，不 fork、不自行编译。Android 的 libmihomo.aar 例外：官方不发布移动端产物，由 build-libmihomo.sh 以依赖方式 import 同一 tag 的内核构建。amd64 一律取 compatible（GOAMD64=v1）：官方不带后缀的 amd64 目标是 GOAMD64=v3，在 Haswell 之前的 CPU 上会因非法指令直接崩溃。mihomo 已内嵌 wintun，不再单独分发 wintun.dll。发布包内不含 LICENSE，内核许可证与本项目同为逐字 GPL-3.0，出包时直接复用仓库根的 LICENSE。更新版本时同步更新此处 sha256。",
+  "mihomo": {
+    "tag": "v1.19.29",
+    "version": "1.19.29",
+    "releasePage": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.29",
+    "assets": {
+      "windows-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-windows-amd64-compatible-v1.19.29.zip",
+        "sha256": "322aaa5957ba9e72afdda9b71cc4329f691d2d45ec39e70bbca3f7bf5aa93d52",
+        "entry": "mihomo-windows-amd64-compatible.exe"
+      },
+      "windows-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-windows-arm64-v1.19.29.zip",
+        "sha256": "f71736f9c2a17abb8909a726c69ac55279d0cb43d1d9f2c85afdbb70a0f326a3",
+        "entry": "mihomo-windows-arm64.exe"
+      },
+      "macos-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-darwin-amd64-compatible-v1.19.29.gz",
+        "sha256": "b43980c9bbcf10911f264662a8be4fdf4c95f4567244d6824c3f5365bab0e7d9"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-darwin-arm64-v1.19.29.gz",
+        "sha256": "4dc25df9e899f14161911302a8ee5fc9e202ed9c976fc405bf82c50ff27466ca"
+      },
+      "linux-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-linux-amd64-compatible-v1.19.29.gz",
+        "sha256": "5612e698e96c8b8ad15abc4c0a4f098eba9234354b4f248cb97f2528e215b094"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-linux-arm64-v1.19.29.gz",
+        "sha256": "9a868b5e4e0ad91d9d71e1b41b0cfce78aaba44360c30df74a723f8e3926a86c"
+      }
+    }
+  },
+  "geodata": {
+    "comment": "随包分发，安装后由服务/helper 播种进内核运行目录。内核解析 GEOIP/GEOSITE 规则时会同步下载缺失的 geodata（component/geodata/init.go 的 InitGeoIP/InitGeoSite，每文件 90 秒超时），下不到就整份配置校验失败、内核起不来——面板下发的 geox-url 指向 GitHub，在目标网络里必然超时。target 是内核认的本地文件名（constant/path.go：MMDB() 认 Country.mmdb/geoip.db/geoip.metadb，GeoSite 认 GeoSite.dat），与上游资产名不同故需改名。上游只有滚动的 latest tag、每天重发，无法固定 sha256，因此改为校验体积下限与 MaxMind 魔数，只拦 404 页面与截断；内容合法性由内核运行时的 mmdb.Verify / geodata.Verify 兜底。",
+    "assets": {
+      "mmdb": {
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb",
+        "target": "geoip.metadb",
+        "minBytes": 4000000
+      },
+      "geosite": {
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
+        "target": "GeoSite.dat",
+        "minBytes": 2000000
+      }
+    }
+  }
+}

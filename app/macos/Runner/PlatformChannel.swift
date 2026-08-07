@@ -1,0 +1,195 @@
+import Cocoa
+import FlutterMacOS
+
+/// 与 Windows 的 platform_channel.cpp 同协议：托盘只上报动作，
+/// 连不连、开不开由 Dart 侧状态机决定。
+/// macOS 其余平台能力（登录项、打开链接、安装包）在 Dart 侧就能完成，不下沉到这里。
+final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
+  private enum MenuTag: Int {
+    case connect = 1
+    case disconnect
+    case systemProxy
+    case tun
+    case show
+    case quit
+  }
+
+  private let channel: FlutterMethodChannel
+  private weak var window: NSWindow?
+
+  private var statusItem: NSStatusItem?
+  private var closeToTray = false
+  private var connected = false
+  private var busy = false
+  private var systemProxy = false
+  private var tun = false
+
+  init(messenger: FlutterBinaryMessenger, window: NSWindow) {
+    channel = FlutterMethodChannel(
+      name: "ecycloud/platform", binaryMessenger: messenger)
+    self.window = window
+    super.init()
+
+    window.delegate = self
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call, result: result)
+    }
+  }
+
+  private func handle(
+    _ call: FlutterMethodCall, result: @escaping FlutterResult
+  ) {
+    switch call.method {
+    case "tray.install":
+      installTray()
+      result(nil)
+    case "tray.remove":
+      removeTray()
+      result(nil)
+    case "tray.closeToTray":
+      guard let arguments = call.arguments as? [String: Any] else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      closeToTray = arguments["enabled"] as? Bool ?? false
+      result(nil)
+    case "tray.state":
+      guard let arguments = call.arguments as? [String: Any] else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      connected = arguments["connected"] as? Bool ?? false
+      busy = arguments["busy"] as? Bool ?? false
+      systemProxy = arguments["system_proxy"] as? Bool ?? false
+      tun = arguments["tun"] as? Bool ?? false
+      result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // MARK: - 托盘
+
+  private func installTray() {
+    guard statusItem == nil else { return }
+
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    item.button?.image = NSImage(
+      systemSymbolName: "network", accessibilityDescription: appDisplayName)
+    // 状态栏图标必须是模板图，否则深色菜单栏下会糊成一团
+    item.button?.image?.isTemplate = true
+    item.button?.toolTip = appDisplayName
+    item.button?.target = self
+    item.button?.action = #selector(onStatusItemClick)
+    item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    statusItem = item
+  }
+
+  private func removeTray() {
+    guard let item = statusItem else { return }
+    NSStatusBar.system.removeStatusItem(item)
+    statusItem = nil
+  }
+
+  /// 左键还原窗口、右键弹菜单，与 Windows 托盘一致
+  @objc private func onStatusItemClick() {
+    guard let button = statusItem?.button else { return }
+
+    if NSApp.currentEvent?.type == .rightMouseUp {
+      let menu = buildMenu()
+      menu.popUp(
+        positioning: nil,
+        at: NSPoint(x: 0, y: button.bounds.height + 4),
+        in: button)
+      return
+    }
+    restoreMainWindow()
+  }
+
+  private func buildMenu() -> NSMenu {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+
+    if busy {
+      menu.addItem(makeItem("取消连接", .disconnect))
+    } else if connected {
+      menu.addItem(makeItem("断开连接", .disconnect))
+    } else {
+      menu.addItem(makeItem("连接", .connect))
+    }
+    menu.addItem(.separator())
+
+    // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
+    let proxyItem = makeItem("系统代理", .systemProxy)
+    proxyItem.isEnabled = connected
+    proxyItem.state = systemProxy ? .on : .off
+    menu.addItem(proxyItem)
+
+    let tunItem = makeItem("TUN 模式", .tun)
+    tunItem.isEnabled = connected
+    tunItem.state = tun ? .on : .off
+    menu.addItem(tunItem)
+
+    menu.addItem(.separator())
+    menu.addItem(makeItem("显示主界面", .show))
+    menu.addItem(.separator())
+    menu.addItem(makeItem("退出", .quit))
+    return menu
+  }
+
+  private func makeItem(_ title: String, _ tag: MenuTag) -> NSMenuItem {
+    let item = NSMenuItem(
+      title: title, action: #selector(onMenuCommand(_:)), keyEquivalent: "")
+    item.target = self
+    item.tag = tag.rawValue
+    return item
+  }
+
+  @objc private func onMenuCommand(_ sender: NSMenuItem) {
+    switch MenuTag(rawValue: sender.tag) {
+    case .connect:
+      emitTrayAction("connect")
+    case .disconnect:
+      emitTrayAction("disconnect")
+    case .systemProxy:
+      emitTrayAction("system_proxy")
+    case .tun:
+      emitTrayAction("tun")
+    case .show:
+      restoreMainWindow()
+    case .quit:
+      // 内核与系统代理由 helper 在察觉 GUI 退出后收尾
+      removeTray()
+      NSApp.terminate(nil)
+    case .none:
+      break
+    }
+  }
+
+  private func emitTrayAction(_ action: String) {
+    channel.invokeMethod("tray.action", arguments: action)
+  }
+
+  // MARK: - 窗口
+
+  func restoreMainWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
+  }
+
+  /// 托盘不可用时不能只是藏起来，否则窗口再也调不出来，只能连进程一起退
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    if closeToTray, statusItem != nil {
+      sender.orderOut(nil)
+      return false
+    }
+    removeTray()
+    NSApp.terminate(nil)
+    return false
+  }
+
+  private var appDisplayName: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+      ?? "ECY Cloud"
+  }
+}

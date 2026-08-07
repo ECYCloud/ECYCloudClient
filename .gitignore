@@ -1,0 +1,10 @@
+# 构建产物、下载缓存与内核二进制一律不入库
+/build/
+# libmihomo.aar 由 scripts/build-libmihomo.sh 现编，几十 MB 不入库
+/app/android/app/libs/
+# geodata 由 scripts/fetch-geodata.sh 出包时下载，十几 MB 且上游每天重发，不入库
+/app/android/app/src/main/assets/
+# 三个 Go 模块直接 `go build ./...` 做类型检查时会把二进制落在模块目录里，
+# 正式构建走 build-service.ps1 / build-helper.sh 的 -o 输出到 /build/
+/native/windows/service/service.exe
+/native/unix/helper/helper
