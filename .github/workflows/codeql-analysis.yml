@@ -27,11 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-
       - if: matrix.language == 'go'
         uses: actions/setup-go@v7
         with:
@@ -40,6 +35,11 @@ jobs:
             native/unix/helper/go.sum
             native/windows/service/go.sum
             native/android/mihomo/go.sum
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
       - if: matrix.language == 'go'
         name: Build Go modules
