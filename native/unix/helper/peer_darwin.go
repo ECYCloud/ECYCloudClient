@@ -53,6 +53,6 @@ func processExePath(pid int) (string, error) {
 }
 
 // utun 只认 root，macOS 也没有 capability 可降权
-func resolveKernelUser() (uint32, uint32) { return 0, 0 }
+func resolveKernelUser() (int, int) { return 0, 0 }
 
 func applyKernelCredential(_ *exec.Cmd) {}

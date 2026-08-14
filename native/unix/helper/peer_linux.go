@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -48,28 +49,36 @@ func processExePath(pid int) (string, error) {
 // helper 以 root 运行才能读到别的用户的 /proc/<pid>/exe，但内核本身不需要 root：
 // 按 AGENTS.md 的要求只给它 CAP_NET_ADMIN / CAP_NET_RAW。用户缺失时退回 root，
 // 否则装包脚本没跑全就会连不上网，比降权失败更难排查。
-func resolveKernelUser() (uint32, uint32) {
+func parseKernelID(s string) (int, bool) {
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || n > math.MaxInt32 {
+		return 0, false
+	}
+	return int(n), true
+}
+
+func resolveKernelUser() (int, int) {
 	account, err := user.Lookup(kernelUserName)
 	if err != nil {
 		return 0, 0
 	}
-	uid, err := strconv.ParseUint(account.Uid, 10, 32)
-	if err != nil {
+	uid, ok := parseKernelID(account.Uid)
+	if !ok {
 		return 0, 0
 	}
-	gid, err := strconv.ParseUint(account.Gid, 10, 32)
-	if err != nil {
+	gid, ok := parseKernelID(account.Gid)
+	if !ok {
 		return 0, 0
 	}
-	return uint32(uid), uint32(gid)
+	return uid, gid
 }
 
 func applyKernelCredential(cmd *exec.Cmd) {
-	if kernelUID == 0 {
+	if kernelUID <= 0 || kernelGID < 0 || uint64(kernelUID) > math.MaxUint32 || uint64(kernelGID) > math.MaxUint32 {
 		return
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential:  &syscall.Credential{Uid: kernelUID, Gid: kernelGID},
+		Credential:  &syscall.Credential{Uid: uint32(kernelUID), Gid: uint32(kernelGID)},
 		AmbientCaps: []uintptr{unix.CAP_NET_ADMIN, unix.CAP_NET_RAW},
 	}
 }
