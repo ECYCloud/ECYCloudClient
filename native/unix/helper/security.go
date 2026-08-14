@@ -25,14 +25,14 @@ func ensureRestrictedDir(path string) error {
 	if err := os.Chmod(path, 0o700); err != nil {
 		return err
 	}
-	return os.Chown(path, kernelUID, kernelGID)
+	return os.Chown(path, int(kernelUID), int(kernelGID))
 }
 
 func writeKernelFile(path string, content string) error {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return err
 	}
-	return os.Chown(path, kernelUID, kernelGID)
+	return os.Chown(path, int(kernelUID), int(kernelGID))
 }
 
 // 与 writeKernelFile 同一要求，只是内容来自文件而非字符串（geodata 有十几 MB，
@@ -41,7 +41,7 @@ func copyKernelFile(source, path string) error {
 	if err := copyFile(source, path); err != nil {
 		return err
 	}
-	return os.Chown(path, kernelUID, kernelGID)
+	return os.Chown(path, int(kernelUID), int(kernelGID))
 }
 
 // kernel.start / kernel.upgrade 会让 helper 以特权执行调用方给的内容，只能放行安装
