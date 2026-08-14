@@ -1,0 +1,57 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "43 22 * * 3"
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: manual
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: native/unix/helper/go.mod
+          cache-dependency-path: |
+            native/unix/helper/go.sum
+            native/windows/service/go.sum
+            native/android/mihomo/go.sum
+
+      - if: matrix.language == 'go'
+        name: Build Go modules
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          (cd native/unix/helper && go build ./...)
+          (cd native/unix/helper && GOOS=darwin CGO_ENABLED=0 go build ./...)
+          (cd native/windows/service && GOOS=windows CGO_ENABLED=0 go build ./...)
+          (cd native/android/mihomo && go build ./...)
+          (cd native/android/mihomo && go build -tags tools ./...)
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
