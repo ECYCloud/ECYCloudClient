@@ -233,6 +233,35 @@ void main() {
     expect(tun['route-exclude-address'], contains('::1/128'));
   });
 
+  test('自定义 TUN 排除网段追加到内置列表', () {
+    final LocalTemplate custom = LocalTemplate(
+      const LocalTemplateOptions(
+        tunEnabled: true,
+        tunStrictRoute: false,
+        mixedPort: 12334,
+        allowLan: false,
+        ipv6Enabled: true,
+        logLevel: 'warning',
+        tunExcludeAddresses: <String>['192.168.56.0/24', '10.0.0.0/8'],
+      ),
+      const ClashApiOptions(port: 19090, secret: 'secret'),
+    );
+
+    final Map<String, dynamic> tun =
+        assembler
+                .assemble(remote: remoteProfile(), template: custom)
+                .config['tun']
+            as Map<String, dynamic>;
+    final List<dynamic> excluded =
+        tun['route-exclude-address'] as List<dynamic>;
+
+    expect(excluded, contains('192.168.56.0/24'));
+    expect(
+      excluded.where((Object? item) => item == '10.0.0.0/8'),
+      hasLength(1),
+    );
+  });
+
   test('分应用名单落在 tun 段，未选模式时整键不出现', () {
     final Map<String, dynamic> off =
         assembler

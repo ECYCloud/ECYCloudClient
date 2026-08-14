@@ -15,9 +15,8 @@ class PanelResponseCache {
   final JsonFileStore _profile;
   final JsonFileStore _remote;
 
-  // 缓存文件跨版本升级仍在原地，而配置形状随内核换代变了（sing-box 的 outbounds
-  // vs mihomo 的 proxies）。写入时打上内核标记、读取时要求一致，升级后那份旧形状的
-  // 配置才不会被当成有效缓存喂给装配
+  // 缓存文件跨版本升级仍在原地，配置形状随内核换代会变。写入时打上内核标记、
+  // 读取时要求一致，旧形状才不会被当成有效缓存喂给装配
   static const String _kernel = 'mihomo';
 
   void saveProfile(String accountKey, UserProfile profile) {

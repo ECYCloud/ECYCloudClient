@@ -51,6 +51,40 @@ class TicketMessage {
   }
 }
 
+class TicketListPage {
+  const TicketListPage({
+    required this.tickets,
+    required this.banned,
+    required this.currentPage,
+    required this.lastPage,
+    required this.total,
+    required this.perPage,
+  });
+
+  final List<TicketSummary> tickets;
+  final bool banned;
+  final int currentPage;
+  final int lastPage;
+  final int total;
+  final int perPage;
+
+  factory TicketListPage.fromJson(Map<String, dynamic> json) {
+    final Object? raw = json['tickets'];
+    return TicketListPage(
+      tickets: <TicketSummary>[
+        if (raw is List)
+          for (final Object? item in raw)
+            if (item is Map<String, dynamic>) TicketSummary.fromJson(item),
+      ],
+      banned: json['banned'] as bool? ?? false,
+      currentPage: (json['current_page'] as num?)?.toInt() ?? 1,
+      lastPage: (json['last_page'] as num?)?.toInt() ?? 1,
+      total: (json['total'] as num?)?.toInt() ?? 0,
+      perPage: (json['per_page'] as num?)?.toInt() ?? 10,
+    );
+  }
+}
+
 class TicketDetail {
   const TicketDetail({
     required this.id,
@@ -60,6 +94,8 @@ class TicketDetail {
     required this.datetime,
     required this.messages,
     required this.banned,
+    this.messageCount = 0,
+    this.enableTicket = true,
   });
 
   final int id;
@@ -69,21 +105,26 @@ class TicketDetail {
   final String datetime;
   final List<TicketMessage> messages;
   final bool banned;
+  final int messageCount;
+  final bool enableTicket;
 
   factory TicketDetail.fromJson(Map<String, dynamic> json) {
     final Object? raw = json['messages'];
+    final List<TicketMessage> messages = <TicketMessage>[
+      if (raw is List)
+        for (final Object? item in raw)
+          if (item is Map<String, dynamic>) TicketMessage.fromJson(item),
+    ];
     return TicketDetail(
       id: (json['id'] as num).toInt(),
       title: json['title'] as String? ?? '',
       status: (json['status'] as num?)?.toInt() ?? 0,
       statusText: json['status_text'] as String? ?? '',
       datetime: json['datetime'] as String? ?? '',
-      messages: <TicketMessage>[
-        if (raw is List)
-          for (final Object? item in raw)
-            if (item is Map<String, dynamic>) TicketMessage.fromJson(item),
-      ],
+      messages: messages,
       banned: json['banned'] as bool? ?? false,
+      messageCount: (json['message_count'] as num?)?.toInt() ?? messages.length,
+      enableTicket: json['enable_ticket'] != false,
     );
   }
 }

@@ -17,6 +17,13 @@ class Credentials {
   bool get valid => token.isNotEmpty && expiresAt.isAfter(DateTime.now());
 }
 
+class RememberedLogin {
+  const RememberedLogin({required this.email, required this.password});
+
+  final String email;
+  final String password;
+}
+
 class CredentialStore {
   CredentialStore()
     : _store = JsonFileStore(AppPaths.credentials, 'credential');
@@ -52,6 +59,36 @@ class CredentialStore {
     _store.write(data);
   }
 
+  RememberedLogin? loadRemembered() {
+    final Map<String, dynamic> data = _store.read();
+    if (data['remember'] != true) {
+      return null;
+    }
+    final String email = data['email'] as String? ?? '';
+    if (email.isEmpty) {
+      return null;
+    }
+    return RememberedLogin(
+      email: email,
+      password: data['password'] as String? ?? '',
+    );
+  }
+
+  void saveRemembered({required String email, required String password}) {
+    final Map<String, dynamic> data = _store.read()
+      ..['remember'] = true
+      ..['email'] = email
+      ..['password'] = password;
+    _store.write(data);
+  }
+
+  void clearRemembered() {
+    final Map<String, dynamic> data = _store.read()
+      ..remove('remember')
+      ..remove('password');
+    _store.write(data);
+  }
+
   // 设备标识必须保留，面板靠它识别同一台机器
   void clear() {
     final Map<String, dynamic> data = _store.read()
@@ -76,5 +113,41 @@ class CredentialStore {
     data['device_id'] = generated;
     _store.write(data);
     return generated;
+  }
+
+  String? loadApiOrigin() {
+    final String? origin = _store.read()['api_origin'] as String?;
+    if (origin == null || origin.isEmpty) {
+      return null;
+    }
+    return origin;
+  }
+
+  void saveApiOrigin(String origin) {
+    final Map<String, dynamic> data = _store.read()..['api_origin'] = origin;
+    _store.write(data);
+  }
+
+  void clearApiOrigin() {
+    final Map<String, dynamic> data = _store.read()..remove('api_origin');
+    _store.write(data);
+  }
+
+  String? loadSiteOrigin() {
+    final String? origin = _store.read()['site_origin'] as String?;
+    if (origin == null || origin.isEmpty) {
+      return null;
+    }
+    return origin;
+  }
+
+  void saveSiteOrigin(String origin) {
+    final Map<String, dynamic> data = _store.read()..['site_origin'] = origin;
+    _store.write(data);
+  }
+
+  void clearSiteOrigin() {
+    final Map<String, dynamic> data = _store.read()..remove('site_origin');
+    _store.write(data);
   }
 }

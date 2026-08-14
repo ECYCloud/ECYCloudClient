@@ -24,4 +24,19 @@ void main() {
     final AppSettings debug = defaults.copyWith(logLevel: LogLevel.debug);
     expect(defaults.affectsKernel(debug), isTrue);
   });
+
+  test('系统代理绕过变更不重启内核，TUN 排除网段要重启', () {
+    expect(
+      defaults.affectsKernel(
+        defaults.copyWith(systemProxyBypass: <String>['example.com']),
+      ),
+      isFalse,
+    );
+    expect(
+      defaults.affectsKernel(
+        defaults.copyWith(tunExcludeAddresses: <String>['192.168.56.0/24']),
+      ),
+      isTrue,
+    );
+  });
 }

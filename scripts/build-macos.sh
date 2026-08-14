@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 构建 macOS 客户端完整产物：内核 + 特权 helper + Flutter 应用，可选打包 pkg。
-# 用法: build-macos.sh --arch x64|arm64 [--version 1.0.1] [--channel last|pre] [--panel-url https://面板域名] [--sub-url https://订阅域名/link/] [--package]
+# 用法: build-macos.sh --arch x64|arm64 [--version 1.0.1] [--channel last|pre] [--panel-url https://站点域名] [--sub-url https://订阅域名] [--package]
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,11 +54,11 @@ if [[ -z "$sub_url" ]]; then
     sub_url="$(jq -er '.subUrl' "$root_dir/config/panel.json")"
 fi
 if [[ ! "$panel_url" =~ ^https?:// ]]; then
-    echo "面板地址不是合法的 http(s) 地址：$panel_url" >&2
+    echo "站点域名不是合法的 http(s) 地址：$panel_url" >&2
     exit 1
 fi
 if [[ ! "$sub_url" =~ ^https?:// ]]; then
-    echo "订阅地址不是合法的 http(s) 地址：$sub_url" >&2
+    echo "订阅域名不是合法的 http(s) 地址：$sub_url" >&2
     exit 1
 fi
 
@@ -70,7 +70,7 @@ deps_dir="$root_dir/build/deps/macos-$arch"
 cd "$app_dir"
 # Release 默认真通用二进制；先整包编出再 thin 到目标架构，避免依赖尚未稳定的 --darwin-arch
 flutter build macos --release --build-name "$version" \
-    --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
+    --dart-define="ECYCLOUD_SITE_URL=$panel_url" \
     --dart-define="ECYCLOUD_SUB_URL=$sub_url" \
     --dart-define="ECYCLOUD_VERSION=$display_version"
 cd "$root_dir"

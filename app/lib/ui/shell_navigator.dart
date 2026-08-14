@@ -7,13 +7,17 @@ class ShellNavigator extends InheritedWidget {
     super.key,
   });
 
+  static const int shopTab = 1;
   static const int nodesTab = 2;
   static const int ticketsTab = 3;
+  static const int unlockTab = 4;
 
   final void Function(int index) goTo;
 
   // 弹窗的 context 不在本 InheritedWidget 子树内，靠 Shell 注册的宿主回调切页
   static void Function(int index)? _hostGoTo;
+  static void Function(String tab)? _shopTabHandler;
+  static String? _pendingShopTab;
 
   static void bindHost(void Function(int index) goTo) {
     _hostGoTo = goTo;
@@ -23,6 +27,22 @@ class ShellNavigator extends InheritedWidget {
     if (identical(_hostGoTo, goTo)) {
       _hostGoTo = null;
     }
+  }
+
+  static void bindShopTab(void Function(String tab) handler) {
+    _shopTabHandler = handler;
+  }
+
+  static void unbindShopTab(void Function(String tab) handler) {
+    if (identical(_shopTabHandler, handler)) {
+      _shopTabHandler = null;
+    }
+  }
+
+  static String? takePendingShopTab() {
+    final String? tab = _pendingShopTab;
+    _pendingShopTab = null;
+    return tab;
   }
 
   static ShellNavigator? maybeOf(BuildContext context) =>
@@ -35,6 +55,18 @@ class ShellNavigator extends InheritedWidget {
       return;
     }
     _hostGoTo?.call(index);
+  }
+
+  /// 对齐网站 `/user/shop?tab=traffic`：进商店并切到流量包。
+  static void openShopTraffic(BuildContext context) {
+    const String tab = 'traffic_package';
+    go(context, shopTab);
+    final void Function(String)? handler = _shopTabHandler;
+    if (handler != null) {
+      handler(tab);
+    } else {
+      _pendingShopTab = tab;
+    }
   }
 
   /// 面板文案里的 `/user/ticket` 在客户端应进工单页，而不是打开浏览器。

@@ -50,7 +50,6 @@ class UpdateController extends ChangeNotifier {
 
   AppUpdate? get appUpdate => _app;
 
-  /// 客户端更新行的说明文字
   String get appStatus {
     final String? stage = _appStage;
     if (stage != null) {
@@ -62,17 +61,17 @@ class UpdateController extends ChangeNotifier {
     }
     final AppUpdate? app = _app;
     if (app == null) {
-      return '尚未检查更新';
+      return '尚未检查';
     }
     if (!app.outdated) {
-      return '已是最新版本 ${app.latest}';
+      return '已是最新（${app.latest}）';
     }
     if (!AppUpdate.selfInstallable) {
-      return '已发布 ${app.latest}，tar.gz 需自行下载并重新执行 install.sh';
+      return '发现新版本（${app.latest}），需自行安装';
     }
     return app.installer == null
-        ? '已发布 ${app.latest}，但该版本未提供 ${AppUpdate.assetSuffix} 安装包'
-        : '已发布 ${app.latest}，可直接下载安装';
+        ? '发现新版本（${app.latest}），无对应安装包'
+        : '发现新版本（${app.latest}）';
   }
 
   bool get appInstallable =>
@@ -201,14 +200,14 @@ class UpdateController extends ChangeNotifier {
       );
       _kernel = update;
       if (update.current.isEmpty) {
-        _kernelStatus = '最新正式版 ${update.latest}，本机版本取不到';
+        _kernelStatus = '本机版本未知，最新（${update.latest}）';
       } else if (update.outdated) {
         final String hint = _connection.kernelUpgradeSupported
             ? ''
             : '，随客户端整包更新';
-        _kernelStatus = '${update.current} · 官方已发布 ${update.latest}$hint';
+        _kernelStatus = '发现新版本（${update.latest}）$hint';
       } else {
-        _kernelStatus = '${update.current} · 已是最新正式版';
+        _kernelStatus = '已是最新（${update.current}）';
       }
     } on Object catch (e) {
       _kernelStatus = '检查失败：$e';
@@ -226,7 +225,7 @@ class UpdateController extends ChangeNotifier {
       return;
     }
     final String version = await _connection.kernelVersion();
-    _kernelStatus = version.isEmpty ? '后台服务未运行，取不到版本' : version;
+    _kernelStatus = version.isEmpty ? '本机版本未知' : '当前（$version）';
     notifyListeners();
   }
 
@@ -238,16 +237,16 @@ class UpdateController extends ChangeNotifier {
 
     _kernelUpgrading = true;
     _kernelPercent = 0;
-    _kernelStatus = '正在升级 $version，请勿关闭客户端';
+    _kernelStatus = '正在更新（$version）';
     notifyListeners();
     _startKernelProgressPoll();
 
     try {
       final String installed = await _connection.upgradeKernel(version);
       _kernel = KernelUpdate(current: installed, latest: installed);
-      _kernelStatus = '已更新到 $installed';
+      _kernelStatus = '更新成功（$installed）';
     } on Object catch (e) {
-      _kernelStatus = '升级失败：$e';
+      _kernelStatus = '更新失败：$e';
     } finally {
       _stopKernelProgressPoll();
       _kernelUpgrading = false;
@@ -330,7 +329,7 @@ class UpdateController extends ChangeNotifier {
       notifyListeners();
 
       if (asset.sha256.isEmpty) {
-        throw GithubReleaseException('发布资产没有校验值，已中止安装');
+        throw GithubReleaseException('发布资产没有校验值，已中止更新');
       }
       final String actual = sha256.convert(await file.readAsBytes()).toString();
       if (actual != asset.sha256.toLowerCase()) {
@@ -342,13 +341,13 @@ class UpdateController extends ChangeNotifier {
       notifyListeners();
 
       if (!await _platform.runInstaller(file.path)) {
-        throw GithubReleaseException('已取消安装');
+        throw GithubReleaseException('已取消更新');
       }
 
       Logger.instance.info(_source, '安装器已启动，客户端退出让位');
       exit(0);
     } on Object catch (e) {
-      _appError = '安装失败：$e';
+      _appError = '更新失败：$e';
       Logger.instance.error(_source, '安装客户端更新失败', e);
     } finally {
       _appStage = null;

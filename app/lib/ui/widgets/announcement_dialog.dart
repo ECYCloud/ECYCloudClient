@@ -17,24 +17,21 @@ Future<void> showAnnouncementPopup(
     barrierDismissible: dismissible,
     builder: (BuildContext context) => AlertDialog(
       title: Text(announcement.title),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (announcement.id != 1 && announcement.date.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    announcement.date,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (announcement.id != 1 && announcement.date.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  announcement.date,
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
-              RichHtmlView(announcement.content),
-            ],
-          ),
+              ),
+            RichHtmlView(announcement.content),
+          ],
         ),
       ),
       actions: <Widget>[
@@ -72,7 +69,6 @@ Future<void> showAnnouncementBrowser(
           return AlertDialog(
             title: const Text('网站公告'),
             content: const SizedBox(
-              width: 320,
               height: 96,
               child: Center(child: CircularProgressIndicator()),
             ),
@@ -103,6 +99,7 @@ Future<void> showAnnouncementBrowser(
       },
     ),
   );
+  controller.markSeen();
 }
 
 class _AnnouncementBrowser extends StatefulWidget {
@@ -132,56 +129,51 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
 
     return AlertDialog(
       title: Text(current.title),
-      content: SizedBox(
-        width: 520,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (current.id != 1 && current.date.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  current.date,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 360),
-              child: SingleChildScrollView(
-                child: RichHtmlView(current.content),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (current.id != 1 && current.date.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                current.date,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-            if (multi) ...<Widget>[
-              const SizedBox(height: 16),
-              Row(
-                children: <Widget>[
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _index =
-                          (_index - 1 + widget.items.length) %
-                          widget.items.length;
-                    }),
-                    child: const Text('上一条'),
-                  ),
-                  Expanded(
-                    child: Text(
-                      '${_index + 1} / ${widget.items.length}',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _index = (_index + 1) % widget.items.length;
-                    }),
-                    child: const Text('下一条'),
-                  ),
-                ],
-              ),
-            ],
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: SingleChildScrollView(
+              child: RichHtmlView(current.content),
+            ),
+          ),
+          if (multi) ...<Widget>[
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                TextButton(
+                  onPressed: () => setState(() {
+                    _index =
+                        (_index - 1 + widget.items.length) %
+                        widget.items.length;
+                  }),
+                  child: const Text('上一条'),
+                ),
+                Text(
+                  '${_index + 1} / ${widget.items.length}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _index = (_index + 1) % widget.items.length;
+                  }),
+                  child: const Text('下一条'),
+                ),
+              ],
+            ),
           ],
-        ),
+        ],
       ),
       actions: <Widget>[
         TextButton(

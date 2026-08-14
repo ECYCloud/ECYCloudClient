@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/app_config.dart';
+import '../../data/store/credential_store.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import 'register_page.dart';
+import 'reset_password_page.dart';
 
 /// 组字中不能回退到 oldValue：引擎仍持有 composing，IME 提交时同一段文本会再来一遍
 class OtpCodeFormatter extends TextInputFormatter {
@@ -33,6 +36,55 @@ class OtpCodeFormatter extends TextInputFormatter {
 final TextInputFormatter asciiOnlyFormatter = FilteringTextInputFormatter.deny(
   RegExp(r'[^\x20-\x7E]'),
 );
+
+/// 仅验证码获焦时关掉本窗口 IME（对齐密码框英文输入）；勿整页关闭，否则国际邮箱无法输入
+class EmailOtpIme extends StatefulWidget {
+  const EmailOtpIme({super.key, required this.builder});
+
+  final Widget Function(BuildContext context, FocusNode focusNode) builder;
+
+  @override
+  State<EmailOtpIme> createState() => _EmailOtpImeState();
+}
+
+class _EmailOtpImeState extends State<EmailOtpIme> {
+  final FocusNode _focusNode = FocusNode();
+  PlatformService? _platform;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_syncIme);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _platform = AppScope.of(context).platform;
+  }
+
+  void _syncIme() {
+    final PlatformService? platform = _platform;
+    if (platform == null) {
+      return;
+    }
+    unawaited(platform.setImeEnabled(enabled: !_focusNode.hasFocus));
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_syncIme);
+    final PlatformService? platform = _platform;
+    if (platform != null) {
+      unawaited(platform.setImeEnabled(enabled: true));
+    }
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _focusNode);
+}
 
 /// 带 prefixIcon 的输入框，高度取图标的最小交互尺寸经 visualDensity 收缩后的值；
 /// 与输入框并排的按钮必须读同一处，否则主题调密度时两者会错开
@@ -61,30 +113,54 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscure = true;
   bool _entering = false;
   bool _emailCodeMode = false;
+  bool _remember = false;
   int _sendCooldown = 0;
   Timer? _cooldownTimer;
-  PlatformService? _platform;
 
-  // 登录页只收邮箱、密码与验证码，整页关掉本窗口输入法即可；
-  // 逐个输入框在获焦/失焦时开关会因两个通知同批发出而互相覆盖
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final PlatformService platform = AppScope.of(context).platform;
-    if (identical(platform, _platform)) {
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_restoreRemembered()),
+    );
+  }
+
+  Future<void> _restoreRemembered() async {
+    if (!mounted) {
       return;
     }
-    _platform = platform;
-    unawaited(platform.setImeEnabled(enabled: false));
+    final RememberedLogin? saved = await AppScope.of(
+      context,
+    ).auth.loadRememberedLogin();
+    if (!mounted || saved == null) {
+      return;
+    }
+    _email.text = saved.email;
+    _password.text = saved.password;
+    setState(() => _remember = true);
+  }
+
+  void _setRemember(AuthController auth, bool remember) {
+    setState(() => _remember = remember);
+    if (!remember) {
+      unawaited(auth.clearRememberedLogin());
+    }
+  }
+
+  Future<void> _persistRemember(AuthController auth) async {
+    if (_remember) {
+      await auth.saveRememberedLogin(
+        email: _email.text.trim(),
+        password: _password.text,
+      );
+    } else {
+      await auth.clearRememberedLogin();
+    }
   }
 
   @override
   void dispose() {
     _cooldownTimer?.cancel();
-    final PlatformService? platform = _platform;
-    if (platform != null) {
-      unawaited(platform.setImeEnabled(enabled: true));
-    }
     _email.dispose();
     _password.dispose();
     _code.dispose();
@@ -167,13 +243,19 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _openForgotPassword() async {
-    final String base = AppConfig.panelBaseUrl.replaceAll(RegExp(r'/+$'), '');
-    await AppScope.of(context).platform.openUrl('$base/password/reset');
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const ResetPasswordPage(),
+      ),
+    );
   }
 
   Future<void> _openRegister() async {
-    final String base = AppConfig.panelBaseUrl.replaceAll(RegExp(r'/+$'), '');
-    await AppScope.of(context).platform.openUrl('$base/auth/register');
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const RegisterPage(),
+      ),
+    );
   }
 
   Future<bool?> _promptTwoFactor(AuthController auth) {
@@ -191,6 +273,10 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _showSuccessAndEnter(AuthController auth) async {
+    await _persistRemember(auth);
+    if (!mounted) {
+      return;
+    }
     setState(() => _entering = true);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -238,7 +324,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '使用 ${AppConfig.panelHost} 账号登录，登录后自动获取可用节点',
+                        '使用 ${AppConfig.siteHost} 账号登录，登录后自动获取可用节点',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
@@ -251,9 +337,6 @@ class _LoginPageState extends State<LoginPage> {
                         autocorrect: false,
                         enableSuggestions: false,
                         autofillHints: const <String>[AutofillHints.email],
-                        inputFormatters: <TextInputFormatter>[
-                          asciiOnlyFormatter,
-                        ],
                         decoration: const InputDecoration(
                           labelText: '邮箱',
                           prefixIcon: Icon(Icons.mail_outline),
@@ -269,28 +352,35 @@ class _LoginPageState extends State<LoginPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Expanded(
-                              child: TextFormField(
-                                controller: _code,
-                                keyboardType: TextInputType.visiblePassword,
-                                autocorrect: false,
-                                enableSuggestions: false,
-                                autofillHints: const <String>[
-                                  AutofillHints.oneTimeCode,
-                                ],
-                                inputFormatters: <TextInputFormatter>[
-                                  OtpCodeFormatter(),
-                                ],
-                                decoration: const InputDecoration(
-                                  labelText: '验证码',
-                                  prefixIcon: Icon(Icons.pin_outlined),
-                                ),
-                                validator: (String? value) =>
-                                    (value == null || value.trim().isEmpty)
-                                    ? '请填写验证码'
-                                    : null,
-                                onFieldSubmitted: (_) => auth.busy || _entering
-                                    ? null
-                                    : _submit(auth),
+                              child: EmailOtpIme(
+                                builder:
+                                    (BuildContext context, FocusNode focusNode) {
+                                  return TextFormField(
+                                    controller: _code,
+                                    focusNode: focusNode,
+                                    keyboardType: TextInputType.visiblePassword,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    autofillHints: const <String>[
+                                      AutofillHints.oneTimeCode,
+                                    ],
+                                    inputFormatters: <TextInputFormatter>[
+                                      OtpCodeFormatter(),
+                                    ],
+                                    decoration: const InputDecoration(
+                                      labelText: '验证码',
+                                      prefixIcon: Icon(Icons.pin_outlined),
+                                    ),
+                                    validator: (String? value) =>
+                                        (value == null || value.trim().isEmpty)
+                                        ? '请填写验证码'
+                                        : null,
+                                    onFieldSubmitted: (_) =>
+                                        auth.busy || _entering
+                                        ? null
+                                        : _submit(auth),
+                                  );
+                                },
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -343,20 +433,34 @@ class _LoginPageState extends State<LoginPage> {
                           onFieldSubmitted: (_) =>
                               auth.busy || _entering ? null : _submit(auth),
                         ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () =>
-                              setState(() => _emailCodeMode = !_emailCodeMode),
-                          child: Text(
-                            _emailCodeMode ? '密码登录' : '邮箱验证码登录',
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: CheckboxListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              contentPadding: EdgeInsets.zero,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              value: _remember,
+                              onChanged: (bool? value) =>
+                                  _setRemember(auth, value ?? false),
+                              title: const Text('记住账号密码'),
+                            ),
                           ),
-                        ),
+                          TextButton(
+                            onPressed: () => setState(
+                              () => _emailCodeMode = !_emailCodeMode,
+                            ),
+                            child: Text(
+                              _emailCodeMode ? '密码登录' : '邮箱验证码登录',
+                            ),
+                          ),
+                        ],
                       ),
                       if (auth.error != null &&
                           auth.stage != AuthStage.needsTwoFactor) ...<Widget>[
                         const SizedBox(height: 8),
-                        _ErrorBanner(message: auth.error!),
+                        AuthErrorBanner(message: auth.error!),
                       ],
                       const SizedBox(height: 16),
                       FilledButton(
@@ -510,8 +614,8 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
   }
 }
 
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message});
+class AuthErrorBanner extends StatelessWidget {
+  const AuthErrorBanner({super.key, required this.message});
 
   final String message;
 

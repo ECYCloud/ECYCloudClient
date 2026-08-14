@@ -36,5 +36,6 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "ECYCLOUD_DISPLAY_VERSION=\"${
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::APPINDICATOR)
+target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::LIBSECRET)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

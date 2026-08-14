@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 import '../../core/logger.dart';
+import '../models/account.dart';
 import '../models/announcement.dart';
 import '../models/shop.dart';
 import '../models/ticket.dart';
@@ -12,11 +13,22 @@ import '../models/user_profile.dart';
 import 'api_exception.dart';
 
 class LoginResult {
-  const LoginResult(this.token, this.expiresAt, this.profile);
+  const LoginResult(
+    this.token,
+    this.expiresAt, {
+    this.profile,
+    this.accountStatus,
+  });
 
   final String token;
   final DateTime expiresAt;
-  final UserProfile profile;
+  final UserProfile? profile;
+  final AccountStatus? accountStatus;
+
+  bool get isRestricted {
+    final AccountStatus? status = accountStatus;
+    return status != null && !status.isNormal;
+  }
 }
 
 class RemoteProfile {
@@ -99,6 +111,8 @@ class PanelApiClient {
 
   String? _token;
 
+  String? get token => _token;
+
   set token(String? value) => _token = value;
 
   Uri _endpoint(String path, [Map<String, String>? query]) =>
@@ -168,14 +182,118 @@ class PanelApiClient {
     return _loginResult(data);
   }
 
+  Future<AuthOptions> fetchAuthOptions() async =>
+      AuthOptions.fromJson(await _get('/auth/options'));
+
+  Future<String> sendRegisterVerify({required String email}) =>
+      _postMsg('/auth/send-register-verify', <String, dynamic>{'email': email});
+
+  Future<LoginResult> register({
+    required String name,
+    required String email,
+    required String passwd,
+    required String repasswd,
+    String code = '',
+    String emailcode = '',
+  }) async {
+    final Map<String, dynamic> data = await _post(
+      '/auth/register',
+      <String, dynamic>{
+        'name': name,
+        'email': email,
+        'passwd': passwd,
+        'repasswd': repasswd,
+        if (code.isNotEmpty) 'code': code,
+        if (emailcode.isNotEmpty) 'emailcode': emailcode,
+        ...device.toJson(),
+      },
+    );
+    return _loginResult(data);
+  }
+
+  Future<String> requestPasswordReset({required String email}) =>
+      _postMsg('/auth/password-reset', <String, dynamic>{'email': email});
+
+  Future<LoginResult> confirmPasswordReset({
+    required String token,
+    required String password,
+    required String repasswd,
+  }) async {
+    final Map<String, dynamic> data = await _post(
+      '/auth/password-reset/confirm',
+      <String, dynamic>{
+        'token': token,
+        'password': password,
+        'repasswd': repasswd,
+        ...device.toJson(),
+      },
+    );
+    return _loginResult(data);
+  }
+
   LoginResult _loginResult(Map<String, dynamic> data) {
     final String token = data['token'] as String;
     _token = token;
 
+    final Object? userRaw = data['user'];
+    final Object? statusRaw = data['account_status'];
+
     return LoginResult(
       token,
       DateTime.parse(data['expires_at'] as String),
-      UserProfile.fromJson(data['user'] as Map<String, dynamic>),
+      profile: userRaw is Map<String, dynamic>
+          ? UserProfile.fromJson(userRaw)
+          : null,
+      accountStatus: statusRaw is Map<String, dynamic>
+          ? AccountStatus.fromJson(statusRaw)
+          : null,
+    );
+  }
+
+  Future<AccountStatus> fetchAccountStatus() async =>
+      AccountStatus.fromJson(await _get('/user/account-status'));
+
+  Future<String> sendKillEmailCode() =>
+      _postMsg('/user/send-kill-email-code', const <String, dynamic>{});
+
+  Future<AccountStatus> killAccount({
+    String? emailCode,
+    String? passwd,
+  }) async {
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/kill',
+      <String, dynamic>{
+        if (emailCode != null) 'email_code': emailCode,
+        if (passwd != null) 'passwd': passwd,
+      },
+    );
+    final Object? data = envelope['data'];
+    if (data is Map<String, dynamic>) {
+      return AccountStatus.fromJson(data);
+    }
+    return fetchAccountStatus();
+  }
+
+  Future<({String message, AccountStatus status, UserProfile profile})>
+  cancelAccountDeletion() async {
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/cancel-account-deletion',
+      const <String, dynamic>{},
+    );
+    final Object? data = envelope['data'];
+    final Map<String, dynamic> map = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    final Object? statusRaw = map['status'];
+    final Object? userRaw = map['user'];
+    return (
+      message: envelope['msg'] as String? ?? '账号状态已恢复正常。',
+      status: statusRaw is Map<String, dynamic>
+          ? AccountStatus.fromJson(statusRaw)
+          : await fetchAccountStatus(),
+      profile: userRaw is Map<String, dynamic>
+          ? UserProfile.fromJson(userRaw)
+          : await fetchProfile(),
     );
   }
 
@@ -193,22 +311,311 @@ class PanelApiClient {
   Future<UserProfile> fetchProfile() async =>
       UserProfile.fromJson(await _get('/user/profile'));
 
+  Future<String> ackIpKick() =>
+      _postMsg('/user/ip-kick-ack', const <String, dynamic>{});
+
+  Future<String> reclaimIp() async {
+    final http.Client client = _directHttpClient();
+    try {
+      final http.Response response = await _send(
+        () => client.post(
+          _endpoint('/user/ip-reclaim'),
+          headers: _headers(json: true),
+          body: jsonEncode(const <String, dynamic>{}),
+        ),
+      );
+      return _envelope(response)['msg'] as String? ?? '';
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<({String message, UserProfile profile})> checkin() async {
+    final http.Response response = await _send(
+      () => _http.post(
+        _endpoint('/user/checkin'),
+        headers: _headers(json: true),
+        body: jsonEncode(const <String, dynamic>{}),
+      ),
+    );
+    final Map<String, dynamic> envelope = _envelope(response);
+    final Object? data = envelope['data'];
+    final UserProfile profile = data is Map<String, dynamic>
+        ? UserProfile.fromJson(data)
+        : await fetchProfile();
+    return (
+      message: envelope['msg'] as String? ?? '签到成功',
+      profile: profile,
+    );
+  }
+
+  Future<String> updateUsername(String newusername) => _postMsg(
+    '/user/username',
+    <String, dynamic>{'newusername': newusername},
+  );
+
+  Future<String> updatePassword({
+    required String oldpwd,
+    required String pwd,
+    required String repwd,
+  }) => _postMsg('/user/password', <String, dynamic>{
+    'oldpwd': oldpwd,
+    'pwd': pwd,
+    'repwd': repwd,
+  });
+
+  Future<String> sendOldEmailVerify() =>
+      _postMsg('/user/send-old-email-verify', const <String, dynamic>{});
+
+  Future<String> verifyOldEmail({required String oldEmailcode}) => _postMsg(
+    '/user/verify-old-email',
+    <String, dynamic>{'old_emailcode': oldEmailcode},
+  );
+
+  Future<String> sendNewEmailVerify({required String email}) =>
+      _postMsg('/user/send-new-email-verify', <String, dynamic>{'email': email});
+
+  Future<String> updateEmail({
+    required String newemail,
+    String oldEmailcode = '',
+    String newEmailcode = '',
+  }) => _postMsg('/user/email', <String, dynamic>{
+    'newemail': newemail,
+    if (oldEmailcode.isNotEmpty) 'old_emailcode': oldEmailcode,
+    if (newEmailcode.isNotEmpty) 'new_emailcode': newEmailcode,
+  });
+
+  Future<InviteSummary> fetchInviteSummary({
+    int invitedPage = 1,
+    int invitedLength = 10,
+    String invitedSearch = '',
+    int paybackPage = 1,
+    int paybackLength = 10,
+    String paybackSearch = '',
+    int withdrawPage = 1,
+    int withdrawLength = 10,
+    String withdrawSearch = '',
+  }) async => InviteSummary.fromJson(
+    await _get('/user/invite', <String, String>{
+      'invited_page': '$invitedPage',
+      'invited_length': '$invitedLength',
+      if (invitedSearch.isNotEmpty) 'invited_search': invitedSearch,
+      'payback_page': '$paybackPage',
+      'payback_length': '$paybackLength',
+      if (paybackSearch.isNotEmpty) 'payback_search': paybackSearch,
+      'withdraw_page': '$withdrawPage',
+      'withdraw_length': '$withdrawLength',
+      if (withdrawSearch.isNotEmpty) 'withdraw_search': withdrawSearch,
+    }),
+  );
+
+  Future<EditAccountOptions> fetchEditOptions() async =>
+      EditAccountOptions.fromJson(await _get('/user/edit-options'));
+
+  Future<SubscriptionConfig> fetchSubscriptionConfig() async =>
+      SubscriptionConfig.fromJson(await _get('/user/subscription-config'));
+
+  Future<String> saveSubscriptionConfig(Map<String, dynamic> body) =>
+      _postMsg('/user/subscription-config', body);
+
+  Future<String> gaCheck(String code) =>
+      _postMsg('/user/ga-check', <String, dynamic>{'code': code});
+
+  Future<String> gaSet(int enable) =>
+      _postMsg('/user/ga-set', <String, dynamic>{'enable': enable});
+
+  Future<({String message, String gaToken, String gaUrl})> gaReset() async {
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/ga-reset',
+      const <String, dynamic>{},
+    );
+    final Object? data = envelope['data'];
+    final Map<String, dynamic> body = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    return (
+      message: envelope['msg'] as String? ?? '',
+      gaToken: body['ga_token'] as String? ?? '',
+      gaUrl: body['ga_url'] as String? ?? '',
+    );
+  }
+
+  Future<({String message, String bindToken})> telegramReset() async {
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/telegram-reset',
+      const <String, dynamic>{},
+    );
+    final Object? data = envelope['data'];
+    final Map<String, dynamic> body = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    return (
+      message: envelope['msg'] as String? ?? '',
+      bindToken: body['bind_token'] as String? ??
+          envelope['bind_token'] as String? ??
+          '',
+    );
+  }
+
+  Future<({bool bound, String imValue, int telegramId})>
+  telegramBindCheck() async {
+    final http.Response response = await _send(
+      () => _http.get(
+        _endpoint('/user/telegram-bind-check'),
+        headers: _headers(),
+      ),
+    );
+    final Map<String, dynamic> envelope = _envelopeAllowRetZero(response);
+    final int ret = (envelope['ret'] as num?)?.toInt() ?? 0;
+    final Object? data = envelope['data'];
+    final Map<String, dynamic> body = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    return (
+      bound: ret == 1,
+      imValue: body['im_value'] as String? ??
+          envelope['im_value'] as String? ??
+          '',
+      telegramId: (body['telegram_id'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Future<String> updateMailNotify(Map<String, bool> preferences) => _postMsg(
+    '/user/mail-notify',
+    <String, dynamic>{'preferences': jsonEncode(preferences)},
+  );
+
+  Future<InviteResetResult> resetInviteCode() async {
+    final Map<String, dynamic> envelope = await _put('/user/invite');
+    final Object? data = envelope['data'];
+    final Map<String, dynamic> body = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    return InviteResetResult(
+      message: envelope['msg'] as String? ?? '',
+      newCode: body['new_code'] as String? ?? '',
+      inviteUrl: body['invite_url'] as String? ?? '',
+    );
+  }
+
+  Future<String> applyWithdraw({
+    required double amount,
+    String channelId = 'balance',
+    Map<String, String> accountInfo = const <String, String>{},
+    bool saveAccount = false,
+  }) => _postMsg('/user/withdraw/apply', <String, dynamic>{
+    'amount': amount,
+    'channel_id': channelId,
+    if (accountInfo.isNotEmpty) 'account_info': accountInfo,
+    if (saveAccount) 'save_account': true,
+  });
+
+  Future<String> cancelWithdraw({required int recordId}) =>
+      _postMsg('/user/withdraw/cancel', <String, dynamic>{
+        'record_id': recordId,
+      });
+
+  Future<WithdrawChannelFieldsResult> fetchWithdrawChannelFields(
+    int channelId,
+  ) async {
+    final http.Response response = await _send(
+      () => _http.get(
+        _endpoint('/user/withdraw/channel/$channelId/fields'),
+        headers: _headers(),
+      ),
+    );
+    return WithdrawChannelFieldsResult.fromJson(_envelope(response));
+  }
+
+  Future<TrafficLogBundle> fetchTrafficLog() async =>
+      TrafficLogBundle.fromJson(await _get('/user/traffic-log'));
+
+  Future<UsageIpListPage> fetchUsageIps({
+    int page = 1,
+    int length = 10,
+  }) async => UsageIpListPage.fromJson(
+    await _get('/user/usage-ips', <String, String>{
+      'page': '$page',
+      'length': '$length',
+    }),
+  );
+
+  Future<LoginLogListPage> fetchLoginLogs({
+    int page = 1,
+    int length = 10,
+  }) async => LoginLogListPage.fromJson(
+    await _get('/user/login-logs', <String, String>{
+      'page': '$page',
+      'length': '$length',
+    }),
+  );
+
+  Future<PurchaseListPage> fetchPurchases({
+    int page = 1,
+    int length = 10,
+    String search = '',
+  }) async => PurchaseListPage.fromJson(
+    await _get('/user/purchases', <String, String>{
+      'page': '$page',
+      'length': '$length',
+      if (search.isNotEmpty) 'search': search,
+    }),
+  );
+
+  Future<RechargeInfo> fetchRechargeInfo() async =>
+      RechargeInfo.fromJson(await _get('/user/recharge'));
+
+  Future<String> redeemRechargeCode(String code) =>
+      _postMsg('/user/recharge/code', <String, dynamic>{'code': code});
+
+  Future<ShopPurchaseResult> rechargeWithEpay({
+    required double price,
+    required String type,
+  }) async {
+    final http.Response response = await _send(
+      () => _http.post(
+        _endpoint('/user/recharge/epay'),
+        headers: _headers(json: true),
+        body: jsonEncode(<String, dynamic>{'price': price, 'type': type}),
+      ),
+    );
+    return ShopPurchaseResult.fromEnvelope(_envelope(response));
+  }
+
+  Future<BalanceListPage> fetchBalanceTransactions({
+    int page = 1,
+    int length = 10,
+    String search = '',
+  }) async => BalanceListPage.fromJson(
+    await _get('/user/balance-transactions', <String, String>{
+      'page': '$page',
+      'length': '$length',
+      if (search.isNotEmpty) 'search': search,
+    }),
+  );
+
+  Future<UnlockListPage> fetchUnlockResults({
+    int page = 1,
+    int length = 10,
+    String search = '',
+  }) async => UnlockListPage.fromJson(
+    await _get('/user/unlock', <String, String>{
+      'page': '$page',
+      'length': '$length',
+      if (search.isNotEmpty) 'search': search,
+    }),
+  );
+
   /// 与网页 POST /user/purchases/toggle 同一业务；[action] 为 enable / disable
   Future<String> togglePurchaseAutoRenew({
     required int id,
     required String action,
-  }) async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint('/purchases/toggle'),
-        headers: _headers(json: true),
-        body: jsonEncode(<String, dynamic>{'id': id, 'action': action}),
-      ),
-    );
-    return _envelope(response)['msg'] as String? ?? '';
-  }
+  }) => _postMsg('/purchases/toggle', <String, dynamic>{
+    'id': id,
+    'action': action,
+  });
 
-  /// 轻量配置戳：未变则客户端不应再打 /config/clash。走订阅域。
+  /// 轻量配置戳：未变则客户端不应再打 /config/clash。走订阅域名。
   Future<String> fetchConfigRevision() async {
     final http.Response response = await _send(
       () => _http.get(_configEndpoint('/config/revision'), headers: _headers()),
@@ -282,15 +689,17 @@ class PanelApiClient {
   Future<AnnouncementBundle> fetchAnnouncements() async =>
       AnnouncementBundle.fromJson(await _get('/announcements'));
 
-  Future<List<TicketSummary>> fetchTickets() async {
-    final Map<String, dynamic> data = await _get('/tickets');
-    final Object? raw = data['tickets'];
-    return <TicketSummary>[
-      if (raw is List)
-        for (final Object? item in raw)
-          if (item is Map<String, dynamic>) TicketSummary.fromJson(item),
-    ];
-  }
+  Future<TicketListPage> fetchTickets({
+    int page = 1,
+    int length = 10,
+    String search = '',
+  }) async => TicketListPage.fromJson(
+    await _get('/tickets', <String, String>{
+      'page': '$page',
+      'length': '$length',
+      if (search.isNotEmpty) 'search': search,
+    }),
+  );
 
   Future<TicketDetail> fetchTicket(int id) async =>
       TicketDetail.fromJson(await _get('/tickets/$id'));
@@ -452,6 +861,57 @@ class PanelApiClient {
       ),
     );
     return _unwrap(response);
+  }
+
+  Future<Map<String, dynamic>> _put(
+    String path, [
+    Map<String, dynamic> body = const <String, dynamic>{},
+  ]) async {
+    final http.Response response = await _send(
+      () => _http.put(
+        _endpoint(path),
+        headers: _headers(json: true),
+        body: jsonEncode(body),
+      ),
+    );
+    return _envelope(response);
+  }
+
+  Future<String> _postMsg(String path, Map<String, dynamic> body) async {
+    final Map<String, dynamic> envelope = await _postEnvelope(path, body);
+    return envelope['msg'] as String? ?? '';
+  }
+
+  Future<Map<String, dynamic>> _postEnvelope(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final http.Response response = await _send(
+      () => _http.post(
+        _endpoint(path),
+        headers: _headers(json: true),
+        body: jsonEncode(body),
+      ),
+    );
+    return _envelope(response);
+  }
+
+  /// 绑定轮询等接口用 ret=0 表示未绑定，不当作错误。
+  Map<String, dynamic> _envelopeAllowRetZero(http.Response response) {
+    Map<String, dynamic>? payload;
+    try {
+      payload =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    } on FormatException {
+      payload = null;
+    }
+    if (payload == null) {
+      throw ApiException(
+        '面板返回了非预期的内容（HTTP ${response.statusCode}）',
+        statusCode: response.statusCode,
+      );
+    }
+    return payload;
   }
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {

@@ -23,6 +23,8 @@ class AppSettings {
     required this.themeMode,
     required this.perAppMode,
     required this.perAppPackages,
+    required this.systemProxyBypass,
+    required this.tunExcludeAddresses,
   });
 
   const AppSettings.defaults()
@@ -41,7 +43,9 @@ class AppSettings {
       closeToTray = true,
       themeMode = ThemeMode.system,
       perAppMode = PerAppProxyMode.off,
-      perAppPackages = const <String>[];
+      perAppPackages = const <String>[],
+      systemProxyBypass = const <String>[],
+      tunExcludeAddresses = const <String>[];
 
   final bool tunEnabled;
   final bool tunStrictRoute;
@@ -56,6 +60,8 @@ class AppSettings {
   final ThemeMode themeMode;
   final PerAppProxyMode perAppMode;
   final List<String> perAppPackages;
+  final List<String> systemProxyBypass;
+  final List<String> tunExcludeAddresses;
 
   AppSettings copyWith({
     bool? tunEnabled,
@@ -71,6 +77,8 @@ class AppSettings {
     ThemeMode? themeMode,
     PerAppProxyMode? perAppMode,
     List<String>? perAppPackages,
+    List<String>? systemProxyBypass,
+    List<String>? tunExcludeAddresses,
   }) => AppSettings(
     tunEnabled: tunEnabled ?? this.tunEnabled,
     tunStrictRoute: tunStrictRoute ?? this.tunStrictRoute,
@@ -85,6 +93,8 @@ class AppSettings {
     themeMode: themeMode ?? this.themeMode,
     perAppMode: perAppMode ?? this.perAppMode,
     perAppPackages: perAppPackages ?? this.perAppPackages,
+    systemProxyBypass: systemProxyBypass ?? this.systemProxyBypass,
+    tunExcludeAddresses: tunExcludeAddresses ?? this.tunExcludeAddresses,
   );
 
   bool affectsKernel(AppSettings other) =>
@@ -95,7 +105,8 @@ class AppSettings {
       ipv6Enabled != other.ipv6Enabled ||
       kernelLogLevel != other.kernelLogLevel ||
       perAppMode != other.perAppMode ||
-      !listEquals(perAppPackages, other.perAppPackages);
+      !listEquals(perAppPackages, other.perAppPackages) ||
+      !listEquals(tunExcludeAddresses, other.tunExcludeAddresses);
 
   // 内核至少按 info 输出，[logLevel] 只作为落盘门槛：内核在 warning 级几乎只在出错时
   // 说话，日志页会退化成一堵错误噪声墙，首次连接时的规则集下载进度也只有
@@ -122,6 +133,7 @@ class AppSettings {
     tunExcludePackages: perAppMode == PerAppProxyMode.exclude
         ? perAppPackages
         : const <String>[],
+    tunExcludeAddresses: tunExcludeAddresses,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -139,6 +151,8 @@ class AppSettings {
     'theme_mode': themeMode.name,
     'per_app_mode': perAppMode.name,
     'per_app_packages': perAppPackages,
+    'system_proxy_bypass': systemProxyBypass,
+    'tun_exclude_addresses': tunExcludeAddresses,
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -170,6 +184,12 @@ class AppSettings {
       perAppPackages:
           (json['per_app_packages'] as List<dynamic>?)?.cast<String>() ??
           fallback.perAppPackages,
+      systemProxyBypass:
+          (json['system_proxy_bypass'] as List<dynamic>?)?.cast<String>() ??
+          fallback.systemProxyBypass,
+      tunExcludeAddresses:
+          (json['tun_exclude_addresses'] as List<dynamic>?)?.cast<String>() ??
+          fallback.tunExcludeAddresses,
     );
   }
 }

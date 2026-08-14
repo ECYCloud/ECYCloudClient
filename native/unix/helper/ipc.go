@@ -19,12 +19,13 @@ type request struct {
 	Command string `json:"command"`
 	// 调用方自己填的，不可信，仅为与 Windows 请求体保持一致而保留；
 	// 各分支一律用 dispatch 收到的、内核给出的真实连接进程 PID
-	PID       int    `json:"pid"`
-	Config    string `json:"config"`
-	Path      string `json:"path"`
-	Port      int    `json:"port"`
-	LogCursor int    `json:"log_cursor"`
-	Version   string `json:"version"`
+	PID       int      `json:"pid"`
+	Config    string   `json:"config"`
+	Path      string   `json:"path"`
+	Port      int      `json:"port"`
+	Bypass    []string `json:"bypass"`
+	LogCursor int      `json:"log_cursor"`
+	Version   string   `json:"version"`
 }
 
 type response struct {
@@ -203,7 +204,7 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if req.Port <= 0 || req.Port > 65535 {
 			return nil, fmt.Errorf("非法端口 %d", req.Port)
 		}
-		if err := s.proxy.set(req.Port, pid); err != nil {
+		if err := s.proxy.set(req.Port, pid, req.Bypass); err != nil {
 			return nil, err
 		}
 		s.watchClient(pid)

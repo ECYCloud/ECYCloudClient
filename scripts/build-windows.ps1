@@ -6,7 +6,7 @@
 .EXAMPLE
     pwsh scripts/build-windows.ps1 -Arch x64
     pwsh scripts/build-windows.ps1 -Arch x64 -Installer
-    pwsh scripts/build-windows.ps1 -Arch x64 -PanelUrl https://面板域名 -SubUrl https://订阅域名/link/ -Installer
+    pwsh scripts/build-windows.ps1 -Arch x64 -SubUrl https://订阅域名 -Installer
 #>
 [CmdletBinding()]
 param(
@@ -25,10 +25,10 @@ param(
     [ValidateSet('last', 'pre')]
     [string]$Channel = 'last',
 
-    # 客户端内置的面板地址。本机是仓库副本、连不到面板数据库，不填时读取 config/panel.json
+    # 设置中心「网站地址」。只用于登录/注册/关于文案，不作为通讯主机。不填时读 config/panel.json 的 panelUrl
     [string]$PanelUrl,
 
-    # 订阅地址（与设置中心 subUrl 同形）。不填时读 config/panel.json
+    # 设置中心「订阅域名」。通讯主机。不填时读 config/panel.json 的 subUrl
     [string]$SubUrl
 )
 
@@ -42,25 +42,25 @@ $stageDir = Join-Path $rootDir "build\windows\$Arch"
 $panelConfigPath = Join-Path $rootDir 'config\panel.json'
 
 $panelConfig = $null
-if ((-not $PanelUrl) -or (-not $SubUrl)) {
+if (-not $SubUrl -or -not $PanelUrl) {
     if (-not (Test-Path $panelConfigPath)) {
-        throw "未指定面板/订阅地址，且找不到 $panelConfigPath"
+        throw "未指定站点域名或订阅域名，且找不到 $panelConfigPath"
     }
     $panelConfig = Get-Content $panelConfigPath -Raw | ConvertFrom-Json
 }
 
-if (-not $PanelUrl) {
-    $PanelUrl = $panelConfig.panelUrl
-}
 if (-not $SubUrl) {
     $SubUrl = $panelConfig.subUrl
 }
+if (-not $PanelUrl) {
+    $PanelUrl = $panelConfig.panelUrl
+}
 
 if ($PanelUrl -notmatch '^https?://') {
-    throw "面板地址不是合法的 http(s) 地址：$PanelUrl"
+    throw "站点域名不是合法的 http(s) 地址：$PanelUrl"
 }
 if ($SubUrl -notmatch '^https?://') {
-    throw "订阅地址不是合法的 http(s) 地址：$SubUrl"
+    throw "订阅域名不是合法的 http(s) 地址：$SubUrl"
 }
 
 # 本机仓库在 D 盘，临时文件不落 C 盘；CI 机器上没有 D 盘，用默认位置
@@ -83,7 +83,7 @@ try {
     $env:ECYCLOUD_VERSION = if ($Channel -eq 'pre') { "Pre $Version" } else { $Version }
     # Flutter 目前只为宿主架构产出 Windows 产物，arm64 包需在 arm64 机器上构建
     flutter build windows --release --build-name $Version `
-        --dart-define="ECYCLOUD_PANEL_URL=$PanelUrl" `
+        --dart-define="ECYCLOUD_SITE_URL=$PanelUrl" `
         --dart-define="ECYCLOUD_SUB_URL=$SubUrl" `
         --dart-define="ECYCLOUD_VERSION=$env:ECYCLOUD_VERSION"
     if ($LASTEXITCODE -ne 0) { throw 'flutter build windows 失败' }

@@ -68,13 +68,6 @@ DialogFontSize=9
 WelcomeFontName=Microsoft YaHei UI
 WelcomeFontSize=12
 
-[InstallDelete]
-; 换内核前的版本随包分发 sing-box 与 wintun，Inno 只覆盖不清理，不点名删就会在
-; 用户机上一直留着几十 MB 的旧内核
-Type: files; Name: "{app}\service\sing-box.exe"
-Type: files; Name: "{app}\service\wintun.dll"
-Type: files; Name: "{app}\service\LICENSE.sing-box.txt"
-
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

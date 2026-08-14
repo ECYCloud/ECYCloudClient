@@ -12,14 +12,17 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/ticket.dart';
 import '../app_scope.dart';
 import '../theme.dart';
+import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/rich_html_view.dart';
 import '../widgets/tag_chip.dart';
-import '../widgets/ticket_content_field.dart';
+import '../widgets/multiline_content_field.dart';
 
 class TicketsPage extends StatefulWidget {
-  const TicketsPage({super.key});
+  const TicketsPage({super.key, this.showBackButton = false});
+
+  final bool showBackButton;
 
   @override
   State<TicketsPage> createState() => _TicketsPageState();
@@ -27,9 +30,16 @@ class TicketsPage extends StatefulWidget {
 
 class _TicketsPageState extends State<TicketsPage> {
   List<TicketSummary> _tickets = const <TicketSummary>[];
+  int _page = 1;
+  int _lastPage = 1;
+  int _total = 0;
+  int _perPage = 10;
+  String _search = '';
+  bool _banned = false;
   String? _error;
   bool _busy = false;
   bool _started = false;
+  Timer? _searchDebounce;
 
   @override
   void didChangeDependencies() {
@@ -38,6 +48,12 @@ class _TicketsPageState extends State<TicketsPage> {
       _started = true;
       unawaited(_load());
     }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -50,23 +66,41 @@ class _TicketsPageState extends State<TicketsPage> {
       _error = null;
     });
     try {
-      final List<TicketSummary> tickets = await api.fetchTickets();
+      final TicketListPage result = await api.fetchTickets(
+        page: _page,
+        length: _perPage,
+        search: _search,
+      );
       if (!mounted) {
         return;
       }
       setState(() {
-        _tickets = tickets;
+        _tickets = result.tickets;
+        _page = result.currentPage;
+        _lastPage = result.lastPage;
+        _total = result.total;
+        _perPage = result.perPage > 0 ? result.perPage : _perPage;
+        _banned = result.banned;
         _busy = false;
       });
-    } on ApiException catch (e) {
+    } on Object catch (e) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _error = e.message;
+        _error = e is ApiException ? e.message : '加载失败：$e';
         _busy = false;
       });
     }
+  }
+
+  void _onSearch(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _search = value.trim();
+      _page = 1;
+      unawaited(_load());
+    });
   }
 
   Future<void> _create() async {
@@ -127,16 +161,45 @@ class _TicketsPageState extends State<TicketsPage> {
         children: <Widget>[
           PageHeader(
             title: '工单',
+            showBackButton: widget.showBackButton,
+            showUserAvatar: true,
             actions: <Widget>[
               FilledButton.icon(
-                onPressed: _busy ? null : _create,
+                onPressed: _busy || _banned ? null : _create,
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('创建工单'),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: PageHeader.actionGap),
               RefreshButton(tooltip: '刷新工单', onRefresh: _load),
             ],
           ),
+          ListToolbar(
+            currentPage: _page,
+            lastPage: _lastPage,
+            total: _total,
+            perPage: _perPage,
+            searchHint: '标题 / 工单号',
+            onSearchChanged: _onSearch,
+            onPerPageChanged: (int value) {
+              _perPage = value;
+              _page = 1;
+              unawaited(_load());
+            },
+            onPageChanged: (int page) {
+              _page = page;
+              unawaited(_load());
+            },
+          ),
+          if (_banned)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+              child: Text(
+                '您已被禁止发起或回复工单',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _load,
@@ -181,7 +244,7 @@ class _TicketsPageState extends State<TicketsPage> {
                         return Card(
                           child: ListTile(
                             title: Text(ticket.title),
-                            subtitle: Text(ticket.datetime),
+                            subtitle: Text('#${ticket.id} · ${ticket.datetime}'),
                             trailing: TagChip(label: ticket.statusText),
                             onTap: () => _openDetail(ticket.id),
                           ),
@@ -209,6 +272,8 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
   TicketDetail? _detail;
   String? _error;
   bool _busy = true;
+  int _msgPage = 1;
+  int _msgPerPage = 10;
 
   @override
   void initState() {
@@ -232,6 +297,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
       }
       setState(() {
         _detail = detail;
+        _msgPage = 1;
         _busy = false;
       });
     } on ApiException catch (e) {
@@ -325,109 +391,181 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
   Widget build(BuildContext context) {
     final TicketDetail? detail = _detail;
     final ThemeData theme = Theme.of(context);
+    final List<TicketMessage> allMessages =
+        detail?.messages ?? const <TicketMessage>[];
+    final int msgLastPage = allMessages.isEmpty
+        ? 1
+        : ((allMessages.length + _msgPerPage - 1) / _msgPerPage).ceil();
+    final int safeMsgPage = _msgPage.clamp(1, msgLastPage);
+    final int msgStart = (safeMsgPage - 1) * _msgPerPage;
+    final List<TicketMessage> pageMessages = allMessages.isEmpty
+        ? const <TicketMessage>[]
+        : allMessages.sublist(
+            msgStart,
+            msgStart + _msgPerPage > allMessages.length
+                ? allMessages.length
+                : msgStart + _msgPerPage,
+          );
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(detail?.title ?? '工单详情'),
-        actions: <Widget>[
-          if (detail != null && !detail.banned) ...<Widget>[
-            if (detail.status != 0) ...<Widget>[
-              Center(
-                child: FilledButton(
-                  onPressed: _closeTicket,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.danger,
-                  ),
-                  child: const Text('关闭工单'),
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: FilledButton.icon(
-                  onPressed: _reply,
-                  icon: const Icon(Icons.reply, size: 16),
-                  label: const Text('回复工单'),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-      body: _busy && detail == null
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null && detail == null
-          ? Center(child: Text(_error!))
-          : detail == null
-          ? const Center(child: Text('工单不存在'))
-          : ListView(
-              padding: const EdgeInsets.all(14),
-              children: <Widget>[
-                // 状态文案最长「等待管理员回复」，与固定 19 字符的时间同行时
-                // 窄屏放不下，用 Wrap 让时间落到下一行
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    TagChip(label: detail.statusText),
-                    Text(
-                      detail.datetime,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                for (final TicketMessage message in detail.messages) ...<Widget>[
-                  Card(
-                    color: message.isAdmin
-                        ? theme.colorScheme.surfaceContainerHighest
-                        : null,
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          // 用户名可能是邮箱、时间固定 19 字符，两者都写死宽度时
-                          // 窄屏与放大字号下必溢出：各占一半余量，长了自己收
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: <Widget>[
-                              Flexible(
-                                child: Text(
-                                  message.userName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    color: message.isAdmin
-                                        ? AppTheme.warning
-                                        : theme.colorScheme.primary,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  message.datetime,
-                                  textAlign: TextAlign.right,
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          RichHtmlView(message.content),
-                        ],
+      body: Column(
+        children: <Widget>[
+          SafeArea(
+            bottom: false,
+            child: PageHeader(
+              title: detail?.title ?? '工单详情',
+              showBackButton: true,
+              showUserAvatar: true,
+              actions: <Widget>[
+                if (detail != null && !detail.banned) ...<Widget>[
+                  if (detail.status != 0) ...<Widget>[
+                    FilledButton(
+                      onPressed: _closeTicket,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.danger,
                       ),
+                      child: const Text('关闭工单'),
                     ),
+                    const SizedBox(width: PageHeader.actionGap),
+                  ],
+                  FilledButton.icon(
+                    onPressed: _reply,
+                    icon: const Icon(Icons.reply, size: 16),
+                    label: const Text('回复工单'),
                   ),
-                  const SizedBox(height: 8),
                 ],
               ],
             ),
+          ),
+          Expanded(
+            child: _busy && detail == null
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null && detail == null
+                ? Center(child: Text(_error!))
+                : detail == null
+                ? const Center(child: Text('工单不存在'))
+                : Column(
+                    children: <Widget>[
+                      ListToolbar(
+                  currentPage: safeMsgPage,
+                  lastPage: msgLastPage,
+                  total: allMessages.length,
+                  perPage: _msgPerPage,
+                  showSearch: false,
+                  onSearchChanged: (_) {},
+                  onPerPageChanged: (int value) {
+                    setState(() {
+                      _msgPerPage = value;
+                      _msgPage = 1;
+                    });
+                  },
+                  onPageChanged: (int page) {
+                    setState(() => _msgPage = page);
+                  },
+                ),
+                Expanded(
+                  child: Builder(
+                    builder: (BuildContext context) {
+                      final List<String> imageAlbum = collectHtmlImageSrcs(
+                        detail.messages.map((TicketMessage m) => m.content),
+                      );
+                      return ListView(
+                        padding: const EdgeInsets.all(14),
+                        children: <Widget>[
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: <Widget>[
+                              TagChip(label: detail.statusText),
+                              Text(
+                                '创建 ${detail.datetime}',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              Text(
+                                '共 ${detail.messageCount} 条消息',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                          if (detail.banned) ...<Widget>[
+                            const SizedBox(height: 8),
+                            Text(
+                              '您已被禁止回复工单',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          if (pageMessages.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 40),
+                              child: Center(child: Text('暂无消息')),
+                            )
+                          else
+                            for (final TicketMessage message
+                                in pageMessages) ...<Widget>[
+                              Card(
+                                color: message.isAdmin
+                                    ? theme.colorScheme.surfaceContainerHighest
+                                    : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: <Widget>[
+                                          Flexible(
+                                            child: Text(
+                                              message.userName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleSmall
+                                                  ?.copyWith(
+                                                color: message.isAdmin
+                                                    ? AppTheme.warning
+                                                    : theme.colorScheme.primary,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              message.datetime,
+                                              textAlign: TextAlign.right,
+                                              style: theme.textTheme.bodySmall,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      RichHtmlView(
+                                        message.content,
+                                        imageAlbum: imageAlbum,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -620,7 +758,10 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
               ),
               const SizedBox(height: 12),
             ],
-            TicketContentField(controller: _content),
+            MultilineContentField(
+              controller: _content,
+              labelText: '内容',
+            ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,

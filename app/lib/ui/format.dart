@@ -11,7 +11,8 @@ class Format {
   ];
 
   static String bytes(num value) {
-    double size = value.toDouble();
+    final bool negative = value < 0;
+    double size = value.abs().toDouble();
     int unit = 0;
 
     while (size >= 1024 && unit < _units.length - 1) {
@@ -19,7 +20,8 @@ class Format {
       unit++;
     }
 
-    return '${size.toStringAsFixed(unit == 0 ? 0 : 2)} ${_units[unit]}';
+    final String amount = size.toStringAsFixed(unit == 0 ? 0 : 2);
+    return '${negative ? '-' : ''}$amount ${_units[unit]}';
   }
 
   static String speed(num bytesPerSecond) => '${bytes(bytesPerSecond)}/s';

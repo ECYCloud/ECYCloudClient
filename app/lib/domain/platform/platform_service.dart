@@ -99,7 +99,10 @@ abstract class PlatformService {
 
   Future<void> initialize();
 
-  Future<void> setSystemProxy({required int port});
+  Future<void> setSystemProxy({
+    required int port,
+    required List<String> bypass,
+  });
 
   Future<void> restoreSystemProxy();
 
@@ -127,6 +130,12 @@ abstract class PlatformService {
   Future<bool> runInstaller(String path);
 
   Future<void> openUrl(String url);
+
+  Future<String> protectSecret(String name, String plaintext);
+
+  Future<String?> unprotectSecret(String name, String blob);
+
+  Future<void> deleteSecret(String name);
 
   Future<void> dispose();
 }

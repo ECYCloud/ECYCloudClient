@@ -48,7 +48,7 @@ fi
 # tar.gz 形态没有包管理器兜底依赖，缺库只会表现为界面起不来，装完就先报出来
 missing="$(ldd "$target/ECYCloud" 2>/dev/null | awk '/not found/ {print $1}')"
 if [ -n "$missing" ]; then
-    echo "以下运行库缺失，请用发行版的包管理器补装 GTK3 与 libayatana-appindicator：" >&2
+    echo "以下运行库缺失，请用发行版的包管理器补装 GTK3、libayatana-appindicator 与 libsecret：" >&2
     echo "$missing" >&2
 fi
 

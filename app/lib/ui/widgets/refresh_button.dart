@@ -12,7 +12,7 @@ class RefreshButton extends StatefulWidget {
     required this.onRefresh,
     this.tooltip,
     this.label,
-    this.iconSize = 16,
+    this.iconSize = 20,
     this.color,
   }) : title = null,
        subtitle = null,
@@ -92,7 +92,7 @@ class _RefreshButtonState extends State<RefreshButton>
       icon: icon,
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
       onPressed: onPressed,
     );
 

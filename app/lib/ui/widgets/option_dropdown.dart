@@ -46,40 +46,58 @@ class OptionDropdown<T> extends StatelessWidget {
         ? placeholder
         : (options[value as T] ?? placeholder);
 
+    final BorderRadius menuRadius = BorderRadius.circular(AppTheme.tileRadius);
+
     return MenuAnchor(
-      alignmentOffset: const Offset(0, 4),
+      crossAxisUnconstrained: false,
+      clipBehavior: Clip.antiAlias,
       style: MenuStyle(
-        padding: const WidgetStatePropertyAll<EdgeInsets>(
-          EdgeInsets.symmetric(vertical: 4),
-        ),
+        alignment: AlignmentDirectional.bottomStart,
+        padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.zero),
+        visualDensity: VisualDensity.standard,
         minimumSize: WidgetStatePropertyAll<Size>(Size(width, 0)),
         maximumSize: WidgetStatePropertyAll<Size>(Size(width, maxMenuHeight)),
         shape: WidgetStatePropertyAll<OutlinedBorder>(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.tileRadius),
-          ),
+          RoundedRectangleBorder(borderRadius: menuRadius),
         ),
       ),
       menuChildren: <Widget>[
-        for (final MapEntry<T, String> entry in options.entries)
-          MenuItemButton(
-            onPressed: enabled ? () => onChanged(entry.key) : null,
-            style: MenuItemButton.styleFrom(
-              minimumSize: Size(width, height),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              textStyle: style,
-              foregroundColor: entry.key == value
-                  ? scheme.primary
-                  : scheme.onSurface,
-              backgroundColor: entry.key == value
-                  ? scheme.primary.withValues(alpha: 0.08)
-                  : null,
-            ),
-            child: _OptionRow(
-              label: entry.value,
-              leading: itemLeading?.call(entry.key),
-              trailing: itemTrailing?.call(entry.key),
-              style: style,
+        for (final (int index, MapEntry<T, String> entry)
+            in options.entries.indexed)
+          SizedBox(
+            width: width,
+            height: height,
+            child: MenuItemButton(
+              onPressed: enabled ? () => onChanged(entry.key) : null,
+              style: MenuItemButton.styleFrom(
+                minimumSize: Size(width, height),
+                fixedSize: Size(width, height),
+                maximumSize: Size(width, height),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.centerLeft,
+                visualDensity: VisualDensity.standard,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: _itemRadius(
+                    menuRadius,
+                    index: index,
+                    length: options.length,
+                  ),
+                ),
+                textStyle: style,
+                foregroundColor: entry.key == value
+                    ? scheme.primary
+                    : scheme.onSurface,
+                backgroundColor: entry.key == value
+                    ? scheme.primary.withValues(alpha: 0.08)
+                    : null,
+              ),
+              child: _OptionRow(
+                label: entry.value,
+                leading: itemLeading?.call(entry.key),
+                trailing: itemTrailing?.call(entry.key),
+                style: style,
+              ),
             ),
           ),
       ],
@@ -90,7 +108,13 @@ class OptionDropdown<T> extends StatelessWidget {
             return InkWell(
               borderRadius: BorderRadius.circular(999),
               onTap: enabled
-                  ? () => open ? controller.close() : controller.open()
+                  ? () {
+                      if (open) {
+                        controller.close();
+                      } else {
+                        controller.open(position: Offset(0, height + 4));
+                      }
+                    }
                   : null,
               child: Container(
                 width: width,
@@ -133,6 +157,29 @@ class OptionDropdown<T> extends StatelessWidget {
           },
     );
   }
+}
+
+BorderRadius _itemRadius(
+  BorderRadius menuRadius, {
+  required int index,
+  required int length,
+}) {
+  if (length <= 1) {
+    return menuRadius;
+  }
+  if (index == 0) {
+    return BorderRadius.only(
+      topLeft: menuRadius.topLeft,
+      topRight: menuRadius.topRight,
+    );
+  }
+  if (index == length - 1) {
+    return BorderRadius.only(
+      bottomLeft: menuRadius.bottomLeft,
+      bottomRight: menuRadius.bottomRight,
+    );
+  }
+  return BorderRadius.zero;
 }
 
 class _OptionRow extends StatelessWidget {

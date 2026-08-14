@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../../core/logger.dart';
+import '../../core/safe_url.dart';
 import '../../domain/config/local_template.dart';
 import '../../domain/platform/platform_service.dart';
 
@@ -93,7 +94,59 @@ abstract class UnixPlatformService implements PlatformService {
   Future<bool> runInstaller(String path) => _spawn(<String>[path]);
 
   @override
-  Future<void> openUrl(String url) => _spawn(<String>[url]);
+  Future<void> openUrl(String url) {
+    if (!SafeUrl.canOpen(url)) {
+      return Future<void>.value();
+    }
+    return _spawn(<String>[url]);
+  }
+
+  @override
+  Future<String> protectSecret(String name, String plaintext) =>
+      _secretInvoke('secret.protect', name, plaintext);
+
+  @override
+  Future<String?> unprotectSecret(String name, String blob) async {
+    try {
+      return await channel.invokeMethod<String>(
+        'secret.unprotect',
+        <String, dynamic>{'name': name, 'value': blob},
+      );
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法读取凭据');
+    }
+  }
+
+  @override
+  Future<void> deleteSecret(String name) async {
+    try {
+      await channel.invokeMethod<void>(
+        'secret.delete',
+        <String, dynamic>{'name': name},
+      );
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法清除凭据');
+    }
+  }
+
+  Future<String> _secretInvoke(
+    String method,
+    String name,
+    String value,
+  ) async {
+    try {
+      final String? blob = await channel.invokeMethod<String>(
+        method,
+        <String, dynamic>{'name': name, 'value': value},
+      );
+      if (blob == null) {
+        throw PlatformServiceException('无法保护凭据');
+      }
+      return blob;
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法保护凭据');
+    }
+  }
 
   /// 安装包与浏览器都由桌面环境接手，本进程随后会退出，必须脱离进程组
   Future<bool> _spawn(List<String> arguments) async {

@@ -281,6 +281,37 @@ class ClashApiClient {
     );
   }
 
+  // 壳层禁止另写 geodata 下载器；手动刷新走内核 updater.UpdateGeoDatabases。
+  // 内核该端点无进度回调，整次下载结束才回 204 / 500。
+  Future<void> updateGeoDatabases() async {
+    final http.Response response = await _http
+        .post(_uri('/configs/geo'), headers: _headers)
+        .timeout(const Duration(seconds: 180));
+
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw ClashApiException(_errorDetail(response));
+    }
+  }
+
+  static String _errorDetail(http.Response response) {
+    final String body = response.body.trim();
+    if (body.isEmpty) {
+      return 'HTTP ${response.statusCode}';
+    }
+    try {
+      final Object? decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final Object? message = decoded['message'];
+        if (message is String && message.isNotEmpty) {
+          return message;
+        }
+      }
+    } on Object {
+      // 非 JSON 时用原文
+    }
+    return body.length > 200 ? body.substring(0, 200) : body;
+  }
+
   /// 热载整份配置（Verge / CMFA 同路：`PUT /configs?force=true` + payload）。
   /// 走 `executor.ApplyConfig`，**不**重建 external-controller，控制面端口与 secret 可保持。
   Future<void> applyConfigPayload(String configJson, {bool force = true}) async {

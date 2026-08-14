@@ -8,6 +8,7 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/shop.dart';
 import '../app_scope.dart';
 import '../format.dart';
+import '../shell_navigator.dart';
 import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
@@ -15,6 +16,7 @@ import '../widgets/rich_html_view.dart';
 import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
+import 'purchases_page.dart';
 
 enum _PayMethod { balance, alipay, wxpay }
 
@@ -51,6 +53,16 @@ class _ShopPageState extends State<ShopPage> {
   Timer? _catalogTicker;
 
   @override
+  void initState() {
+    super.initState();
+    final String? pending = ShellNavigator.takePendingShopTab();
+    if (pending != null) {
+      _tab = pending;
+    }
+    ShellNavigator.bindShopTab(_selectShopTab);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_started) {
@@ -66,9 +78,17 @@ class _ShopPageState extends State<ShopPage> {
 
   @override
   void dispose() {
+    ShellNavigator.unbindShopTab(_selectShopTab);
     _ticker?.cancel();
     _catalogTicker?.cancel();
     super.dispose();
+  }
+
+  void _selectShopTab(String tab) {
+    if (!mounted || _tab == tab) {
+      return;
+    }
+    setState(() => _tab = tab);
   }
 
   PanelApiClient? get _api => AppScope.of(context).auth.api;
@@ -371,6 +391,7 @@ class _ShopPageState extends State<ShopPage> {
       children: <Widget>[
         PageHeader(
           title: '商店',
+          showUserAvatar: true,
           actions: <Widget>[
             if (catalog != null)
               TagChip(
@@ -378,7 +399,7 @@ class _ShopPageState extends State<ShopPage> {
                 label: '余额 ¥ ${catalog.money.toStringAsFixed(2)}',
                 color: Theme.of(context).colorScheme.primary,
               ),
-            const SizedBox(width: 8),
+            const SizedBox(width: PageHeader.actionGap),
             RefreshButton(tooltip: '刷新商品', onRefresh: _load),
           ],
         ),
@@ -414,10 +435,90 @@ class _ShopPageState extends State<ShopPage> {
         if (durations.isEmpty || product.classExpire == _duration) product,
     ];
 
+    final ThemeData theme = Theme.of(context);
+    final TextStyle? noticeStyle = theme.textTheme.bodyMedium;
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(14),
       children: <Widget>[
+        SectionCard(
+          icon: Icons.info_outline,
+          title: '注意事项',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Text(
+                  '每周六日所有的套餐、流量包将进行9折促销。',
+                  style: noticeStyle?.copyWith(
+                    color: theme.colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    Text('接独享节点定制，请 ', style: noticeStyle),
+                    TextButton(
+                      style: AppTheme.inlineTextLink(theme.colorScheme),
+                      onPressed: () => ShellNavigator.go(
+                        context,
+                        ShellNavigator.ticketsTab,
+                      ),
+                      child: const Text('提交工单'),
+                    ),
+                    Text(
+                      ' 发送需求。请说明你的使用场景/需求，需要定制的地区，是否要优化线路等。',
+                      style: noticeStyle,
+                    ),
+                  ],
+                ),
+              ),
+              const _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Text('旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。'),
+              ),
+              const _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Text('流量不够用可以购买流量包，可和套餐流量叠加。'),
+              ),
+              const _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Text('购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。'),
+              ),
+              const _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Text('套餐内流量、流量包仅限在当前套餐有效期内使用，过期即失效。'),
+              ),
+              _ShopNotice(
+                icon: Icons.campaign_outlined,
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    Text('自动续费可在 ', style: noticeStyle),
+                    TextButton(
+                      style: AppTheme.inlineTextLink(theme.colorScheme),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (BuildContext context) =>
+                              const PurchasesPage(),
+                        ),
+                      ),
+                      child: const Text('购买记录'),
+                    ),
+                    Text(' 中关闭。', style: noticeStyle),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
         Center(
           child: SegmentedButton<String>(
             segments: <ButtonSegment<String>>[
@@ -494,6 +595,32 @@ class _ShopPageState extends State<ShopPage> {
           ],
         );
       },
+    );
+  }
+}
+
+class _ShopNotice extends StatelessWidget {
+  const _ShopNotice({required this.icon, required this.child});
+
+  final IconData icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            icon,
+            size: 18,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: child),
+        ],
+      ),
     );
   }
 }
@@ -1006,6 +1133,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   icon: Icons.autorenew,
                   title: '到期时自动续费',
                   value: _autoRenew,
+                  contentPadding: EdgeInsets.zero,
                   onChanged: (bool value) => setState(() => _autoRenew = value),
                 ),
             ],
@@ -1066,36 +1194,33 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
 
     return AlertDialog(
       title: Text(widget.title),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (widget.note.isNotEmpty) ...<Widget>[
-              Text(widget.note, style: theme.textTheme.bodySmall),
-              const SizedBox(height: 8),
-            ],
-            Text('商品名称：${quote.name}'),
-            const SizedBox(height: 4),
-            Text(
-              _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
-              style: theme.textTheme.titleSmall,
-            ),
-            if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
-              const SizedBox(height: 4),
-              Text('库存：${quote.stock}'),
-            ],
-            const SizedBox(height: 12),
-            _PaymentPicker(
-              total: quote.amount,
-              balance: widget.balance,
-              value: _method,
-              onChanged: (_PayMethod method) =>
-                  setState(() => _method = method),
-            ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (widget.note.isNotEmpty) ...<Widget>[
+            Text(widget.note, style: theme.textTheme.bodySmall),
+            const SizedBox(height: 8),
           ],
-        ),
+          Text('商品名称：${quote.name}'),
+          const SizedBox(height: 4),
+          Text(
+            _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
+            style: theme.textTheme.titleSmall,
+          ),
+          if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
+            const SizedBox(height: 4),
+            Text('库存：${quote.stock}'),
+          ],
+          const SizedBox(height: 12),
+          _PaymentPicker(
+            total: quote.amount,
+            balance: widget.balance,
+            value: _method,
+            onChanged: (_PayMethod method) =>
+                setState(() => _method = method),
+          ),
+        ],
       ),
       actions: <Widget>[
         TextButton(
@@ -1274,32 +1399,28 @@ class _PaymentWaitDialogState extends State<_PaymentWaitDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('等待支付'),
-      content: SizedBox(
-        width: 380,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text('已在系统浏览器中打开支付页面，完成支付后订单会自动到账。'),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _status,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text('已在系统浏览器中打开支付页面，完成支付后订单会自动到账。'),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _status,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
       ),
       actions: <Widget>[
         TextButton(
@@ -1334,37 +1455,34 @@ class _MessageDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('提示'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              // 服务端 msg 给网页用，卡密已嵌在 HTML 里；客户端另有 card_key，去掉重复
-              RichHtmlView(
-                cardKey.isEmpty
-                    ? message
-                    : _messageWithoutCardKey(message, cardKey),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            // 服务端 msg 给网页用，卡密已嵌在 HTML 里；客户端另有 card_key，去掉重复
+            RichHtmlView(
+              cardKey.isEmpty
+                  ? message
+                  : _messageWithoutCardKey(message, cardKey),
+            ),
+            if (cardKey.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              SelectableText(
+                cardKey,
+                style: Theme.of(context).textTheme.titleSmall,
               ),
-              if (cardKey.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 8),
-                SelectableText(
-                  cardKey,
-                  style: Theme.of(context).textTheme.titleSmall,
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => unawaited(_copy(context)),
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('复制卡密'),
                 ),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () => unawaited(_copy(context)),
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('复制卡密'),
-                  ),
-                ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
       actions: <Widget>[

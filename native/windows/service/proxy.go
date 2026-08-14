@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,7 +44,7 @@ func openInternetSettings(sid string, access uint32) (registry.Key, error) {
 	return registry.OpenKey(registry.USERS, sid+`\`+internetSettingsKey, access)
 }
 
-func (p *proxyManager) set(port int, clientPID int) error {
+func (p *proxyManager) set(port int, clientPID int, bypass []string) error {
 	sid, err := clientUserSID(clientPID)
 	if err != nil {
 		return err
@@ -75,11 +76,26 @@ func (p *proxyManager) set(port int, clientPID int) error {
 	if err := key.SetStringValue("ProxyServer", fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
 		return fmt.Errorf("写入 ProxyServer 失败: %w", err)
 	}
-	if err := key.SetStringValue("ProxyOverride", proxyBypass); err != nil {
+	if err := key.SetStringValue("ProxyOverride", joinBypass(bypass)); err != nil {
 		return fmt.Errorf("写入 ProxyOverride 失败: %w", err)
 	}
 	notifySettingsChanged()
 	return nil
+}
+
+func joinBypass(items []string) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			parts = append(parts, item)
+		}
+	}
+	// 空列表是旧版 GUI 或漏传，不能把 ProxyOverride 写成空串，否则局域网会进代理
+	if len(parts) == 0 {
+		return proxyBypass
+	}
+	return strings.Join(parts, ";")
 }
 
 func (p *proxyManager) restore() error {

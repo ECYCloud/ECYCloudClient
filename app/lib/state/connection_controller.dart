@@ -15,6 +15,7 @@ import '../data/models/user_profile.dart';
 import '../data/store/panel_response_cache.dart';
 import '../data/store/settings_store.dart';
 import '../domain/config/local_template.dart';
+import '../domain/config/network_bypass.dart';
 import '../domain/config/profile_assembler.dart';
 import '../domain/kernel/clash_api_client.dart';
 import '../domain/kernel/kernel_controller.dart';
@@ -109,6 +110,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   PanelApiClient? _api;
   ClashApiClient? _clash;
   UserProfile? Function()? _profileOf;
+  Future<bool> Function()? confirmIpLimitKick;
 
   Map<String, dynamic>? _remote;
   Map<String, String> _groupIcons = const <String, String>{};
@@ -359,7 +361,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final bool changed = !identical(api, _api);
     final String nextKey = (accountKey ?? '').trim();
     final bool accountChanged =
-        nextKey.isNotEmpty && nextKey.toLowerCase() != _accountKey.toLowerCase();
+        nextKey.isNotEmpty &&
+        nextKey.toLowerCase() != _accountKey.toLowerCase();
     _api = api;
     if (nextKey.isNotEmpty) {
       _accountKey = nextKey;
@@ -384,7 +387,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> preloadProxies() async {
     final PanelApiClient? api = _api;
-    if (api == null || _clash != null) {
+    if (api == null) {
       return;
     }
 
@@ -392,6 +395,19 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       await _ensureRemoteConfig(api);
     } on Object catch (e) {
       Logger.instance.warn(_source, '预取面板配置失败: $e');
+    }
+
+    if (_clash != null) {
+      try {
+        await _refreshProxies();
+      } on Object catch (e) {
+        Logger.instance.debug(_source, '刷新出站列表失败: $e');
+      }
+      if (_groups.isEmpty) {
+        _applyProfileProxies();
+      }
+      notifyListeners();
+      return;
     }
 
     _applyProfileProxies();
@@ -452,10 +468,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (_takeover) {
       _scheduleStatsRefresh();
     }
-    Logger.instance.info(
-      _source,
-      _takeover ? '已接管后台运行中的内核' : '已接管后台常驻的内核',
-    );
+    Logger.instance.info(_source, _takeover ? '已接管后台运行中的内核' : '已接管后台常驻的内核');
     _setState(
       _takeover ? ConnectionPhase.connected : ConnectionPhase.disconnected,
       error: null,
@@ -478,11 +491,24 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     final UserProfile? profile = _profileOf?.call();
     if (profile != null && profile.onlineIpLimitReached) {
-      _fail(
-        '在线 IP 已达上限（${profile.onlineIpCount}/${profile.connectorLimit}），'
-        '请先下线其他设备后再连接',
-      );
-      return;
+      final Future<bool> Function()? confirm = confirmIpLimitKick;
+      if (confirm == null) {
+        return;
+      }
+      if (!await confirm()) {
+        return;
+      }
+      final PanelApiClient? api = _api;
+      if (api == null) {
+        _fail('尚未登录');
+        return;
+      }
+      try {
+        await api.reclaimIp();
+      } on ApiException catch (e) {
+        _fail(e.message);
+        return;
+      }
     }
 
     await _switchTakeover(true, '正在连接');
@@ -552,7 +578,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (generation != _generation) {
         return;
       }
-      final String reason = _kernelDiedDuringConnect ? '内核启动失败，请重试' : e.toString();
+      final String reason = _kernelDiedDuringConnect
+          ? '内核启动失败，请重试'
+          : e.toString();
       await _teardown();
       // 常驻起不来不该弹成连接失败：用户没按连接，界面退回面板配置那份节点列表即可
       if (takeover) {
@@ -567,7 +595,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> updateSettings(AppSettings next) async {
     final bool needsRestart = _settings.affectsKernel(next) && _clash != null;
     final bool proxyChanged =
-        _settings.systemProxyEnabled != next.systemProxyEnabled;
+        _settings.systemProxyEnabled != next.systemProxyEnabled ||
+        !listEquals(_settings.systemProxyBypass, next.systemProxyBypass);
 
     _settings = next;
     _settingsStore.save(next);
@@ -621,9 +650,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _teardown();
         return;
       }
-      final String reason = _kernelDiedDuringConnect
-          ? '内核启动失败'
-          : e.toString();
+      final String reason = _kernelDiedDuringConnect ? '内核启动失败' : e.toString();
       await _teardown(restarting: true);
       _scheduleRestart(reason);
     }
@@ -911,9 +938,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     // 限流窗口内：有旧配置就先用（哪怕标了过期），绝不连打面板
     final DateTime? until = _remoteCooldownUntil;
-    if (_remote != null &&
-        until != null &&
-        DateTime.now().isBefore(until)) {
+    if (_remote != null && until != null && DateTime.now().isBefore(until)) {
       _remoteStale = false;
       return Future<void>.value();
     }
@@ -950,17 +975,20 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       await _waitForRemoteCooldown(until);
     }
 
-    // 本地已有配置时先探轻量 revision，未变则绝不打昂贵的 /config/clash
+    // 本地已有配置时先探轻量 revision，未变则绝不打昂贵的 /config/clash；
+    // 本地若尚无分组则不能跳过（戳不变也会一直空着）。
     if (_remote != null &&
         _configRevision.isNotEmpty &&
+        _remoteHasProxyGroups &&
         await _remoteRevisionUnchanged(api)) {
       _remoteStale = false;
       return;
     }
 
     // 已连接时本地 mixed 可用：直连面板失败再走代理；未连接则只直连
-    final int? fallbackProxyPort =
-        _state == ConnectionPhase.connected ? _settings.mixedPort : null;
+    final int? fallbackProxyPort = _state == ConnectionPhase.connected
+        ? _settings.mixedPort
+        : null;
     try {
       final RemoteProfile remote = await api.fetchClashProfile(
         fallbackProxyPort: fallbackProxyPort,
@@ -970,10 +998,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!e.rateLimited) {
         rethrow;
       }
-      final int seconds =
-          e.retryAfterSeconds ?? _rateLimitFallback.inSeconds;
-      _remoteCooldownUntil =
-          DateTime.now().add(Duration(seconds: seconds.clamp(1, 60)));
+      final int seconds = e.retryAfterSeconds ?? _rateLimitFallback.inSeconds;
+      _remoteCooldownUntil = DateTime.now().add(
+        Duration(seconds: seconds.clamp(1, 60)),
+      );
       if (_useCachedRemote()) {
         return;
       }
@@ -1141,8 +1169,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final int readySeconds = (60 + _providerTotal * 8).clamp(60, 180);
     await clash.waitReady(
       timeout: Duration(seconds: readySeconds),
-      isCancelled: () =>
-          generation != _generation || _kernelDiedDuringConnect,
+      isCancelled: () => generation != _generation || _kernelDiedDuringConnect,
     );
 
     // 等待内核就绪期间同样可能被取代：这次连接已经没有意义。
@@ -1218,7 +1245,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (_takeover && _settings.systemProxyEnabled) {
-      await _platform.setSystemProxy(port: _settings.mixedPort);
+      await _platform.setSystemProxy(
+        port: _settings.mixedPort,
+        bypass: resolvedSystemProxyBypass(
+          _platform.platformId,
+          _settings.systemProxyBypass,
+        ),
+      );
     } else {
       await _platform.restoreSystemProxy();
     }
@@ -1425,10 +1458,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(refreshProfileFromPanel());
   }
 
-  Future<void> refreshProfileFromPanel() async {
+  /// 返回给人看的结果文案；已有刷新在进行时返回 null（调用方勿提示）。
+  Future<String?> refreshProfileFromPanel() async {
     final PanelApiClient? api = _api;
-    if (api == null || _profileRefreshInFlight) {
-      return;
+    if (api == null) {
+      return '更新失败：未登录';
+    }
+    if (_profileRefreshInFlight) {
+      return null;
     }
 
     _profileRefreshInFlight = true;
@@ -1441,7 +1478,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _fetchRemoteConfig(api);
       } on ApiException catch (e) {
         Logger.instance.warn(_source, '刷新面板配置失败: $e');
-        return;
+        return '更新失败：$e';
       }
 
       final bool changed = jsonEncode(_remote) != previous;
@@ -1451,14 +1488,23 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!changed) {
         if (running) {
           await _refreshRuleProviders();
+          if (_groups.isEmpty) {
+            await _refreshProxies();
+          }
         }
-        return;
+        if (_groups.isEmpty) {
+          _applyProfileProxies();
+          notifyListeners();
+        }
+        return running ? '已是最新，分流规则已刷新' : '已是最新';
       }
 
-      // 内核未起：只更新内存缓存，下次 connect / 常驻拉起时再装配
+      // 内核未起：更新内存与节点列表，下次 connect / 常驻拉起时再装配内核
       if (!running) {
         Logger.instance.info(_source, '面板配置有变更，将在下次启动内核时生效');
-        return;
+        _applyProfileProxies();
+        notifyListeners();
+        return '更新成功，下次启动内核时生效';
       }
 
       try {
@@ -1468,6 +1514,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _restartKernel('面板配置有变更，正在重启内核');
       }
       await _refreshRuleProviders();
+      return '更新成功';
     } finally {
       _profileRefreshInFlight = false;
     }
@@ -1488,6 +1535,48 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     } on Object catch (e) {
       Logger.instance.warn(_source, '更新分流规则失败: $e');
     }
+  }
+
+  // 内核 UpdateGeoDatabases 在远端与本地 hash 相同时直接成功且不落盘，
+  // 所以不能凭 HTTP 204 就报「已更新」，要看运行目录文件有没有真变。
+  static const List<String> _geoDataFiles = <String>[
+    'geoip.metadb',
+    'GeoSite.dat',
+    'ASN.mmdb',
+  ];
+
+  Future<String> updateGeoData() async {
+    final ClashApiClient? clash = _clash;
+    if (clash == null) {
+      throw ClashApiException('内核未运行');
+    }
+    Logger.instance.info(_source, '正在更新 GeoData');
+    final String before = _geoDataFingerprint();
+    await clash.updateGeoDatabases();
+    final String after = _geoDataFingerprint();
+    if (before == after) {
+      Logger.instance.info(_source, 'GeoData 已是最新');
+      return '已是最新';
+    }
+    Logger.instance.info(_source, 'GeoData 已更新');
+    return '更新成功';
+  }
+
+  String _geoDataFingerprint() {
+    final StringBuffer buffer = StringBuffer();
+    for (final String name in _geoDataFiles) {
+      final File file = File(
+        '${AppPaths.kernelRunDir}${Platform.pathSeparator}$name',
+      );
+      if (!file.existsSync()) {
+        continue;
+      }
+      final FileStat stat = file.statSync();
+      buffer.write(
+        '$name:${stat.size}:${stat.modified.millisecondsSinceEpoch};',
+      );
+    }
+    return buffer.toString();
   }
 
   List<String> _httpRuleProviderNames() {
@@ -1562,7 +1651,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   List<ProxyGroup> _inProfileOrder(List<ProxyGroup> groups) {
     final Object? configured = _remote?['proxy-groups'];
     if (configured is! List) {
-      return groups;
+      return <ProxyGroup>[
+        for (final ProxyGroup group in groups) _withNodesSortedByName(group),
+      ];
     }
 
     final Map<String, ProxyGroup> pending = <String, ProxyGroup>{
@@ -1575,13 +1666,57 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       }
       final ProxyGroup? group = pending.remove(entry['name']);
       if (group != null) {
-        ordered.add(group);
+        ordered.add(_withNodesSortedByName(group));
       }
     }
 
     // GLOBAL 这类内核自建分组不在面板配置里，缀在后面，不能丢
-    ordered.addAll(groups.where((ProxyGroup g) => pending.containsKey(g.name)));
+    ordered.addAll(
+      groups
+          .where((ProxyGroup g) => pending.containsKey(g.name))
+          .map(_withNodesSortedByName),
+    );
     return ordered;
+  }
+
+  static ProxyGroup _withNodesSortedByName(ProxyGroup group) {
+    final List<String> members = _membersByNodeName(group.members);
+    if (identical(members, group.members)) {
+      return group;
+    }
+    return ProxyGroup(
+      name: group.name,
+      type: group.type,
+      now: group.now,
+      members: members,
+    );
+  }
+
+  // 只重排官方客户端的 node-{id}；DIRECT / 策略组引用保持面板原位
+  static List<String> _membersByNodeName(List<String> members) {
+    final List<int> slots = <int>[];
+    final List<String> nodes = <String>[];
+    for (int i = 0; i < members.length; i++) {
+      if (!members[i].startsWith('node-')) {
+        continue;
+      }
+      slots.add(i);
+      nodes.add(members[i]);
+    }
+    if (nodes.length < 2) {
+      return members;
+    }
+    nodes.sort(NodeLabels.compareName);
+    final List<String> out = List<String>.of(members);
+    for (int i = 0; i < slots.length; i++) {
+      out[slots[i]] = nodes[i];
+    }
+    return List<String>.unmodifiable(out);
+  }
+
+  bool get _remoteHasProxyGroups {
+    final Object? groups = _remote?['proxy-groups'];
+    return groups is List && groups.isNotEmpty;
   }
 
   void _applyProfileProxies() {
@@ -1610,11 +1745,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
                   // url-test 组更是要测完延迟才定。拿配置里的首个成员顶替，界面就会
                   // 把每个分组都显示成同一个节点，而这与实际选中项无关。
                   now: '',
-                  members: (group['proxies'] is List
-                      ? (group['proxies'] as List).whereType<String>().toList(
-                          growable: false,
-                        )
-                      : const <String>[]),
+                  members: _membersByNodeName(
+                    group['proxies'] is List
+                        ? (group['proxies'] as List).whereType<String>().toList(
+                            growable: false,
+                          )
+                        : const <String>[],
+                  ),
                 ),
           ]
         : const <ProxyGroup>[];

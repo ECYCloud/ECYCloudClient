@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ecycloud_client/ui/pages/login_page.dart';
 import 'package:ecycloud_client/ui/theme.dart';
-import 'package:ecycloud_client/ui/widgets/ticket_content_field.dart';
+import 'package:ecycloud_client/ui/widgets/multiline_content_field.dart';
 
 Widget wrap(Widget child) => MaterialApp(
   theme: AppTheme.light().copyWith(platform: TargetPlatform.windows),
@@ -51,27 +51,28 @@ void main() {
     expect(ticketsSrc.contains('actionButtonStyle'), isFalse);
   });
 
-  testWidgets('工单内容框滚动条在独立轨道且使用箭头光标', (WidgetTester tester) async {
+  testWidgets('多行内容框滚动条在独立轨道且使用箭头光标', (WidgetTester tester) async {
     await tester.pumpWidget(
       wrap(
         SizedBox(
           width: 460,
-          child: TicketContentField(
+          child: MultilineContentField(
             controller: TextEditingController(text: '${'测试内容' * 20}\n' * 12),
+            labelText: '内容',
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(TicketContentField), findsOneWidget);
+    expect(find.byType(MultilineContentField), findsOneWidget);
     expect(find.byType(MouseRegion), findsWidgets);
     expect(find.byType(CustomPaint), findsWidgets);
 
     final MouseRegion rail = tester.widget<MouseRegion>(
       find
           .descendant(
-            of: find.byType(TicketContentField),
+            of: find.byType(MultilineContentField),
             matching: find.byType(MouseRegion),
           )
           .last,
@@ -142,29 +143,50 @@ void main() {
     );
   });
 
-  test('邮箱与密码框只收可见 ASCII', () {
-    final TextEditingValue value = asciiOnlyFormatter.formatEditUpdate(
+  test('密码框只收可见 ASCII；邮箱框不限制字符集', () {
+    final TextEditingValue password = asciiOnlyFormatter.formatEditUpdate(
       TextEditingValue.empty,
-      const TextEditingValue(text: 'a测b@1.com'),
+      const TextEditingValue(text: 'p测ass'),
     );
-    expect(value.text, 'ab@1.com');
-  });
+    expect(password.text, 'pass');
 
-  test('注册链接指向站点 /auth/register', () {
-    final String src = File('lib/ui/pages/login_page.dart').readAsStringSync();
-    expect(src, contains(r"$base/auth/register"));
-    expect(src.contains(r"$base/register'"), isFalse);
-    expect(src, contains('TextInputType.visiblePassword'));
-  });
-
-  test('登录页整页关闭本窗口 IME，不逐框切换、不切换用户输入法', () {
     final String login = File(
       'lib/ui/pages/login_page.dart',
     ).readAsStringSync();
-    expect(login, contains('setImeEnabled(enabled: false)'));
-    expect(login, contains('setImeEnabled(enabled: true)'));
-    // 两个输入框的焦点变化同批通知，逐框开关会互相覆盖
-    expect(login.contains('onFocusChange'), isFalse);
+    final int emailField = login.indexOf("labelText: '邮箱'");
+    expect(emailField, greaterThanOrEqualTo(0));
+    final String emailBlock = login.substring(
+      login.lastIndexOf('TextFormField(', emailField),
+      emailField,
+    );
+    expect(emailBlock.contains('asciiOnlyFormatter'), isFalse);
+    expect(emailBlock.contains('setImeEnabled'), isFalse);
+  });
+
+  test('登录页注册入口进入应用内注册页', () {
+    final String src = File('lib/ui/pages/login_page.dart').readAsStringSync();
+    expect(src, contains('RegisterPage()'));
+    expect(src, contains('_openRegister'));
+    expect(src, contains('TextInputType.visiblePassword'));
+  });
+
+  test('邮箱验证码获焦关 IME，邮箱页不整页关闭', () {
+    final String login = File(
+      'lib/ui/pages/login_page.dart',
+    ).readAsStringSync();
+    final String register = File(
+      'lib/ui/pages/register_page.dart',
+    ).readAsStringSync();
+    final String reset = File(
+      'lib/ui/pages/reset_password_page.dart',
+    ).readAsStringSync();
+    expect(login, contains('class EmailOtpIme'));
+    expect(login, contains('OtpCodeFormatter()'));
+    expect(register, contains('EmailOtpIme('));
+    expect(register, contains('OtpCodeFormatter()'));
+    expect(login, contains('setImeEnabled(enabled: !_focusNode.hasFocus)'));
+    expect(register.contains('setImeEnabled(enabled: false)'), isFalse);
+    expect(reset.contains('setImeEnabled'), isFalse);
     expect(login.contains("MethodChannel('ecycloud/platform')"), isFalse);
     expect(login.contains('dart:ffi'), isFalse);
     expect(login.contains('LoadKeyboardLayout'), isFalse);
@@ -197,5 +219,8 @@ void main() {
     expect(src, contains('ShellNavigator.openTickets'));
     expect(src, contains('Style.fromThemeData'));
     expect(src, contains("'*': uiFont"));
+    expect(src, contains('doNotRenderTheseTags'));
+    expect(src, contains('SafeUrl.canOpenLink'));
+    expect(src, contains('SafeUrl.canLoad'));
   });
 }

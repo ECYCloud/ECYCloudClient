@@ -29,8 +29,14 @@ class MacosPlatformService extends UnixPlatformService {
   String get tunInterfaceName => '';
 
   @override
-  Future<void> setSystemProxy({required int port}) async {
-    await _helper.request('proxy.set', <String, dynamic>{'port': port});
+  Future<void> setSystemProxy({
+    required int port,
+    required List<String> bypass,
+  }) async {
+    await _helper.request('proxy.set', <String, dynamic>{
+      'port': port,
+      'bypass': bypass,
+    });
   }
 
   @override

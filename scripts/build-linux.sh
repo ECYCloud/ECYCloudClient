@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 构建 Linux 客户端完整产物：内核 + 特权 helper + Flutter 应用，可选打包 deb / rpm / tar.gz。
-# 用法: build-linux.sh [--arch x64|arm64] [--version 1.0.1] [--channel last|pre] [--panel-url https://面板域名] [--sub-url https://订阅域名/link/] [--package] [--format deb,rpm,tar]
+# 用法: build-linux.sh [--arch x64|arm64] [--version 1.0.1] [--channel last|pre] [--panel-url https://站点域名] [--sub-url https://订阅域名] [--package] [--format deb,rpm,tar]
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,11 +47,11 @@ if [[ -z "$sub_url" ]]; then
     sub_url="$(jq -er '.subUrl' "$root_dir/config/panel.json")"
 fi
 if [[ ! "$panel_url" =~ ^https?:// ]]; then
-    echo "面板地址不是合法的 http(s) 地址：$panel_url" >&2
+    echo "站点域名不是合法的 http(s) 地址：$panel_url" >&2
     exit 1
 fi
 if [[ ! "$sub_url" =~ ^https?:// ]]; then
-    echo "订阅地址不是合法的 http(s) 地址：$sub_url" >&2
+    echo "订阅域名不是合法的 http(s) 地址：$sub_url" >&2
     exit 1
 fi
 
@@ -63,7 +63,7 @@ cd "$app_dir"
 export ECYCLOUD_VERSION="$display_version"
 # Flutter 只为宿主架构产出 Linux 产物，arm64 包需在 arm64 机器上构建
 flutter build linux --release --build-name "$version" \
-    --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
+    --dart-define="ECYCLOUD_SITE_URL=$panel_url" \
     --dart-define="ECYCLOUD_SUB_URL=$sub_url" \
     --dart-define="ECYCLOUD_VERSION=$display_version"
 cd "$root_dir"

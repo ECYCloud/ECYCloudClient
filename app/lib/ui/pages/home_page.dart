@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/api/api_exception.dart';
-import '../../data/api/panel_api_client.dart';
 import '../../data/models/user_profile.dart';
 import '../../data/store/settings_store.dart';
 import '../../domain/kernel/clash_api_client.dart';
@@ -29,6 +28,7 @@ import '../widgets/section_card.dart';
 import '../widgets/sparkline.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
+import 'traffic_log_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -55,11 +55,14 @@ class _HomePageState extends State<HomePage> {
     super.didChangeDependencies();
     if (_profileTicker == null) {
       final AppScope scope = AppScope.of(context);
-      // 账号定时刷新；公告仅本次进入首页拉一次（点铃铛可再拉）
+      // 账号与公告均 60s 轮询（与面板限流窗口一致）；点铃铛也可再拉公告。
       // 首帧不打 /user/profile：restore() 刚拉过；面板配额为每路径 60s/10 次。
       _profileTicker = Timer.periodic(
         const Duration(seconds: 60),
-        (_) => unawaited(scope.auth.refreshProfile()),
+        (_) {
+          unawaited(scope.auth.refreshProfile());
+          unawaited(scope.announcements.refresh());
+        },
       );
       unawaited(scope.announcements.refresh());
     }
@@ -88,7 +91,10 @@ class _HomePageState extends State<HomePage> {
 
         return Column(
           children: <Widget>[
-            const PageHeader(title: '首页'),
+            const PageHeader(
+              title: '首页',
+              showUserAvatar: true,
+            ),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(14),
@@ -120,7 +126,7 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(height: 10),
                     _KernelCard(connection: connection),
                     const SizedBox(height: 10),
-                    _AccountCard(profile: profile, auth: scope.auth),
+                    _TrafficUsageCard(profile: profile, auth: scope.auth),
                   ],
                 ),
               ),
@@ -166,14 +172,12 @@ class _Grid extends StatelessWidget {
   const _Grid({
     required this.children,
     required this.columns,
-    this.rowSpacing = 10,
-    this.columnSpacing = 16,
   });
 
   final List<Widget> children;
   final int columns;
-  final double rowSpacing;
-  final double columnSpacing;
+  final double rowSpacing = 10;
+  final double columnSpacing = 16;
 
   @override
   Widget build(BuildContext context) {
@@ -332,27 +336,29 @@ class _ConnectionCard extends StatelessWidget {
                           : null,
                     ),
                     const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: '网站公告',
-                      onPressed: () => unawaited(
-                        showAnnouncementBrowser(
-                          context,
-                          controller: announcements,
+                    Badge(
+                      isLabelVisible: announcements.hasUnread,
+                      backgroundColor: const Color(0xFFE53935),
+                      smallSize: 8,
+                      child: IconButton(
+                        tooltip: '网站公告',
+                        onPressed: () => unawaited(
+                          showAnnouncementBrowser(
+                            context,
+                            controller: announcements,
+                          ),
                         ),
-                      ),
-                      icon: Badge(
-                        isLabelVisible: announcements.pendingPopup != null,
-                        child: const Icon(
+                        icon: const Icon(
                           Icons.notifications_outlined,
                           size: 20,
                         ),
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 32,
+                        ),
+                        padding: EdgeInsets.zero,
                       ),
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 32,
-                      ),
-                      padding: EdgeInsets.zero,
                     ),
                   ],
                 ),
@@ -474,198 +480,285 @@ class _ProxyToggles extends StatelessWidget {
   }
 }
 
-class _AccountCard extends StatelessWidget {
-  const _AccountCard({required this.profile, required this.auth});
+class _TrafficUsageCard extends StatefulWidget {
+  const _TrafficUsageCard({required this.profile, required this.auth});
 
   final UserProfile? profile;
   final AuthController auth;
 
   @override
+  State<_TrafficUsageCard> createState() => _TrafficUsageCardState();
+}
+
+class _TrafficUsageCardState extends State<_TrafficUsageCard> {
+  bool _checkingIn = false;
+
+  Future<void> _checkin() async {
+    if (_checkingIn) {
+      return;
+    }
+    setState(() => _checkingIn = true);
+    try {
+      final String message = await widget.auth.checkin();
+      if (!mounted) {
+        return;
+      }
+      await _showCheckinResult(message);
+    } on ApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      await _showCheckinResult(e.message);
+    } finally {
+      if (mounted) {
+        setState(() => _checkingIn = false);
+      }
+    }
+  }
+
+  Future<void> _showCheckinResult(String message) {
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('提示'),
+        content: Text(message),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final UserProfile? user = profile;
-    final UserPlan? plan = user?.plan;
+    final UserProfile? user = widget.profile;
+    final AuthController auth = widget.auth;
 
     if (user == null) {
       return SectionCard(
-        icon: Icons.person_outline,
-        title: '账号',
+        icon: Icons.pie_chart_outline,
+        title: '流量使用情况',
         action: RefreshButton(
-          tooltip: '刷新账号信息',
+          tooltip: '刷新流量',
           onRefresh: auth.refreshProfile,
         ),
         child: const Text('—'),
       );
     }
 
-    final List<Widget> fields = <Widget>[
-      InfoRow(
-        label: '套餐',
-        value:
-            plan?.name ??
-            (user.userClass > 0 ? 'VIP ${user.userClass}' : '免费用户'),
-      ),
-      if (plan != null) ...<Widget>[
-        InfoRow(label: '到期', value: plan.expireAt),
-        InfoRow(label: '剩余天数', value: '${plan.remainingDays} 天'),
-        InfoRow(label: '自动续费', value: plan.autoRenew ? plan.renewAt : '-'),
-      ],
-      if (user.trafficReset.isNotEmpty)
-        InfoRow(label: '流量重置', value: user.trafficReset),
-      InfoRow(
-        label: '限速',
-        value: user.speedLimitMbps <= 0
-            ? '不限速'
-            : '${user.speedLimitMbps.toStringAsFixed(0)} Mbps',
-      ),
-      InfoRow(
-        label: '在线 IP',
-        value: user.connectorLimit <= 0
-            ? '${user.onlineIpCount} / 无限制'
-            : '${user.onlineIpCount} / ${user.connectorLimit}',
-      ),
-    ];
-
-    final bool canToggleRenew = plan != null && plan.canToggleAutoRenew;
+    final int remainBytes = user.transferEnable - user.used;
+    final String remainText = Format.bytes(remainBytes).replaceAll(' ', '');
 
     return SectionCard(
-      icon: Icons.person_outline,
-      title: '账号',
-      action: RefreshButton(tooltip: '刷新账号信息', onRefresh: auth.refreshProfile),
+      icon: Icons.pie_chart_outline,
+      title: '流量使用情况',
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          RefreshButton(
+            tooltip: '刷新流量',
+            onRefresh: auth.refreshProfile,
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (BuildContext context) => const TrafficLogPage(),
+              ),
+            ),
+            child: const Text('流量明细 ›'),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          _TrafficBarRow(
+            label: '今日已使用',
+            value: Format.bytes(user.todayUsed).replaceAll(' ', ''),
+            ratio: user.ratioOf(user.todayUsed),
+            barColor: AppTheme.danger,
+            tagColor: AppTheme.danger,
+          ),
+          const SizedBox(height: 10),
+          _TrafficBarRow(
+            label: '之前已使用',
+            value: Format.bytes(user.lastUsed).replaceAll(' ', ''),
+            ratio: user.ratioOf(user.lastUsed),
+            barColor: AppTheme.warning,
+            tagColor: AppTheme.warning,
+          ),
+          const SizedBox(height: 10),
+          _TrafficBarRow(
+            label: '剩余流量',
+            value: remainText,
+            ratio: user.ratioOf(remainBytes > 0 ? remainBytes : 0),
+            barColor: remainBytes < 0 ? AppTheme.danger : AppTheme.success,
+            tagColor: AppTheme.success,
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1),
+          ),
           Row(
             children: <Widget>[
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            user.displayName,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        TagChip(label: 'ID ${user.id}'),
-                      ],
-                    ),
-                    Text(
-                      user.email,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                child: Text('账户总流量', style: theme.textTheme.bodyMedium),
+              ),
+              TagChip(
+                label: Format.bytes(user.transferEnable).replaceAll(' ', ''),
+                color: theme.colorScheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Text(
+                '流量不够用？前往 ',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
+              TextButton(
+                onPressed: () => ShellNavigator.openShopTraffic(context),
+                child: const Text('商店 ›'),
+              ),
               Text(
-                '剩余 ${Format.bytes(user.remaining)}',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.primary,
+                ' 选购流量包',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          LinearProgressIndicator(value: user.usedRatio),
-          const SizedBox(height: 5),
-          Text(
-            '已用 ${Format.bytes(user.used)} / ${Format.bytes(user.transferEnable)}',
-            style: theme.textTheme.bodySmall,
+          _TrafficMetaRow(
+            icon: Icons.today_outlined,
+            label: '下次重置已使用流量日期',
+            value: user.trafficReset.isEmpty ? '—' : user.trafficReset,
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Divider(height: 1),
+          _TrafficMetaRow(
+            icon: Icons.schedule_outlined,
+            label: '上次使用时间',
+            value: user.lastSsTime,
           ),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) =>
-                _Grid(
-                  columns: constraints.maxWidth < 520 ? 1 : 3,
-                  rowSpacing: 2,
-                  columnSpacing: 24,
-                  children: fields,
-                ),
-          ),
-          if (canToggleRenew) ...<Widget>[
-            const SizedBox(height: 4),
-            Row(
-              children: <Widget>[
-                const Spacer(),
-                TextButton(
-                  onPressed: () => unawaited(
-                    _toggleAutoRenew(context, plan, enable: !plan.autoRenew),
-                  ),
-                  child: Text(plan.autoRenew ? '关闭自动续费' : '开启自动续费'),
-                ),
-              ],
+          if (user.enableCheckin)
+            _TrafficMetaRow(
+              icon: Icons.calendar_month_outlined,
+              label: '上次签到时间',
+              value: user.lastCheckInTime,
+            ),
+          if (user.enableCheckin) ...<Widget>[
+            const SizedBox(height: 12),
+            Text(
+              '签到可随机获得 ${user.checkinMin}~${user.checkinMax} MB 流量',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: !user.ableToCheckin || _checkingIn
+                  ? null
+                  : _checkin,
+              icon: _checkingIn
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check_circle_outline, size: 18),
+              label: Text(
+                user.ableToCheckin ? '点我签到' : '今日已签到',
+              ),
             ),
           ],
         ],
       ),
     );
   }
+}
 
-  Future<void> _toggleAutoRenew(
-    BuildContext context,
-    UserPlan plan, {
-    required bool enable,
-  }) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(enable ? '确认开启自动续费？' : '确认关闭自动续费？'),
-        content: Text(enable ? '开启后将在套餐到期时自动续费。' : '关闭后，您可以随时重新开启自动续费。'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+class _TrafficBarRow extends StatelessWidget {
+  const _TrafficBarRow({
+    required this.label,
+    required this.value,
+    required this.ratio,
+    required this.barColor,
+    required this.tagColor,
+  });
+
+  final String label;
+  final String value;
+  final double ratio;
+  final Color barColor;
+  final Color tagColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+            TagChip(label: value, color: tagColor),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: ratio.clamp(0.0, 1.0),
+            minHeight: 6,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+            color: barColor,
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TrafficMetaRow extends StatelessWidget {
+  const _TrafficMetaRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
+          Text(value, style: theme.textTheme.bodySmall),
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) {
-      return;
-    }
-
-    final PanelApiClient? api = auth.api;
-    if (api == null) {
-      return;
-    }
-
-    try {
-      final String message = await api.togglePurchaseAutoRenew(
-        id: plan.id,
-        action: enable ? 'enable' : 'disable',
-      );
-      await auth.refreshProfile();
-      if (!context.mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            message.isEmpty ? (enable ? '自动续费开启成功' : '自动续费关闭成功') : message,
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } on ApiException catch (e) {
-      if (!context.mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
-      );
-    }
   }
 }
 
@@ -871,12 +964,6 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
             onPressed: () => connection.testGroup(group.name),
           ),
           TextButton(
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
             onPressed: () =>
                 ShellNavigator.go(context, ShellNavigator.nodesTab),
             child: const Text('节点 ›'),

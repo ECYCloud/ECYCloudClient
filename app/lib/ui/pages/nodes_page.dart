@@ -10,6 +10,7 @@ import '../widgets/flag_icon.dart';
 import '../widgets/group_delay_test_button.dart';
 import '../widgets/group_icon.dart';
 import '../widgets/page_header.dart';
+import '../widgets/refresh_button.dart';
 import '../widgets/tag_chip.dart';
 
 class NodesPage extends StatelessWidget {
@@ -28,7 +29,16 @@ class NodesPage extends StatelessWidget {
 
         return Column(
           children: <Widget>[
-            const PageHeader(title: '节点'),
+            PageHeader(
+              title: '节点',
+              showUserAvatar: true,
+              actions: <Widget>[
+                RefreshButton(
+                  tooltip: '刷新节点',
+                  onRefresh: connection.refreshProfileFromPanel,
+                ),
+              ],
+            ),
             Expanded(
               child: groups.isEmpty
                   ? const _Placeholder(
@@ -222,7 +232,7 @@ class _GroupCardState extends State<_GroupCard> {
   }
 }
 
-// urltest 分组的选中项由内核持有，客户端只能把最优成员摆出来
+// 非 Selector 组的选中项由内核持有：URLTest 按延迟，Fallback 按列表顺序取第一个可用
 class _AutoGroupHint extends StatelessWidget {
   const _AutoGroupHint({required this.connection, required this.group});
 
@@ -232,11 +242,7 @@ class _AutoGroupHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final String? fastest = connection.fastestMember(group);
-    final String detail = fastest == null || fastest == group.now
-        ? '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选'
-        : '本组由内核按延迟自动选择，当前最优为 ${NodeLabels.displayName(fastest)}；'
-              '点上方测延迟可让内核立即切过去';
+    final String detail = _detail();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -256,6 +262,20 @@ class _AutoGroupHint extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _detail() {
+    if (group.type == 'Fallback') {
+      return '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；'
+          '测延迟会刷新可用性并让内核立即重选';
+    }
+
+    final String? fastest = connection.fastestMember(group);
+    if (fastest == null || fastest == group.now) {
+      return '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选';
+    }
+    return '本组由内核按延迟自动选择，当前最优为 ${NodeLabels.displayName(fastest)}；'
+        '点上方测延迟可让内核立即切过去';
   }
 }
 

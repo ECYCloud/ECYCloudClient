@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import Security
 
 /// 与 Windows 的 platform_channel.cpp 同协议：托盘只上报动作，
 /// 连不连、开不开由 Dart 侧状态机决定。
@@ -62,6 +63,45 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       busy = arguments["busy"] as? Bool ?? false
       systemProxy = arguments["system_proxy"] as? Bool ?? false
       tun = arguments["tun"] as? Bool ?? false
+      result(nil)
+    case "secret.protect":
+      guard let arguments = call.arguments as? [String: Any],
+        let name = arguments["name"] as? String,
+        let value = arguments["value"] as? String
+      else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      do {
+        try storeSecret(name, value)
+        result("")
+      } catch {
+        result(
+          FlutterError(
+            code: "secret", message: error.localizedDescription, details: nil))
+      }
+    case "secret.unprotect":
+      guard let arguments = call.arguments as? [String: Any],
+        let name = arguments["name"] as? String
+      else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      do {
+        result(try readSecret(name))
+      } catch {
+        result(
+          FlutterError(
+            code: "secret", message: error.localizedDescription, details: nil))
+      }
+    case "secret.delete":
+      guard let arguments = call.arguments as? [String: Any],
+        let name = arguments["name"] as? String
+      else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      deleteSecret(name)
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
@@ -191,5 +231,50 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var appDisplayName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
       ?? "ECY Cloud"
+  }
+
+  private static let secretService = "com.ecycloud.client"
+
+  private func storeSecret(_ name: String, _ password: String) throws {
+    deleteSecret(name)
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: Self.secretService,
+      kSecAttrAccount as String: name,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+      kSecValueData as String: Data(password.utf8),
+    ]
+    let status = SecItemAdd(query as CFDictionary, nil)
+    guard status == errSecSuccess else {
+      throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
+  }
+
+  private func readSecret(_ name: String) throws -> String? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: Self.secretService,
+      kSecAttrAccount as String: name,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound {
+      return nil
+    }
+    guard status == errSecSuccess, let data = item as? Data else {
+      throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
+    return String(data: data, encoding: .utf8)
+  }
+
+  private func deleteSecret(_ name: String) {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: Self.secretService,
+      kSecAttrAccount as String: name,
+    ]
+    SecItemDelete(query as CFDictionary)
   }
 }

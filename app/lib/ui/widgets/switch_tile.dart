@@ -15,6 +15,7 @@ class SwitchTile extends StatelessWidget {
     required this.onChanged,
     this.subtitle,
     this.icon,
+    this.contentPadding,
   });
 
   final String title;
@@ -22,6 +23,7 @@ class SwitchTile extends StatelessWidget {
   final bool value;
   final ValueChanged<bool>? onChanged;
   final IconData? icon;
+  final EdgeInsetsGeometry? contentPadding;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +31,7 @@ class SwitchTile extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return ListTile(
+      contentPadding: contentPadding,
       leading: icon == null
           ? null
           : Icon(

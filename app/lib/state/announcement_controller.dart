@@ -11,6 +11,7 @@ class AnnouncementController extends ChangeNotifier {
   AnnouncementController();
 
   static const String _source = 'announcement';
+  static const String _readMaxIdKey = 'read_max_id';
 
   final JsonFileStore _store = JsonFileStore(
     AppPaths.announcementState,
@@ -37,6 +38,28 @@ class AnnouncementController extends ChangeNotifier {
     }
     final int? dismissed = _store.read()['dismissed_popup_id'] as int?;
     return dismissed == popup.id ? null : popup;
+  }
+
+  bool get hasUnread {
+    if (!_loaded) {
+      return false;
+    }
+    final int maxId = _maxItemId;
+    if (maxId <= 0) {
+      return false;
+    }
+    final int? seen = _store.read()[_readMaxIdKey] as int?;
+    return seen == null || maxId > seen;
+  }
+
+  int get _maxItemId {
+    int maxId = 0;
+    for (final Announcement item in _items) {
+      if (item.id > maxId) {
+        maxId = item.id;
+      }
+    }
+    return maxId;
   }
 
   void attachApi(PanelApiClient? api) {
@@ -83,6 +106,21 @@ class AnnouncementController extends ChangeNotifier {
   void dismissPopup(Announcement announcement) {
     final Map<String, dynamic> data = _store.read();
     data['dismissed_popup_id'] = announcement.id;
+    _store.write(data);
+    notifyListeners();
+  }
+
+  void markSeen() {
+    final int maxId = _maxItemId;
+    if (maxId <= 0) {
+      return;
+    }
+    final Map<String, dynamic> data = _store.read();
+    if (data[_readMaxIdKey] == maxId) {
+      return;
+    }
+    data[_readMaxIdKey] = maxId;
+    data.remove('last_seen_id');
     _store.write(data);
     notifyListeners();
   }

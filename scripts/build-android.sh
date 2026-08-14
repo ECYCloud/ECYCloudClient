@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 构建 Android 客户端：libmihomo.aar + 按 ABI 分包的 Flutter APK。
-# 用法: build-android.sh [--version 1.0.1] [--channel last|pre] [--build-number 1] [--panel-url https://面板域名] [--sub-url https://订阅域名/link/] [--skip-kernel]
+# 用法: build-android.sh [--version 1.0.1] [--channel last|pre] [--build-number 1] [--panel-url https://站点域名] [--sub-url https://订阅域名] [--skip-kernel]
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,11 +39,11 @@ if [[ -z "$sub_url" ]]; then
     sub_url="$(jq -er '.subUrl' "$root_dir/config/panel.json")"
 fi
 if [[ ! "$panel_url" =~ ^https?:// ]]; then
-    echo "面板地址不是合法的 http(s) 地址：$panel_url" >&2
+    echo "站点域名不是合法的 http(s) 地址：$panel_url" >&2
     exit 1
 fi
 if [[ ! "$sub_url" =~ ^https?:// ]]; then
-    echo "订阅地址不是合法的 http(s) 地址：$sub_url" >&2
+    echo "订阅域名不是合法的 http(s) 地址：$sub_url" >&2
     exit 1
 fi
 
@@ -65,7 +65,7 @@ cd "$app_dir"
 # 必须用 --split-per-abi：仅 --target-platform 不会裁掉 libmihomo.aar 里其它 ABI 的 .so
 flutter build apk --release --split-per-abi \
     --build-name "$version" --build-number "$build_number" \
-    --dart-define="ECYCLOUD_PANEL_URL=$panel_url" \
+    --dart-define="ECYCLOUD_SITE_URL=$panel_url" \
     --dart-define="ECYCLOUD_SUB_URL=$sub_url" \
     --dart-define="ECYCLOUD_VERSION=$display_version"
 

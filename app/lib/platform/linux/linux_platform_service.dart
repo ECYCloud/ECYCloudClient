@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/app_paths.dart';
+import '../../domain/config/network_bypass.dart';
 import '../../domain/platform/platform_service.dart';
 import '../unix/unix_platform_service.dart';
 
@@ -11,17 +12,6 @@ class LinuxPlatformService extends UnixPlatformService {
   LinuxPlatformService();
 
   static const String _proxySchema = 'org.gnome.system.proxy';
-  static const List<String> _bypass = <String>[
-    'localhost',
-    '127.0.0.0/8',
-    '10.0.0.0/8',
-    '172.16.0.0/12',
-    '192.168.0.0/16',
-    '169.254.0.0/16',
-    '::1',
-    'fc00::/7',
-    'fe80::/10',
-  ];
 
   static const List<(String, String)> _snapshotKeys = <(String, String)>[
     (_proxySchema, 'mode'),
@@ -41,7 +31,10 @@ class LinuxPlatformService extends UnixPlatformService {
   String get openCommand => 'xdg-open';
 
   @override
-  Future<void> setSystemProxy({required int port}) async {
+  Future<void> setSystemProxy({
+    required int port,
+    required List<String> bypass,
+  }) async {
     // 已有快照说明上一次还没还原，保留最早的原值，不要用被自己改过的值覆盖
     if (!AppPaths.proxySnapshot.existsSync()) {
       final Map<String, String> snapshot = <String, String>{};
@@ -55,10 +48,13 @@ class LinuxPlatformService extends UnixPlatformService {
       await _set('$_proxySchema.$scheme', 'host', "'127.0.0.1'");
       await _set('$_proxySchema.$scheme', 'port', '$port');
     }
+    final List<String> hosts = bypass.isEmpty
+        ? defaultSystemProxyBypass(platformId)
+        : bypass;
     await _set(
       _proxySchema,
       'ignore-hosts',
-      '[${_bypass.map((String host) => "'$host'").join(', ')}]',
+      '[${hosts.map(_gsettingsString).join(', ')}]',
     );
     await _set(_proxySchema, 'mode', "'manual'");
   }
@@ -155,6 +151,9 @@ X-GNOME-Autostart-enabled=true
       );
     }
   }
+
+  static String _gsettingsString(String value) =>
+      "'${value.replaceAll("'", r"'\''")}'";
 
   static String _unquote(String value) =>
       value.length >= 2 && value.startsWith("'") && value.endsWith("'")

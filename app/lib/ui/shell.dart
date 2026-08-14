@@ -7,6 +7,7 @@ import '../domain/kernel/kernel_update.dart';
 import '../domain/update/app_update.dart';
 import '../data/models/announcement.dart';
 import '../state/announcement_controller.dart';
+import '../state/auth_controller.dart';
 import '../state/connection_controller.dart';
 import '../state/update_controller.dart';
 import 'app_scope.dart';
@@ -17,6 +18,7 @@ import 'pages/nodes_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/shop_page.dart';
 import 'pages/tickets_page.dart';
+import 'pages/unlock_page.dart';
 import 'shell_navigator.dart';
 import 'widgets/announcement_dialog.dart';
 import 'widgets/connection_status_badge.dart';
@@ -55,6 +57,12 @@ class _ShellState extends State<Shell> {
       TicketsPage(),
     ),
     _Destination(
+      Icons.lock_open_outlined,
+      Icons.lock_open,
+      '解锁',
+      UnlockPage(),
+    ),
+    _Destination(
       Icons.swap_horiz_outlined,
       Icons.swap_horiz,
       '连接',
@@ -67,9 +75,12 @@ class _ShellState extends State<Shell> {
   int _index = 0;
   UpdateController? _update;
   ConnectionController? _connection;
+  AuthController? _auth;
   AnnouncementController? _announcements;
   bool _forcingUpdate = false;
   int? _lastPromptedPopupId;
+  bool _handlingIpKick = false;
+  Timer? _ipKickPollTimer;
 
   @override
   void initState() {
@@ -85,23 +96,129 @@ class _ShellState extends State<Shell> {
     }
     final AppScope scope = AppScope.of(context);
     _update = scope.update..addListener(_forceUpdateIfNeeded);
-    _connection = scope.connection..addListener(_forceUpdateIfNeeded);
+    _auth = scope.auth..onIpKickNotice = _onIpKickNotice;
+    _connection = scope.connection
+      ..addListener(_forceUpdateIfNeeded)
+      ..addListener(_syncIpKickPoll)
+      ..confirmIpLimitKick = _confirmIpLimitKick;
     _announcements = scope.announcements..addListener(_maybeShowPopup);
     _forceUpdateIfNeeded();
     _maybeShowPopup();
+    _syncIpKickPoll();
+    if (_auth?.profile?.ipKickNotice == true) {
+      _onIpKickNotice();
+    }
   }
 
   @override
   void dispose() {
     ShellNavigator.unbindHost(_goToTab);
+    _ipKickPollTimer?.cancel();
     _update?.removeListener(_forceUpdateIfNeeded);
     _connection?.removeListener(_forceUpdateIfNeeded);
+    _connection?.removeListener(_syncIpKickPoll);
+    _connection?.confirmIpLimitKick = null;
+    _auth?.onIpKickNotice = null;
     _announcements?.removeListener(_maybeShowPopup);
     super.dispose();
   }
 
   void _goToTab(int index) {
     setState(() => _index = index);
+  }
+
+  void _syncIpKickPoll() {
+    final ConnectionController? connection = _connection;
+    final bool connected =
+        connection != null && connection.state == ConnectionPhase.connected;
+    if (connected) {
+      _ipKickPollTimer ??= Timer.periodic(
+        const Duration(seconds: 60),
+        (_) {
+          final AuthController? auth = _auth;
+          if (auth != null) {
+            unawaited(auth.refreshProfile());
+          }
+        },
+      );
+      return;
+    }
+    _ipKickPollTimer?.cancel();
+    _ipKickPollTimer = null;
+  }
+
+  Future<bool> _confirmIpLimitKick() async {
+    if (!mounted) {
+      return false;
+    }
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('在线 IP 已达上限'),
+        content: const Text('当前已超出在线IP限制，是否将其中一个在线IP踢下线，以挪出位置？'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  void _onIpKickNotice() {
+    if (_handlingIpKick || !mounted) {
+      return;
+    }
+    _handlingIpKick = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_handleIpKickNotice());
+    });
+  }
+
+  Future<void> _handleIpKickNotice() async {
+    try {
+      final ConnectionController? connection = _connection;
+      if (connection != null &&
+          (connection.state == ConnectionPhase.connected ||
+              connection.state == ConnectionPhase.connecting)) {
+        await connection.disconnect();
+      }
+      if (!mounted) {
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('设备已下线'),
+          content: const Text(
+            '由于超出在线 IP 限制，有新 IP 请求连接，已将您的设备踢下线。',
+          ),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+      final api = _auth?.api;
+      if (api != null) {
+        try {
+          await api.ackIpKick();
+        } on Object {
+          // 清除失败不阻断；下次 profile 仍可能再提示
+        }
+      }
+    } finally {
+      _handlingIpKick = false;
+    }
   }
 
   void _maybeShowPopup() {
@@ -313,8 +430,8 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     final bool appOutdated = app != null && app.outdated && app.installer != null;
     final bool kernelOutdated = kernel != null && kernel.outdated;
     final bool busy = update.appBusy || update.kernelUpgrading;
-    final bool appFailed = update.appStatus.startsWith('安装失败');
-    final bool kernelFailed = update.kernelStatus.startsWith('升级失败');
+    final bool appFailed = update.appStatus.startsWith('更新失败');
+    final bool kernelFailed = update.kernelStatus.startsWith('更新失败');
     final Color errorColor = Theme.of(context).colorScheme.error;
 
     return AlertDialog(

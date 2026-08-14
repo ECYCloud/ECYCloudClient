@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/app_config.dart';
 import 'core/app_paths.dart';
@@ -17,13 +18,16 @@ import 'state/connection_controller.dart';
 import 'state/update_controller.dart';
 import 'ui/app_scope.dart';
 import 'ui/node_labels.dart';
+import 'ui/pages/account_status_page.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
+import 'ui/widgets/zoom_cursors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.bootstrap();
+  await ZoomCursors.ensureReady();
   ErrorLogger.init();
 
   if (!AppConfig.configured) {
@@ -74,52 +78,106 @@ class EcyCloudApp extends StatefulWidget {
 
 class _EcyCloudAppState extends State<EcyCloudApp> {
   bool _bootstrapped = false;
+  ThemeMode _themeMode = ThemeMode.system;
+  AuthController? _auth;
+  ConnectionController? _connection;
+  AnnouncementController? _announcements;
+  UpdateController? _update;
+  PlatformService? _platform;
+  AuthStage _authStage = AuthStage.unknown;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_bootstrapped) {
       _bootstrapped = true;
+      final AppScope scope = AppScope.of(context);
+      _auth = scope.auth;
+      _connection = scope.connection;
+      _announcements = scope.announcements;
+      _update = scope.update;
+      _platform = scope.platform;
+      _themeMode = scope.connection.settings.themeMode;
       unawaited(_bootstrap());
     }
   }
 
-  Future<void> _bootstrap() async {
-    final AppScope scope = AppScope.of(context);
+  @override
+  void dispose() {
+    _auth?.removeListener(_onAuthChanged);
+    _connection?.removeListener(_onConnectionChanged);
+    super.dispose();
+  }
 
-    scope.auth.addListener(_onAuthChanged);
-    scope.auth.onConfigRevision = scope.connection.notePanelRevision;
+  Future<void> _bootstrap() async {
+    final AuthController auth = _auth!;
+    final ConnectionController connection = _connection!;
+    final UpdateController update = _update!;
+    final PlatformService platform = _platform!;
+
+    auth.addListener(_onAuthChanged);
+    // 流量轮询也会 notify connection：绝不能因此整棵重建 MaterialApp，否则偶发白屏
+    connection.addListener(_onConnectionChanged);
+    auth.onConfigRevision = connection.notePanelRevision;
 
     try {
-      await scope.platform.initialize();
-      await scope.connection.syncPlatformSettings();
+      await platform.initialize();
+      await connection.syncPlatformSettings();
     } on Object catch (e) {
       Logger.instance.error('app', '平台初始化失败', e);
     }
 
     // 预检只是给设置页攒一份问题清单，慢的话不该一直挡着启动图
-    unawaited(scope.connection.runPreflight());
+    unawaited(connection.runPreflight());
     // 界面可能是被系统重建的，隧道还在后台跑着，要在拉起常驻内核之前认回来
-    await scope.connection.adoptRunningKernel();
-    await scope.auth.restore();
+    await connection.adoptRunningKernel();
+    await auth.restore();
 
-    scope.update.start();
+    update.start();
+  }
+
+  void _onConnectionChanged() {
+    final ConnectionController? connection = _connection;
+    if (!mounted || connection == null) {
+      return;
+    }
+    // 监听回调不用 AppScope.of：of 走 dependOnInherited，应在 build /
+    // didChangeDependencies 里取好引用（见 Flutter BuildContext 文档）。
+    final ThemeMode next = connection.settings.themeMode;
+    if (next == _themeMode) {
+      return;
+    }
+    setState(() => _themeMode = next);
   }
 
   void _onAuthChanged() {
-    final AppScope scope = AppScope.of(context);
-    scope.connection.attachApi(
-      scope.auth.api,
-      accountKey: scope.auth.accountKey,
-    );
-    scope.connection.attachProfileLookup(() => scope.auth.profile);
-    scope.announcements.attachApi(scope.auth.api);
+    final AuthController? auth = _auth;
+    final ConnectionController? connection = _connection;
+    final AnnouncementController? announcements = _announcements;
+    if (!mounted ||
+        auth == null ||
+        connection == null ||
+        announcements == null) {
+      return;
+    }
+    final bool leftRestricted = auth.stage == AuthStage.loggedIn &&
+        _authStage == AuthStage.accountRestricted;
+    _authStage = auth.stage;
 
-    if (scope.auth.stage == AuthStage.loggedIn &&
-        scope.connection.settings.autoConnect &&
-        scope.connection.state == ConnectionPhase.disconnected &&
-        !scope.connection.busy) {
-      unawaited(scope.connection.connect());
+    connection.attachApi(auth.api, accountKey: auth.accountKey);
+    connection.attachProfileLookup(() => auth.profile);
+    announcements.attachApi(auth.api);
+
+    // attachApi 仅在 API 实例变化时 preload；受限恢复仍是同一实例
+    if (leftRestricted) {
+      unawaited(connection.preloadProxies());
+    }
+
+    if (auth.stage == AuthStage.loggedIn &&
+        connection.settings.autoConnect &&
+        connection.state == ConnectionPhase.disconnected &&
+        !connection.busy) {
+      unawaited(connection.connect());
     }
   }
 
@@ -127,22 +185,27 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
   Widget build(BuildContext context) {
     final AppScope scope = AppScope.of(context);
 
-    return ListenableBuilder(
-      listenable: scope.connection,
-      builder: (BuildContext context, _) => MaterialApp(
-        title: 'ECY Cloud',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: scope.connection.settings.themeMode,
-        home: ListenableBuilder(
-          listenable: scope.auth,
-          builder: (BuildContext context, _) => switch (scope.auth.stage) {
-            AuthStage.unknown => const _Splash(),
-            AuthStage.loggedIn => const Shell(),
-            _ => const LoginPage(),
-          },
-        ),
+    return MaterialApp(
+      title: 'ECY Cloud',
+      debugShowCheckedModeBanner: false,
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const <Locale>[Locale('zh', 'CN')],
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: _themeMode,
+      home: ListenableBuilder(
+        listenable: scope.auth,
+        builder: (BuildContext context, _) => switch (scope.auth.stage) {
+          AuthStage.unknown => const _Splash(),
+          AuthStage.loggedIn => const Shell(),
+          AuthStage.accountRestricted => const AccountStatusPage(),
+          _ => const LoginPage(),
+        },
       ),
     );
   }
@@ -170,10 +233,10 @@ class _MisconfiguredApp extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(32),
           child: Text(
-            '构建缺少面板或订阅地址。\n'
+            '构建缺少站点域名或订阅域名。\n'
             '请用 scripts/ 下对应平台的出包脚本构建，或调试时带上\n'
-            '--dart-define=ECYCLOUD_PANEL_URL=https://面板域名\n'
-            '--dart-define=ECYCLOUD_SUB_URL=https://订阅域名/link/',
+            '--dart-define=ECYCLOUD_SITE_URL=https://站点域名\n'
+            '--dart-define=ECYCLOUD_SUB_URL=https://订阅域名',
             textAlign: TextAlign.center,
           ),
         ),

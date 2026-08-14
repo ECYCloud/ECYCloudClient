@@ -54,6 +54,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
 # GtkStatusIcon 自 GNOME 3.26 起被移除，Linux 托盘只能走 StatusNotifierItem
 pkg_check_modules(APPINDICATOR REQUIRED IMPORTED_TARGET ayatana-appindicator3-0.1)
+pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
 
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")

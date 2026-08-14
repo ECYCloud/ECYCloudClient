@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../../core/safe_url.dart';
 import '../../domain/config/local_template.dart';
 import '../../domain/platform/platform_service.dart';
 
@@ -45,7 +46,10 @@ class AndroidPlatformService implements PlatformService {
   Future<void> initialize() async {}
 
   @override
-  Future<void> setSystemProxy({required int port}) async {}
+  Future<void> setSystemProxy({
+    required int port,
+    required List<String> bypass,
+  }) async {}
 
   @override
   Future<void> restoreSystemProxy() async {}
@@ -112,9 +116,52 @@ class AndroidPlatformService implements PlatformService {
 
   @override
   Future<void> openUrl(String url) async {
+    if (!SafeUrl.canOpen(url)) {
+      return;
+    }
     await _channel.invokeMethod<void>('url.open', <String, dynamic>{
       'url': url,
     });
+  }
+
+  @override
+  Future<String> protectSecret(String name, String plaintext) async {
+    try {
+      final String? blob = await _channel.invokeMethod<String>(
+        'secret.protect',
+        <String, dynamic>{'name': name, 'value': plaintext},
+      );
+      if (blob == null) {
+        throw PlatformServiceException('无法保护凭据');
+      }
+      return blob;
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法保护凭据');
+    }
+  }
+
+  @override
+  Future<String?> unprotectSecret(String name, String blob) async {
+    try {
+      return await _channel.invokeMethod<String>(
+        'secret.unprotect',
+        <String, dynamic>{'name': name, 'value': blob},
+      );
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法读取凭据');
+    }
+  }
+
+  @override
+  Future<void> deleteSecret(String name) async {
+    try {
+      await _channel.invokeMethod<void>(
+        'secret.delete',
+        <String, dynamic>{'name': name},
+      );
+    } on PlatformException catch (e) {
+      throw PlatformServiceException(e.message ?? '无法清除凭据');
+    }
   }
 
   @override

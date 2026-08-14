@@ -1,6 +1,7 @@
 #include "platform_channel.h"
 
 #include <libayatana-appindicator/app-indicator.h>
+#include <libsecret/secret.h>
 
 namespace {
 
@@ -8,6 +9,15 @@ constexpr const char kChannelName[] = "ecycloud/platform";
 constexpr const char kIndicatorId[] = "ecycloud-client";
 constexpr const char kIndicatorIcon[] = "com.ecycloud.client";
 constexpr const char kActionKey[] = "ecycloud-action";
+
+const SecretSchema kRememberedSchema = {
+    "com.ecycloud.client.RememberedLogin",
+    SECRET_SCHEMA_NONE,
+    {
+        {"account", SECRET_SCHEMA_ATTRIBUTE_STRING},
+        {nullptr, static_cast<SecretSchemaAttributeType>(0)},
+    },
+};
 
 }  // namespace
 
@@ -23,6 +33,18 @@ struct _PlatformChannel {
 };
 
 static void update_menu(PlatformChannel* self);
+
+static const gchar* lookup_string(FlValue* arguments, const gchar* key) {
+  if (arguments == nullptr ||
+      fl_value_get_type(arguments) != FL_VALUE_TYPE_MAP) {
+    return nullptr;
+  }
+  FlValue* value = fl_value_lookup_string(arguments, key);
+  if (value == nullptr || fl_value_get_type(value) != FL_VALUE_TYPE_STRING) {
+    return nullptr;
+  }
+  return fl_value_get_string(value);
+}
 
 static gboolean lookup_bool(FlValue* arguments, const gchar* key) {
   if (arguments == nullptr ||
@@ -171,6 +193,57 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     self->tun = lookup_bool(arguments, "tun");
     update_menu(self);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "secret.protect") == 0) {
+    const gchar* name = lookup_string(arguments, "name");
+    const gchar* value = lookup_string(arguments, "value");
+    if (name == nullptr || value == nullptr) {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("argument", "缺少参数", nullptr));
+    } else {
+      g_autoptr(GError) store_error = nullptr;
+      if (secret_password_store_sync(
+              &kRememberedSchema, SECRET_COLLECTION_DEFAULT, "ECY Cloud",
+              value, nullptr, &store_error, "account", name, nullptr)) {
+        response = FL_METHOD_RESPONSE(
+            fl_method_success_response_new(fl_value_new_string("")));
+      } else {
+        response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "secret",
+            store_error != nullptr ? store_error->message : "无法保护凭据",
+            nullptr));
+      }
+    }
+  } else if (g_strcmp0(method, "secret.unprotect") == 0) {
+    const gchar* name = lookup_string(arguments, "name");
+    if (name == nullptr) {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("argument", "缺少参数", nullptr));
+    } else {
+      g_autoptr(GError) lookup_error = nullptr;
+      gchar* password = secret_password_lookup_sync(
+          &kRememberedSchema, nullptr, &lookup_error, "account", name, nullptr);
+      if (password != nullptr) {
+        response = FL_METHOD_RESPONSE(
+            fl_method_success_response_new(fl_value_new_string(password)));
+        secret_password_free(password);
+      } else if (lookup_error != nullptr) {
+        response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "secret", lookup_error->message, nullptr));
+      } else {
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+      }
+    }
+  } else if (g_strcmp0(method, "secret.delete") == 0) {
+    const gchar* name = lookup_string(arguments, "name");
+    if (name == nullptr) {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("argument", "缺少参数", nullptr));
+    } else {
+      g_autoptr(GError) clear_error = nullptr;
+      secret_password_clear_sync(&kRememberedSchema, nullptr, &clear_error,
+                                 "account", name, nullptr);
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    }
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }

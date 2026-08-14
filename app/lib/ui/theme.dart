@@ -13,6 +13,18 @@ class AppTheme {
   // 全局按钮圆角：胶囊形
   static const OutlinedBorder pillShape = StadiumBorder();
 
+  static ButtonStyle inlineTextLink(ColorScheme scheme) => TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        foregroundColor: scheme.primary,
+        textStyle: _componentText(13).copyWith(
+          decoration: TextDecoration.underline,
+          decorationColor: scheme.primary,
+        ),
+      );
+
   // 卡片与卡片内小块的圆角，成套用才不会看起来东拼西凑
   static const double cardRadius = 12;
   static const double tileRadius = 9;
@@ -200,7 +212,7 @@ class AppTheme {
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(iconSize: 18, shape: pillShape),
+        style: IconButton.styleFrom(iconSize: 20, shape: pillShape),
       ),
       listTileTheme: const ListTileThemeData(
         minVerticalPadding: 6,
@@ -221,8 +233,19 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         contentTextStyle: _componentText(13, color: scheme.onInverseSurface),
       ),
+      // 桌面宽窗下 Dialog 默认无 maxWidth，会拉成整屏宽条；按 Material 3 收口
       dialogTheme: DialogThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 560),
+      ),
+      appBarTheme: AppBarTheme(
+        actionsPadding: const EdgeInsets.only(right: 14),
+        titleTextStyle: _componentText(
+          16,
+          weight: FontWeight.w600,
+          color: scheme.onSurface,
+        ),
+        toolbarTextStyle: _componentText(13, color: scheme.onSurface),
       ),
       // 与 NavigationRail 同一纪律：底栏标签也必须自带字族，不能靠默认 labelMedium
       navigationBarTheme: NavigationBarThemeData(

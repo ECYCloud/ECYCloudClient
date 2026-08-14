@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
@@ -7,6 +8,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/logger.dart';
+import '../../core/safe_url.dart';
 import '../../domain/config/local_template.dart';
 import '../../domain/platform/platform_service.dart';
 import 'service_pipe.dart';
@@ -66,8 +68,14 @@ class WindowsPlatformService implements PlatformService {
   }
 
   @override
-  Future<void> setSystemProxy({required int port}) async {
-    await _pipe.request('proxy.set', <String, dynamic>{'port': port});
+  Future<void> setSystemProxy({
+    required int port,
+    required List<String> bypass,
+  }) async {
+    await _pipe.request('proxy.set', <String, dynamic>{
+      'port': port,
+      'bypass': bypass,
+    });
   }
 
   @override
@@ -132,7 +140,23 @@ class WindowsPlatformService implements PlatformService {
       false;
 
   @override
-  Future<void> openUrl(String url) => Isolate.run(() => _shellOpen(url));
+  Future<void> openUrl(String url) {
+    if (!SafeUrl.canOpen(url)) {
+      return Future<void>.value();
+    }
+    return Isolate.run(() => _shellOpen(url));
+  }
+
+  @override
+  Future<String> protectSecret(String name, String plaintext) =>
+      Future<String>.value(_dpapiProtect(name, plaintext));
+
+  @override
+  Future<String?> unprotectSecret(String name, String blob) =>
+      Future<String?>.value(_dpapiUnprotect(name, blob));
+
+  @override
+  Future<void> deleteSecret(String name) async {}
 
   @override
   Future<void> dispose() async {
@@ -180,12 +204,183 @@ void _shellOpen(String url) {
   final Pointer<Utf16> file = url.toNativeUtf16();
 
   try {
-    DynamicLibrary.open('shell32.dll')
-        .lookupFunction<_ShellExecuteWNative, _ShellExecuteWDart>(
-          'ShellExecuteW',
-        )(0, operation, file, nullptr, nullptr, _swShowNormal);
+    DynamicLibrary.open(
+      'shell32.dll',
+    ).lookupFunction<_ShellExecuteWNative, _ShellExecuteWDart>('ShellExecuteW')(
+      0,
+      operation,
+      file,
+      nullptr,
+      nullptr,
+      _swShowNormal,
+    );
   } finally {
     malloc.free(operation);
     malloc.free(file);
+  }
+}
+
+final class _DataBlob extends Struct {
+  @Uint32()
+  external int cbData;
+
+  external Pointer<Uint8> pbData;
+}
+
+typedef _CryptProtectNative =
+    Int32 Function(
+      Pointer<_DataBlob>,
+      Pointer<Utf16>,
+      Pointer<_DataBlob>,
+      Pointer<Void>,
+      Pointer<Void>,
+      Uint32,
+      Pointer<_DataBlob>,
+    );
+typedef _CryptProtectDart =
+    int Function(
+      Pointer<_DataBlob>,
+      Pointer<Utf16>,
+      Pointer<_DataBlob>,
+      Pointer<Void>,
+      Pointer<Void>,
+      int,
+      Pointer<_DataBlob>,
+    );
+
+typedef _CryptUnprotectNative =
+    Int32 Function(
+      Pointer<_DataBlob>,
+      Pointer<Pointer<Utf16>>,
+      Pointer<_DataBlob>,
+      Pointer<Void>,
+      Pointer<Void>,
+      Uint32,
+      Pointer<_DataBlob>,
+    );
+typedef _CryptUnprotectDart =
+    int Function(
+      Pointer<_DataBlob>,
+      Pointer<Pointer<Utf16>>,
+      Pointer<_DataBlob>,
+      Pointer<Void>,
+      Pointer<Void>,
+      int,
+      Pointer<_DataBlob>,
+    );
+
+// 禁止弹出 DPAPI 确认框，否则登录会被系统对话框卡住
+const int _cryptProtectUiForbidden = 0x1;
+
+String _dpapiEntropyFor(String name) => name == 'remembered_password'
+    ? 'ECYCloud.remembered_login'
+    : 'ECYCloud.$name';
+
+String _dpapiProtect(String name, String plaintext) => base64Encode(
+  _dpapiTransform(
+    utf8.encode(plaintext),
+    entropy: _dpapiEntropyFor(name),
+    protect: true,
+  ),
+);
+
+String? _dpapiUnprotect(String name, String blob) {
+  final Uint8List raw;
+  try {
+    raw = base64Decode(blob);
+  } on FormatException {
+    return null;
+  }
+  if (raw.isEmpty) {
+    return null;
+  }
+  try {
+    return utf8.decode(
+      _dpapiTransform(
+        raw,
+        entropy: _dpapiEntropyFor(name),
+        protect: false,
+      ),
+    );
+  } on PlatformServiceException {
+    return null;
+  } on FormatException {
+    return null;
+  }
+}
+
+Uint8List _dpapiTransform(
+  List<int> input, {
+  required String entropy,
+  required bool protect,
+}) {
+  final Uint8List entropyBytes = Uint8List.fromList(utf8.encode(entropy));
+  final Pointer<_DataBlob> dataIn = calloc<_DataBlob>();
+  final Pointer<_DataBlob> dataOut = calloc<_DataBlob>();
+  final Pointer<_DataBlob> entropyBlob = calloc<_DataBlob>();
+  final Pointer<Uint8> inputPtr = input.isEmpty
+      ? nullptr
+      : calloc<Uint8>(input.length);
+  final Pointer<Uint8> entropyPtr = calloc<Uint8>(entropyBytes.length);
+
+  try {
+    if (input.isNotEmpty) {
+      inputPtr.asTypedList(input.length).setAll(0, input);
+    }
+    dataIn.ref
+      ..cbData = input.length
+      ..pbData = inputPtr;
+    entropyPtr.asTypedList(entropyBytes.length).setAll(0, entropyBytes);
+    entropyBlob.ref
+      ..cbData = entropyBytes.length
+      ..pbData = entropyPtr;
+
+    final DynamicLibrary crypt32 = DynamicLibrary.open('crypt32.dll');
+    final int ok = protect
+        ? crypt32
+              .lookupFunction<_CryptProtectNative, _CryptProtectDart>(
+                'CryptProtectData',
+              )(
+                dataIn,
+                nullptr,
+                entropyBlob,
+                nullptr,
+                nullptr,
+                _cryptProtectUiForbidden,
+                dataOut,
+              )
+        : crypt32
+              .lookupFunction<_CryptUnprotectNative, _CryptUnprotectDart>(
+                'CryptUnprotectData',
+              )(
+                dataIn,
+                nullptr,
+                entropyBlob,
+                nullptr,
+                nullptr,
+                _cryptProtectUiForbidden,
+                dataOut,
+              );
+    if (ok == 0) {
+      throw PlatformServiceException('无法保护凭据');
+    }
+
+    final Uint8List output = Uint8List.fromList(
+      dataOut.ref.pbData.asTypedList(dataOut.ref.cbData),
+    );
+    DynamicLibrary.open('kernel32.dll')
+        .lookupFunction<
+          Pointer<Void> Function(Pointer<Void>),
+          Pointer<Void> Function(Pointer<Void>)
+        >('LocalFree')(dataOut.ref.pbData.cast());
+    return output;
+  } finally {
+    if (inputPtr != nullptr) {
+      calloc.free(inputPtr);
+    }
+    calloc.free(entropyPtr);
+    calloc.free(dataIn);
+    calloc.free(dataOut);
+    calloc.free(entropyBlob);
   }
 }

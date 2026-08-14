@@ -12,6 +12,7 @@ URL:            https://github.com/ECYCloud/ECYCloudClient
 AutoReqProv:    no
 Requires:       libgtk-3.so.0()(64bit)
 Requires:       libayatana-appindicator3.so.1()(64bit)
+Requires:       libsecret-1.so.0()(64bit)
 Requires:       (iproute or iproute2)
 # 系统代理默认开启，读写的 org.gnome.system.proxy 由它提供，GTK3 并不带
 Requires:       gsettings-desktop-schemas

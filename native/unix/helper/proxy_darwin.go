@@ -61,7 +61,7 @@ type proxyManager struct {
 
 func newProxyManager() *proxyManager { return &proxyManager{} }
 
-func (p *proxyManager) set(port int, clientPID int) error {
+func (p *proxyManager) set(port int, clientPID int, bypass []string) error {
 	services, err := activeServices()
 	if err != nil {
 		return err
@@ -91,11 +91,26 @@ func (p *proxyManager) set(port int, clientPID int) error {
 				return err
 			}
 		}
-		if err := networksetup(append([]string{"-setproxybypassdomains", service}, proxyBypass...)...); err != nil {
+		if err := networksetup(append([]string{"-setproxybypassdomains", service}, effectiveBypass(bypass)...)...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func effectiveBypass(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	// 空列表是旧版 GUI 或漏传，不能清空例外，否则局域网会进代理
+	if len(out) == 0 {
+		return proxyBypass
+	}
+	return out
 }
 
 func (p *proxyManager) restore() error {

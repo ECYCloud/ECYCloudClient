@@ -10,7 +10,7 @@ type proxyManager struct{}
 
 func newProxyManager() *proxyManager { return &proxyManager{} }
 
-func (p *proxyManager) set(_ int, _ int) error {
+func (p *proxyManager) set(_ int, _ int, _ []string) error {
 	return fmt.Errorf("Linux 的系统代理由客户端自行设置")
 }
 

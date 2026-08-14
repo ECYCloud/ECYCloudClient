@@ -1,12 +1,12 @@
 class AppConfig {
   AppConfig._();
 
-  static const String panelBaseUrl = String.fromEnvironment(
-    'ECYCLOUD_PANEL_URL',
-  );
-
   static const String subBaseUrl = String.fromEnvironment(
     'ECYCLOUD_SUB_URL',
+  );
+
+  static const String siteBaseUrl = String.fromEnvironment(
+    'ECYCLOUD_SITE_URL',
   );
 
   static const String appVersion = String.fromEnvironment(
@@ -15,9 +15,11 @@ class AppConfig {
   );
 
   static bool get configured =>
-      panelBaseUrl.isNotEmpty && subBaseUrl.isNotEmpty;
-
-  static String get panelHost => Uri.parse(panelBaseUrl).host;
+      subBaseUrl.isNotEmpty && siteBaseUrl.isNotEmpty;
 
   static String get subOrigin => Uri.parse(subBaseUrl).origin;
+
+  static String get siteOrigin => Uri.parse(siteBaseUrl).origin;
+
+  static String get siteHost => Uri.parse(siteBaseUrl).host;
 }

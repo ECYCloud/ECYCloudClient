@@ -43,22 +43,23 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
 
   Widget _body(ConnectionController connection) {
     final List<_Row> rows = _rows(connection);
+    final int activeCount = _matchCount(connection.connections, active: true);
+    final int closedCount =
+        _matchCount(connection.closedConnections, active: false);
 
     final SegmentedButton<_Scope> scopeFilter = SegmentedButton<_Scope>(
       segments: <ButtonSegment<_Scope>>[
         ButtonSegment<_Scope>(
           value: _Scope.all,
-          label: Text(
-            '全部 ${connection.connections.length + connection.closedConnections.length}',
-          ),
+          label: Text('全部 ${activeCount + closedCount}'),
         ),
         ButtonSegment<_Scope>(
           value: _Scope.active,
-          label: Text('活跃中 ${connection.connections.length}'),
+          label: Text('活跃中 $activeCount'),
         ),
         ButtonSegment<_Scope>(
           value: _Scope.closed,
-          label: Text('已关闭 ${connection.closedConnections.length}'),
+          label: Text('已关闭 $closedCount'),
         ),
       ],
       selected: <_Scope>{_scope},
@@ -138,6 +139,19 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     return rows
         .where((_Row row) => row.haystack.contains(_keyword))
         .toList(growable: false);
+  }
+
+  int _matchCount(List<Map<String, dynamic>> items, {required bool active}) {
+    if (_keyword.isEmpty) {
+      return items.length;
+    }
+    int count = 0;
+    for (final Map<String, dynamic> item in items) {
+      if (_Row(item, active: active).haystack.contains(_keyword)) {
+        count++;
+      }
+    }
+    return count;
   }
 }
 

@@ -1,3 +1,5 @@
+import 'network_bypass.dart';
+
 class LocalTemplateOptions {
   const LocalTemplateOptions({
     required this.tunEnabled,
@@ -16,6 +18,7 @@ class LocalTemplateOptions {
     this.localDnsServer = '223.5.5.5',
     this.tunIncludePackages = const <String>[],
     this.tunExcludePackages = const <String>[],
+    this.tunExcludeAddresses = const <String>[],
   });
 
   static const String defaultTunInterfaceName = 'ECYCloud';
@@ -42,6 +45,7 @@ class LocalTemplateOptions {
   // 往里塞规则。仅 Android 有值，由 BoxService 翻成 VpnService.Builder 的名单
   final List<String> tunIncludePackages;
   final List<String> tunExcludePackages;
+  final List<String> tunExcludeAddresses;
 }
 
 class ClashApiOptions {
@@ -133,7 +137,10 @@ class LocalTemplate {
     // IPv6 地址必须恒定下发：strict-route 在 TUN 缺少 IPv6 地址时会向 WFP
     // 注册一条全局阻断规则，连 ::1 都不可达
     'inet6-address': <String>[options.tunAddress6],
-    'route-exclude-address': excludedRoutes,
+    'route-exclude-address': appendUnique(
+      excludedRoutes,
+      options.tunExcludeAddresses,
+    ),
     if (options.tunIncludePackages.isNotEmpty)
       'include-package': options.tunIncludePackages,
     if (options.tunExcludePackages.isNotEmpty)

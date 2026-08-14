@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../app_scope.dart';
 import '../node_labels.dart';
 import '../theme.dart';
 import 'icon_image.dart';
+import 'user_avatar.dart';
 
 class GroupIcon extends StatelessWidget {
   const GroupIcon({
@@ -26,7 +28,11 @@ class GroupIcon extends StatelessWidget {
       color: theme.colorScheme.primary,
     );
 
-    if (url == null) {
+    final String? resolved = UserAvatar.resolveUrl(
+      url,
+      origin: AppScope.of(context).auth.siteOrigin,
+    );
+    if (resolved == null) {
       return SizedBox(height: size, width: size, child: Center(child: builtin));
     }
 
@@ -44,7 +50,7 @@ class GroupIcon extends StatelessWidget {
             )
           : null,
       child: RemoteIcon(
-        url: url!,
+        url: resolved,
         width: size - pad * 2,
         fallback: builtin,
       ),

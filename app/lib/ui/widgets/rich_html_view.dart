@@ -1,16 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
 
-import '../../core/app_config.dart';
+import '../../core/safe_url.dart';
 import '../app_scope.dart';
 import '../shell_navigator.dart';
 import 'image_viewer.dart';
+import 'zoom_cursors.dart';
+
+/// 从若干段 HTML 中按出现顺序收集去重后的 img src（与网站 collectImageList 同口径）。
+List<String> collectHtmlImageSrcs(Iterable<String> htmlFragments) {
+  final RegExp re = RegExp(
+    r'''<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1''',
+    caseSensitive: false,
+  );
+  final List<String> out = <String>[];
+  for (final String html in htmlFragments) {
+    for (final RegExpMatch match in re.allMatches(html)) {
+      final String src = _decodeHtmlSrc(match.group(2) ?? '').trim();
+      if (src.isNotEmpty && !out.contains(src)) {
+        out.add(src);
+      }
+    }
+  }
+  return out;
+}
+
+String _decodeHtmlSrc(String value) {
+  return value
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&apos;', "'");
+}
 
 /// 渲染面板下发的安全 HTML（文字格式 / 图片 / 视频链接）。
 class RichHtmlView extends StatelessWidget {
-  const RichHtmlView(this.html, {super.key});
+  const RichHtmlView(this.html, {super.key, this.imageAlbum});
 
   final String html;
+
+  /// 非空时放大浏览使用该相册（如工单整单会话）；空则仅本段 HTML 内的图。
+  final List<String>? imageAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -28,8 +58,11 @@ class RichHtmlView extends StatelessWidget {
       fontFamilyFallback: body.fontFamilyFallback,
     );
 
+    final String base = AppScope.of(context).auth.siteOrigin;
+
     return Html(
       data: source,
+      doNotRenderTheseTags: _blockedTags,
       style: <String, Style>{
         ...Style.fromThemeData(theme),
         'body': Style.fromTextStyle(body).copyWith(
@@ -62,6 +95,7 @@ class RichHtmlView extends StatelessWidget {
           tagsToExtend: <String>{'a'},
           builder: (ExtensionContext ctx) {
             final String? href = ctx.attributes['href'];
+            final bool canTap = href != null && _canTapLink(href, base);
             final TextStyle? linkStyle = ctx.style?.generateTextStyle();
             final Widget label = Text.rich(
               TextSpan(
@@ -70,54 +104,61 @@ class RichHtmlView extends StatelessWidget {
               ),
             );
             final Widget link = MouseRegion(
-              cursor: href == null || href.isEmpty
-                  ? MouseCursor.defer
-                  : SystemMouseCursors.click,
+              cursor: canTap
+                  ? SystemMouseCursors.click
+                  : MouseCursor.defer,
               child: GestureDetector(
-                onTap: href == null || href.isEmpty
-                    ? null
-                    : () => ctx.parser.internalOnAnchorTap?.call(
+                onTap: canTap
+                    ? () => ctx.parser.internalOnAnchorTap?.call(
                           href,
                           ctx.attributes,
                           ctx.element,
-                        ),
+                        )
+                    : null,
                 child: label,
               ),
             );
             return WidgetSpan(
               alignment: PlaceholderAlignment.baseline,
               baseline: TextBaseline.alphabetic,
-              child: href == null || href.isEmpty
-                  ? link
-                  : Tooltip(message: href, child: link),
+              child: canTap ? Tooltip(message: href, child: link) : link,
             );
           },
         ),
         TagExtension(
           tagsToExtend: <String>{'img'},
           builder: (ExtensionContext ctx) {
-            final String? src = ctx.attributes['src'];
-            if (src == null || src.isEmpty) {
+            final String? src = _httpUrl(ctx.attributes['src'] ?? '', base);
+            if (src == null) {
               return const SizedBox.shrink();
             }
             return _TicketImage(
               src,
               alt: ctx.attributes['alt'] ?? '',
-              // 与网站 collectImageList 同一口径：放大视图只在本段富文本内前后切换
-              album: () => ctx.parser.htmlData
-                  .querySelectorAll('img')
-                  .map((e) => e.attributes['src'] ?? '')
-                  .where((String url) => url.isNotEmpty)
-                  .toSet()
-                  .toList(growable: false),
+              // 与网站 collectImageList 同一口径：有外部相册用外部，否则本段富文本内切换
+              album: () {
+                final Iterable<String> raw = imageAlbum ??
+                    ctx.parser.htmlData
+                        .querySelectorAll('img')
+                        .map((e) => e.attributes['src'] ?? '')
+                        .where((String url) => url.isNotEmpty);
+                final List<String> out = <String>[];
+                for (final String url in raw) {
+                  final String? ok = _httpUrl(url, base);
+                  if (ok != null && !out.contains(ok)) {
+                    out.add(ok);
+                  }
+                }
+                return out;
+              },
             );
           },
         ),
         TagExtension(
           tagsToExtend: <String>{'video'},
           builder: (ExtensionContext ctx) {
-            final String? src = ctx.attributes['src'];
-            if (src == null || src.isEmpty) {
+            final String? src = _httpUrl(ctx.attributes['src'] ?? '', base);
+            if (src == null) {
               return const SizedBox.shrink();
             }
             return Padding(
@@ -139,15 +180,58 @@ class RichHtmlView extends StatelessWidget {
         if (_isUserTicketLink(url) && ShellNavigator.openTickets(context)) {
           return;
         }
-        AppScope.of(context).platform.openUrl(_absolute(url));
+        final String? abs = _openableLink(url, base);
+        if (abs == null) {
+          return;
+        }
+        AppScope.of(context).platform.openUrl(abs);
       },
     );
   }
 
-  /// 面板下发的链接一律是根相对路径，交给系统打开前须补回面板地址
-  static String _absolute(String url) => url.startsWith('/')
-      ? '${AppConfig.panelBaseUrl.replaceAll(RegExp(r'/+$'), '')}$url'
+  static const Set<String> _blockedTags = <String>{
+    'script',
+    'iframe',
+    'object',
+    'embed',
+    'form',
+    'input',
+    'button',
+    'select',
+    'textarea',
+    'style',
+    'link',
+    'meta',
+    'base',
+    'svg',
+    'math',
+    'applet',
+    'frame',
+    'frameset',
+  };
+
+  static String _absolute(String url, String base) => url.startsWith('/')
+      ? '${base.replaceAll(RegExp(r'/+$'), '')}$url'
       : url;
+
+  static String? _httpUrl(String url, String base) {
+    if (url.isEmpty) {
+      return null;
+    }
+    final String abs = _absolute(url, base);
+    return SafeUrl.canLoad(abs) ? abs : null;
+  }
+
+  static String? _openableLink(String url, String base) {
+    if (url.isEmpty) {
+      return null;
+    }
+    final String abs = _absolute(url, base);
+    return SafeUrl.canOpenLink(abs) ? abs : null;
+  }
+
+  static bool _canTapLink(String href, String base) =>
+      _isUserTicketLink(href) || _openableLink(href, base) != null;
 
   static bool _isUserTicketLink(String url) {
     final String path = url.startsWith('/')
@@ -207,15 +291,18 @@ class _TicketImageState extends State<_TicketImage> {
           child: _failed
               ? _placeholder(theme)
               : MouseRegion(
-                  cursor: SystemMouseCursors.zoomIn,
+                  cursor: ZoomCursors.zoomIn,
                   child: GestureDetector(
                     onTap: () {
                       final List<String> album = widget.album();
-                      showImageViewer(
-                        context,
-                        images: album,
-                        index: album.indexOf(widget.src),
-                      );
+                      if (album.isEmpty) {
+                        return;
+                      }
+                      int index = album.indexOf(widget.src);
+                      if (index < 0) {
+                        index = 0;
+                      }
+                      showImageViewer(context, images: album, index: index);
                     },
                     child: Image.network(
                       widget.src,

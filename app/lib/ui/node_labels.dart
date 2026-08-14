@@ -89,6 +89,19 @@ class NodeLabels {
   static String _resolveName(String tagOrName) =>
       _nodeNames[tagOrName] ?? tagOrName;
 
+  // 与 User\NodeController 的 strcmp(name) 同一套，用面板原名（含国旗 emoji）
+  static int compareName(String a, String b) {
+    final List<int> left = utf8.encode(_resolveName(a));
+    final List<int> right = utf8.encode(_resolveName(b));
+    final int n = left.length < right.length ? left.length : right.length;
+    for (int i = 0; i < n; i++) {
+      if (left[i] != right[i]) {
+        return left[i] - right[i];
+      }
+    }
+    return left.length - right.length;
+  }
+
   /// 国旗 emoji 就是两个区域指示符（U+1F1E6..U+1F1FF），减去基点即得两个字母，
   /// 机场节点名普遍自带，认它不需要任何关键词表
   static String? _fromEmoji(String name) {

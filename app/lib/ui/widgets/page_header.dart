@@ -1,40 +1,93 @@
 import 'package:flutter/material.dart';
 
+import 'user_avatar.dart';
+
 /// 与侧栏连接状态图标垂直居中对齐。
 ///
 /// NavigationRail 默认上下各约 8px 内边距，其 leading 里的状态图标为 32×32；
 /// 标题放在等高盒子内居中，右侧操作区可更高，整行按中线对齐。
+///
+/// 左右外边距同为 [edge]；操作按钮之间用 [actionGap]；头像与操作区再隔开
+/// [edge]，避免与刷新等贴死。
 class PageHeader extends StatelessWidget {
-  const PageHeader({super.key, required this.title, this.actions});
+  const PageHeader({
+    super.key,
+    required this.title,
+    this.actions,
+    this.showUserAvatar = false,
+    this.showBackButton = false,
+  });
 
   final String title;
   final List<Widget>? actions;
+  final bool showUserAvatar;
+  final bool showBackButton;
+
+  /// 与 [UserAvatarButton.edge] / AppBar `actionsPadding` 一致。
+  static const double edge = UserAvatarButton.edge;
+
+  /// 标题行内操作按钮间距（余额 / 刷新 / 创建等）。
+  static const double actionGap = 8;
 
   static const double _railPaddingTop = 8;
   static const double _brandSize = 32;
 
+  // 与账户页 ListTile leading / RefreshButton 默认尺寸一致。
+  static const double _actionIconSize = 20;
+  static const double _actionButtonSize = 32;
+  static const double _actionIconInset =
+      (_actionButtonSize - _actionIconSize) / 2;
+
   @override
   Widget build(BuildContext context) {
+    final double left = showBackButton ? edge - _actionIconInset : edge;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, _railPaddingTop, 10, 10),
+          padding: EdgeInsets.fromLTRB(left, _railPaddingTop, edge, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
+              if (showBackButton) ...<Widget>[
+                IconButton(
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  icon: const BackButtonIcon(),
+                  iconSize: _actionIconSize,
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: _actionButtonSize,
+                    height: _actionButtonSize,
+                  ),
+                  onPressed: () {
+                    Navigator.maybePop(context);
+                  },
+                ),
+                const SizedBox(width: actionGap),
+              ],
               SizedBox(
                 height: _brandSize,
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
               ),
               const Spacer(),
-              ...?actions,
+              if (actions != null)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: actions!,
+                ),
+              if (showUserAvatar) ...<Widget>[
+                const SizedBox(width: edge),
+                const UserAvatarButton(),
+              ],
             ],
           ),
         ),

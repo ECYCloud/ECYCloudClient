@@ -1,23 +1,28 @@
 import 'package:flutter/material.dart';
 
-/// 工单多行内容框：滚动条在独立轨道，与 EditableText 分离，避免 I 光标盖住滚动条。
-class TicketContentField extends StatefulWidget {
-  const TicketContentField({
+/// 多行内容框：圆角矩形外壳 + 独立滚动轨道（与全局胶囊形单行 InputDecoration 区分）。
+/// 工单内容、配置策略 Host/规则等共用。
+class MultilineContentField extends StatefulWidget {
+  const MultilineContentField({
     super.key,
     required this.controller,
+    this.labelText,
+    this.hintText,
     this.minLines = 4,
     this.maxLines = 8,
   });
 
   final TextEditingController controller;
+  final String? labelText;
+  final String? hintText;
   final int minLines;
   final int maxLines;
 
   @override
-  State<TicketContentField> createState() => _TicketContentFieldState();
+  State<MultilineContentField> createState() => _MultilineContentFieldState();
 }
 
-class _TicketContentFieldState extends State<TicketContentField> {
+class _MultilineContentFieldState extends State<MultilineContentField> {
   final ScrollController _scroll = ScrollController();
 
   @override
@@ -30,6 +35,8 @@ class _TicketContentFieldState extends State<TicketContentField> {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     const BorderRadius radius = BorderRadius.all(Radius.circular(16));
+    final String? label = widget.labelText;
+    final String? hint = widget.hintText;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -51,14 +58,15 @@ class _TicketContentFieldState extends State<TicketContentField> {
                     scrollController: _scroll,
                     minLines: widget.minLines,
                     maxLines: widget.maxLines,
-                    decoration: const InputDecoration(
-                      labelText: '内容',
-                      alignLabelWithHint: true,
+                    decoration: InputDecoration(
+                      labelText: label,
+                      hintText: hint,
+                      alignLabelWithHint: label != null,
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                       filled: false,
-                      contentPadding: EdgeInsets.fromLTRB(14, 12, 8, 12),
+                      contentPadding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
                     ),
                   ),
                 ),
@@ -102,7 +110,8 @@ class _ScrollRail extends StatelessWidget {
       builder: (BuildContext context, _) {
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: (TapDownDetails details) => _jumpTo(details.localPosition.dy),
+          onTapDown: (TapDownDetails details) =>
+              _jumpTo(details.localPosition.dy),
           onVerticalDragUpdate: (DragUpdateDetails details) {
             if (!controller.hasClients) {
               return;
