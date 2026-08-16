@@ -15,9 +15,11 @@ import '../theme.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
+import '../widgets/section_card.dart';
 import '../widgets/rich_html_view.dart';
 import '../widgets/tag_chip.dart';
 import '../widgets/multiline_content_field.dart';
+import '../../l10n/l10n.dart';
 
 class TicketsPage extends StatefulWidget {
   const TicketsPage({super.key, this.showBackButton = false});
@@ -88,7 +90,7 @@ class _TicketsPageState extends State<TicketsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -111,7 +113,7 @@ class _TicketsPageState extends State<TicketsPage> {
     final _TicketEditorResult? draft = await showDialog<_TicketEditorResult>(
       context: context,
       builder: (BuildContext context) => _TicketEditorDialog(
-        titleLabel: '创建工单',
+        titleLabel: L10n.t('创建工单'),
         requireTitle: true,
         api: api,
       ),
@@ -160,25 +162,37 @@ class _TicketsPageState extends State<TicketsPage> {
       body: Column(
         children: <Widget>[
           PageHeader(
-            title: '工单',
+            title: L10n.t('工单'),
             showBackButton: widget.showBackButton,
             showUserAvatar: true,
             actions: <Widget>[
               FilledButton.icon(
                 onPressed: _busy || _banned ? null : _create,
                 icon: const Icon(Icons.add, size: 16),
-                label: const Text('创建工单'),
+                label: Text(L10n.t('创建工单')),
               ),
               const SizedBox(width: PageHeader.actionGap),
-              RefreshButton(tooltip: '刷新工单', onRefresh: _load),
+              RefreshButton(tooltip: L10n.t('刷新工单'), onRefresh: _load),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: SectionCard(
+                child: Text(
+                  L10n.t('如需与我们沟通，请点击上方创建工单按钮。'),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ),
           ),
           ListToolbar(
             currentPage: _page,
             lastPage: _lastPage,
             total: _total,
             perPage: _perPage,
-            searchHint: '标题 / 工单号',
+            searchHint: L10n.t('标题 / 工单号'),
             onSearchChanged: _onSearch,
             onPerPageChanged: (int value) {
               _perPage = value;
@@ -194,7 +208,7 @@ class _TicketsPageState extends State<TicketsPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
               child: Text(
-                '您已被禁止发起或回复工单',
+                L10n.t('您已被禁止发起或回复工单'),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.error,
                 ),
@@ -229,9 +243,9 @@ class _TicketsPageState extends State<TicketsPage> {
                   : _tickets.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      children: const <Widget>[
+                      children: <Widget>[
                         SizedBox(height: 120),
-                        Center(child: Text('暂无工单')),
+                        Center(child: Text(L10n.t('暂无工单'))),
                       ],
                     )
                   : ListView.separated(
@@ -320,7 +334,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
     final _TicketEditorResult? draft = await showDialog<_TicketEditorResult>(
       context: context,
       builder: (BuildContext context) => _TicketEditorDialog(
-        titleLabel: '回复工单',
+        titleLabel: L10n.t('回复工单'),
         requireTitle: false,
         api: api,
       ),
@@ -353,17 +367,17 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('关闭工单'),
-        content: const Text('确定关闭此工单？'),
+        title: Text(L10n.t('关闭工单')),
+        content: Text(L10n.t('确定关闭此工单？')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(L10n.t('取消')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
-            child: const Text('关闭工单'),
+            child: Text(L10n.t('关闭工单')),
           ),
         ],
       ),
@@ -413,7 +427,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: detail?.title ?? '工单详情',
+              title: detail?.title ?? L10n.t('工单详情'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
@@ -424,14 +438,14 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.danger,
                       ),
-                      child: const Text('关闭工单'),
+                      child: Text(L10n.t('关闭工单')),
                     ),
                     const SizedBox(width: PageHeader.actionGap),
                   ],
                   FilledButton.icon(
                     onPressed: _reply,
                     icon: const Icon(Icons.reply, size: 16),
-                    label: const Text('回复工单'),
+                    label: Text(L10n.t('回复工单')),
                   ),
                 ],
               ],
@@ -443,7 +457,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                 : _error != null && detail == null
                 ? Center(child: Text(_error!))
                 : detail == null
-                ? const Center(child: Text('工单不存在'))
+                ? Center(child: Text(L10n.t('工单不存在')))
                 : Column(
                     children: <Widget>[
                       ListToolbar(
@@ -479,11 +493,11 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                             children: <Widget>[
                               TagChip(label: detail.statusText),
                               Text(
-                                '创建 ${detail.datetime}',
+                                L10n.t('创建 {0}', <Object>[detail.datetime]),
                                 style: theme.textTheme.bodySmall,
                               ),
                               Text(
-                                '共 ${detail.messageCount} 条消息',
+                                L10n.t('共 {0} 条消息', <Object>[detail.messageCount]),
                                 style: theme.textTheme.bodySmall,
                               ),
                             ],
@@ -491,7 +505,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                           if (detail.banned) ...<Widget>[
                             const SizedBox(height: 8),
                             Text(
-                              '您已被禁止回复工单',
+                              L10n.t('您已被禁止回复工单'),
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.error,
                               ),
@@ -499,9 +513,9 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                           ],
                           const SizedBox(height: 12),
                           if (pageMessages.isEmpty)
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.only(top: 40),
-                              child: Center(child: Text('暂无消息')),
+                              child: Center(child: Text(L10n.t('暂无消息'))),
                             )
                           else
                             for (final TicketMessage message
@@ -524,7 +538,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage> {
                                         children: <Widget>[
                                           Flexible(
                                             child: Text(
-                                              message.userName,
+                                              L10n.t(message.userName),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: theme.textTheme.titleSmall
@@ -666,7 +680,7 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
     await Logger.instance.flush();
     final Directory dir = AppPaths.logs;
     if (!dir.existsSync()) {
-      _toast('暂无运行日志');
+      _toast(L10n.t('暂无运行日志'));
       return;
     }
     final List<File> logs = dir
@@ -675,7 +689,7 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
         .where((File f) => f.path.endsWith('.log'))
         .toList();
     if (logs.isEmpty) {
-      _toast('暂无运行日志');
+      _toast(L10n.t('暂无运行日志'));
       return;
     }
     logs.sort(
@@ -754,13 +768,13 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
             if (widget.requireTitle) ...<Widget>[
               TextField(
                 controller: _title,
-                decoration: const InputDecoration(labelText: '标题'),
+                decoration: InputDecoration(labelText: L10n.t('标题')),
               ),
               const SizedBox(height: 12),
             ],
             MultilineContentField(
               controller: _content,
-              labelText: '内容',
+              labelText: L10n.t('内容'),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -771,17 +785,17 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
                 OutlinedButton.icon(
                   onPressed: _uploading ? null : () => _pickMedia(video: false),
                   icon: const Icon(Icons.image_outlined, size: 16),
-                  label: const Text('图片'),
+                  label: Text(L10n.t('图片')),
                 ),
                 OutlinedButton.icon(
                   onPressed: _uploading ? null : () => _pickMedia(video: true),
                   icon: const Icon(Icons.videocam_outlined, size: 16),
-                  label: const Text('视频'),
+                  label: Text(L10n.t('视频')),
                 ),
                 OutlinedButton.icon(
                   onPressed: _uploading ? null : _uploadRuntimeLog,
                   icon: const Icon(Icons.bug_report_outlined, size: 16),
-                  label: const Text('运行日志'),
+                  label: Text(L10n.t('运行日志')),
                 ),
                 if (_uploading)
                   const SizedBox(
@@ -821,11 +835,11 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _uploading ? null : () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: _uploading ? null : _submit,
-          child: const Text('提交'),
+          child: Text(L10n.t('提交')),
         ),
       ],
     );

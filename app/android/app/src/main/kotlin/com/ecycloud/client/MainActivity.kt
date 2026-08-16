@@ -12,6 +12,9 @@ import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
     private var vpnConsent: ((String?) -> Unit)? = null
+
+    // 磁贴的转交请求从 Binder 线程读它
+    @Volatile
     private var platform: PlatformBridge? = null
 
     private val resumed get() = foreground === this
@@ -82,10 +85,12 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_NOTIFICATION = 0x4e54
 
         // 界面不在前台时不交给 Dart：连接要过 requestVpnConsent，而后台弹不出授权框，
-        // 那条路只能直接失败。返回 false 时由磁贴自己启停 BoxService
+        // 那条路只能直接失败。返回 false 时由磁贴自己启停 BoxService。
+        // 磁贴在 :kernel 进程里，调用从 Binder 线程进来，而 MethodChannel 只能在主线程用
         fun requestToggle(): Boolean {
-            val bridge = foreground?.platform ?: return false
-            bridge.notifyToggle()
+            val activity = foreground ?: return false
+            val bridge = activity.platform ?: return false
+            activity.runOnUiThread { bridge.notifyToggle() }
             return true
         }
     }

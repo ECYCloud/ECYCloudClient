@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:ecycloud_client/core/logger.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,4 +65,55 @@ void main() {
     );
     expect(Logger.kernelLevel(''), LogLevel.info);
   });
+
+  test('只删除 30 天以前的日文件，其它文件不动', () {
+    final Directory dir = _tmpDir();
+    File appFile(String day) =>
+        File('${dir.path}${Platform.pathSeparator}app-$day.log');
+    for (final String day in <String>['2026-07-16', '2026-07-17', '2026-08-15']) {
+      appFile(day).writeAsStringSync('x');
+    }
+    File(
+      '${dir.path}${Platform.pathSeparator}software_errors.log',
+    ).writeAsStringSync('e');
+
+    Logger.pruneExpired(dir, DateTime(2026, 8, 15));
+
+    expect(appFile('2026-07-16').existsSync(), isFalse);
+    expect(appFile('2026-07-17').existsSync(), isTrue);
+    expect(appFile('2026-08-15').existsSync(), isTrue);
+    expect(
+      File(
+        '${dir.path}${Platform.pathSeparator}software_errors.log',
+      ).existsSync(),
+      isTrue,
+    );
+  });
+
+  test('日文件超过 10MB 时裁掉旧内容再追加，仍是同一个文件', () {
+    final Directory dir = _tmpDir();
+    final File file = File(
+      '${dir.path}${Platform.pathSeparator}app-2026-08-15.log',
+    );
+    file.writeAsBytesSync(List<int>.filled(10 * 1024 * 1024, 0x61));
+
+    Logger.appendCapped(file, 'TAIL\n');
+
+    expect(file.lengthSync(), lessThanOrEqualTo(10 * 1024 * 1024));
+    expect(file.readAsStringSync().endsWith('TAIL\n'), isTrue);
+  });
+}
+
+Directory _tmpDir() {
+  final Directory dir = Directory(r'D:\tmp\ecycloud-logger-test');
+  if (dir.existsSync()) {
+    dir.deleteSync(recursive: true);
+  }
+  dir.createSync(recursive: true);
+  addTearDown(() {
+    if (dir.existsSync()) {
+      dir.deleteSync(recursive: true);
+    }
+  });
+  return dir;
 }

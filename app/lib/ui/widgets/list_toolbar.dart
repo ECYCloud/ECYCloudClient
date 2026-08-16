@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'option_dropdown.dart';
 import 'search_field.dart';
+import '../../l10n/l10n.dart';
 
 /// 列表页搜索 + 每页条数 + 翻页 / 跳页。
 ///
@@ -18,7 +19,7 @@ class ListToolbar extends StatefulWidget {
     required this.onSearchChanged,
     required this.onPerPageChanged,
     required this.onPageChanged,
-    this.searchHint = '搜索',
+    this.searchHint,
     this.showSearch = true,
   });
 
@@ -29,7 +30,7 @@ class ListToolbar extends StatefulWidget {
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<int> onPerPageChanged;
   final ValueChanged<int> onPageChanged;
-  final String searchHint;
+  final String? searchHint;
   final bool showSearch;
 
   static const List<int> pageSizes = <int>[10, 25, 50, 100];
@@ -77,16 +78,16 @@ class _ListToolbarState extends State<ListToolbar> {
       width: 120,
       height: ListToolbar._rowHeight,
       options: <int, String>{
-        for (final int size in ListToolbar.pageSizes) size: '每页 $size 项',
+        for (final int size in ListToolbar.pageSizes) size: L10n.t('每页 {0} 项', <Object>[size]),
       },
       onChanged: widget.onPerPageChanged,
     );
     final Widget stats = Text(
-      '共 ${widget.total} 条 · 第 ${widget.currentPage}/$lastPage 页',
+      L10n.t('共 {0} 条 · 第 {1}/{2} 页', <Object>[widget.total, widget.currentPage, lastPage]),
       style: theme.textTheme.bodySmall,
     );
     final Widget prevButton = IconButton(
-      tooltip: '上一页',
+      tooltip: L10n.t('上一页'),
       onPressed: canPrev
           ? () => widget.onPageChanged(widget.currentPage - 1)
           : null,
@@ -96,7 +97,7 @@ class _ListToolbarState extends State<ListToolbar> {
       constraints: const BoxConstraints.tightFor(width: 24, height: 24),
     );
     final Widget nextButton = IconButton(
-      tooltip: '下一页',
+      tooltip: L10n.t('下一页'),
       onPressed: canNext
           ? () => widget.onPageChanged(widget.currentPage + 1)
           : null,
@@ -117,8 +118,8 @@ class _ListToolbarState extends State<ListToolbar> {
           FilteringTextInputFormatter.digitsOnly,
         ],
         style: fieldStyle,
-        decoration: const InputDecoration(
-          hintText: '页码',
+        decoration: InputDecoration(
+          hintText: L10n.t('页码'),
           // 与 SearchField 相同：用 30 高 icon 槽把输入行撑满，文字垂直居中
           prefixIcon: SizedBox(height: ListToolbar._rowHeight),
           prefixIconConstraints: BoxConstraints.tightFor(
@@ -137,7 +138,7 @@ class _ListToolbarState extends State<ListToolbar> {
     );
     final Widget jumpButton = TextButton(
       onPressed: _jumpTo,
-      child: const Text('跳转'),
+      child: Text(L10n.t('跳转')),
     );
     final List<Widget> pageControls = <Widget>[
       stats,

@@ -9,7 +9,16 @@ class SafeUrl {
 
   static const Set<String> _web = <String>{'http', 'https'};
   static const Set<String> _link = <String>{'http', 'https', 'mailto'};
-  static const Set<String> _open = <String>{'http', 'https', 'mailto', 'tg'};
+  // weixin / alipay(s) 是微信与支付宝注册的 scheme，应用内唤起付款必须放行
+  static const Set<String> _open = <String>{
+    'http',
+    'https',
+    'mailto',
+    'tg',
+    'weixin',
+    'alipay',
+    'alipays',
+  };
 
   static bool _schemeIn(String url, Set<String> schemes) {
     final Uri? uri = Uri.tryParse(url.trim());

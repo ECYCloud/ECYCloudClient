@@ -26,6 +26,41 @@ class InstalledApp {
   final bool system;
 }
 
+class TrayLabels {
+  const TrayLabels({
+    required this.connect,
+    required this.disconnect,
+    required this.cancel,
+    required this.systemProxy,
+    required this.tun,
+    required this.show,
+    required this.quit,
+  });
+
+  final String connect;
+  final String disconnect;
+  final String cancel;
+  final String systemProxy;
+  final String tun;
+  final String show;
+  final String quit;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TrayLabels &&
+      other.connect == connect &&
+      other.disconnect == disconnect &&
+      other.cancel == cancel &&
+      other.systemProxy == systemProxy &&
+      other.tun == tun &&
+      other.show == show &&
+      other.quit == quit;
+
+  @override
+  int get hashCode =>
+      Object.hash(connect, disconnect, cancel, systemProxy, tun, show, quit);
+}
+
 class TrayState {
   const TrayState({
     required this.connected,
@@ -33,6 +68,7 @@ class TrayState {
     required this.systemProxyEnabled,
     required this.tunEnabled,
     required this.darkMenu,
+    required this.labels,
   });
 
   final bool connected;
@@ -42,6 +78,7 @@ class TrayState {
 
   // Win32 弹出菜单不走 Flutter 主题，明暗只能由原生侧另行设置
   final bool darkMenu;
+  final TrayLabels labels;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'connected': connected,
@@ -49,6 +86,13 @@ class TrayState {
     'system_proxy': systemProxyEnabled,
     'tun': tunEnabled,
     'dark': darkMenu,
+    'label_connect': labels.connect,
+    'label_disconnect': labels.disconnect,
+    'label_cancel': labels.cancel,
+    'label_system_proxy': labels.systemProxy,
+    'label_tun': labels.tun,
+    'label_show': labels.show,
+    'label_quit': labels.quit,
   };
 
   @override
@@ -58,11 +102,18 @@ class TrayState {
       other.busy == busy &&
       other.systemProxyEnabled == systemProxyEnabled &&
       other.tunEnabled == tunEnabled &&
-      other.darkMenu == darkMenu;
+      other.darkMenu == darkMenu &&
+      other.labels == labels;
 
   @override
-  int get hashCode =>
-      Object.hash(connected, busy, systemProxyEnabled, tunEnabled, darkMenu);
+  int get hashCode => Object.hash(
+    connected,
+    busy,
+    systemProxyEnabled,
+    tunEnabled,
+    darkMenu,
+    labels,
+  );
 }
 
 // 不叫 PlatformException，避免与 package:flutter/services.dart 同名类冲突
@@ -129,7 +180,11 @@ abstract class PlatformService {
   /// 以管理员权限启动客户端安装包，返回 false 表示用户拒绝了提权
   Future<bool> runInstaller(String path);
 
-  Future<void> openUrl(String url);
+  /// 返回 false 表示系统里没有能接手该链接的程序（如未安装支付 App），调用方需降级
+  Future<bool> openUrl(String url);
+
+  /// 用系统文件管理器打开本地目录。路径不存在或系统拒绝时返回 false
+  Future<bool> openDirectory(String path);
 
   Future<String> protectSecret(String name, String plaintext);
 

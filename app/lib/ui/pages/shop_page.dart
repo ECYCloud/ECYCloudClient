@@ -11,12 +11,15 @@ import '../format.dart';
 import '../shell_navigator.dart';
 import '../theme.dart';
 import '../widgets/page_header.dart';
+import '../widgets/payment_wait_dialog.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/rich_html_view.dart';
 import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
 import 'purchases_page.dart';
+import 'recharge_page.dart';
+import '../../l10n/l10n.dart';
 
 enum _PayMethod { balance, alipay, wxpay }
 
@@ -25,6 +28,12 @@ extension on _PayMethod {
     _PayMethod.balance => '',
     _PayMethod.alipay => 'alipay',
     _PayMethod.wxpay => 'wxpay',
+  };
+
+  String get label => switch (this) {
+    _PayMethod.balance => L10n.t('余额'),
+    _PayMethod.alipay => L10n.t('支付宝'),
+    _PayMethod.wxpay => L10n.t('微信'),
   };
 }
 
@@ -36,7 +45,7 @@ class ShopPage extends StatefulWidget {
 }
 
 class _ShopPageState extends State<ShopPage> {
-  static const List<(String, String)> _tabs = <(String, String)>[
+  static const List<(String, String)> _tabKeys = <(String, String)>[
     ('plan', '套餐'),
     ('traffic_package', '流量包'),
     ('card_key', '卡密'),
@@ -190,7 +199,7 @@ class _ShopPageState extends State<ShopPage> {
     }
     if (_cooldownRemaining > 0) {
       await _showMessage(
-        '您在24小时内已购买过套餐了，请在 ${_cooldownText(_cooldownRemaining)} 后再购买新套餐。',
+        L10n.t('您在24小时内已购买过套餐了，请在 {0} 后再购买新套餐。', <Object>[_cooldownText(_cooldownRemaining)]),
       );
       return;
     }
@@ -222,6 +231,7 @@ class _ShopPageState extends State<ShopPage> {
         return;
       }
       await _submit(
+        order.method,
         () => api.buyPlan(
           shop: product.id,
           coupon: order.coupon,
@@ -243,8 +253,8 @@ class _ShopPageState extends State<ShopPage> {
     try {
       final ProductQuote quote = await api.fetchTrafficPackageQuote(product.id);
       final _PayMethod? method = await _confirmSimpleOrder(
-        title: '流量包订单确认',
-        note: '流量包仅限在当前套餐效期内使用',
+        title: L10n.t('流量包订单确认'),
+        note: L10n.t('流量包仅限在当前套餐效期内使用'),
         quote: quote,
         alwaysShowStock: false,
       );
@@ -252,6 +262,7 @@ class _ShopPageState extends State<ShopPage> {
         return;
       }
       await _submit(
+        method,
         () =>
             api.buyTrafficPackage(shop: product.id, epayType: method.epayType),
       );
@@ -268,7 +279,7 @@ class _ShopPageState extends State<ShopPage> {
     try {
       final ProductQuote quote = await api.fetchCardKeyQuote(product.id);
       final _PayMethod? method = await _confirmSimpleOrder(
-        title: '卡密商品订单确认',
+        title: L10n.t('卡密商品订单确认'),
         note: '',
         quote: quote,
         alwaysShowStock: true,
@@ -277,6 +288,7 @@ class _ShopPageState extends State<ShopPage> {
         return;
       }
       await _submit(
+        method,
         () => api.buyCardKey(shop: product.id, epayType: method.epayType),
       );
     } on ApiException catch (e) {
@@ -305,14 +317,17 @@ class _ShopPageState extends State<ShopPage> {
     );
   }
 
-  Future<void> _submit(Future<ShopPurchaseResult> Function() request) async {
+  Future<void> _submit(
+    _PayMethod method,
+    Future<ShopPurchaseResult> Function() request,
+  ) async {
     try {
       final ShopPurchaseResult result = await request();
       if (!mounted) {
         return;
       }
       if (result.needsOnlinePayment) {
-        await _payOnline(result);
+        await _payOnline(result, method);
         return;
       }
       await _showMessage(result.message, cardKey: result.cardKey);
@@ -322,26 +337,23 @@ class _ShopPageState extends State<ShopPage> {
     }
   }
 
-  Future<void> _payOnline(ShopPurchaseResult result) async {
+  Future<void> _payOnline(ShopPurchaseResult result, _PayMethod method) async {
     final PanelApiClient? api = _api;
     if (api == null) {
-      return;
-    }
-    await AppScope.of(context).platform.openUrl(result.paymentUrl);
-    if (!mounted) {
       return;
     }
     final PaymentStatus? status = await showDialog<PaymentStatus>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) => _PaymentWaitDialog(
+      builder: (BuildContext context) => PaymentWaitDialog(
         api: api,
-        tradeNo: result.tradeNo,
-        paymentUrl: result.paymentUrl,
+        result: result,
+        methodLabel: method.label,
+        timeoutHint: L10n.t('长时间未收到支付结果，可稍后在购买记录中确认。'),
       ),
     );
     if (status != null) {
-      await _showMessage('支付成功，订单已到账。', cardKey: status.cardKey);
+      await _showMessage(L10n.t('支付成功，订单已到账。'), cardKey: status.cardKey);
     }
     await _refreshAfterPurchase();
   }
@@ -353,6 +365,18 @@ class _ShopPageState extends State<ShopPage> {
     final AppScope scope = AppScope.of(context);
     await _load();
     await scope.auth.refreshProfile();
+  }
+
+  Future<void> _openRecharge() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const RechargePage(),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    await _refreshAfterPurchase();
   }
 
   Future<void> _showMessage(String message, {String cardKey = ''}) async {
@@ -372,13 +396,13 @@ class _ShopPageState extends State<ShopPage> {
     final int minutes = seconds % 3600 ~/ 60;
     final int rest = seconds % 60;
     if (hours > 0) {
-      text.write('$hours小时');
+      text.write(L10n.t('{0}小时', <Object>[hours]));
     }
     if (minutes > 0) {
-      text.write('$minutes分钟');
+      text.write(L10n.t('{0}分钟', <Object>[minutes]));
     }
     if (rest > 0) {
-      text.write('$rest秒');
+      text.write(L10n.t('{0}秒', <Object>[rest]));
     }
     return text.toString();
   }
@@ -390,17 +414,10 @@ class _ShopPageState extends State<ShopPage> {
     return Column(
       children: <Widget>[
         PageHeader(
-          title: '商店',
+          title: L10n.t('商店'),
           showUserAvatar: true,
           actions: <Widget>[
-            if (catalog != null)
-              TagChip(
-                icon: Icons.account_balance_wallet_outlined,
-                label: '余额 ¥ ${catalog.money.toStringAsFixed(2)}',
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            const SizedBox(width: PageHeader.actionGap),
-            RefreshButton(tooltip: '刷新商品', onRefresh: _load),
+            RefreshButton(tooltip: L10n.t('刷新商品'), onRefresh: _load),
           ],
         ),
         Expanded(
@@ -422,7 +439,7 @@ class _ShopPageState extends State<ShopPage> {
           else if (_error != null)
             Text(_error!, textAlign: TextAlign.center)
           else
-            const Center(child: Text('暂无商品')),
+            Center(child: Text(L10n.t('暂无商品'))),
         ],
       );
     }
@@ -443,15 +460,29 @@ class _ShopPageState extends State<ShopPage> {
       padding: const EdgeInsets.all(14),
       children: <Widget>[
         SectionCard(
+          icon: Icons.account_balance_wallet_outlined,
+          title: L10n.t('账户余额'),
+          action: TextButton(
+            style: AppTheme.inlineTextLink(theme.colorScheme),
+            onPressed: () => unawaited(_openRecharge()),
+            child: Text(L10n.t('余额充值')),
+          ),
+          child: InfoRow(
+            label: L10n.t('当前余额'),
+            value: '¥ ${catalog.money.toStringAsFixed(2)}',
+          ),
+        ),
+        const SizedBox(height: 12),
+        SectionCard(
           icon: Icons.info_outline,
-          title: '注意事项',
+          title: L10n.t('注意事项'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               _ShopNotice(
                 icon: Icons.campaign_outlined,
                 child: Text(
-                  '每周六日所有的套餐、流量包将进行9折促销。',
+                  L10n.t('每周六日所有的套餐、流量包将进行9折促销。'),
                   style: noticeStyle?.copyWith(
                     color: theme.colorScheme.error,
                     fontWeight: FontWeight.w600,
@@ -463,44 +494,44 @@ class _ShopPageState extends State<ShopPage> {
                 child: Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    Text('接独享节点定制，请 ', style: noticeStyle),
+                    Text(L10n.t('接独享节点定制，请 '), style: noticeStyle),
                     TextButton(
                       style: AppTheme.inlineTextLink(theme.colorScheme),
                       onPressed: () => ShellNavigator.go(
                         context,
                         ShellNavigator.ticketsTab,
                       ),
-                      child: const Text('提交工单'),
+                      child: Text(L10n.t('提交工单')),
                     ),
                     Text(
-                      ' 发送需求。请说明你的使用场景/需求，需要定制的地区，是否要优化线路等。',
+                      L10n.t(' 发送需求。请说明你的使用场景/需求，需要定制的地区，是否要优化线路等。'),
                       style: noticeStyle,
                     ),
                   ],
                 ),
               ),
-              const _ShopNotice(
+              _ShopNotice(
                 icon: Icons.campaign_outlined,
-                child: Text('旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。'),
+                child: Text(L10n.t('旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。')),
               ),
-              const _ShopNotice(
+              _ShopNotice(
                 icon: Icons.campaign_outlined,
-                child: Text('流量不够用可以购买流量包，可和套餐流量叠加。'),
+                child: Text(L10n.t('流量不够用可以购买流量包，可和套餐流量叠加。')),
               ),
-              const _ShopNotice(
+              _ShopNotice(
                 icon: Icons.campaign_outlined,
-                child: Text('购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。'),
+                child: Text(L10n.t('购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。')),
               ),
-              const _ShopNotice(
+              _ShopNotice(
                 icon: Icons.campaign_outlined,
-                child: Text('套餐内流量、流量包仅限在当前套餐有效期内使用，过期即失效。'),
+                child: Text(L10n.t('套餐内流量、流量包仅限在当前套餐有效期内使用，过期即失效。')),
               ),
               _ShopNotice(
                 icon: Icons.campaign_outlined,
                 child: Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    Text('自动续费可在 ', style: noticeStyle),
+                    Text(L10n.t('自动续费可在 '), style: noticeStyle),
                     TextButton(
                       style: AppTheme.inlineTextLink(theme.colorScheme),
                       onPressed: () => Navigator.of(context).push(
@@ -509,9 +540,9 @@ class _ShopPageState extends State<ShopPage> {
                               const PurchasesPage(),
                         ),
                       ),
-                      child: const Text('购买记录'),
+                      child: Text(L10n.t('购买记录')),
                     ),
-                    Text(' 中关闭。', style: noticeStyle),
+                    Text(L10n.t(' 中关闭。'), style: noticeStyle),
                   ],
                 ),
               ),
@@ -522,8 +553,11 @@ class _ShopPageState extends State<ShopPage> {
         Center(
           child: SegmentedButton<String>(
             segments: <ButtonSegment<String>>[
-              for (final (String type, String label) in _tabs)
-                ButtonSegment<String>(value: type, label: Text(label)),
+              for (final (String type, String label) in _tabKeys)
+                ButtonSegment<String>(
+                  value: type,
+                  label: Text(L10n.t(label)),
+                ),
             ],
             selected: <String>{_tab},
             onSelectionChanged: (Set<String> selection) =>
@@ -539,7 +573,7 @@ class _ShopPageState extends State<ShopPage> {
                 for (final int duration in durations)
                   ButtonSegment<int>(
                     value: duration,
-                    label: Text('$duration天'),
+                    label: Text(L10n.t('{0}天', <Object>[duration])),
                   ),
               ],
               selected: <int>{_duration},
@@ -562,9 +596,9 @@ class _ShopPageState extends State<ShopPage> {
             },
         ]),
         if (products.isEmpty)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 60),
-            child: Center(child: Text('暂无商品')),
+            child: Center(child: Text(L10n.t('暂无商品'))),
           ),
       ],
     );
@@ -683,13 +717,15 @@ class _PlanCard extends StatelessWidget {
                 ),
                 if (product.classExpire > 1 && !unlimitedExpire)
                   Text(
-                    '≈ ${(product.amount / product.classExpire).toStringAsFixed(2)} 元 / 天',
+                    L10n.t('≈ {0} 元 / 天', <Object>[
+                      (product.amount / product.classExpire).toStringAsFixed(2),
+                    ]),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall,
                   ),
                 if (product.hasLimitedSale)
                   Text(
-                    '原价 ¥ ${product.basePrice}',
+                    L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       decoration: TextDecoration.lineThrough,
@@ -700,17 +736,17 @@ class _PlanCard extends StatelessWidget {
                   children: <Widget>[
                     for (final (String label, String value)
                         in <(String, String)>[
-                          ('等级', 'VIP ${product.userClass}'),
+                          (L10n.t('等级'), 'VIP ${product.userClass}'),
                           (
-                            '在线IP数',
+                            L10n.t('在线IP数'),
                             product.connector == 0
-                                ? '无限制'
-                                : '${product.connector} 个',
+                                ? L10n.t('无限制')
+                                : L10n.t('{0} 个', <Object>[product.connector]),
                           ),
                           (
-                            '网络速率',
+                            L10n.t('网络速率'),
                             product.speedLimit == 0
-                                ? '无限制'
+                                ? L10n.t('无限制')
                                 : '${Format.number(product.speedLimit)} Mbps',
                           ),
                         ])
@@ -735,13 +771,13 @@ class _PlanCard extends StatelessWidget {
                 // 列宽不一致就会出现与上方内容错位的视觉效果
                 for (final (String label, String value) in <(String, String)>[
                   (
-                    'VIP有效期',
-                    unlimitedExpire ? '不限时' : '${product.classExpire} 天',
+                    L10n.t('VIP有效期'),
+                    unlimitedExpire ? L10n.t('不限时') : L10n.t('{0} 天', <Object>[product.classExpire]),
                   ),
                   (
-                    product.classExpire == 1 ? '试用流量' : '每月流量',
+                    product.classExpire == 1 ? L10n.t('试用流量') : L10n.t('每月流量'),
                     product.bandwidth == 10000
-                        ? '无限制'
+                        ? L10n.t('无限制')
                         : '${Format.number(product.bandwidth)} GB',
                   ),
                 ])
@@ -797,7 +833,7 @@ class _PlanCard extends StatelessWidget {
                 const SizedBox(height: 14),
                 FilledButton(
                   onPressed: product.inStock ? () => onBuy(product) : null,
-                  child: Text(product.inStock ? '购买' : '已售罄'),
+                  child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
                 ),
               ],
             ),
@@ -841,7 +877,7 @@ class _CompactCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                '原价 ¥ ${product.basePrice}',
+                L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
                 style: theme.textTheme.bodySmall?.copyWith(
                   decoration: TextDecoration.lineThrough,
                   color: theme.colorScheme.onSurfaceVariant,
@@ -855,7 +891,7 @@ class _CompactCard extends StatelessWidget {
             Theme(
               data: theme.copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
-                title: Text('商品描述', style: theme.textTheme.bodySmall),
+                title: Text(L10n.t('商品描述'), style: theme.textTheme.bodySmall),
                 tilePadding: EdgeInsets.zero,
                 childrenPadding: const EdgeInsets.only(bottom: 8),
                 expandedCrossAxisAlignment: CrossAxisAlignment.start,
@@ -866,7 +902,7 @@ class _CompactCard extends StatelessWidget {
           const SizedBox(height: 10),
           FilledButton(
             onPressed: product.inStock ? () => onBuy(product) : null,
-            child: Text(product.inStock ? '购买' : '已售罄'),
+            child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
           ),
         ],
       ),
@@ -898,7 +934,7 @@ class _ProductChips extends StatelessWidget {
       children: <Widget>[
         TagChip(
           icon: Icons.inventory_2_outlined,
-          label: '库存${product.stock}',
+          label: L10n.t('库存{0}', <Object>[product.stock]),
           color: product.inStock ? AppTheme.success : AppTheme.danger,
         ),
         if (product.isTrafficPackage)
@@ -910,21 +946,21 @@ class _ProductChips extends StatelessWidget {
         TagChip(
           icon: Icons.shopping_cart_outlined,
           label: product.purchaseLimit > 0
-              ? '限购${product.purchaseLimit}次'
-              : '不限购',
+              ? L10n.t('限购{0}次', <Object>[product.purchaseLimit])
+              : L10n.t('不限购'),
         ),
         if (product.newUserDaysLimit > 0)
           TagChip(
             icon: Icons.person_add_alt,
-            label: '需注册未满${product.newUserDaysLimit}天',
+            label: L10n.t('需注册未满{0}天', <Object>[product.newUserDaysLimit]),
           )
         else if (product.minRegistrationDays > 0)
           TagChip(
             icon: Icons.person_add_alt,
-            label: '需注册满${product.minRegistrationDays}天',
+            label: L10n.t('需注册满{0}天', <Object>[product.minRegistrationDays]),
           )
         else if (alwaysShowRegistration)
-          const TagChip(icon: Icons.person_add_alt, label: '不限注册天数'),
+          TagChip(icon: Icons.person_add_alt, label: L10n.t('不限注册天数')),
         for (final ShopCountdown countdown in product.countdowns)
           TagChip(
             icon: Icons.schedule,
@@ -938,13 +974,13 @@ class _ProductChips extends StatelessWidget {
 
   static String _countdownText(Duration remaining) {
     if (remaining.isNegative) {
-      return '00天00时00分00秒';
+      return L10n.t('00天00时00分00秒');
     }
     final String days = '${remaining.inDays}'.padLeft(2, '0');
     final String hours = '${remaining.inHours % 24}'.padLeft(2, '0');
     final String minutes = '${remaining.inMinutes % 60}'.padLeft(2, '0');
     final String seconds = '${remaining.inSeconds % 60}'.padLeft(2, '0');
-    return '$days天$hours时$minutes分$seconds秒';
+    return L10n.t('{0}天{1}时{2}分{3}秒', <Object>[days, hours, minutes, seconds]);
   }
 }
 
@@ -1007,12 +1043,12 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
   Future<void> _applyCoupon() async {
     final String coupon = _coupon.text.trim();
     if (coupon.isEmpty) {
-      setState(() => _couponMsg = '请输入优惠码');
+      setState(() => _couponMsg = L10n.t('请输入优惠码'));
       return;
     }
     setState(() {
       _applying = true;
-      _couponMsg = '正在验证优惠码...';
+      _couponMsg = L10n.t('正在验证优惠码...');
     });
     try {
       final PlanQuote quote = await widget.api.fetchPlanQuote(
@@ -1035,9 +1071,9 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
         _couponMsg = quote.couponMsg.isNotEmpty
             ? quote.couponMsg
             : quote.couponApplied && quote.credit > 0
-            ? '优惠码应用成功，优惠 ${quote.credit}%'
+            ? L10n.t('优惠码应用成功，优惠 {0}%', <Object>[quote.credit])
             : quote.couponApplied
-            ? '优惠码应用成功'
+            ? L10n.t('优惠码应用成功')
             : '';
         _method = _PaymentPicker.initial(quote.amount, widget.balance);
       });
@@ -1058,7 +1094,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
     final PlanQuote quote = _quote;
 
     return AlertDialog(
-      title: const Text('套餐订单确认'),
+      title: Text(L10n.t('套餐订单确认')),
       content: SizedBox(
         width: 460,
         child: SingleChildScrollView(
@@ -1066,7 +1102,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text('商品名称：${quote.name}'),
+              Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
               const SizedBox(height: 4),
               Text(
                 _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
@@ -1074,17 +1110,25 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
               ),
               if (quote.hasStockLimit) ...<Widget>[
                 const SizedBox(height: 4),
-                Text('库存：${quote.stock}'),
+                Text(L10n.t('库存：{0}', <Object>[quote.stock])),
               ],
               if (quote.hasTrafficResetFee) ...<Widget>[
                 const SizedBox(height: 10),
                 _DetailBlock(
-                  title: '流量重置费用',
+                  title: L10n.t('流量重置费用'),
                   lines: <String>[
-                    '现有套餐：${quote.trafficCurrentShopName} 已使用：${Format.bytes(quote.trafficUsed)} / ${Format.bytes(quote.trafficTotal)}（${quote.trafficUsagePercent.toStringAsFixed(2)}%）',
-                    '新套餐：${quote.name} 计费基准价：${quote.trafficBillingBasePrice} 元',
-                    '流量重置费：${quote.trafficBillingBasePrice} x ${quote.trafficFeePercent.toStringAsFixed(2)}%${quote.trafficFeeIsCapped ? '（费用上限）' : ''} = ${quote.trafficResetFee} 元',
-                    '费用规则：按已用流量比例计算，50% 封顶',
+                    L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[quote.trafficCurrentShopName, Format.bytes(quote.trafficUsed), Format.bytes(quote.trafficTotal), quote.trafficUsagePercent.toStringAsFixed(2)]),
+                    L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[quote.name, quote.trafficBillingBasePrice]),
+                    L10n.t(
+                      '流量重置费：{0} x {1}%{2} = {3} 元',
+                      <Object>[
+                        quote.trafficBillingBasePrice,
+                        quote.trafficFeePercent.toStringAsFixed(2),
+                        quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
+                        quote.trafficResetFee,
+                      ],
+                    ),
+                    L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
                   ],
                 ),
               ],
@@ -1092,7 +1136,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   quote.upgradeMsg.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 10),
                 _DetailBlock(
-                  title: '剩余价值抵扣',
+                  title: L10n.t('剩余价值抵扣'),
                   lines: <String>[quote.upgradeMsg],
                 ),
               ],
@@ -1102,9 +1146,9 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   Expanded(
                     child: TextField(
                       controller: _coupon,
-                      decoration: const InputDecoration(
-                        labelText: '优惠码',
-                        hintText: '如有优惠码请在此输入',
+                      decoration: InputDecoration(
+                        labelText: L10n.t('优惠码'),
+                        hintText: L10n.t('如有优惠码请在此输入'),
                         isDense: true,
                       ),
                     ),
@@ -1112,7 +1156,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   const SizedBox(width: 8),
                   OutlinedButton(
                     onPressed: _applying ? null : _applyCoupon,
-                    child: const Text('应用'),
+                    child: Text(L10n.t('应用')),
                   ),
                 ],
               ),
@@ -1131,7 +1175,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
               if (widget.product.autoRenew != 0)
                 SwitchTile(
                   icon: Icons.autorenew,
-                  title: '到期时自动续费',
+                  title: L10n.t('到期时自动续费'),
                   value: _autoRenew,
                   contentPadding: EdgeInsets.zero,
                   onChanged: (bool value) => setState(() => _autoRenew = value),
@@ -1143,7 +1187,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: _applying
@@ -1155,7 +1199,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                     method: quote.amount <= 0 ? _PayMethod.balance : _method,
                   ),
                 ),
-          child: const Text('购买'),
+          child: Text(L10n.t('购买')),
         ),
       ],
     );
@@ -1202,7 +1246,7 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
             Text(widget.note, style: theme.textTheme.bodySmall),
             const SizedBox(height: 8),
           ],
-          Text('商品名称：${quote.name}'),
+          Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
           const SizedBox(height: 4),
           Text(
             _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
@@ -1210,7 +1254,7 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
           ),
           if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
             const SizedBox(height: 4),
-            Text('库存：${quote.stock}'),
+            Text(L10n.t('库存：{0}', <Object>[quote.stock])),
           ],
           const SizedBox(height: 12),
           _PaymentPicker(
@@ -1225,13 +1269,13 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(
             context,
           ).pop(quote.amount <= 0 ? _PayMethod.balance : _method),
-          child: const Text('确定'),
+          child: Text(L10n.t('确定')),
         ),
       ],
     );
@@ -1266,23 +1310,23 @@ class _PaymentPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text('选择支付方式', style: theme.textTheme.titleSmall),
+        Text(L10n.t('选择支付方式'), style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         SegmentedButton<_PayMethod>(
           segments: <ButtonSegment<_PayMethod>>[
             ButtonSegment<_PayMethod>(
               value: _PayMethod.balance,
-              label: const Text('余额'),
+              label: Text(L10n.t('余额')),
               icon: const Icon(Icons.account_balance_wallet_outlined),
               enabled: affordable,
             ),
-            const ButtonSegment<_PayMethod>(
+            ButtonSegment<_PayMethod>(
               value: _PayMethod.alipay,
-              label: Text('支付宝'),
+              label: Text(L10n.t('支付宝')),
             ),
-            const ButtonSegment<_PayMethod>(
+            ButtonSegment<_PayMethod>(
               value: _PayMethod.wxpay,
-              label: Text('微信支付'),
+              label: Text(L10n.t('微信支付')),
             ),
           ],
           selected: <_PayMethod>{value},
@@ -1293,8 +1337,8 @@ class _PaymentPicker extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           affordable
-              ? '当前余额：¥ ${balance.toStringAsFixed(2)}'
-              : '当前余额：¥ ${balance.toStringAsFixed(2)}，余额不足，请选择在线支付',
+              ? L10n.t('当前余额：¥ {0}', <Object>[balance.toStringAsFixed(2)])
+              : L10n.t('当前余额：¥ {0}，余额不足，请选择在线支付', <Object>[balance.toStringAsFixed(2)]),
           style: theme.textTheme.bodySmall?.copyWith(
             color: affordable ? null : theme.colorScheme.error,
           ),
@@ -1336,115 +1380,6 @@ class _DetailBlock extends StatelessWidget {
   }
 }
 
-class _PaymentWaitDialog extends StatefulWidget {
-  const _PaymentWaitDialog({
-    required this.api,
-    required this.tradeNo,
-    required this.paymentUrl,
-  });
-
-  final PanelApiClient api;
-  final String tradeNo;
-  final String paymentUrl;
-
-  @override
-  State<_PaymentWaitDialog> createState() => _PaymentWaitDialogState();
-}
-
-class _PaymentWaitDialogState extends State<_PaymentWaitDialog> {
-  static const Duration _interval = Duration(seconds: 5);
-  static const Duration _limit = Duration(minutes: 5);
-
-  Timer? _timer;
-  DateTime _deadline = DateTime.now().add(_limit);
-  String _status = '等待支付结果…';
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(_interval, (_) => unawaited(_poll()));
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _poll() async {
-    if (DateTime.now().isAfter(_deadline)) {
-      _timer?.cancel();
-      if (mounted) {
-        setState(() => _status = '长时间未收到支付结果，可稍后在购买记录中确认。');
-      }
-      return;
-    }
-    try {
-      final PaymentStatus status = await widget.api.fetchPaymentStatus(
-        widget.tradeNo,
-      );
-      if (!mounted || !status.paid) {
-        return;
-      }
-      _timer?.cancel();
-      Navigator.of(context).pop(status);
-    } on ApiException catch (e) {
-      if (mounted) {
-        setState(() => _status = e.message);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('等待支付'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text('已在系统浏览器中打开支付页面，完成支付后订单会自动到账。'),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _status,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ],
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
-        ),
-        OutlinedButton(
-          onPressed: () => unawaited(
-            AppScope.of(context).platform.openUrl(widget.paymentUrl),
-          ),
-          child: const Text('重新打开支付页'),
-        ),
-        FilledButton(
-          onPressed: () {
-            _deadline = DateTime.now().add(_limit);
-            unawaited(_poll());
-          },
-          child: const Text('我已完成支付'),
-        ),
-      ],
-    );
-  }
-}
-
 class _MessageDialog extends StatelessWidget {
   const _MessageDialog({required this.message, required this.cardKey});
 
@@ -1454,7 +1389,7 @@ class _MessageDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('提示'),
+      title: Text(L10n.t('提示')),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1478,7 +1413,7 @@ class _MessageDialog extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: () => unawaited(_copy(context)),
                   icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('复制卡密'),
+                  label: Text(L10n.t('复制卡密')),
                 ),
               ),
             ],
@@ -1488,7 +1423,7 @@ class _MessageDialog extends StatelessWidget {
       actions: <Widget>[
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('我知道了'),
+          child: Text(L10n.t('我知道了')),
         ),
       ],
     );
@@ -1500,8 +1435,8 @@ class _MessageDialog extends StatelessWidget {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已复制卡密'),
+      SnackBar(
+        content: Text(L10n.t('已复制卡密')),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -1523,5 +1458,9 @@ class _MessageDialog extends StatelessWidget {
 
 String _totalText(String total, String basePrice, bool hasLimitedSale) =>
     basePrice.isNotEmpty && basePrice != total
-    ? '总金额：$total 元（${hasLimitedSale ? '限时价格' : '原价'}：$basePrice 元）'
-    : '总金额：$total 元';
+    ? L10n.t('总金额：{0} 元（{1}：{2} 元）', <Object>[
+        total,
+        hasLimitedSale ? L10n.t('限时价格') : L10n.t('原价'),
+        basePrice,
+      ])
+    : L10n.t('总金额：{0} 元', <Object>[total]);

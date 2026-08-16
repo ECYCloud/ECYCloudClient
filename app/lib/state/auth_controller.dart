@@ -9,6 +9,7 @@ import '../data/models/user_profile.dart';
 import '../data/store/credential_store.dart';
 import '../data/store/panel_response_cache.dart';
 import '../domain/platform/platform_service.dart';
+import '../l10n/l10n.dart';
 
 enum AuthStage {
   unknown,
@@ -339,6 +340,17 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<String> fetchTos() async {
+    final PanelApiClient client = await _clientForRequest();
+    try {
+      return await client.fetchTos();
+    } finally {
+      if (!identical(client, _api)) {
+        client.close();
+      }
+    }
+  }
+
   Future<bool> sendRegisterVerify({required String email}) async {
     _busy = true;
     _error = null;
@@ -441,7 +453,7 @@ class AuthController extends ChangeNotifier {
         _api = null;
         await _clearSessionSecret();
         _busy = false;
-        _error = '登录响应缺少用户资料';
+        _error = L10n.t('登录响应缺少用户资料');
         _set(AuthStage.loggedOut);
         return false;
       }
@@ -461,7 +473,7 @@ class AuthController extends ChangeNotifier {
     } catch (e) {
       client.close();
       _busy = false;
-      _error = '登录失败：$e';
+      _error = L10n.t('登录失败：{0}', <Object>['$e']);
       _set(AuthStage.loggedOut);
       return false;
     }
@@ -484,7 +496,7 @@ class AuthController extends ChangeNotifier {
   Future<String> cancelAccountDeletion() async {
     final PanelApiClient? client = _api;
     if (client == null) {
-      throw ApiException('未登录');
+      throw ApiException(L10n.t('未登录'));
     }
     final ({String message, AccountStatus status, UserProfile profile}) result =
         await client.cancelAccountDeletion();
@@ -533,7 +545,7 @@ class AuthController extends ChangeNotifier {
   Future<String> checkin() async {
     final PanelApiClient? client = _api;
     if (client == null) {
-      throw ApiException('未登录');
+      throw ApiException(L10n.t('未登录'));
     }
     final ({String message, UserProfile profile}) result =
         await client.checkin();
@@ -573,7 +585,7 @@ class AuthController extends ChangeNotifier {
     final DateTime? until = _profileCooldownUntil;
     if (until != null && DateTime.now().isBefore(until)) {
       throw ApiException(
-        '请求过于频繁，请稍后再试',
+        L10n.t('请求过于频繁，请稍后再试'),
         statusCode: 429,
         retryAfterSeconds: until
             .difference(DateTime.now())

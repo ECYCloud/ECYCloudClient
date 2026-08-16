@@ -10,6 +10,7 @@ import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/simple_data_table.dart';
+import '../../l10n/l10n.dart';
 
 class LoginLogsPage extends StatefulWidget {
   const LoginLogsPage({super.key});
@@ -71,7 +72,7 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -86,11 +87,11 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '登录记录',
+              title: L10n.t('登录记录'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -99,7 +100,7 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '最近 $_logKeepDays 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。',
+                L10n.t('最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。', <Object>[_logKeepDays]),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -134,15 +135,15 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
                       padding: const EdgeInsets.all(14),
                       children: <Widget>[
                         SimpleDataTable(
-                          columns: const <String>[
-                            '登录IP',
-                            '归属地',
-                            '设备',
-                            '状态',
-                            '登录方式',
-                            '登录时间',
+                          columns: <String>[
+                            L10n.t('登录IP'),
+                            L10n.t('归属地'),
+                            L10n.t('设备'),
+                            L10n.t('状态'),
+                            L10n.t('登录方式'),
+                            L10n.t('登录时间'),
                           ],
-                          emptyText: '最近 $_logKeepDays 天内还没有登录记录',
+                          emptyText: L10n.t('最近 {0} 天内还没有登录记录', <Object>[_logKeepDays]),
                           rows: <List<Widget>>[
                             for (final LoginLogItem item in _items)
                               <Widget>[

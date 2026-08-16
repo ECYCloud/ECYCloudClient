@@ -9,6 +9,8 @@ import '../../domain/kernel/clash_api_client.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/announcement_controller.dart';
 import '../../state/auth_controller.dart';
+import '../../l10n/app_language.dart';
+import '../../l10n/l10n.dart';
 import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../format.dart';
@@ -91,8 +93,8 @@ class _HomePageState extends State<HomePage> {
 
         return Column(
           children: <Widget>[
-            const PageHeader(
-              title: '首页',
+            PageHeader(
+              title: L10n.t('首页'),
               showUserAvatar: true,
             ),
             Expanded(
@@ -239,17 +241,21 @@ class _ConnectionCard extends StatelessWidget {
     final String detail = switch (phase) {
       ConnectionPhase.connected =>
         connection.connectedAt == null
-            ? '已连接'
-            : '已连接 ${Format.duration(DateTime.now().difference(connection.connectedAt!))}',
+            ? L10n.t('已连接')
+            : L10n.t('已连接 {0}', <Object>[
+                Format.duration(
+                  DateTime.now().difference(connection.connectedAt!),
+                ),
+              ]),
       ConnectionPhase.connecting =>
         connection.error ??
             connection.startupStage ??
             (connection.kernelCacheReady
-                ? '正在启动内核，请稍候'
-                : '首次连接需下载分流规则集，可能耗时较久，请勿关闭'),
-      ConnectionPhase.disconnecting => '正在断开连接，请稍候',
-      ConnectionPhase.failed => connection.error ?? '连接失败',
-      ConnectionPhase.disconnected => '点击右侧按钮开始连接',
+                ? L10n.t('正在启动内核，请稍候')
+                : L10n.t('首次连接需下载分流规则集，可能耗时较久，请勿关闭')),
+      ConnectionPhase.disconnecting => L10n.t('正在断开连接，请稍候'),
+      ConnectionPhase.failed => connection.error ?? L10n.t('连接失败'),
+      ConnectionPhase.disconnected => L10n.t('点击右侧按钮开始连接'),
     };
 
     return Card(
@@ -309,9 +315,13 @@ class _ConnectionCard extends StatelessWidget {
                     FilledButton.icon(
                       onPressed: disconnecting
                           ? null
-                          : () => connected || connecting
-                                ? connection.disconnect()
-                                : connection.connect(),
+                          : () {
+                              if (connected || connecting) {
+                                unawaited(connection.disconnect());
+                                return;
+                              }
+                              unawaited(connection.connect());
+                            },
                       icon: Icon(
                         disconnecting || connecting
                             ? Icons.close
@@ -322,12 +332,14 @@ class _ConnectionCard extends StatelessWidget {
                       ),
                       label: Text(
                         disconnecting
-                            ? '断开中'
+                            ? L10n.t('断开中')
                             : connecting
-                            ? '取消'
+                            ? L10n.t('取消')
                             : connected
-                            ? '断开'
-                            : '连接',
+                            ? L10n.t('断开')
+                            : L10n.current == AppLanguage.en
+                            ? 'Connect'
+                            : L10n.t('连接'),
                       ),
                       style: connected || disconnecting
                           ? FilledButton.styleFrom(
@@ -341,7 +353,7 @@ class _ConnectionCard extends StatelessWidget {
                       backgroundColor: const Color(0xFFE53935),
                       smallSize: 8,
                       child: IconButton(
-                        tooltip: '网站公告',
+                        tooltip: L10n.t('网站公告'),
                         onPressed: () => unawaited(
                           showAnnouncementBrowser(
                             context,
@@ -407,7 +419,10 @@ class _ModeSelector extends StatelessWidget {
     return SegmentedButton<String>(
       segments: <ButtonSegment<String>>[
         for (final MapEntry<String, String> entry in _modes.entries)
-          ButtonSegment<String>(value: entry.key, label: Text(entry.value)),
+          ButtonSegment<String>(
+            value: entry.key,
+            label: Text(L10n.t(entry.value)),
+          ),
       ],
       selected: <String>{
         _modes.containsKey(connection.routeMode)
@@ -442,10 +457,10 @@ class _ProxyToggles extends StatelessWidget {
             Expanded(
               child: SwitchTile(
                 icon: Icons.public,
-                title: '系统代理',
+                title: L10n.t('系统代理'),
                 subtitle: active
-                    ? '本机 ${settings.mixedPort} 端口'
-                    : '仅连接后占用，当前未生效',
+                    ? L10n.t('本机 {0} 端口', <Object>[settings.mixedPort])
+                    : L10n.t('仅连接后占用，当前未生效'),
                 value: settings.systemProxyEnabled,
                 onChanged: (bool value) => connection.updateSettings(
                   settings.copyWith(systemProxyEnabled: value),
@@ -460,12 +475,12 @@ class _ProxyToggles extends StatelessWidget {
           Expanded(
             child: SwitchTile(
               icon: Icons.lan_outlined,
-              title: 'TUN 模式',
+              title: L10n.t('TUN 模式'),
               subtitle: tunLocked
-                  ? 'Android 由系统 VPN 接管，始终开启'
+                  ? L10n.t('Android 由系统 VPN 接管，始终开启')
                   : active
-                  ? '接管系统全部流量'
-                  : '仅连接后占用，当前未生效',
+                  ? L10n.t('接管系统全部流量')
+                  : L10n.t('仅连接后占用，当前未生效'),
               value: settings.tunEnabled,
               onChanged: tunLocked
                   ? null
@@ -520,12 +535,12 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('提示'),
+        title: Text(L10n.t('提示')),
         content: Text(message),
         actions: <Widget>[
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('我知道了'),
+            child: Text(L10n.t('我知道了')),
           ),
         ],
       ),
@@ -541,9 +556,9 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
     if (user == null) {
       return SectionCard(
         icon: Icons.pie_chart_outline,
-        title: '流量使用情况',
+        title: L10n.t('流量使用情况'),
         action: RefreshButton(
-          tooltip: '刷新流量',
+          tooltip: L10n.t('刷新流量'),
           onRefresh: auth.refreshProfile,
         ),
         child: const Text('—'),
@@ -555,12 +570,12 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
 
     return SectionCard(
       icon: Icons.pie_chart_outline,
-      title: '流量使用情况',
+      title: L10n.t('流量使用情况'),
       action: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           RefreshButton(
-            tooltip: '刷新流量',
+            tooltip: L10n.t('刷新流量'),
             onRefresh: auth.refreshProfile,
           ),
           TextButton(
@@ -569,7 +584,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
                 builder: (BuildContext context) => const TrafficLogPage(),
               ),
             ),
-            child: const Text('流量明细 ›'),
+            child: Text(L10n.t('流量明细 ›')),
           ),
         ],
       ),
@@ -577,7 +592,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           _TrafficBarRow(
-            label: '今日已使用',
+            label: L10n.t('今日已使用'),
             value: Format.bytes(user.todayUsed).replaceAll(' ', ''),
             ratio: user.ratioOf(user.todayUsed),
             barColor: AppTheme.danger,
@@ -585,7 +600,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           ),
           const SizedBox(height: 10),
           _TrafficBarRow(
-            label: '之前已使用',
+            label: L10n.t('之前已使用'),
             value: Format.bytes(user.lastUsed).replaceAll(' ', ''),
             ratio: user.ratioOf(user.lastUsed),
             barColor: AppTheme.warning,
@@ -593,7 +608,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           ),
           const SizedBox(height: 10),
           _TrafficBarRow(
-            label: '剩余流量',
+            label: L10n.t('剩余流量'),
             value: remainText,
             ratio: user.ratioOf(remainBytes > 0 ? remainBytes : 0),
             barColor: remainBytes < 0 ? AppTheme.danger : AppTheme.success,
@@ -606,7 +621,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           Row(
             children: <Widget>[
               Expanded(
-                child: Text('账户总流量', style: theme.textTheme.bodyMedium),
+                child: Text(L10n.t('账户总流量'), style: theme.textTheme.bodyMedium),
               ),
               TagChip(
                 label: Format.bytes(user.transferEnable).replaceAll(' ', ''),
@@ -619,17 +634,17 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
-                '流量不够用？前往 ',
+                L10n.t('流量不够用？前往 '),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               TextButton(
                 onPressed: () => ShellNavigator.openShopTraffic(context),
-                child: const Text('商店 ›'),
+                child: Text(L10n.t('商店 ›')),
               ),
               Text(
-                ' 选购流量包',
+                L10n.t(' 选购流量包'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -639,24 +654,24 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           const SizedBox(height: 10),
           _TrafficMetaRow(
             icon: Icons.today_outlined,
-            label: '下次重置已使用流量日期',
+            label: L10n.t('下次重置已使用流量日期'),
             value: user.trafficReset.isEmpty ? '—' : user.trafficReset,
           ),
           _TrafficMetaRow(
             icon: Icons.schedule_outlined,
-            label: '上次使用时间',
-            value: user.lastSsTime,
+            label: L10n.t('上次使用时间'),
+            value: L10n.t(user.lastSsTime),
           ),
           if (user.enableCheckin)
             _TrafficMetaRow(
               icon: Icons.calendar_month_outlined,
-              label: '上次签到时间',
-              value: user.lastCheckInTime,
+              label: L10n.t('上次签到时间'),
+              value: L10n.t(user.lastCheckInTime),
             ),
           if (user.enableCheckin) ...<Widget>[
             const SizedBox(height: 12),
             Text(
-              '签到可随机获得 ${user.checkinMin}~${user.checkinMax} MB 流量',
+              L10n.t('签到可随机获得 {0}~{1} MB 流量', <Object>[user.checkinMin, user.checkinMax]),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -675,7 +690,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
                     )
                   : const Icon(Icons.check_circle_outline, size: 18),
               label: Text(
-                user.ableToCheckin ? '点我签到' : '今日已签到',
+                user.ableToCheckin ? L10n.t('点我签到') : L10n.t('今日已签到'),
               ),
             ),
           ],
@@ -782,7 +797,7 @@ class _TrafficCard extends StatelessWidget {
 
     return SectionCard(
       icon: upload ? Icons.north : Icons.south,
-      title: upload ? '上传' : '下载',
+      title: upload ? L10n.t('上传') : L10n.t('下载'),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -796,7 +811,9 @@ class _TrafficCard extends StatelessWidget {
           ),
           const SizedBox(height: 1),
           Text(
-            '累计 ${Format.bytes(upload ? total.up : total.down)}',
+            L10n.t('累计 {0}', <Object>[
+              Format.bytes(upload ? total.up : total.down),
+            ]),
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
@@ -822,25 +839,25 @@ class _KernelCard extends StatelessWidget {
     final List<Widget> metrics = <Widget>[
       MetricTile(
         icon: Icons.memory,
-        label: '内存占用',
+        label: L10n.t('内存占用'),
         value: live ? Format.bytes(stats.memory) : '—',
       ),
       MetricTile(
         icon: Icons.swap_vert,
-        label: '活跃连接',
+        label: L10n.t('活跃连接'),
         value: live ? '${stats.connections}' : '—',
         color: live && stats.connections > 0 ? AppTheme.success : null,
       ),
       MetricTile(
         icon: Icons.history,
-        label: '已关闭连接',
+        label: L10n.t('已关闭连接'),
         value: live ? '${connection.closedConnections.length}' : '—',
       ),
     ];
 
     return SectionCard(
       icon: Icons.developer_board,
-      title: '内核状态',
+      title: L10n.t('内核状态'),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) => _Grid(
           columns: constraints.maxWidth < 460 ? 2 : 3,
@@ -876,7 +893,7 @@ class _PreflightCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 7),
                 Text(
-                  '运行环境自检未通过',
+                  L10n.t('运行环境自检未通过'),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: scheme.onErrorContainer,
                     fontWeight: FontWeight.w600,
@@ -884,7 +901,7 @@ class _PreflightCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 RefreshButton(
-                  tooltip: '重新检测',
+                  tooltip: L10n.t('重新检测'),
                   color: scheme.onErrorContainer,
                   onRefresh: connection.runPreflight,
                 ),
@@ -947,7 +964,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
     final String now = group.now;
     final String leaf = now.isEmpty ? '' : connection.resolveNode(now);
     final String display = leaf.isEmpty
-        ? (live ? '未选择节点' : '正在准备内核')
+        ? (live ? L10n.t('未选择节点') : L10n.t('正在准备内核'))
         : NodeLabels.displayName(leaf);
     final String? region = leaf.isEmpty ? null : NodeLabels.region(leaf);
     final String protocol = leaf.isEmpty ? '' : connection.typeOf(leaf);
@@ -955,7 +972,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
 
     return SectionCard(
       icon: Icons.cell_tower_outlined,
-      title: '当前节点',
+      title: L10n.t('当前节点'),
       action: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -966,7 +983,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
           TextButton(
             onPressed: () =>
                 ShellNavigator.go(context, ShellNavigator.nodesTab),
-            child: const Text('节点 ›'),
+            child: Text(L10n.t('节点 ›')),
           ),
         ],
       ),
@@ -1022,7 +1039,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
           const SizedBox(height: 10),
           _Pair(
             left: _LabeledDropdown(
-              label: '策略组',
+              label: L10n.t('策略组'),
               builder: (double width) => OptionDropdown<String>(
                 width: width,
                 height: 36,
@@ -1048,12 +1065,12 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
               ),
             ),
             right: _LabeledDropdown(
-              label: '节点',
+              label: L10n.t('节点'),
               builder: (double width) => OptionDropdown<String>(
                 width: width,
                 height: 36,
                 value: now.isEmpty ? null : now,
-                placeholder: live ? '未选择' : '内核尚未就绪',
+                placeholder: live ? L10n.t('未选择') : L10n.t('内核尚未就绪'),
                 enabled: live && group.selectable && group.members.isNotEmpty,
                 options: <String, String>{
                   for (final String member in group.members)

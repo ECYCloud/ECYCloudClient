@@ -12,6 +12,7 @@ import '../app_scope.dart';
 import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'login_page.dart';
+import '../../l10n/l10n.dart';
 
 class DeleteAccountPage extends StatefulWidget {
   const DeleteAccountPage({super.key});
@@ -118,31 +119,31 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       if (_emailCode.text.trim().isEmpty) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('请先输入邮箱验证码')));
+        ).showSnackBar(SnackBar(content: Text(L10n.t('请先输入邮箱验证码'))));
         return;
       }
     } else if (_passwd.text.trim().isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('请先输入登录密码')));
+      ).showSnackBar(SnackBar(content: Text(L10n.t('请先输入登录密码'))));
       return;
     }
 
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('确认提交删除请求吗？'),
-        content: const Text(
-          '提交后，您的账户将被禁用，并在 30 天后彻底删除。在此期间可取消删除。',
+        title: Text(L10n.t('确认提交删除请求吗？')),
+        content: Text(
+          L10n.t('提交后，您的账户将被禁用，并在 30 天后彻底删除。在此期间可取消删除。'),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(L10n.t('取消')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
+            child: Text(L10n.t('确定')),
           ),
         ],
       ),
@@ -192,7 +193,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     return Scaffold(
       body: Column(
         children: <Widget>[
-          const PageHeader(title: '删除账号', showBackButton: true),
+          PageHeader(title: L10n.t('删除账号'), showBackButton: true),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -200,30 +201,30 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                     padding: const EdgeInsets.all(14),
                     children: <Widget>[
                       if (options == null || !options.enableKill)
-                        const SectionCard(
+                        SectionCard(
                           icon: Icons.block,
-                          title: '功能已关闭',
+                          title: L10n.t('功能已关闭'),
                           child: Text(
-                            '管理员已关闭账号删除功能。如需删除账号，请联系管理员。',
+                            L10n.t('管理员已关闭账号删除功能。如需删除账号，请联系管理员。'),
                           ),
                         )
                       else ...<Widget>[
-                        const SectionCard(
+                        SectionCard(
                           icon: Icons.warning_amber_outlined,
-                          title: '注意！',
+                          title: L10n.t('注意！'),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                '提交删除账号请求后，您的账户将被禁用，并在 30 天后从系统中彻底删除。在此期间，您可以登录并取消删除请求以恢复账户。',
+                                L10n.t('提交删除账号请求后，您的账户将被禁用，并在 30 天后从系统中彻底删除。在此期间，您可以登录并取消删除请求以恢复账户。'),
                               ),
                               SizedBox(height: 8),
                               Text(
-                                '删除后，账号及相关数据（包括余额、有效套餐等）都将被删除，请谨慎操作！',
+                                L10n.t('删除后，账号及相关数据（包括余额、有效套餐等）都将被删除，请谨慎操作！'),
                               ),
                               SizedBox(height: 8),
                               Text(
-                                '当然账号删除后如果您还想继续使用本服务，您随时可以回来重新注册账号。',
+                                L10n.t('当然账号删除后如果您还想继续使用本服务，您随时可以回来重新注册账号。'),
                               ),
                             ],
                           ),
@@ -232,14 +233,14 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                         SectionCard(
                           icon: Icons.verified_user_outlined,
                           title: options.emailVerify
-                              ? '输入邮箱验证码以验证身份'
-                              : '输入登录密码以验证身份',
+                              ? L10n.t('输入邮箱验证码以验证身份')
+                              : L10n.t('输入登录密码以验证身份'),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
                               if (options.emailVerify) ...<Widget>[
                                 Text(
-                                  '删除账号验证码将发送到 $email 邮箱',
+                                  L10n.t('删除账号验证码将发送到 {0} 邮箱', <Object>[email]),
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
                                         color: Theme.of(
@@ -265,25 +266,36 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                       inputFormatters: <TextInputFormatter>[
                                         OtpCodeFormatter(),
                                       ],
-                                      decoration: const InputDecoration(
-                                        labelText: '邮箱验证码（必填）',
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('邮箱验证码（必填）'),
                                       ),
                                     );
                                   },
                                 ),
                               ] else
-                                TextField(
-                                  controller: _passwd,
-                                  enabled: !_busy,
-                                  obscureText: true,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  inputFormatters: <TextInputFormatter>[
-                                    asciiOnlyFormatter,
-                                  ],
-                                  decoration: const InputDecoration(
-                                    labelText: '登录密码（必填）',
-                                  ),
+                                EmailOtpIme(
+                                  builder:
+                                      (
+                                        BuildContext context,
+                                        FocusNode focusNode,
+                                      ) {
+                                    return TextField(
+                                      controller: _passwd,
+                                      focusNode: focusNode,
+                                      enabled: !_busy,
+                                      obscureText: true,
+                                      keyboardType:
+                                          TextInputType.visiblePassword,
+                                      autocorrect: false,
+                                      enableSuggestions: false,
+                                      inputFormatters: <TextInputFormatter>[
+                                        asciiOnlyFormatter,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('登录密码（必填）'),
+                                      ),
+                                    );
+                                  },
                                 ),
                               const SizedBox(height: 14),
                               Wrap(
@@ -301,8 +313,8 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                       ),
                                       label: Text(
                                         _sendCooldown > 0
-                                            ? '获取验证码 (${_sendCooldown}s)'
-                                            : '获取验证码',
+                                            ? L10n.t('获取验证码 ({0}s)', <Object>[_sendCooldown])
+                                            : L10n.t('获取验证码'),
                                       ),
                                     ),
                                   FilledButton.icon(
@@ -310,7 +322,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                         ? null
                                         : () => unawaited(_submit()),
                                     icon: const Icon(Icons.check, size: 18),
-                                    label: const Text('提交删除请求'),
+                                    label: Text(L10n.t('提交删除请求')),
                                   ),
                                 ],
                               ),

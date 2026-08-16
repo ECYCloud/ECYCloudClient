@@ -10,6 +10,7 @@ import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../pages/account_page.dart';
 import '../theme.dart';
+import '../../l10n/l10n.dart';
 
 /// 面板头像：管理员自定义 / QQ / 字母 SVG；失败时回退首字。
 class UserAvatar extends StatelessWidget {
@@ -193,7 +194,7 @@ class UserAvatarButton extends StatelessWidget {
               style: style,
               color: scheme.onSurface,
               icon: Icons.badge_outlined,
-              label: '账户信息',
+              label: L10n.t('账户信息'),
               onPressed: () {
                 if (onAccount) {
                   return;
@@ -213,14 +214,14 @@ class UserAvatarButton extends StatelessWidget {
               style: style,
               color: scheme.error,
               icon: Icons.logout,
-              label: '退出登录',
+              label: L10n.t('退出登录'),
               onPressed: () => unawaited(_logout(context, auth, connection)),
             ),
           ],
           builder:
               (BuildContext context, MenuController controller, Widget? child) {
                 return Tooltip(
-                  message: '账户信息',
+                  message: L10n.t('账户信息'),
                   child: InkWell(
                     customBorder: const CircleBorder(),
                     onTap: () {
@@ -301,16 +302,16 @@ Future<void> _logout(
   final bool? confirmed = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: const Text('退出登录'),
-      content: const Text('退出后将断开连接并清除本机保存的登录凭据。'),
+      title: Text(L10n.t('退出登录')),
+      content: Text(L10n.t('退出后将断开连接并清除本机保存的登录凭据。')),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('退出'),
+          child: Text(L10n.t('退出')),
         ),
       ],
     ),

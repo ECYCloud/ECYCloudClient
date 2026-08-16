@@ -30,6 +30,13 @@ struct _PlatformChannel {
   gboolean busy;
   gboolean system_proxy;
   gboolean tun;
+  gchar* label_connect;
+  gchar* label_disconnect;
+  gchar* label_cancel;
+  gchar* label_system_proxy;
+  gchar* label_tun;
+  gchar* label_show;
+  gchar* label_quit;
 };
 
 static void update_menu(PlatformChannel* self);
@@ -117,24 +124,37 @@ static GtkWidget* build_menu(PlatformChannel* self) {
   GtkMenuShell* shell = GTK_MENU_SHELL(menu);
 
   if (self->busy) {
-    append_item(self, shell, "取消连接", "disconnect");
+    append_item(self, shell,
+                self->label_cancel != nullptr ? self->label_cancel : "取消连接",
+                "disconnect");
   } else if (self->connected) {
-    append_item(self, shell, "断开连接", "disconnect");
+    append_item(
+        self, shell,
+        self->label_disconnect != nullptr ? self->label_disconnect : "断开连接",
+        "disconnect");
   } else {
-    append_item(self, shell, "连接", "connect");
+    append_item(self, shell,
+                self->label_connect != nullptr ? self->label_connect : "连接",
+                "connect");
   }
   gtk_menu_shell_append(shell, gtk_separator_menu_item_new());
 
   // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
-  append_check_item(self, shell, "系统代理", "system_proxy",
-                    self->system_proxy, self->connected);
-  append_check_item(self, shell, "TUN 模式", "tun", self->tun,
-                    self->connected);
+  append_check_item(
+      self, shell,
+      self->label_system_proxy != nullptr ? self->label_system_proxy : "系统代理",
+      "system_proxy", self->system_proxy, self->connected);
+  append_check_item(self, shell,
+                    self->label_tun != nullptr ? self->label_tun : "TUN 模式",
+                    "tun", self->tun, self->connected);
 
   gtk_menu_shell_append(shell, gtk_separator_menu_item_new());
-  append_item(self, shell, "显示主界面", "show");
+  append_item(self, shell,
+              self->label_show != nullptr ? self->label_show : "显示主界面",
+              "show");
   gtk_menu_shell_append(shell, gtk_separator_menu_item_new());
-  append_item(self, shell, "退出", "quit");
+  append_item(self, shell,
+              self->label_quit != nullptr ? self->label_quit : "退出", "quit");
 
   gtk_widget_show_all(menu);
   return menu;
@@ -191,6 +211,41 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     self->busy = lookup_bool(arguments, "busy");
     self->system_proxy = lookup_bool(arguments, "system_proxy");
     self->tun = lookup_bool(arguments, "tun");
+    const gchar* connect = lookup_string(arguments, "label_connect");
+    const gchar* disconnect = lookup_string(arguments, "label_disconnect");
+    const gchar* cancel = lookup_string(arguments, "label_cancel");
+    const gchar* system_proxy = lookup_string(arguments, "label_system_proxy");
+    const gchar* tun = lookup_string(arguments, "label_tun");
+    const gchar* show = lookup_string(arguments, "label_show");
+    const gchar* quit = lookup_string(arguments, "label_quit");
+    if (connect != nullptr) {
+      g_free(self->label_connect);
+      self->label_connect = g_strdup(connect);
+    }
+    if (disconnect != nullptr) {
+      g_free(self->label_disconnect);
+      self->label_disconnect = g_strdup(disconnect);
+    }
+    if (cancel != nullptr) {
+      g_free(self->label_cancel);
+      self->label_cancel = g_strdup(cancel);
+    }
+    if (system_proxy != nullptr) {
+      g_free(self->label_system_proxy);
+      self->label_system_proxy = g_strdup(system_proxy);
+    }
+    if (tun != nullptr) {
+      g_free(self->label_tun);
+      self->label_tun = g_strdup(tun);
+    }
+    if (show != nullptr) {
+      g_free(self->label_show);
+      self->label_show = g_strdup(show);
+    }
+    if (quit != nullptr) {
+      g_free(self->label_quit);
+      self->label_quit = g_strdup(quit);
+    }
     update_menu(self);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (g_strcmp0(method, "secret.protect") == 0) {
@@ -275,5 +330,12 @@ void platform_channel_free(PlatformChannel* self) {
   }
   remove_tray(self);
   g_clear_object(&self->channel);
+  g_free(self->label_connect);
+  g_free(self->label_disconnect);
+  g_free(self->label_cancel);
+  g_free(self->label_system_proxy);
+  g_free(self->label_tun);
+  g_free(self->label_show);
+  g_free(self->label_quit);
   g_free(self);
 }

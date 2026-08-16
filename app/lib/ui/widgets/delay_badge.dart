@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import '../../l10n/l10n.dart';
 
 class DelayBadge extends StatelessWidget {
   const DelayBadge({
@@ -50,12 +51,12 @@ class DelayBadge extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final Widget content = switch ((delay, unreachable)) {
       (> 0, _) => _text(context, '$delay', colorOf(delay)),
-      (_, true) => _text(context, '超时', AppTheme.danger),
+      (_, true) => _text(context, L10n.t('超时'), AppTheme.danger),
       _ => Icon(Icons.bolt_outlined, size: 13, color: scheme.outline),
     };
 
     return Tooltip(
-      message: '测试该节点延迟',
+      message: L10n.t('测试该节点延迟'),
       waitDuration: const Duration(milliseconds: 400),
       child: InkWell(
         onTap: onTest,

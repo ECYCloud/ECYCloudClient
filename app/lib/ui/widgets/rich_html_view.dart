@@ -4,6 +4,7 @@ import 'package:flutter_html/flutter_html.dart';
 import '../../core/safe_url.dart';
 import '../app_scope.dart';
 import '../shell_navigator.dart';
+import '../../l10n/l10n.dart';
 import 'image_viewer.dart';
 import 'zoom_cursors.dart';
 
@@ -167,7 +168,7 @@ class RichHtmlView extends StatelessWidget {
                 onPressed: () =>
                     AppScope.of(context).platform.openUrl(src),
                 icon: const Icon(Icons.play_circle_outline, size: 18),
-                label: const Text('播放视频'),
+                label: Text(L10n.t('播放视频')),
               ),
             );
           },
@@ -374,7 +375,9 @@ class _TicketImageState extends State<_TicketImage> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              widget.alt.isEmpty ? '附件已删除或无法加载' : '无法加载：${widget.alt}',
+              widget.alt.isEmpty
+                  ? L10n.t('附件已删除或无法加载')
+                  : L10n.t('无法加载：{0}', <Object>[widget.alt]),
               style: theme.textTheme.bodySmall,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

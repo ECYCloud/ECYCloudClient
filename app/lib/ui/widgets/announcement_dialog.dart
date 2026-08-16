@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/announcement.dart';
 import '../../state/announcement_controller.dart';
 import 'rich_html_view.dart';
+import '../../l10n/l10n.dart';
 
 Future<void> showAnnouncementPopup(
   BuildContext context, {
@@ -40,7 +41,7 @@ Future<void> showAnnouncementPopup(
             controller.dismissPopup(announcement);
             Navigator.of(context).pop();
           },
-          child: const Text('我知道了'),
+          child: Text(L10n.t('我知道了')),
         ),
       ],
     ),
@@ -67,7 +68,7 @@ Future<void> showAnnouncementBrowser(
         // 不能用 !loaded 单独判断，否则会永远停在加载态。
         if (items.isEmpty && !controller.loaded && controller.busy) {
           return AlertDialog(
-            title: const Text('网站公告'),
+            title: Text(L10n.t('网站公告')),
             content: const SizedBox(
               height: 96,
               child: Center(child: CircularProgressIndicator()),
@@ -75,22 +76,22 @@ Future<void> showAnnouncementBrowser(
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('关闭'),
+                child: Text(L10n.t('关闭')),
               ),
             ],
           );
         }
         if (items.isEmpty) {
           return AlertDialog(
-            title: const Text('网站公告'),
+            title: Text(L10n.t('网站公告')),
             content: Text(
               controller.error ??
-                  (controller.loaded ? '暂无公告' : '暂时无法获取公告，请稍后重试'),
+                  (controller.loaded ? L10n.t('暂无公告') : L10n.t('暂时无法获取公告，请稍后重试')),
             ),
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('关闭'),
+                child: Text(L10n.t('关闭')),
               ),
             ],
           );
@@ -158,7 +159,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                         (_index - 1 + widget.items.length) %
                         widget.items.length;
                   }),
-                  child: const Text('上一条'),
+                  child: Text(L10n.t('上一条')),
                 ),
                 Text(
                   '${_index + 1} / ${widget.items.length}',
@@ -168,7 +169,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                   onPressed: () => setState(() {
                     _index = (_index + 1) % widget.items.length;
                   }),
-                  child: const Text('下一条'),
+                  child: Text(L10n.t('下一条')),
                 ),
               ],
             ),
@@ -178,7 +179,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          child: Text(L10n.t('关闭')),
         ),
       ],
     );

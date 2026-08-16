@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../l10n/l10n.dart';
 
 
 /// 只读文本查看（运行配置 / 分流规则）。不提供编辑。
@@ -45,7 +46,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
                 return const SizedBox.shrink();
               }
               return IconButton(
-                tooltip: '复制全部',
+                tooltip: L10n.t('复制全部'),
                 icon: const Icon(Icons.copy_all_outlined),
                 onPressed: () => Clipboard.setData(ClipboardData(text: text)),
               );
@@ -90,7 +91,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
                 final String text = snap.data ?? '';
                 if (text.isEmpty) {
                   return Center(
-                    child: Text('文件为空或不存在', style: theme.textTheme.bodyLarge),
+                    child: Text(L10n.t('文件为空或不存在'), style: theme.textTheme.bodyLarge),
                   );
                 }
                 // Scrollbar 与 ScrollView 必须共用同一 controller，否则桌面端拇指无法拖拽

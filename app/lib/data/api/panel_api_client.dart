@@ -109,7 +109,38 @@ class PanelApiClient {
   final DeviceInfo device;
   final http.Client _http;
 
+  List<InternetAddress> _configDirectAddresses = <InternetAddress>[];
+  String _configDirectHost = '';
+
   String? _token;
+
+  List<String> get configDirectCidrs => <String>[
+    for (final InternetAddress address in _configDirectAddresses)
+      address.type == InternetAddressType.IPv6
+          ? '${address.address}/128'
+          : '${address.address}/32',
+  ];
+
+  // TUN dns-hijack 会把域名解析成 198.18/16 fake-ip；那种地址写进
+  // route-exclude-address 或拿来建连都会打空，必须丢掉。
+  Future<void> refreshConfigDirectAddresses() async {
+    final String host = Uri.tryParse(configBaseUrl)?.host ?? '';
+    if (host.isEmpty) {
+      _configDirectHost = '';
+      _configDirectAddresses = <InternetAddress>[];
+      return;
+    }
+    final List<InternetAddress> next = await _lookupRoutable(host);
+    if (next.isNotEmpty) {
+      _configDirectHost = host;
+      _configDirectAddresses = next;
+      return;
+    }
+    if (_configDirectHost != host) {
+      _configDirectHost = host;
+      _configDirectAddresses = <InternetAddress>[];
+    }
+  }
 
   String? get token => _token;
 
@@ -184,6 +215,11 @@ class PanelApiClient {
 
   Future<AuthOptions> fetchAuthOptions() async =>
       AuthOptions.fromJson(await _get('/auth/options'));
+
+  Future<String> fetchTos() async {
+    final Map<String, dynamic> data = await _get('/auth/tos');
+    return data['content'] as String? ?? '';
+  }
 
   Future<String> sendRegisterVerify({required String email}) =>
       _postMsg('/auth/send-register-verify', <String, dynamic>{'email': email});
@@ -616,19 +652,52 @@ class PanelApiClient {
   });
 
   /// 轻量配置戳：未变则客户端不应再打 /config/clash。走订阅域名。
-  Future<String> fetchConfigRevision() async {
-    final http.Response response = await _send(
-      () => _http.get(_configEndpoint('/config/revision'), headers: _headers()),
+  /// 与 [fetchClashProfile] 相同：先直连，不通再经本地 mixed 代理。
+  Future<String> fetchConfigRevision({int? fallbackProxyPort}) async {
+    return _viaDirectThenProxy(
+      fallbackProxyPort: fallbackProxyPort,
+      run: (http.Client client) async {
+        final http.Response response = await _send(
+          () => client.get(
+            _configEndpoint('/config/revision'),
+            headers: _headers(),
+          ),
+        );
+        final Map<String, dynamic> data = _unwrap(response);
+        return data['revision'] as String? ?? '';
+      },
     );
-    final Map<String, dynamic> data = _unwrap(response);
-    return data['revision'] as String? ?? '';
   }
 
   /// 拉取节点与分流规则。优先直连（绕过系统代理）；直连失败且提供了
   /// [fallbackProxyPort] 时，再经本地 mixed 代理重试。
   Future<RemoteProfile> fetchClashProfile({int? fallbackProxyPort}) async {
+    return _viaDirectThenProxy(
+      fallbackProxyPort: fallbackProxyPort,
+      run: _fetchClashProfileVia,
+    );
+  }
+
+  Future<T> _viaDirectThenProxy<T>({
+    required Future<T> Function(http.Client client) run,
+    int? fallbackProxyPort,
+  }) async {
+    Future<T> attempt(http.Client client) async {
+      try {
+        return await run(client);
+      } finally {
+        client.close();
+      }
+    }
+
+    await refreshConfigDirectAddresses();
     try {
-      return await _fetchClashProfileVia(_directHttpClient());
+      return await attempt(
+        _directHttpClient(
+          _configDirectAddresses,
+          Uri.tryParse(configBaseUrl)?.host ?? '',
+        ),
+      );
     } on Object catch (directError) {
       if (fallbackProxyPort == null || !_isUnreachable(directError)) {
         rethrow;
@@ -637,37 +706,33 @@ class PanelApiClient {
         _source,
         '直连拉取面板配置失败，改经本地代理 $fallbackProxyPort：$directError',
       );
-      return await _fetchClashProfileVia(_proxyHttpClient(fallbackProxyPort));
+      return await attempt(_proxyHttpClient(fallbackProxyPort));
     }
   }
 
   Future<RemoteProfile> _fetchClashProfileVia(http.Client client) async {
-    try {
-      final http.Response response = await _send(
-        () => client.get(_configEndpoint('/config/clash'), headers: _headers()),
-      );
-      final Map<String, dynamic> data = _unwrap(response);
-      final Object? icons = data['group_icons'];
-      final Object? labels = data['node_labels'];
+    final http.Response response = await _send(
+      () => client.get(_configEndpoint('/config/clash'), headers: _headers()),
+    );
+    final Map<String, dynamic> data = _unwrap(response);
+    final Object? icons = data['group_icons'];
+    final Object? labels = data['node_labels'];
 
-      return RemoteProfile(
-        config: data['config'] as Map<String, dynamic>,
-        revision: data['revision'] as String? ?? '',
-        groupIcons: <String, String>{
-          if (icons is Map<String, dynamic>)
-            for (final MapEntry<String, dynamic> entry in icons.entries)
-              if (entry.value is String) entry.key: entry.value as String,
-        },
-        nodeLabels: <String, String>{
-          if (labels is Map<String, dynamic>)
-            for (final MapEntry<String, dynamic> entry in labels.entries)
-              if (entry.value is String) entry.key: entry.value as String,
-        },
-        flagRegex: data['flag_regex'] as String? ?? '',
-      );
-    } finally {
-      client.close();
-    }
+    return RemoteProfile(
+      config: data['config'] as Map<String, dynamic>,
+      revision: data['revision'] as String? ?? '',
+      groupIcons: <String, String>{
+        if (icons is Map<String, dynamic>)
+          for (final MapEntry<String, dynamic> entry in icons.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+      },
+      nodeLabels: <String, String>{
+        if (labels is Map<String, dynamic>)
+          for (final MapEntry<String, dynamic> entry in labels.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+      },
+      flagRegex: data['flag_regex'] as String? ?? '',
+    );
   }
 
   /// 已拿到 HTTP 响应（含业务错误）不算「连不上」，不再改走代理。
@@ -678,9 +743,67 @@ class PanelApiClient {
     return true;
   }
 
-  static http.Client _directHttpClient() => IOClient(
-    HttpClient()..findProxy = (Uri _) => 'DIRECT',
-  );
+  static http.Client _directHttpClient([
+    List<InternetAddress> bind = const <InternetAddress>[],
+    String host = '',
+  ]) {
+    final HttpClient raw = HttpClient()..findProxy = (Uri _) => 'DIRECT';
+    if (bind.isNotEmpty && host.isNotEmpty) {
+      final InternetAddress target = bind.firstWhere(
+        (InternetAddress address) => address.type == InternetAddressType.IPv4,
+        orElse: () => bind.first,
+      );
+      raw.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+        if (proxyHost != null && proxyPort != null) {
+          return Socket.startConnect(proxyHost, proxyPort);
+        }
+        final Object connectHost = uri.host == host ? target : uri.host;
+        if (uri.scheme != 'https') {
+          return Socket.startConnect(connectHost, uri.port);
+        }
+        // HttpClient 对 connectionFactory 的明文 socket 不会再升 TLS；
+        // 直连 IP 时必须自己握手，SNI / 证书校验仍用域名。
+        if (connectHost is InternetAddress) {
+          final ConnectionTask<Socket> tcp = await Socket.startConnect(
+            connectHost,
+            uri.port,
+          );
+          return ConnectionTask.fromSocket(
+            tcp.socket.then(
+              (Socket plain) => SecureSocket.secure(plain, host: uri.host),
+            ),
+            tcp.cancel,
+          );
+        }
+        return SecureSocket.startConnect(connectHost, uri.port);
+      };
+    }
+    return IOClient(raw);
+  }
+
+  static Future<List<InternetAddress>> _lookupRoutable(String host) async {
+    final InternetAddress? literal = InternetAddress.tryParse(host);
+    if (literal != null) {
+      return <InternetAddress>[literal];
+    }
+    try {
+      final List<InternetAddress> found = await InternetAddress.lookup(host);
+      return <InternetAddress>[
+        for (final InternetAddress address in found)
+          if (!_isClashFakeIp(address)) address,
+      ];
+    } on SocketException {
+      return const <InternetAddress>[];
+    }
+  }
+
+  static bool _isClashFakeIp(InternetAddress address) {
+    if (address.type != InternetAddressType.IPv4) {
+      return false;
+    }
+    final List<int> bytes = address.rawAddress;
+    return bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19);
+  }
 
   static http.Client _proxyHttpClient(int port) => IOClient(
     HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port',

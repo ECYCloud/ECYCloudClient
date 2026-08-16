@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
+import '../../l10n/l10n.dart';
 
 class SimpleDataTable extends StatelessWidget {
   const SimpleDataTable({
     super.key,
     required this.columns,
     required this.rows,
-    this.emptyText = '暂无数据',
+    this.emptyText,
     this.minWidth,
     this.framed = true,
   });
 
   final List<String> columns;
   final List<List<Widget>> rows;
-  final String emptyText;
+  final String? emptyText;
   final double? minWidth;
   final bool framed;
 
@@ -20,6 +21,7 @@ class SimpleDataTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
+        final String empty = emptyText ?? L10n.t('暂无数据');
         final double available = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
@@ -29,12 +31,12 @@ class SimpleDataTable extends StatelessWidget {
             ? _MobileList(
                 columns: columns,
                 rows: rows,
-                emptyText: emptyText,
+                emptyText: empty,
               )
             : _WideTable(
                 columns: columns,
                 rows: rows,
-                emptyText: emptyText,
+                emptyText: empty,
                 availableWidth: available,
                 minWidth: contentMin,
                 framed: framed,

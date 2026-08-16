@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 
 import 'app_paths.dart';
@@ -36,16 +37,15 @@ class Logger {
   static final Logger instance = Logger._();
 
   static const int _ringCapacity = 2000;
+  static const int _maxFileBytes = 10 * 1024 * 1024;
+  static const int _retentionDays = 30;
 
-  // 内核自己写日志文件是纯 append、既不轮转也没上限，长期开着就一直涨。
-  // 客户端这边按天分文件，并只留最近这么多天，避免同样的问题。
-  static const int _retentionDays = 7;
+  static final RegExp _logFileName = RegExp(r'app-(\d{4}-\d{2}-\d{2})\.log$');
 
   final Queue<LogEntry> _ring = Queue<LogEntry>();
   final List<void Function(LogEntry)> _listeners = <void Function(LogEntry)>[];
 
   LogLevel level = LogLevel.warn;
-  IOSink? _sink;
   String? _sinkDate;
 
   List<LogEntry> get entries => List<LogEntry>.unmodifiable(_ring);
@@ -129,27 +129,56 @@ class Logger {
         '${entry.time.day.toString().padLeft(2, '0')}';
 
     if (_sinkDate != date) {
-      _sink?.close();
-      _sink = File(
-        '${AppPaths.logs.path}${Platform.pathSeparator}app-$date.log',
-      ).openWrite(mode: FileMode.append);
       _sinkDate = date;
-      _prune(entry.time);
+      pruneExpired(AppPaths.logs, entry.time);
     }
 
-    _sink?.writeln(entry.toString());
+    appendCapped(
+      File('${AppPaths.logs.path}${Platform.pathSeparator}app-$date.log'),
+      '${entry.toString()}\n',
+    );
   }
 
-  static final RegExp _logFileName = RegExp(r'app-(\d{4}-\d{2}-\d{2})\.log$');
+  // 裁到上限以下留出续写空间，否则触顶后每行都要重写整份文件
+  static void appendCapped(File file, String line) {
+    final int incoming = utf8.encode(line).length;
+    final int current = file.existsSync() ? file.lengthSync() : 0;
+    if (current + incoming > _maxFileBytes) {
+      trimToLastBytes(file, _maxFileBytes * 4 ~/ 5);
+    }
+    try {
+      file.writeAsStringSync(line, mode: FileMode.append);
+    } on FileSystemException {}
+  }
 
-  void _prune(DateTime now) {
+  static void trimToLastBytes(File file, int maxBytes) {
+    if (!file.existsSync()) {
+      return;
+    }
+    final int length = file.lengthSync();
+    if (length <= maxBytes) {
+      return;
+    }
+    final RandomAccessFile raf = file.openSync(mode: FileMode.read);
+    try {
+      raf.setPositionSync(length - maxBytes);
+      file.writeAsBytesSync(raf.readSync(maxBytes));
+    } finally {
+      raf.closeSync();
+    }
+  }
+
+  static void pruneExpired(Directory dir, DateTime now) {
+    if (!dir.existsSync()) {
+      return;
+    }
     final DateTime oldest = DateTime(
       now.year,
       now.month,
       now.day,
     ).subtract(const Duration(days: _retentionDays - 1));
 
-    for (final FileSystemEntity entity in AppPaths.logs.listSync()) {
+    for (final FileSystemEntity entity in dir.listSync()) {
       final RegExpMatch? match = _logFileName.firstMatch(entity.path);
       final DateTime? day = match == null
           ? null
@@ -165,14 +194,9 @@ class Logger {
     }
   }
 
-  Future<void> flush() async {
-    await _sink?.flush();
-  }
+  Future<void> flush() async {}
 
   Future<void> dispose() async {
-    await flush();
-    await _sink?.close();
-    _sink = null;
     _sinkDate = null;
   }
 }

@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 
 import '../domain/kernel/kernel_update.dart';
+import '../l10n/l10n.dart';
 import '../domain/update/app_update.dart';
 import '../data/models/announcement.dart';
 import '../state/announcement_controller.dart';
@@ -154,16 +155,16 @@ class _ShellState extends State<Shell> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('在线 IP 已达上限'),
-        content: const Text('当前已超出在线IP限制，是否将其中一个在线IP踢下线，以挪出位置？'),
+        title: Text(L10n.t('在线 IP 已达上限')),
+        content: Text(L10n.t('当前已超出在线IP限制，是否将其中一个在线IP踢下线，以挪出位置？')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(L10n.t('取消')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
+            child: Text(L10n.t('确定')),
           ),
         ],
       ),
@@ -196,14 +197,14 @@ class _ShellState extends State<Shell> {
         context: context,
         barrierDismissible: false,
         builder: (BuildContext context) => AlertDialog(
-          title: const Text('设备已下线'),
-          content: const Text(
-            '由于超出在线 IP 限制，有新 IP 请求连接，已将您的设备踢下线。',
+          title: Text(L10n.t('设备已下线')),
+          content: Text(
+            L10n.t('由于超出在线 IP 限制，有新 IP 请求连接，已将您的设备踢下线。'),
           ),
           actions: <Widget>[
             FilledButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('知道了'),
+              child: Text(L10n.t('知道了')),
             ),
           ],
         ),
@@ -354,7 +355,7 @@ class _ShellState extends State<Shell> {
                                             selectedIcon: Icon(
                                               destination.selectedIcon,
                                             ),
-                                            label: Text(destination.label),
+                                            label: Text(L10n.t(destination.label)),
                                           ),
                                       ],
                                     ),
@@ -378,7 +379,7 @@ class _ShellState extends State<Shell> {
                         NavigationDestination(
                           icon: Icon(destination.icon),
                           selectedIcon: Icon(destination.selectedIcon),
-                          label: destination.label,
+                          label: L10n.t(destination.label),
                         ),
                     ],
                   ),
@@ -430,25 +431,32 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     final bool appOutdated = app != null && app.outdated && app.installer != null;
     final bool kernelOutdated = kernel != null && kernel.outdated;
     final bool busy = update.appBusy || update.kernelUpgrading;
-    final bool appFailed = update.appStatus.startsWith('更新失败');
-    final bool kernelFailed = update.kernelStatus.startsWith('更新失败');
+    final bool appFailed = update.appStatus.startsWith(L10n.t('更新失败'));
+    final bool kernelFailed = update.kernelStatus.startsWith(L10n.t('更新失败'));
     final Color errorColor = Theme.of(context).colorScheme.error;
 
     return AlertDialog(
       icon: const Icon(Icons.system_update_alt),
-      title: const Text('必须更新'),
+      title: Text(L10n.t('必须更新')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 6,
         children: <Widget>[
-          const Text(
-            '强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，'
-            '继续使用可能导致无法连接或行为异常。',
+          Text(
+            L10n.t(
+              '强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。',
+            ),
           ),
-          if (appOutdated) Text('客户端 ${app.current} → ${app.latest}'),
+          if (appOutdated)
+            Text(L10n.t('客户端 {0} → {1}', <Object>[app.current, app.latest])),
           if (kernelOutdated)
-            Text('mihomo 内核 ${kernel.current} → ${kernel.latest}'),
+            Text(
+              L10n.t('mihomo 内核 {0} → {1}', <Object>[
+                kernel.current,
+                kernel.latest,
+              ]),
+            ),
           if (update.appBusy || appFailed)
             Text(
               update.appStatus,
@@ -485,7 +493,7 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
             update.dismissUpdatePrompt();
             Navigator.of(context).pop();
           },
-          child: const Text('关闭'),
+          child: Text(L10n.t('关闭')),
         ),
         if (update.kernelUpgradable != null)
           FilledButton(
@@ -493,9 +501,11 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
             child: Text(
               update.kernelUpgrading
                   ? (update.kernelPercent == null
-                        ? '正在更新内核…'
-                        : '正在更新内核 ${update.kernelPercent}%')
-                  : '更新内核',
+                        ? L10n.t('正在更新内核…')
+                        : L10n.t('正在更新内核 {0}%', <Object>[
+                            update.kernelPercent!,
+                          ]))
+                  : L10n.t('更新内核'),
             ),
           ),
         if (appOutdated)
@@ -504,9 +514,11 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
             child: Text(
               update.appBusy
                   ? (update.appPercent == null
-                        ? '正在更新客户端…'
-                        : '正在更新客户端 ${update.appPercent}%')
-                  : '更新客户端',
+                        ? L10n.t('正在更新客户端…')
+                        : L10n.t('正在更新客户端 {0}%', <Object>[
+                            update.appPercent!,
+                          ]))
+                  : L10n.t('更新客户端'),
             ),
           ),
       ],
@@ -528,7 +540,7 @@ class _Brand extends StatelessWidget {
         final ConnectionStatusVisual visual = ConnectionStatusVisual.of(
           connection.state,
           scheme,
-          failedLabel: connection.error ?? '连接失败',
+          failedLabel: connection.error ?? L10n.t('连接失败'),
         );
 
         return Tooltip(

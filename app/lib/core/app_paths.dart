@@ -33,6 +33,9 @@ class AppPaths {
 
   static File get settings => File(_join(userData.path, 'settings.json'));
 
+  static File get installerLocale =>
+      File(_join(userData.path, 'installer-locale'));
+
   static File get announcementState =>
       File(_join(userData.path, 'announcement.json'));
 
@@ -42,6 +45,12 @@ class AppPaths {
 
   static File get remoteConfigCache =>
       File(_join(userData.path, 'remote-config-cache.json'));
+
+  // Windows 停内核是 TerminateProcess，mihomo 来不及关 bbolt；下次打开若
+  // cache.db 校验失败会被内核整份删掉。用户选择另落 userData，装配时写入
+  // default-selected，TUN 起来时出口已是上次节点。
+  static File get selectorCache =>
+      File(_join(userData.path, 'selector-cache.json'));
 
   static Directory get logs => _ensure(Directory(_join(userData.path, 'logs')));
 

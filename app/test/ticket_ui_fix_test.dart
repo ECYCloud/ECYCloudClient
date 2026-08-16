@@ -153,7 +153,7 @@ void main() {
     final String login = File(
       'lib/ui/pages/login_page.dart',
     ).readAsStringSync();
-    final int emailField = login.indexOf("labelText: '邮箱'");
+    final int emailField = login.indexOf("labelText: L10n.t('邮箱')");
     expect(emailField, greaterThanOrEqualTo(0));
     final String emailBlock = login.substring(
       login.lastIndexOf('TextFormField(', emailField),

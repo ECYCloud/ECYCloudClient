@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
+import '../../l10n/l10n.dart';
 
 /// 列表页通用搜索框。受控用法：由调用方持有关键词，本组件只负责输入与清除。
 class SearchField extends StatefulWidget {
   const SearchField({
     super.key,
     required this.onChanged,
-    this.hintText = '搜索',
+    this.hintText,
     this.width = 220,
   });
 
   final ValueChanged<String> onChanged;
-  final String hintText;
+  final String? hintText;
   final double width;
 
   @override
@@ -47,7 +48,7 @@ class _SearchFieldState extends State<SearchField> {
           setState(() {});
         },
         decoration: InputDecoration(
-          hintText: widget.hintText,
+          hintText: widget.hintText ?? L10n.t('搜索'),
           prefixIcon: Icon(Icons.search, size: 15, color: scheme.outline),
           prefixIconConstraints: const BoxConstraints.tightFor(
             width: 30,

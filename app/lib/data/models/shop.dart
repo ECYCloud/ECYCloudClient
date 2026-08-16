@@ -261,6 +261,8 @@ class ShopPurchaseResult {
     required this.cardKey,
     required this.tradeNo,
     required this.paymentUrl,
+    required this.payQrcode,
+    required this.payScheme,
   });
 
   final String message;
@@ -268,7 +270,28 @@ class ShopPurchaseResult {
   final String tradeNo;
   final String paymentUrl;
 
-  bool get needsOnlinePayment => paymentUrl.isNotEmpty;
+  /// 收款码内容，画成二维码给支付宝 / 微信扫
+  final String payQrcode;
+
+  /// 唤起支付 App 的链接
+  final String payScheme;
+
+  bool get needsOnlinePayment =>
+      paymentUrl.isNotEmpty || payQrcode.isNotEmpty || payScheme.isNotEmpty;
+
+  /// 能交给系统唤起支付 App 的链接。收款码本身是 weixin:// 这类 scheme 时同样可以唤起
+  String get appScheme {
+    for (final String candidate in <String>[payScheme, payQrcode]) {
+      final Uri? uri = Uri.tryParse(candidate.trim());
+      if (uri != null &&
+          uri.scheme.isNotEmpty &&
+          uri.scheme != 'http' &&
+          uri.scheme != 'https') {
+        return candidate.trim();
+      }
+    }
+    return '';
+  }
 
   factory ShopPurchaseResult.fromEnvelope(Map<String, dynamic> envelope) {
     final Object? data = envelope['data'];
@@ -281,6 +304,8 @@ class ShopPurchaseResult {
       cardKey: body['card_key'] as String? ?? '',
       tradeNo: body['tradeno']?.toString() ?? '',
       paymentUrl: body['payment_url'] as String? ?? '',
+      payQrcode: body['pay_qrcode'] as String? ?? '',
+      payScheme: body['pay_scheme'] as String? ?? '',
     );
   }
 }

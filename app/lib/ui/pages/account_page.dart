@@ -24,6 +24,7 @@ import 'recharge_page.dart';
 import 'subscription_strategy_page.dart';
 import 'traffic_log_page.dart';
 import 'usage_ips_page.dart';
+import '../../l10n/l10n.dart';
 
 Future<void> togglePurchaseAutoRenewDialog(
   BuildContext context, {
@@ -34,16 +35,16 @@ Future<void> togglePurchaseAutoRenewDialog(
   final bool? confirmed = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: Text(enable ? '确认开启自动续费？' : '确认关闭自动续费？'),
-      content: Text(enable ? '开启后将在套餐到期时自动续费。' : '关闭后，您可以随时重新开启自动续费。'),
+      title: Text(enable ? L10n.t('确认开启自动续费？') : L10n.t('确认关闭自动续费？')),
+      content: Text(enable ? L10n.t('开启后将在套餐到期时自动续费。') : L10n.t('关闭后，您可以随时重新开启自动续费。')),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('确定'),
+          child: Text(L10n.t('确定')),
         ),
       ],
     ),
@@ -69,7 +70,7 @@ Future<void> togglePurchaseAutoRenewDialog(
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          message.isEmpty ? (enable ? '自动续费开启成功' : '自动续费关闭成功') : message,
+          message.isEmpty ? (enable ? L10n.t('自动续费开启成功') : L10n.t('自动续费关闭成功')) : message,
         ),
         behavior: SnackBarBehavior.floating,
       ),
@@ -122,12 +123,12 @@ class _AccountPageState extends State<AccountPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '账户信息',
+              title: L10n.t('账户信息'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
                 RefreshButton(
-                  tooltip: '刷新账号信息',
+                  tooltip: L10n.t('刷新账号信息'),
                   onRefresh: auth.refreshProfile,
                 ),
               ],
@@ -149,13 +150,13 @@ class _AccountPageState extends State<AccountPage> {
                     const SizedBox(height: 10),
                     SectionCard(
                       icon: Icons.menu,
-                      title: '更多',
+                      title: L10n.t('更多'),
                       child: Column(
                         children: <Widget>[
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.edit_outlined, size: 20),
-                            title: const Text('修改信息'),
+                            title: Text(L10n.t('修改信息')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -167,7 +168,7 @@ class _AccountPageState extends State<AccountPage> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.tune, size: 20),
-                            title: const Text('自定义策略'),
+                            title: Text(L10n.t('自定义策略')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -180,7 +181,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading:
                                 const Icon(Icons.card_giftcard_outlined, size: 20),
-                            title: const Text('邀请返利'),
+                            title: Text(L10n.t('邀请返利')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -192,7 +193,7 @@ class _AccountPageState extends State<AccountPage> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.data_usage, size: 20),
-                            title: const Text('流量记录'),
+                            title: Text(L10n.t('流量记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -204,7 +205,7 @@ class _AccountPageState extends State<AccountPage> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.lan_outlined, size: 20),
-                            title: const Text('使用 IP'),
+                            title: Text(L10n.t('使用 IP')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -216,7 +217,7 @@ class _AccountPageState extends State<AccountPage> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.history, size: 20),
-                            title: const Text('登录记录'),
+                            title: Text(L10n.t('登录记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -231,7 +232,7 @@ class _AccountPageState extends State<AccountPage> {
                               Icons.account_balance_wallet_outlined,
                               size: 20,
                             ),
-                            title: const Text('余额充值'),
+                            title: Text(L10n.t('余额充值')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -244,7 +245,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading:
                                 const Icon(Icons.receipt_long_outlined, size: 20),
-                            title: const Text('余额记录'),
+                            title: Text(L10n.t('余额记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -257,7 +258,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading:
                                 const Icon(Icons.shopping_bag_outlined, size: 20),
-                            title: const Text('购买记录'),
+                            title: Text(L10n.t('购买记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
@@ -297,9 +298,9 @@ class _UserCard extends StatelessWidget {
     final UserProfile? user = profile;
 
     if (user == null) {
-      return const SectionCard(
+      return SectionCard(
         icon: Icons.person_outline,
-        title: '账号',
+        title: L10n.t('账号'),
         child: Text('—'),
       );
     }
@@ -308,7 +309,7 @@ class _UserCard extends StatelessWidget {
 
     return SectionCard(
       icon: Icons.person_outline,
-      title: '账号',
+      title: L10n.t('账号'),
       action: enableKill
           ? TextButton.icon(
               onPressed: () => Navigator.of(context).push(
@@ -317,7 +318,7 @@ class _UserCard extends StatelessWidget {
                 ),
               ),
               icon: const Icon(Icons.block, size: 16),
-              label: const Text('删除账号'),
+              label: Text(L10n.t('删除账号')),
               style: TextButton.styleFrom(
                 foregroundColor: theme.colorScheme.error,
               ),
@@ -363,42 +364,42 @@ class _UserCard extends StatelessWidget {
             child: Divider(height: 1),
           ),
           InfoRow(
-            label: '余额',
+            label: L10n.t('余额'),
             value: '¥ ${user.money.toStringAsFixed(2)}',
           ),
           InfoRow(
-            label: '注册时间',
+            label: L10n.t('注册时间'),
             value: user.regDate.isEmpty ? '—' : user.regDate,
           ),
           InfoRow(
-            label: '套餐',
+            label: L10n.t('套餐'),
             value:
                 plan?.name ??
-                (user.userClass > 0 ? 'VIP ${user.userClass}' : '免费用户'),
+                (user.userClass > 0 ? 'VIP ${user.userClass}' : L10n.t('免费用户')),
           ),
           if (plan != null) ...<Widget>[
-            InfoRow(label: '到期', value: plan.expireAt),
-            InfoRow(label: '剩余天数', value: '${plan.remainingDays} 天'),
-            InfoRow(label: '自动续费', value: plan.autoRenew ? plan.renewAt : '-'),
+            InfoRow(label: L10n.t('到期'), value: plan.expireAt),
+            InfoRow(label: L10n.t('剩余天数'), value: L10n.t('{0} 天', <Object>[plan.remainingDays])),
+            InfoRow(label: L10n.t('自动续费'), value: plan.autoRenew ? plan.renewAt : '-'),
           ],
           InfoRow(
-            label: '限速',
+            label: L10n.t('限速'),
             value: user.speedLimitMbps <= 0
-                ? '不限速'
+                ? L10n.t('不限速')
                 : '${user.speedLimitMbps.toStringAsFixed(0)} Mbps',
           ),
           InfoRow(
-            label: '在线 IP',
+            label: L10n.t('在线 IP'),
             value: user.connectorLimit <= 0
-                ? '${user.onlineIpCount} / 无限制'
+                ? L10n.t('{0} / 无限制', <Object>[user.onlineIpCount])
                 : '${user.onlineIpCount} / ${user.connectorLimit}',
           ),
           if (plan != null && plan.canToggleAutoRenew) ...<Widget>[
             const SizedBox(height: 4),
             SwitchTile(
               contentPadding: EdgeInsets.zero,
-              title: '自动续费',
-              subtitle: plan.autoRenew ? plan.renewAt : '已关闭',
+              title: L10n.t('自动续费'),
+              subtitle: plan.autoRenew ? plan.renewAt : L10n.t('已关闭'),
               value: plan.autoRenew,
               onChanged: (bool value) => unawaited(
                 togglePurchaseAutoRenewDialog(

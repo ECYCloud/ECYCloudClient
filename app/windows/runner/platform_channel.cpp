@@ -31,11 +31,33 @@ constexpr const wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr const wchar_t kRunValue[] = L"ECY Cloud";
 
+std::wstring WideFromUtf8(const std::string& text);
+
 bool ReadBool(const flutter::EncodableMap& arguments, const char* key) {
   auto entry = arguments.find(flutter::EncodableValue(key));
   return entry != arguments.end() &&
          std::holds_alternative<bool>(entry->second) &&
          std::get<bool>(entry->second);
+}
+
+std::wstring g_label_connect = L"\u8fde\u63a5";
+std::wstring g_label_disconnect = L"\u65ad\u5f00\u8fde\u63a5";
+std::wstring g_label_cancel = L"\u53d6\u6d88\u8fde\u63a5";
+std::wstring g_label_system_proxy = L"\u7cfb\u7edf\u4ee3\u7406";
+std::wstring g_label_tun = L"TUN \u6a21\u5f0f";
+std::wstring g_label_show = L"\u663e\u793a\u4e3b\u754c\u9762";
+std::wstring g_label_quit = L"\u9000\u51fa";
+
+std::wstring ReadLabel(const flutter::EncodableMap& arguments,
+                       const char* key,
+                       const std::wstring& fallback) {
+  auto entry = arguments.find(flutter::EncodableValue(key));
+  if (entry == arguments.end() ||
+      !std::holds_alternative<std::string>(entry->second)) {
+    return fallback;
+  }
+  const std::string& text = std::get<std::string>(entry->second);
+  return text.empty() ? fallback : WideFromUtf8(text);
 }
 
 // Win32 弹出菜单由 uxtheme 绘制，不受 Flutter 主题影响，只能切进程级的
@@ -266,6 +288,15 @@ void PlatformChannel::HandleMethodCall(
     busy_ = ReadBool(*arguments, "busy");
     system_proxy_ = ReadBool(*arguments, "system_proxy");
     tun_ = ReadBool(*arguments, "tun");
+    g_label_connect = ReadLabel(*arguments, "label_connect", g_label_connect);
+    g_label_disconnect =
+        ReadLabel(*arguments, "label_disconnect", g_label_disconnect);
+    g_label_cancel = ReadLabel(*arguments, "label_cancel", g_label_cancel);
+    g_label_system_proxy =
+        ReadLabel(*arguments, "label_system_proxy", g_label_system_proxy);
+    g_label_tun = ReadLabel(*arguments, "label_tun", g_label_tun);
+    g_label_show = ReadLabel(*arguments, "label_show", g_label_show);
+    g_label_quit = ReadLabel(*arguments, "label_quit", g_label_quit);
     ApplyMenuTheme(ReadBool(*arguments, "dark"));
     result->Success();
     return;
@@ -369,11 +400,13 @@ void PlatformChannel::ShowTrayMenu() {
   }
 
   if (busy_) {
-    ::AppendMenuW(menu, MF_STRING, kMenuCommandDisconnect, L"取消连接");
+    ::AppendMenuW(menu, MF_STRING, kMenuCommandDisconnect,
+                  g_label_cancel.c_str());
   } else if (connected_) {
-    ::AppendMenuW(menu, MF_STRING, kMenuCommandDisconnect, L"断开连接");
+    ::AppendMenuW(menu, MF_STRING, kMenuCommandDisconnect,
+                  g_label_disconnect.c_str());
   } else {
-    ::AppendMenuW(menu, MF_STRING, kMenuCommandConnect, L"连接");
+    ::AppendMenuW(menu, MF_STRING, kMenuCommandConnect, g_label_connect.c_str());
   }
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
@@ -381,14 +414,14 @@ void PlatformChannel::ShowTrayMenu() {
   ::AppendMenuW(menu,
                 MF_STRING | proxy_state |
                     (system_proxy_ ? MF_CHECKED : MF_UNCHECKED),
-                kMenuCommandSystemProxy, L"系统代理");
+                kMenuCommandSystemProxy, g_label_system_proxy.c_str());
   ::AppendMenuW(menu,
                 MF_STRING | proxy_state | (tun_ ? MF_CHECKED : MF_UNCHECKED),
-                kMenuCommandTun, L"TUN 模式");
+                kMenuCommandTun, g_label_tun.c_str());
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  ::AppendMenuW(menu, MF_STRING, kMenuCommandShow, L"显示主界面");
+  ::AppendMenuW(menu, MF_STRING, kMenuCommandShow, g_label_show.c_str());
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  ::AppendMenuW(menu, MF_STRING, kMenuCommandExit, L"退出");
+  ::AppendMenuW(menu, MF_STRING, kMenuCommandExit, g_label_quit.c_str());
 
   POINT cursor = {};
   ::GetCursorPos(&cursor);

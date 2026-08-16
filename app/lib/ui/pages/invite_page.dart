@@ -13,6 +13,7 @@ import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import '../widgets/simple_data_table.dart';
+import '../../l10n/l10n.dart';
 
 class InvitePage extends StatefulWidget {
   const InvitePage({super.key});
@@ -97,7 +98,7 @@ class _InvitePageState extends State<InvitePage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -110,10 +111,67 @@ class _InvitePageState extends State<InvitePage> {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已复制$label'),
+        content: Text(L10n.t('已复制{0}', <Object>[label])),
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  Future<void> _confirmReset() async {
+    if (_busy) {
+      return;
+    }
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(L10n.t('您确定要重置邀请链接吗？')),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text.rich(
+                TextSpan(
+                  children: <InlineSpan>[
+                    TextSpan(text: L10n.t('注意：您点击 ')),
+                    TextSpan(
+                      text: L10n.t('确定'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: scheme.error,
+                      ),
+                    ),
+                    TextSpan(text: L10n.t(' 按钮之后系统会立即重置您的邀请链接。此操作不可逆！')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(L10n.t('重置后旧的邀请链接将失效，新的邀请链接将立即生效。')),
+              const SizedBox(height: 8),
+              Text(L10n.t('通过旧邀请链接注册的被邀请者，返利奖励仍有效，不会因邀请链接变更而受影响。')),
+              const SizedBox(height: 8),
+              Text(L10n.t('重置后请您将新的邀请链接发送给被邀请者。')),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(L10n.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(L10n.t('确定')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _reset();
   }
 
   Future<void> _reset() async {
@@ -131,7 +189,7 @@ class _InvitePageState extends State<InvitePage> {
         SnackBar(
           content: Text(
             result.message.isEmpty
-                ? '已重置您的邀请链接，复制您的邀请链接发送给其他人！'
+                ? L10n.t('已重置您的邀请链接，复制您的邀请链接发送给其他人！')
                 : result.message,
           ),
           behavior: SnackBarBehavior.floating,
@@ -175,7 +233,7 @@ class _InvitePageState extends State<InvitePage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg.isEmpty ? '提现成功' : msg),
+          content: Text(msg.isEmpty ? L10n.t('提现成功') : msg),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -203,7 +261,7 @@ class _InvitePageState extends State<InvitePage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg.isEmpty ? '已取消' : msg),
+          content: Text(msg.isEmpty ? L10n.t('已取消') : msg),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -228,11 +286,11 @@ class _InvitePageState extends State<InvitePage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '邀请返利',
+              title: L10n.t('邀请返利'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -248,61 +306,50 @@ class _InvitePageState extends State<InvitePage> {
               children: <Widget>[
                 SectionCard(
                   icon: Icons.link,
-                  title: '邀请信息',
+                  title: L10n.t('邀请信息'),
                   action: TextButton(
-                    onPressed: _busy ? null : _reset,
-                    child: const Text('重置邀请码'),
+                    onPressed: _busy ? null : () => unawaited(_confirmReset()),
+                    child: Text(L10n.t('重置链接 / 邀请码')),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      InfoRow(label: '邀请码', value: summary.code),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              summary.inviteUrl,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '复制链接',
-                            onPressed: () => unawaited(
-                              _copy('邀请链接', summary.inviteUrl),
-                            ),
-                            icon: const Icon(Icons.copy, size: 18),
-                          ),
-                          IconButton(
-                            tooltip: '复制邀请码',
-                            onPressed: () =>
-                                unawaited(_copy('邀请码', summary.code)),
-                            icon: const Icon(Icons.tag, size: 18),
-                          ),
-                        ],
+                      Text(
+                        L10n.t('邀请他人注册时，请将以下链接发送给被邀请者'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      _InviteCopyRow(
+                        label: L10n.t('邀请链接'),
+                        value: summary.inviteUrl,
+                        onCopy: () => unawaited(_copy(L10n.t('邀请链接'), summary.inviteUrl)),
+                      ),
+                      const SizedBox(height: 8),
+                      _InviteCopyRow(
+                        label: L10n.t('邀请码'),
+                        value: summary.code,
+                        onCopy: () => unawaited(_copy(L10n.t('邀请码'), summary.code)),
                       ),
                       const Divider(height: 20),
                       InfoRow(
-                        label: '邀请人数',
+                        label: L10n.t('邀请人数'),
                         value: '${summary.invitedUsersCount}',
                       ),
                       InfoRow(
-                        label: '返利人数',
+                        label: L10n.t('返利人数'),
                         value: '${summary.rebateUsersCount}',
                       ),
                       InfoRow(
-                        label: '累计返利',
+                        label: L10n.t('累计返利'),
                         value: '¥ ${summary.paybacksSum.toStringAsFixed(2)}',
                       ),
                       InfoRow(
-                        label: '返利比例',
+                        label: L10n.t('返利比例'),
                         value:
                             '${(summary.codePayback * 100).toStringAsFixed(0)}%',
                       ),
                       InfoRow(
-                        label: '每位受邀用户返利次数上限',
+                        label: L10n.t('每位受邀用户返利次数上限'),
                         value: '${summary.rebateFrequencyLimit}',
                       ),
                     ],
@@ -311,28 +358,28 @@ class _InvitePageState extends State<InvitePage> {
                 const SizedBox(height: 10),
                 SectionCard(
                   icon: Icons.account_balance_wallet_outlined,
-                  title: '提现',
+                  title: L10n.t('提现'),
                   action: TextButton(
                     onPressed: _applyWithdraw,
                     child: Text(
-                      summary.withdrawChannels.isEmpty ? '提现到余额' : '申请提现',
+                      summary.withdrawChannels.isEmpty ? L10n.t('提现到余额') : L10n.t('申请提现'),
                     ),
                   ),
                   child: Column(
                     children: <Widget>[
                       InfoRow(
-                        label: '可提现',
+                        label: L10n.t('可提现'),
                         value:
                             '¥ ${summary.withdrawBalance.toStringAsFixed(2)}',
                       ),
                       if (summary.enableWithdraw)
                         InfoRow(
-                          label: '提现中',
+                          label: L10n.t('提现中'),
                           value:
                               '¥ ${summary.pendingWithdraw.toStringAsFixed(2)}',
                         ),
                       InfoRow(
-                        label: '账户余额',
+                        label: L10n.t('账户余额'),
                         value: '¥ ${summary.money.toStringAsFixed(2)}',
                       ),
                     ],
@@ -341,7 +388,7 @@ class _InvitePageState extends State<InvitePage> {
                 const SizedBox(height: 10),
                 SectionCard(
                   icon: Icons.people_outline,
-                  title: '邀请用户',
+                  title: L10n.t('邀请用户'),
                   child: Column(
                     children: <Widget>[
                       ListToolbar(
@@ -349,7 +396,7 @@ class _InvitePageState extends State<InvitePage> {
                         lastPage: summary.invitedLastPage,
                         total: summary.invitedTotal,
                         perPage: _invitedPerPage,
-                        searchHint: '用户名 / 邮箱',
+                        searchHint: L10n.t('用户名 / 邮箱'),
                         onSearchChanged: (String value) {
                           _invitedDebounce?.cancel();
                           _invitedDebounce = Timer(
@@ -374,13 +421,13 @@ class _InvitePageState extends State<InvitePage> {
                       SimpleDataTable(
                         framed: false,
                         minWidth: 560,
-                        columns: const <String>[
-                          '用户ID',
-                          '用户名',
-                          '邮箱',
-                          '注册时间',
+                        columns: <String>[
+                          L10n.t('用户ID'),
+                          L10n.t('用户名'),
+                          L10n.t('邮箱'),
+                          L10n.t('注册时间'),
                         ],
-                        emptyText: '暂无邀请用户',
+                        emptyText: L10n.t('暂无邀请用户'),
                         rows: <List<Widget>>[
                           for (final InvitedUserItem user
                               in summary.invitedUsers)
@@ -401,7 +448,7 @@ class _InvitePageState extends State<InvitePage> {
                 const SizedBox(height: 10),
                 SectionCard(
                   icon: Icons.payments_outlined,
-                  title: '返利记录',
+                  title: L10n.t('返利记录'),
                   child: Column(
                     children: <Widget>[
                       ListToolbar(
@@ -409,7 +456,7 @@ class _InvitePageState extends State<InvitePage> {
                         lastPage: summary.paybackLastPage,
                         total: summary.paybackTotal,
                         perPage: _paybackPerPage,
-                        searchHint: '用户 ID',
+                        searchHint: L10n.t('用户 ID'),
                         onSearchChanged: (String value) {
                           _paybackDebounce?.cancel();
                           _paybackDebounce = Timer(
@@ -434,12 +481,12 @@ class _InvitePageState extends State<InvitePage> {
                       SimpleDataTable(
                         framed: false,
                         minWidth: 480,
-                        columns: const <String>[
-                          '返利用户ID',
-                          '返利金额',
-                          '返利时间',
+                        columns: <String>[
+                          L10n.t('返利用户ID'),
+                          L10n.t('返利金额'),
+                          L10n.t('返利时间'),
                         ],
-                        emptyText: '暂无返利记录',
+                        emptyText: L10n.t('暂无返利记录'),
                         rows: <List<Widget>>[
                           for (final PaybackItem item in summary.paybacks)
                             <Widget>[
@@ -455,7 +502,7 @@ class _InvitePageState extends State<InvitePage> {
                 const SizedBox(height: 10),
                 SectionCard(
                   icon: Icons.history,
-                  title: '提现记录',
+                  title: L10n.t('提现记录'),
                   child: Column(
                     children: <Widget>[
                       ListToolbar(
@@ -463,7 +510,7 @@ class _InvitePageState extends State<InvitePage> {
                         lastPage: summary.withdrawLastPage,
                         total: summary.withdrawTotal,
                         perPage: _withdrawPerPage,
-                        searchHint: '渠道 / 金额',
+                        searchHint: L10n.t('渠道 / 金额'),
                         onSearchChanged: (String value) {
                           _withdrawDebounce?.cancel();
                           _withdrawDebounce = Timer(
@@ -488,14 +535,14 @@ class _InvitePageState extends State<InvitePage> {
                       SimpleDataTable(
                         framed: false,
                         minWidth: 640,
-                        columns: const <String>[
-                          '金额',
-                          '提现方式',
-                          '状态',
-                          '申请时间',
-                          '操作',
+                        columns: <String>[
+                          L10n.t('金额'),
+                          L10n.t('提现方式'),
+                          L10n.t('状态'),
+                          L10n.t('申请时间'),
+                          L10n.t('操作'),
                         ],
-                        emptyText: '暂无提现记录',
+                        emptyText: L10n.t('暂无提现记录'),
                         rows: <List<Widget>>[
                           for (final WithdrawRecordItem item
                               in summary.withdrawRecords)
@@ -509,7 +556,7 @@ class _InvitePageState extends State<InvitePage> {
                                       onPressed: () => unawaited(
                                         _cancelWithdraw(item.id),
                                       ),
-                                      child: const Text('取消'),
+                                      child: Text(L10n.t('取消')),
                                     )
                                   : const TableText('-', muted: true),
                             ],
@@ -523,6 +570,46 @@ class _InvitePageState extends State<InvitePage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _InviteCopyRow extends StatelessWidget {
+  const _InviteCopyRow({
+    required this.label,
+    required this.value,
+    required this.onCopy,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(label, style: theme.textTheme.bodySmall),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+            IconButton(
+              tooltip: L10n.t('复制{0}', <Object>[label]),
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy, size: 18),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -587,9 +674,9 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
         ? _summary.balanceWithdrawRequireMin
         : true;
     final String min = needMin
-        ? '，最低 ¥ ${_summary.minWithdrawAmount.toStringAsFixed(2)}'
+        ? L10n.t('，最低 ¥ {0}', <Object>[_summary.minWithdrawAmount.toStringAsFixed(2)])
         : '';
-    return '可提现 ¥ ${_summary.withdrawBalance.toStringAsFixed(2)}$min';
+    return L10n.t('可提现 ¥ {0}{1}', <Object>[_summary.withdrawBalance.toStringAsFixed(2), min]);
   }
 
   Future<void> _selectChannel(String channelId) async {
@@ -629,7 +716,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
       }
       setState(() {
         _fieldsBusy = false;
-        _fieldsError = e is ApiException ? e.message : '加载渠道失败';
+        _fieldsError = e is ApiException ? e.message : L10n.t('加载渠道失败');
       });
     }
   }
@@ -652,7 +739,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
   void _submit() {
     final double? parsed = double.tryParse(_amount.text.trim());
     if (parsed == null || parsed <= 0) {
-      setState(() => _amountError = '请输入有效的提现金额');
+      setState(() => _amountError = L10n.t('请输入有效的提现金额'));
       return;
     }
     if (!_toBalance && (_fieldsBusy || _fieldsError != null)) {
@@ -677,19 +764,19 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
     final ThemeData theme = Theme.of(context);
     final List<WithdrawChannelItem> channels = _summary.withdrawChannels;
     final Map<String, String> channelOptions = <String, String>{
-      'balance': '提现到账户余额（无需审批）',
+      'balance': L10n.t('提现到账户余额（无需审批）'),
       for (final WithdrawChannelItem channel in channels)
-        '${channel.id}': '${channel.name}（需审批）',
+        '${channel.id}': L10n.t('{0}（需审批）', <Object>[channel.name]),
     };
     final Map<String, String> savedOptions = <String, String>{
-      '': '手动输入',
+      '': L10n.t('手动输入'),
       for (final WithdrawSavedAccount account in _savedAccounts)
         '${account.id}':
-            account.isDefault ? '${account.summary}（默认）' : account.summary,
+            account.isDefault ? L10n.t('{0}（默认）', <Object>[account.summary]) : account.summary,
     };
 
     return AlertDialog(
-      title: Text(channels.isEmpty ? '提现到余额' : '申请提现'),
+      title: Text(channels.isEmpty ? L10n.t('提现到余额') : L10n.t('申请提现')),
       content: SizedBox(
         width: 460,
         child: SingleChildScrollView(
@@ -703,7 +790,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                   decimal: true,
                 ),
                 decoration: InputDecoration(
-                  labelText: '金额',
+                  labelText: L10n.t('金额'),
                   helperText: _helperText(),
                   errorText: _amountError,
                 ),
@@ -715,7 +802,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
               ),
               if (channels.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
-                Text('提现方式', style: theme.textTheme.bodySmall),
+                Text(L10n.t('提现方式'), style: theme.textTheme.bodySmall),
                 const SizedBox(height: 6),
                 LayoutBuilder(
                   builder: (BuildContext context, BoxConstraints constraints) =>
@@ -749,7 +836,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                 ] else ...<Widget>[
                   if (_savedAccounts.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 12),
-                    Text('已保存的账户', style: theme.textTheme.bodySmall),
+                    Text(L10n.t('已保存的账户'), style: theme.textTheme.bodySmall),
                     const SizedBox(height: 6),
                     LayoutBuilder(
                       builder:
@@ -779,7 +866,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                     value: _saveAccount,
                     onChanged: (bool? value) =>
                         setState(() => _saveAccount = value ?? false),
-                    title: const Text('保存此收款账户'),
+                    title: Text(L10n.t('保存此收款账户')),
                   ),
                 ],
               ],
@@ -790,11 +877,11 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
         FilledButton(
           onPressed: _fieldsBusy || _fieldsError != null ? null : _submit,
-          child: const Text('申请'),
+          child: Text(L10n.t('申请')),
         ),
       ],
     );

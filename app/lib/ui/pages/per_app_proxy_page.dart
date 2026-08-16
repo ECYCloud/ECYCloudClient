@@ -6,6 +6,7 @@ import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/search_field.dart';
+import '../../l10n/l10n.dart';
 
 class PerAppProxyPage extends StatefulWidget {
   const PerAppProxyPage({super.key});
@@ -48,7 +49,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = '读取应用列表失败：$e');
+        setState(() => _error = L10n.t('读取应用列表失败：{0}', <Object>[e]));
       }
     }
   }
@@ -58,7 +59,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
     final ConnectionController connection = AppScope.of(context).connection;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('分应用代理')),
+      appBar: AppBar(title: Text(L10n.t('分应用代理'))),
       body: ListenableBuilder(
         listenable: connection,
         builder: (BuildContext context, _) {
@@ -68,11 +69,15 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
           return Column(
             children: <Widget>[
               ListTile(
-                title: const Text('生效范围'),
-                subtitle: const Text('改动在下次连接或重连后生效'),
+                title: Text(L10n.t('生效范围')),
+                subtitle: Text(L10n.t('改动在下次连接或重连后生效')),
                 trailing: OptionDropdown<PerAppProxyMode>(
                   value: settings.perAppMode,
-                  options: PerAppProxyPage.modes,
+                  options: <PerAppProxyMode, String>{
+                    for (final MapEntry<PerAppProxyMode, String> entry
+                        in PerAppProxyPage.modes.entries)
+                      entry.key: L10n.t(entry.value),
+                  },
                   width: 140,
                   onChanged: (PerAppProxyMode mode) => connection
                       .updateSettings(settings.copyWith(perAppMode: mode)),
@@ -84,7 +89,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
                   children: <Widget>[
                     Expanded(
                       child: SearchField(
-                        hintText: '搜索应用',
+                        hintText: L10n.t('搜索应用'),
                         width: double.infinity,
                         onChanged: (String value) =>
                             setState(() => _keyword = value.toLowerCase()),
@@ -92,7 +97,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
                     ),
                     const SizedBox(width: 8),
                     FilterChip(
-                      label: const Text('系统应用'),
+                      label: Text(L10n.t('系统应用')),
                       selected: _showSystem,
                       onSelected: (bool value) =>
                           setState(() => _showSystem = value),
@@ -134,7 +139,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
     ];
 
     if (visible.isEmpty) {
-      return const Center(child: Text('没有匹配的应用'));
+      return Center(child: Text(L10n.t('没有匹配的应用')));
     }
 
     final bool enabled = settings.perAppMode != PerAppProxyMode.off;

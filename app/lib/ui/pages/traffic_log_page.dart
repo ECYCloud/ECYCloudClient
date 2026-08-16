@@ -13,6 +13,7 @@ import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import '../widgets/simple_data_table.dart';
+import '../../l10n/l10n.dart';
 
 /// 与网页 trafficlog.tpl 列一致的可排序字段。
 enum _TrafficSortCol { date, upload, download, rate, usage, nodeName }
@@ -127,7 +128,7 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -192,20 +193,18 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('流量记录说明'),
-        content: const SingleChildScrollView(
+        title: Text(L10n.t('流量记录说明')),
+        content: SingleChildScrollView(
           child: Text(
-            '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、'
-            'Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，'
-            '会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，'
-            '这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n'
-            '如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。',
+            L10n.t(
+              '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。',
+            ),
           ),
         ),
         actions: <Widget>[
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('我知道了'),
+            child: Text(L10n.t('我知道了')),
           ),
         ],
       ),
@@ -231,11 +230,11 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '流量记录',
+              title: L10n.t('流量记录'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -256,12 +255,12 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                '此处只展示最近 $keepDays 天的每日流量记录。',
+                                L10n.t('此处只展示最近 {0} 天的每日流量记录。', <Object>[keepDays]),
                                 style: theme.textTheme.bodyMedium,
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。',
+                                L10n.t('当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。'),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -271,13 +270,13 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: <Widget>[
                                   Text(
-                                    '我没有使用某些节点，为什么这些节点也会消耗流量？',
+                                    L10n.t('我没有使用某些节点，为什么这些节点也会消耗流量？'),
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                   TextButton(
                                     style: AppTheme.inlineTextLink(scheme),
                                     onPressed: _showTrafficInfo,
-                                    child: const Text('查看说明'),
+                                    child: Text(L10n.t('查看说明')),
                                   ),
                                 ],
                               ),
@@ -285,7 +284,7 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: <Widget>[
                                   Text(
-                                    '流量不够用？前往 ',
+                                    L10n.t('流量不够用？前往 '),
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                   TextButton(
@@ -296,10 +295,10 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                       );
                                       ShellNavigator.openShopTraffic(context);
                                     },
-                                    child: const Text('商店'),
+                                    child: Text(L10n.t('商店')),
                                   ),
                                   Text(
-                                    ' 选购流量包',
+                                    L10n.t(' 选购流量包'),
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                 ],
@@ -485,7 +484,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
           padding: const EdgeInsets.symmetric(vertical: 32),
           child: Center(
             child: Text(
-              '您最近 $keepDays 天内还没有流量使用记录',
+              L10n.t('您最近 {0} 天内还没有流量使用记录', <Object>[keepDays]),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -546,7 +545,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                       _sortLabel(
                         theme: theme,
                         scheme: scheme,
-                        title: h.$2,
+                        title: L10n.t(h.$2),
                         col: h.$1,
                         activeCol: widget.daySortCol,
                         asc: widget.daySortAsc,
@@ -587,7 +586,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                           TableText(
                             bundle.traffic[day]?.totalDownload ?? '0B',
                           ),
-                          TableText(bundle.traffic[day]?.rateInfo ?? '无'),
+                          TableText(bundle.traffic[day]?.rateInfo ?? L10n.t('无')),
                           TableText(
                             bundle.traffic[day]?.totalUsage ?? '0B',
                             bold: true,
@@ -610,7 +609,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
               ],
               segment(<TableRow>[
                 cells(<Widget>[
-                  const TableText('累计使用流量', bold: true),
+                  TableText(L10n.t('累计使用流量'), bold: true),
                   TableText(bundle.totalUpload, bold: true),
                   TableText(bundle.totalDownload, bold: true),
                   TableText(bundle.totalRateInfo, bold: true),
@@ -699,7 +698,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                         _kv(
                           theme,
                           scheme,
-                          '日期',
+                          L10n.t('日期'),
                           Row(
                             children: <Widget>[
                               Icon(
@@ -717,7 +716,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                         _kv(
                           theme,
                           scheme,
-                          '实际上传流量',
+                          L10n.t('实际上传流量'),
                           TableText(
                             bundle.traffic[days[i]]?.totalUpload ?? '0B',
                           ),
@@ -725,7 +724,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                         _kv(
                           theme,
                           scheme,
-                          '实际下载流量',
+                          L10n.t('实际下载流量'),
                           TableText(
                             bundle.traffic[days[i]]?.totalDownload ?? '0B',
                           ),
@@ -733,15 +732,15 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                         _kv(
                           theme,
                           scheme,
-                          '倍率',
+                          L10n.t('倍率'),
                           TableText(
-                            bundle.traffic[days[i]]?.rateInfo ?? '无',
+                            bundle.traffic[days[i]]?.rateInfo ?? L10n.t('无'),
                           ),
                         ),
                         _kv(
                           theme,
                           scheme,
-                          '结算流量',
+                          L10n.t('结算流量'),
                           TableText(
                             bundle.traffic[days[i]]?.totalUsage ?? '0B',
                             bold: true,
@@ -770,31 +769,31 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                 _kv(
                   theme,
                   scheme,
-                  '日期',
-                  const TableText('累计使用流量', bold: true),
+                  L10n.t('日期'),
+                  TableText(L10n.t('累计使用流量'), bold: true),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '实际上传流量',
+                  L10n.t('实际上传流量'),
                   TableText(bundle.totalUpload, bold: true),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '实际下载流量',
+                  L10n.t('实际下载流量'),
                   TableText(bundle.totalDownload, bold: true),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '倍率',
+                  L10n.t('倍率'),
                   TableText(bundle.totalRateInfo, bold: true),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '结算流量',
+                  L10n.t('结算流量'),
                   TableText(bundle.totalUsage, bold: true),
                 ),
               ],
@@ -822,7 +821,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
           children: <Widget>[
             if (nodes.isEmpty)
               Text(
-                '该日期没有节点使用数据',
+                L10n.t('该日期没有节点使用数据'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
@@ -833,26 +832,26 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                 _kv(
                   theme,
                   scheme,
-                  '节点名称',
+                  L10n.t('节点名称'),
                   TableText(nodes[i].nodeName, bold: true),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '实际上传流量',
+                  L10n.t('实际上传流量'),
                   TableText(Format.bytes(nodes[i].dailyUpload)),
                 ),
                 _kv(
                   theme,
                   scheme,
-                  '实际下载流量',
+                  L10n.t('实际下载流量'),
                   TableText(Format.bytes(nodes[i].dailyDownload)),
                 ),
-                _kv(theme, scheme, '倍率', TableText(nodes[i].nodeRateStr)),
+                _kv(theme, scheme, L10n.t('倍率'), TableText(nodes[i].nodeRateStr)),
                 _kv(
                   theme,
                   scheme,
-                  '结算流量',
+                  L10n.t('结算流量'),
                   TableText(Format.bytes(nodes[i].dailyUsage), bold: true),
                 ),
               ],
@@ -883,7 +882,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                 _sortLabel(
                   theme: theme,
                   scheme: scheme,
-                  title: h.$2,
+                  title: L10n.t(h.$2),
                   col: h.$1,
                   activeCol: _nodeSortCol,
                   asc: _nodeSortAsc,
@@ -897,7 +896,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
           if (nodes.isEmpty)
             cells(<Widget>[
               Text(
-                '该日期没有节点使用数据',
+                L10n.t('该日期没有节点使用数据'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),

@@ -115,13 +115,25 @@ class AndroidPlatformService implements PlatformService {
       false;
 
   @override
-  Future<void> openUrl(String url) async {
+  Future<bool> openUrl(String url) async {
     if (!SafeUrl.canOpen(url)) {
-      return;
+      return false;
     }
-    await _channel.invokeMethod<void>('url.open', <String, dynamic>{
-      'url': url,
-    });
+    return await _channel.invokeMethod<bool>('url.open', <String, dynamic>{
+          'url': url,
+        }) ??
+        false;
+  }
+
+  @override
+  Future<bool> openDirectory(String path) async {
+    if (path.isEmpty) {
+      return false;
+    }
+    return await _channel.invokeMethod<bool>('dir.open', <String, dynamic>{
+          'path': path,
+        }) ??
+        false;
   }
 
   @override

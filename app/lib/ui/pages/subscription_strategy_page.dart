@@ -14,6 +14,7 @@ import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
+import '../../l10n/l10n.dart';
 
 class SubscriptionStrategyPage extends StatefulWidget {
   const SubscriptionStrategyPage({super.key});
@@ -103,7 +104,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _loading = false;
       });
     }
@@ -122,7 +123,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg.isEmpty ? '保存成功' : msg),
+          content: Text(msg.isEmpty ? L10n.t('保存成功') : msg),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -139,6 +140,19 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         setState(() => _busy = false);
       }
     }
+  }
+
+  String? _groupToggleIcon(SubscriptionConfig config, String name) {
+    final String? builtIn = config.groupIcons[name];
+    if (builtIn != null && builtIn.isNotEmpty) {
+      return builtIn;
+    }
+    for (final CustomProxyGroup group in _customGroups) {
+      if (group.name == name) {
+        return group.icon;
+      }
+    }
+    return null;
   }
 
   void _clearGroupForm() {
@@ -163,8 +177,48 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     _groupNameFocus.requestFocus();
   }
 
-  void _removeCustomGroup(int i) {
+  void _persistCustomGroups() {
+    unawaited(
+      _save(<String, dynamic>{
+        'custom_groups': jsonEncode(
+          <Map<String, dynamic>>[
+            for (final CustomProxyGroup g in _customGroups) g.toJson(),
+          ],
+        ),
+      }),
+    );
+  }
+
+  Future<void> _removeCustomGroup(int i) async {
+    if (i < 0 || i >= _customGroups.length) {
+      return;
+    }
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(L10n.t('确认删除')),
+        content: Text(
+          L10n.t('确定要删除自定义策略组「{0}」吗？', <Object>[
+            _customGroups[i].name,
+          ]),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(L10n.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(L10n.t('确定')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) {
+      return;
+    }
     setState(() {
+      _disabled.remove(_customGroups[i].name);
       _customGroups.removeAt(i);
       if (_editingGroupIdx == i) {
         _clearGroupForm();
@@ -172,6 +226,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         _editingGroupIdx = _editingGroupIdx! - 1;
       }
     });
+    _persistCustomGroups();
   }
 
   void _commitCustomGroup({int? replaceAt}) {
@@ -182,8 +237,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     final String name = _groupName.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请填写策略组名称'),
+        SnackBar(
+          content: Text(L10n.t('请填写策略组名称')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -193,7 +248,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         _customGroups.length >= config.maxCustomGroups) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('最多添加 ${config.maxCustomGroups} 个自定义策略组'),
+          content: Text(L10n.t('最多添加 {0} 个自定义策略组', <Object>[config.maxCustomGroups])),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -204,8 +259,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
           e.value.name == name && e.key != replaceAt,
     )) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('策略组名称已存在'),
+        SnackBar(
+          content: Text(L10n.t('策略组名称已存在')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -217,8 +272,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
             icon.startsWith('https://') ||
             icon.startsWith('/'))) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('图标须为 http(s) 链接或站点根路径'),
+        SnackBar(
+          content: Text(L10n.t('图标须为 http(s) 链接或站点根路径')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -241,17 +296,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       }
       _clearGroupForm();
     });
-    if (replaceAt != null) {
-      unawaited(
-        _save(<String, dynamic>{
-          'custom_groups': jsonEncode(
-            <Map<String, dynamic>>[
-              for (final CustomProxyGroup g in _customGroups) g.toJson(),
-            ],
-          ),
-        }),
-      );
-    }
+    _persistCustomGroups();
   }
 
   List<String> _policyNames(SubscriptionConfig config) {
@@ -319,8 +364,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         : (policies.isNotEmpty ? policies.first : '');
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请填写规则集 URL'),
+        SnackBar(
+          content: Text(L10n.t('请填写规则集 URL')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -328,8 +373,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     }
     if (!(url.startsWith('http://') || url.startsWith('https://'))) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('URL 须为 http(s) 链接'),
+        SnackBar(
+          content: Text(L10n.t('URL 须为 http(s) 链接')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -337,8 +382,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     }
     if (policy.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请选择策略'),
+        SnackBar(
+          content: Text(L10n.t('请选择策略')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -348,7 +393,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         _customRuleProviders.length >= config.maxCustomRuleProviders) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('最多添加 ${config.maxCustomRuleProviders} 个远程规则集'),
+          content: Text(L10n.t('最多添加 {0} 个远程规则集', <Object>[config.maxCustomRuleProviders])),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -395,10 +440,10 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     return Scaffold(
       body: Column(
         children: <Widget>[
-          const SafeArea(
+          SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '自定义策略',
+              title: L10n.t('自定义策略'),
               showBackButton: true,
               showUserAvatar: true,
             ),
@@ -407,9 +452,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
             color: theme.colorScheme.surface,
             child: TabBar(
               controller: _tabs,
-              tabs: const <Widget>[
-                Tab(text: '分组策略'),
-                Tab(text: '配置策略'),
+              tabs: <Widget>[
+                Tab(text: L10n.t('分组策略')),
+                Tab(text: L10n.t('配置策略')),
               ],
             ),
           ),
@@ -419,7 +464,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                 : _error != null
                 ? Center(child: Text(_error!))
                 : config == null
-                ? const Center(child: Text('暂无数据'))
+                ? Center(child: Text(L10n.t('暂无数据')))
                 : TabBarView(
                     controller: _tabs,
                     children: <Widget>[
@@ -438,18 +483,26 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       for (final String name in config.allGroupNames)
         if (config.customizableGroups.contains(name)) name,
     ];
+    final Set<String> seen = toggleable.toSet();
+    if (config.allowCustomGroups) {
+      for (final CustomProxyGroup group in _customGroups) {
+        if (group.name.isNotEmpty && seen.add(group.name)) {
+          toggleable.add(group.name);
+        }
+      }
+    }
 
     return ListView(
       padding: const EdgeInsets.all(14),
       children: <Widget>[
         SectionCard(
           icon: Icons.tune,
-          title: '策略组开关',
+          title: L10n.t('策略组开关'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                '开启或关闭策略组，保存后刷新配置生效',
+                L10n.t('开启或关闭策略组，保存后刷新配置生效'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -457,9 +510,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
               const SizedBox(height: 10),
               if (toggleable.isEmpty)
                 Text(
-                  config.customizableGroups.isEmpty
-                      ? '管理员未开放分组自定义功能'
-                      : '暂无可自定义的策略组',
+                  config.customizableGroups.isEmpty && !config.allowCustomGroups
+                      ? L10n.t('管理员未开放分组自定义功能')
+                      : L10n.t('暂无可自定义的策略组'),
                   style: theme.textTheme.bodyMedium,
                 )
               else
@@ -467,7 +520,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: GroupIcon(
-                      url: config.groupIcons[name],
+                      url: _groupToggleIcon(config, name),
                       selectable: true,
                       size: 20,
                     ),
@@ -502,7 +555,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               ),
                             }),
                           ),
-                    child: const Text('保存分组配置'),
+                    child: Text(L10n.t('保存分组配置')),
                   ),
                 ),
               ],
@@ -513,19 +566,19 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
           const SizedBox(height: 10),
           SectionCard(
             icon: Icons.add_circle_outline,
-            title: '自定义策略组',
+            title: L10n.t('自定义策略组'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  '仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 ${config.maxCustomGroups} 个。',
+                  L10n.t('仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 {0} 个。', <Object>[config.maxCustomGroups]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 10),
                 if (_customGroups.isEmpty)
-                  Text('尚未添加自定义策略组', style: theme.textTheme.bodyMedium)
+                  Text(L10n.t('尚未添加自定义策略组'), style: theme.textTheme.bodyMedium)
                 else
                   for (int i = 0; i < _customGroups.length; i++)
                     if (_editingGroupIdx == i)
@@ -537,29 +590,29 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             TextField(
                               controller: _groupName,
                               focusNode: _groupNameFocus,
-                              decoration: const InputDecoration(
-                                labelText: '策略组名称',
+                              decoration: InputDecoration(
+                                labelText: L10n.t('策略组名称'),
                                 isDense: true,
                               ),
                             ),
                             const SizedBox(height: 8),
                             TextField(
                               controller: _groupIcon,
-                              decoration: const InputDecoration(
-                                labelText: '图标 URL（可选）',
+                              decoration: InputDecoration(
+                                labelText: L10n.t('图标 URL（可选）'),
                                 hintText: 'https://example.com/icon.png',
                                 isDense: true,
                               ),
                             ),
                             SwitchTile(
                               contentPadding: EdgeInsets.zero,
-                              title: '包含全部节点',
+                              title: L10n.t('包含全部节点'),
                               value: _draftIncludeNodes,
                               onChanged: (bool value) =>
                                   setState(() => _draftIncludeNodes = value),
                             ),
                             Text(
-                              '引用策略组',
+                              L10n.t('引用策略组'),
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -595,7 +648,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                       ? null
                                       : () =>
                                           _commitCustomGroup(replaceAt: i),
-                                  child: const Text('保存'),
+                                  child: Text(L10n.t('保存')),
                                 ),
                                 const SizedBox(width: 10),
                                 TextButton(
@@ -605,7 +658,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                   onPressed: _busy
                                       ? null
                                       : () => setState(_clearGroupForm),
-                                  child: const Text('取消'),
+                                  child: Text(L10n.t('取消')),
                                 ),
                               ],
                             ),
@@ -623,9 +676,11 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                         title: Text(_customGroups[i].name),
                         subtitle: Text(
                           [
-                            if (_customGroups[i].includeNodes) '全部节点',
+                            if (_customGroups[i].includeNodes) L10n.t('全部节点'),
                             if (_customGroups[i].proxies.isNotEmpty)
-                              '${_customGroups[i].proxies.length} 引用',
+                              L10n.t('{0} 引用', <Object>[
+                                _customGroups[i].proxies.length,
+                              ]),
                           ].join(' · '),
                         ),
                         trailing: Row(
@@ -638,7 +693,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               onPressed: _busy
                                   ? null
                                   : () => _beginEditGroup(i),
-                              child: const Text('编辑'),
+                              child: Text(L10n.t('编辑')),
                             ),
                             const SizedBox(width: 10),
                             TextButton(
@@ -647,8 +702,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               ),
                               onPressed: _busy
                                   ? null
-                                  : () => _removeCustomGroup(i),
-                              child: const Text('删除'),
+                                  : () => unawaited(_removeCustomGroup(i)),
+                              child: Text(L10n.t('删除')),
                             ),
                           ],
                         ),
@@ -658,29 +713,29 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   TextField(
                     controller: _groupName,
                     focusNode: _groupNameFocus,
-                    decoration: const InputDecoration(
-                      labelText: '策略组名称',
+                    decoration: InputDecoration(
+                      labelText: L10n.t('策略组名称'),
                       isDense: true,
                     ),
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _groupIcon,
-                    decoration: const InputDecoration(
-                      labelText: '图标 URL（可选）',
+                    decoration: InputDecoration(
+                      labelText: L10n.t('图标 URL（可选）'),
                       hintText: 'https://example.com/icon.png',
                       isDense: true,
                     ),
                   ),
                   SwitchTile(
                     contentPadding: EdgeInsets.zero,
-                    title: '包含全部节点',
+                    title: L10n.t('包含全部节点'),
                     value: _draftIncludeNodes,
                     onChanged: (bool value) =>
                         setState(() => _draftIncludeNodes = value),
                   ),
                   Text(
-                    '引用策略组',
+                    L10n.t('引用策略组'),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -704,34 +759,15 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                         ),
                     ],
                   ),
-                ],
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: <Widget>[
-                    if (_editingGroupIdx == null)
-                      OutlinedButton(
-                        onPressed: _busy ? null : _commitCustomGroup,
-                        child: const Text('添加'),
-                      ),
-                    FilledButton(
-                      onPressed: _busy
-                          ? null
-                          : () => unawaited(
-                              _save(<String, dynamic>{
-                                'custom_groups': jsonEncode(
-                                  <Map<String, dynamic>>[
-                                    for (final CustomProxyGroup g
-                                        in _customGroups)
-                                      g.toJson(),
-                                  ],
-                                ),
-                              }),
-                            ),
-                      child: const Text('保存自定义策略组'),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : _commitCustomGroup,
+                      child: Text(L10n.t('添加')),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -746,7 +782,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         config.allowCustomRules ||
         config.allowCustomRuleProviders;
     if (!hasConfig) {
-      return const Center(child: Text('管理员未开放自定义配置功能'));
+      return Center(child: Text(L10n.t('管理员未开放自定义配置功能')));
     }
     final bool hasHostsOrRules =
         config.allowCustomHosts || config.allowCustomRules;
@@ -761,12 +797,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         if (config.allowCustomHosts)
           SectionCard(
             icon: Icons.dns_outlined,
-            title: '自定义 Host',
+            title: L10n.t('自定义 Host'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  '每行一条：domain = ip。最多 ${config.maxCustomHosts} 条。',
+                  L10n.t('每行一条：domain = ip。最多 {0} 条。', <Object>[config.maxCustomHosts]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -786,12 +822,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         if (config.allowCustomRules)
           SectionCard(
             icon: Icons.alt_route,
-            title: '自定义分流规则',
+            title: L10n.t('自定义分流规则'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  '每行一条：TYPE,value,POLICY。最多 ${config.maxCustomRules} 条。',
+                  L10n.t('每行一条：TYPE,value,POLICY。最多 {0} 条。', <Object>[config.maxCustomRules]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -823,7 +859,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                       }
                       unawaited(_save(body));
                     },
-              child: const Text('保存配置策略'),
+              child: Text(L10n.t('保存配置策略')),
             ),
           ),
         ],
@@ -832,19 +868,19 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         if (config.allowCustomRuleProviders)
           SectionCard(
             icon: Icons.cloud_download_outlined,
-            title: '远程规则集',
+            title: L10n.t('远程规则集'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  '填写规则集 URL 并选择策略，仅 Clash / 官方客户端生效。需同时在上方设置自定义分流规则。最多 ${config.maxCustomRuleProviders} 个。',
+                  L10n.t('填写规则集 URL 并选择策略，仅 Clash / 官方客户端生效。需同时在上方设置自定义分流规则。最多 {0} 个。', <Object>[config.maxCustomRuleProviders]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 10),
                 if (_customRuleProviders.isEmpty)
-                  Text('尚未添加远程规则集', style: theme.textTheme.bodyMedium)
+                  Text(L10n.t('尚未添加远程规则集'), style: theme.textTheme.bodyMedium)
                 else
                   for (int i = 0; i < _customRuleProviders.length; i++)
                     if (_editingProviderIdx == i)
@@ -856,15 +892,15 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             TextField(
                               controller: _providerUrl,
                               focusNode: _providerUrlFocus,
-                              decoration: const InputDecoration(
-                                labelText: '规则集 URL',
+                              decoration: InputDecoration(
+                                labelText: L10n.t('规则集 URL'),
                                 isDense: true,
                               ),
                             ),
                             const SizedBox(height: 8),
                             Row(
                               children: <Widget>[
-                                Text('策略', style: theme.textTheme.bodyMedium),
+                                Text(L10n.t('策略'), style: theme.textTheme.bodyMedium),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: LayoutBuilder(
@@ -879,7 +915,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                         value: draftPolicy.isEmpty
                                             ? null
                                             : draftPolicy,
-                                        placeholder: '选择策略',
+                                        placeholder: L10n.t('选择策略'),
                                         options: <String, String>{
                                           for (final String name in policies)
                                             name: name,
@@ -903,7 +939,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                       ? null
                                       : () =>
                                           _commitRuleProvider(replaceAt: i),
-                                  child: const Text('保存'),
+                                  child: Text(L10n.t('保存')),
                                 ),
                                 const SizedBox(width: 10),
                                 TextButton(
@@ -913,7 +949,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                   onPressed: _busy
                                       ? null
                                       : () => setState(_clearProviderForm),
-                                  child: const Text('取消'),
+                                  child: Text(L10n.t('取消')),
                                 ),
                               ],
                             ),
@@ -935,7 +971,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               onPressed: _busy
                                   ? null
                                   : () => _beginEditProvider(i),
-                              child: const Text('编辑'),
+                              child: Text(L10n.t('编辑')),
                             ),
                             const SizedBox(width: 10),
                             TextButton(
@@ -945,7 +981,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               onPressed: _busy
                                   ? null
                                   : () => _removeRuleProvider(i),
-                              child: const Text('删除'),
+                              child: Text(L10n.t('删除')),
                             ),
                           ],
                         ),
@@ -955,8 +991,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   TextField(
                     controller: _providerUrl,
                     focusNode: _providerUrlFocus,
-                    decoration: const InputDecoration(
-                      labelText: '规则集 URL',
+                    decoration: InputDecoration(
+                      labelText: L10n.t('规则集 URL'),
                       hintText: 'https://example.com/rules.yaml',
                       isDense: true,
                     ),
@@ -964,7 +1000,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   const SizedBox(height: 8),
                   Row(
                     children: <Widget>[
-                      Text('策略', style: theme.textTheme.bodyMedium),
+                      Text(L10n.t('策略'), style: theme.textTheme.bodyMedium),
                       const SizedBox(width: 12),
                       Expanded(
                         child: LayoutBuilder(
@@ -977,7 +1013,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               width: constraints.maxWidth,
                               height: 36,
                               value: draftPolicy.isEmpty ? null : draftPolicy,
-                              placeholder: '选择策略',
+                              placeholder: L10n.t('选择策略'),
                               options: <String, String>{
                                 for (final String name in policies) name: name,
                               },
@@ -997,7 +1033,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                     if (_editingProviderIdx == null)
                       OutlinedButton(
                         onPressed: _busy ? null : _commitRuleProvider,
-                        child: const Text('添加'),
+                        child: Text(L10n.t('添加')),
                       ),
                     FilledButton(
                       onPressed: _busy
@@ -1013,7 +1049,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                 ),
                               }),
                             ),
-                      child: const Text('保存远程规则集'),
+                      child: Text(L10n.t('保存远程规则集')),
                     ),
                   ],
                 ),

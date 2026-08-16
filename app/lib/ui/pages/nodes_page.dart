@@ -12,6 +12,7 @@ import '../widgets/group_icon.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/tag_chip.dart';
+import '../../l10n/l10n.dart';
 
 class NodesPage extends StatelessWidget {
   const NodesPage({super.key});
@@ -30,20 +31,20 @@ class NodesPage extends StatelessWidget {
         return Column(
           children: <Widget>[
             PageHeader(
-              title: '节点',
+              title: L10n.t('节点'),
               showUserAvatar: true,
               actions: <Widget>[
                 RefreshButton(
-                  tooltip: '刷新节点',
+                  tooltip: L10n.t('刷新节点'),
                   onRefresh: connection.refreshProfileFromPanel,
                 ),
               ],
             ),
             Expanded(
               child: groups.isEmpty
-                  ? const _Placeholder(
+                  ? _Placeholder(
                       icon: Icons.inbox_outlined,
-                      message: '面板未下发节点分组',
+                      message: L10n.t('面板未下发节点分组'),
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.all(14),
@@ -93,9 +94,11 @@ class _GroupCardState extends State<_GroupCard> {
     }
     final String leaf = connection.resolveNode(group.now);
     return leaf == group.now
-        ? ' · 当前 ${NodeLabels.displayName(group.now)}'
-        : ' · 当前 ${NodeLabels.displayName(group.now)} → '
-              '${NodeLabels.displayName(leaf)}';
+        ? L10n.t(' · 当前 {0}', <Object>[NodeLabels.displayName(group.now)])
+        : L10n.t(' · 当前 {0} → {1}', <Object>[
+            NodeLabels.displayName(group.now),
+            NodeLabels.displayName(leaf),
+          ]);
   }
 
   Widget _buildTile(
@@ -159,11 +162,11 @@ class _GroupCardState extends State<_GroupCard> {
               ),
             ),
             const SizedBox(width: 6),
-            TagChip(label: group.selectable ? '手动' : '自动'),
+            TagChip(label: group.selectable ? L10n.t('手动') : L10n.t('自动')),
           ],
         ),
         subtitle: Text(
-          '${group.members.length} 个节点${_nowLabel(connection, group)}',
+          L10n.t('{0} 个节点{1}', <Object>[group.members.length, _nowLabel(connection, group)]),
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
@@ -266,16 +269,19 @@ class _AutoGroupHint extends StatelessWidget {
 
   String _detail() {
     if (group.type == 'Fallback') {
-      return '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；'
-          '测延迟会刷新可用性并让内核立即重选';
+      return L10n.t(
+        '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选',
+      );
     }
 
     final String? fastest = connection.fastestMember(group);
     if (fastest == null || fastest == group.now) {
-      return '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选';
+      return L10n.t('本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选');
     }
-    return '本组由内核按延迟自动选择，当前最优为 ${NodeLabels.displayName(fastest)}；'
-        '点上方测延迟可让内核立即切过去';
+    return L10n.t(
+      '本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去',
+      <Object>[NodeLabels.displayName(fastest)],
+    );
   }
 }
 

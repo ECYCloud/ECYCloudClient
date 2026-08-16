@@ -34,7 +34,7 @@ class QuickToggleService : TileService() {
 
     private fun startTunnel() {
         // 界面在前台时交给 Dart 状态机（刷新面板配置、走完整连接流程）
-        if (MainActivity.requestToggle()) {
+        if (KernelService.requestToggle()) {
             return
         }
         if (BoxState.starting || !BoxState.configFile(this).isFile) {
@@ -52,7 +52,7 @@ class QuickToggleService : TileService() {
     }
 
     private fun stopTunnel() {
-        if (MainActivity.requestToggle()) {
+        if (KernelService.requestToggle()) {
             return
         }
         // closeService 会阻塞，与 onRevoke 一样挪到后台；磁贴由 shutdown() 回刷

@@ -12,6 +12,7 @@ import '../core/logger.dart';
 import '../data/api/api_exception.dart';
 import '../data/api/panel_api_client.dart';
 import '../data/models/user_profile.dart';
+import '../data/store/json_file_store.dart';
 import '../data/store/panel_response_cache.dart';
 import '../data/store/settings_store.dart';
 import '../domain/config/local_template.dart';
@@ -21,6 +22,8 @@ import '../domain/kernel/clash_api_client.dart';
 import '../domain/kernel/kernel_controller.dart';
 import '../domain/kernel/kernel_update.dart';
 import '../domain/platform/platform_service.dart';
+import '../l10n/app_language.dart';
+import '../l10n/l10n.dart';
 import '../ui/node_labels.dart';
 
 /// 已落盘的 rule-provider，供只读查看页列出。
@@ -57,7 +60,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
        _kernel = kernel,
        _settingsStore = settingsStore,
        _settings = settingsStore.load(),
-       _panelCache = panelCache ?? PanelResponseCache() {
+       _panelCache = panelCache ?? PanelResponseCache(),
+       _selectorCache = JsonFileStore(AppPaths.selectorCache, 'selector-cache') {
     WidgetsBinding.instance.addObserver(this);
     _kernelStatusSubscription = _kernel.statusStream.listen(_onKernelStatus);
     _kernelLogSubscription = _kernel.kernelLog.listen((String line) {
@@ -92,6 +96,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   final KernelController _kernel;
   final SettingsStore _settingsStore;
   final PanelResponseCache _panelCache;
+  final JsonFileStore _selectorCache;
 
   late StreamSubscription<KernelStatus> _kernelStatusSubscription;
   late StreamSubscription<String> _kernelLogSubscription;
@@ -157,8 +162,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   bool _launching = false;
   // 面板配置/节点变更等主动重启：失败后按退避持续重试，直到连上或用户断开
   bool _persistRestart = false;
-  // 重启前记下 selector 选中项；store-selected 存进 cache.db 的选择在成员名变化时
-  // 会失效（内核只在选中项仍是当前成员时才恢复），连上后再 PUT 兜一遍
+  // 只认用户点选后落盘的记录。内核回落到的组内第一个不能当上次选择，
+  // 否则会写成 default-selected 并关掉 store-selected，把 cache.db 也废掉。
   Map<String, String>? _selectorSnapshot;
 
   // connect()/_restartKernel()/自动重连每次各领一个新编号；某一轮在 await 期间
@@ -684,6 +689,19 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       busy: busy,
       systemProxyEnabled: active && _settings.systemProxyEnabled,
       tunEnabled: active && _settings.tunEnabled,
+      labels: TrayLabels(
+        connect: switch (L10n.current) {
+          AppLanguage.en => 'Connect',
+          AppLanguage.zhTW => '連線',
+          AppLanguage.zhCN => '连接',
+        },
+        disconnect: L10n.t('断开连接'),
+        cancel: L10n.t('取消连接'),
+        systemProxy: L10n.t('系统代理'),
+        tun: L10n.t('TUN 模式'),
+        show: L10n.t('显示主界面'),
+        quit: L10n.t('退出'),
+      ),
       darkMenu: switch (_settings.themeMode) {
         ThemeMode.dark => true,
         ThemeMode.light => false,
@@ -746,6 +764,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final String? previous = groupByName(group)?.now;
 
     await clash.selectProxy(group, member);
+    _rememberSelector(group, member);
     await _refreshProxies();
 
     // 换下来的那个出站上还挂着存量连接，断掉它们后续请求才走新选中项。只断经过它的，
@@ -756,20 +775,77 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _captureSelectorSnapshot() {
-    if (_selectorSnapshot != null) {
+    final Map<String, String> live = <String, String>{
+      for (final ProxyGroup group in _groups)
+        if (group.selectable &&
+            group.now.isNotEmpty &&
+            (group.members.isEmpty || group.now != group.members.first))
+          group.name: group.now,
+    };
+    final Map<String, String> snap = <String, String>{
+      ...live,
+      ...?_loadSelectorSnapshot(),
+      ...?_selectorSnapshot,
+    };
+    _selectorSnapshot = snap.isEmpty ? null : snap;
+    if (snap.isNotEmpty) {
+      _persistSelectorSnapshot(snap);
+    }
+  }
+
+  void _rememberSelector(String group, String member) {
+    if (group.isEmpty || member.isEmpty) {
       return;
     }
     final Map<String, String> snap = <String, String>{
-      for (final ProxyGroup group in _groups)
-        if (group.selectable && group.now.isNotEmpty) group.name: group.now,
+      ...?_loadSelectorSnapshot(),
+      ...?_selectorSnapshot,
+      group: member,
     };
-    if (snap.isNotEmpty) {
-      _selectorSnapshot = snap;
+    _selectorSnapshot = snap;
+    _persistSelectorSnapshot(snap);
+  }
+
+  Map<String, String>? _loadSelectorSnapshot() {
+    final Map<String, dynamic> data = _selectorCache.read();
+    final String storedAccount = (data['account'] as String? ?? '')
+        .toLowerCase();
+    if (_accountKey.isNotEmpty &&
+        storedAccount.isNotEmpty &&
+        storedAccount != _accountKey.trim().toLowerCase()) {
+      return null;
+    }
+    final Object? raw = data['selected'];
+    if (raw is! Map) {
+      return null;
+    }
+    final Map<String, String> snap = <String, String>{
+      for (final MapEntry<Object?, Object?> entry in raw.entries)
+        if (entry.key is String &&
+            entry.value is String &&
+            (entry.value as String).isNotEmpty)
+          entry.key as String: entry.value as String,
+    };
+    return snap.isEmpty ? null : snap;
+  }
+
+  void _persistSelectorSnapshot(Map<String, String> snap) {
+    if (snap.isEmpty) {
+      return;
+    }
+    try {
+      _selectorCache.write(<String, dynamic>{
+        'account': _accountKey.trim().toLowerCase(),
+        'selected': snap,
+      });
+    } on Object catch (e) {
+      Logger.instance.warn(_source, '写入 selector-cache 失败: $e');
     }
   }
 
   Future<void> _restoreSelectorSnapshot() async {
-    final Map<String, String>? snap = _selectorSnapshot;
+    final Map<String, String>? snap =
+        _selectorSnapshot ?? _loadSelectorSnapshot();
     final ClashApiClient? clash = _clash;
     if (snap == null || snap.isEmpty || clash == null) {
       return;
@@ -793,10 +869,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         Logger.instance.warn(_source, '恢复分组「${group.name}」选中项失败: $e');
       }
     }
-    _selectorSnapshot = null;
     if (replaced.isNotEmpty) {
       await clash.closeConnectionsVia(replaced);
-      await _refreshProxies();
+      await _refreshProxies(notify: false);
     }
   }
 
@@ -975,20 +1050,20 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       await _waitForRemoteCooldown(until);
     }
 
+    // 已连接时本地 mixed 可用：直连面板失败再走代理；未连接则只直连
+    final int? fallbackProxyPort = _state == ConnectionPhase.connected
+        ? _settings.mixedPort
+        : null;
+
     // 本地已有配置时先探轻量 revision，未变则绝不打昂贵的 /config/clash；
     // 本地若尚无分组则不能跳过（戳不变也会一直空着）。
     if (_remote != null &&
         _configRevision.isNotEmpty &&
         _remoteHasProxyGroups &&
-        await _remoteRevisionUnchanged(api)) {
+        await _remoteRevisionUnchanged(api, fallbackProxyPort)) {
       _remoteStale = false;
       return;
     }
-
-    // 已连接时本地 mixed 可用：直连面板失败再走代理；未连接则只直连
-    final int? fallbackProxyPort = _state == ConnectionPhase.connected
-        ? _settings.mixedPort
-        : null;
     try {
       final RemoteProfile remote = await api.fetchClashProfile(
         fallbackProxyPort: fallbackProxyPort,
@@ -1029,9 +1104,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// true = 面板戳与本地一致（可跳过全量）；探测失败时不阻断后续拉全量/用缓存。
-  Future<bool> _remoteRevisionUnchanged(PanelApiClient api) async {
+  Future<bool> _remoteRevisionUnchanged(
+    PanelApiClient api,
+    int? fallbackProxyPort,
+  ) async {
     try {
-      final String remote = await api.fetchConfigRevision();
+      final String remote = await api.fetchConfigRevision(
+        fallbackProxyPort: fallbackProxyPort,
+      );
       if (remote.isEmpty) {
         return false;
       }
@@ -1119,15 +1199,27 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
 
+    final PanelApiClient? api = _api;
+    if (api != null) {
+      await api.refreshConfigDirectAddresses();
+    }
+
+    final Map<String, String> selectorDefaults = <String, String>{
+      ...?_selectorSnapshot,
+      ...?_loadSelectorSnapshot(),
+    };
+    _selectorSnapshot = selectorDefaults.isEmpty ? null : selectorDefaults;
     _profile = const ProfileAssembler().assemble(
       remote: remote,
       template: LocalTemplate(
         _settings.toTemplateOptions(
           tunInterfaceName: _platform.tunInterfaceName,
           takeover: _takeover,
+          extraTunExcludeAddresses: api?.configDirectCidrs ?? const <String>[],
         ),
         _clashApiOptions!,
       ),
+      selectorDefaults: selectorDefaults,
     );
 
     _providerReady.clear();
@@ -1182,8 +1274,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _clash = clash;
 
-    await _refreshProxies();
+    await _refreshProxies(notify: false);
     await _restoreSelectorSnapshot();
+    _captureSelectorSnapshot();
     _routeMode = (await clash.fetchRuntime()).mode;
 
     if (generation != _generation) {
@@ -1462,7 +1555,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> refreshProfileFromPanel() async {
     final PanelApiClient? api = _api;
     if (api == null) {
-      return '更新失败：未登录';
+      return L10n.t('更新失败：未登录');
     }
     if (_profileRefreshInFlight) {
       return null;
@@ -1478,7 +1571,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _fetchRemoteConfig(api);
       } on ApiException catch (e) {
         Logger.instance.warn(_source, '刷新面板配置失败: $e');
-        return '更新失败：$e';
+        return L10n.t('更新失败：{0}', <Object>['$e']);
       }
 
       final bool changed = jsonEncode(_remote) != previous;
@@ -1496,7 +1589,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
           _applyProfileProxies();
           notifyListeners();
         }
-        return running ? '已是最新，分流规则已刷新' : '已是最新';
+        return running ? L10n.t('已是最新，分流规则已刷新') : L10n.t('已是最新');
       }
 
       // 内核未起：更新内存与节点列表，下次 connect / 常驻拉起时再装配内核
@@ -1504,7 +1597,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         Logger.instance.info(_source, '面板配置有变更，将在下次启动内核时生效');
         _applyProfileProxies();
         notifyListeners();
-        return '更新成功，下次启动内核时生效';
+        return L10n.t('更新成功，下次启动内核时生效');
       }
 
       try {
@@ -1514,7 +1607,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _restartKernel('面板配置有变更，正在重启内核');
       }
       await _refreshRuleProviders();
-      return '更新成功';
+      return L10n.t('更新成功');
     } finally {
       _profileRefreshInFlight = false;
     }
@@ -1556,7 +1649,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final String after = _geoDataFingerprint();
     if (before == after) {
       Logger.instance.info(_source, 'GeoData 已是最新');
-      return '已是最新';
+      return L10n.t('已是最新');
     }
     Logger.instance.info(_source, 'GeoData 已更新');
     return '更新成功';
@@ -1616,12 +1709,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       await clash.applyConfigPayload(profile.json);
     }
 
-    await _refreshProxies();
+    await _refreshProxies(notify: false);
     await _restoreSelectorSnapshot();
     notifyListeners();
   }
 
-  Future<void> _refreshProxies() async {
+  Future<void> _refreshProxies({bool notify = true}) async {
     final ClashApiClient? clash = _clash;
     if (clash == null) {
       return;
@@ -1642,7 +1735,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         _delays.remove(node.name);
       }
     }
-    notifyListeners();
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   // /proxies 的分组来自内核里的一张 Go map，encoding/json 序列化时按键名排序输出，

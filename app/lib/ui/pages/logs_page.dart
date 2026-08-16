@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/logger.dart';
+import '../../l10n/l10n.dart';
 import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
@@ -92,7 +93,7 @@ class _LogsPageState extends State<LogsPage> {
   Widget _levelFilter(ThemeData theme, {required bool compact}) =>
       SegmentedButton<LogLevel?>(
         segments: <ButtonSegment<LogLevel?>>[
-          const ButtonSegment<LogLevel?>(value: null, label: Text('全部')),
+          ButtonSegment<LogLevel?>(value: null, label: Text(L10n.t('全部'))),
           for (final LogLevel level in _filterable)
             ButtonSegment<LogLevel?>(value: level, label: Text(level.label)),
         ],
@@ -115,11 +116,11 @@ class _LogsPageState extends State<LogsPage> {
 
   Widget _searchActions(ThemeData theme, List<LogEntry> visible) => Row(
     children: <Widget>[
-      Text('${visible.length} 条', style: theme.textTheme.bodySmall),
+      Text(L10n.t('{0} 条', <Object>[visible.length]), style: theme.textTheme.bodySmall),
       const SizedBox(width: 10),
       Expanded(
         child: SearchField(
-          hintText: '搜索日志内容',
+          hintText: L10n.t('搜索日志内容'),
           width: double.infinity,
           onChanged: (String value) {
             _keyword = value.trim().toLowerCase();
@@ -129,7 +130,7 @@ class _LogsPageState extends State<LogsPage> {
       ),
       const SizedBox(width: 4),
       IconButton(
-        tooltip: '复制当前列表',
+        tooltip: L10n.t('复制当前列表'),
         icon: const Icon(Icons.copy_all_outlined, size: 16),
         visualDensity: VisualDensity.compact,
         onPressed: () => Clipboard.setData(
@@ -149,7 +150,7 @@ class _LogsPageState extends State<LogsPage> {
 
     return Column(
       children: <Widget>[
-        const PageHeader(title: '日志'),
+        PageHeader(title: L10n.t('日志')),
         LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             // 与 Shell 宽屏断点一致：窄屏级别条会吃光整行，搜索/复制必须换行
@@ -182,7 +183,7 @@ class _LogsPageState extends State<LogsPage> {
         const Divider(height: 1),
         Expanded(
           child: visible.isEmpty
-              ? const Center(child: Text('没有符合条件的日志'))
+              ? Center(child: Text(L10n.t('没有符合条件的日志')))
               : SelectionArea(
                   child: ListView.builder(
                     controller: _scroll,

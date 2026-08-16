@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'zoom_cursors.dart';
+import '../../l10n/l10n.dart';
 
 Future<void> showImageViewer(
   BuildContext context, {
@@ -161,7 +162,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                   right: 12,
                   child: _button(
                     icon: Icons.close,
-                    tooltip: '关闭',
+                    tooltip: L10n.t('关闭'),
                     onPressed: _close,
                   ),
                 ),
@@ -199,7 +200,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                   bottom: 12,
                   child: _button(
                     icon: Icons.chevron_left,
-                    tooltip: '上一张',
+                    tooltip: L10n.t('上一张'),
                     onPressed: multi ? () => _step(-1) : null,
                   ),
                 ),
@@ -210,7 +211,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                   child: Center(
                     child: _button(
                       icon: Icons.refresh,
-                      tooltip: '旋转',
+                      tooltip: L10n.t('旋转'),
                       onPressed: () => setState(() => _quarterTurns++),
                     ),
                   ),
@@ -220,7 +221,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                   bottom: 12,
                   child: _button(
                     icon: Icons.chevron_right,
-                    tooltip: '下一张',
+                    tooltip: L10n.t('下一张'),
                     onPressed: multi ? () => _step(1) : null,
                   ),
                 ),

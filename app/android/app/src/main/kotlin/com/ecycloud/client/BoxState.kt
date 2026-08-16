@@ -1,6 +1,7 @@
 package com.ecycloud.client
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 
 class LogRing(private val limit: Int) {
@@ -29,6 +30,8 @@ class LogRing(private val limit: Int) {
 }
 
 object BoxState {
+    // 以下可变字段与日志缓冲只在 :kernel 进程内有效。界面进程有各自一份静态副本，
+    // 读到的永远是初值，要状态必须经 KernelClient 取
     val logs = LogRing(800)
 
     @Volatile
@@ -71,6 +74,11 @@ object BoxState {
     // 内核把 cache.db 放在 -d 目录，即 runDir
     fun cacheReady(context: Context): Boolean =
         File(runDir(context), "cache.db").let { it.isFile && it.length() > 0 }
+
+    /** 这一份配置要不要接管出口。装配逻辑全端共用，Kotlin 侧只读结论 */
+    fun takesOverExit(config: String): Boolean = runCatching {
+        JSONObject(config).getJSONObject("tun").getBoolean("enable")
+    }.getOrDefault(false)
 
     private const val maxRunFileBytes = 8L shl 20
 

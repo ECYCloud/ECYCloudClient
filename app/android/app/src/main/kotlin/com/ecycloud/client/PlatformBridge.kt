@@ -44,6 +44,7 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
             "apps.list" -> Bridge.run(result) { installedApps() }
             "installer.run" -> Bridge.run(result) { runInstaller(call.argument<String>("path")) }
             "url.open" -> Bridge.run(result) { openUrl(call.argument<String>("url")) }
+            "dir.open" -> Bridge.run(result) { openDirectory(call.argument<String>("path")) }
             "secret.protect" -> Bridge.run(result) {
                 protectSecret(
                     call.argument<String>("name"),
@@ -115,6 +116,26 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
             return false
         }
         return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    private fun openDirectory(path: String?): Boolean {
+        if (path.isNullOrEmpty()) {
+            return false
+        }
+        val dir = File(path)
+        if (!dir.isDirectory) {
+            return false
+        }
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            dir,
+        )
+        return openIntent(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "resource/folder")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        )
     }
 
     private fun openIntent(intent: Intent): Boolean =

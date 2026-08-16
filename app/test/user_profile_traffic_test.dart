@@ -37,4 +37,25 @@ void main() {
     expect(profile.remaining, 0);
     expect(profile.transferEnable - profile.used, -600);
   });
+
+  test('同 IP 已在线时不视为需要踢人', () {
+    final UserProfile profile = UserProfile.fromJson(<String, dynamic>{
+      'id': 1,
+      'email': 'a@b.c',
+      'node_connector': 1,
+      'online_ip_count': 1,
+      'online_ip_self': true,
+    });
+    expect(profile.onlineIpLimitReached, isFalse);
+  });
+
+  test('名额满且本机是新 IP 时需要踢人', () {
+    final UserProfile profile = UserProfile.fromJson(<String, dynamic>{
+      'id': 1,
+      'email': 'a@b.c',
+      'node_connector': 1,
+      'online_ip_count': 1,
+    });
+    expect(profile.onlineIpLimitReached, isTrue);
+  });
 }

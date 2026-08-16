@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import '../../state/connection_controller.dart';
 import '../theme.dart';
 
@@ -19,30 +20,30 @@ class ConnectionStatusVisual {
     ColorScheme scheme, {
     String? failedLabel,
   }) => switch (phase) {
-    ConnectionPhase.connected => const ConnectionStatusVisual(
+    ConnectionPhase.connected => ConnectionStatusVisual(
       color: AppTheme.success,
       icon: Icons.shield,
-      label: '已连接',
+      label: L10n.t('已连接'),
     ),
-    ConnectionPhase.connecting => const ConnectionStatusVisual(
+    ConnectionPhase.connecting => ConnectionStatusVisual(
       color: AppTheme.warning,
       icon: Icons.sync,
-      label: '正在连接',
+      label: L10n.t('正在连接'),
     ),
-    ConnectionPhase.disconnecting => const ConnectionStatusVisual(
+    ConnectionPhase.disconnecting => ConnectionStatusVisual(
       color: AppTheme.warning,
       icon: Icons.sync,
-      label: '正在断开连接',
+      label: L10n.t('正在断开连接'),
     ),
     ConnectionPhase.failed => ConnectionStatusVisual(
       color: AppTheme.danger,
       icon: Icons.shield_outlined,
-      label: failedLabel ?? '连接失败',
+      label: failedLabel ?? L10n.t('连接失败'),
     ),
     ConnectionPhase.disconnected => ConnectionStatusVisual(
       color: scheme.outline,
       icon: Icons.shield_outlined,
-      label: '未连接',
+      label: L10n.t('未连接'),
     ),
   };
 }

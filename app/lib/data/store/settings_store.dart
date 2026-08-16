@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import '../../core/app_paths.dart';
 import '../../core/logger.dart' show LogLevel, LogLevelName;
 import '../../domain/config/local_template.dart';
+import '../../domain/config/network_bypass.dart';
 import 'json_file_store.dart';
 
 enum PerAppProxyMode { off, include, exclude }
@@ -21,6 +22,7 @@ class AppSettings {
     required this.launchAtLogin,
     required this.closeToTray,
     required this.themeMode,
+    required this.locale,
     required this.perAppMode,
     required this.perAppPackages,
     required this.systemProxyBypass,
@@ -42,6 +44,7 @@ class AppSettings {
       launchAtLogin = false,
       closeToTray = true,
       themeMode = ThemeMode.system,
+      locale = '',
       perAppMode = PerAppProxyMode.off,
       perAppPackages = const <String>[],
       systemProxyBypass = const <String>[],
@@ -58,6 +61,7 @@ class AppSettings {
   final bool launchAtLogin;
   final bool closeToTray;
   final ThemeMode themeMode;
+  final String locale;
   final PerAppProxyMode perAppMode;
   final List<String> perAppPackages;
   final List<String> systemProxyBypass;
@@ -75,6 +79,7 @@ class AppSettings {
     bool? launchAtLogin,
     bool? closeToTray,
     ThemeMode? themeMode,
+    String? locale,
     PerAppProxyMode? perAppMode,
     List<String>? perAppPackages,
     List<String>? systemProxyBypass,
@@ -91,6 +96,7 @@ class AppSettings {
     launchAtLogin: launchAtLogin ?? this.launchAtLogin,
     closeToTray: closeToTray ?? this.closeToTray,
     themeMode: themeMode ?? this.themeMode,
+    locale: locale ?? this.locale,
     perAppMode: perAppMode ?? this.perAppMode,
     perAppPackages: perAppPackages ?? this.perAppPackages,
     systemProxyBypass: systemProxyBypass ?? this.systemProxyBypass,
@@ -119,6 +125,7 @@ class AppSettings {
   LocalTemplateOptions toTemplateOptions({
     required String tunInterfaceName,
     required bool takeover,
+    List<String> extraTunExcludeAddresses = const <String>[],
   }) => LocalTemplateOptions(
     tunEnabled: takeover && tunEnabled,
     tunStrictRoute: tunStrictRoute,
@@ -133,7 +140,10 @@ class AppSettings {
     tunExcludePackages: perAppMode == PerAppProxyMode.exclude
         ? perAppPackages
         : const <String>[],
-    tunExcludeAddresses: tunExcludeAddresses,
+    tunExcludeAddresses: appendUnique(
+      tunExcludeAddresses,
+      extraTunExcludeAddresses,
+    ),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -149,6 +159,7 @@ class AppSettings {
     'launch_at_login': launchAtLogin,
     'close_to_tray': closeToTray,
     'theme_mode': themeMode.name,
+    'locale': locale,
     'per_app_mode': perAppMode.name,
     'per_app_packages': perAppPackages,
     'system_proxy_bypass': systemProxyBypass,
@@ -177,6 +188,7 @@ class AppSettings {
         (ThemeMode mode) => mode.name == json['theme_mode'],
         orElse: () => fallback.themeMode,
       ),
+      locale: json['locale'] as String? ?? fallback.locale,
       perAppMode: PerAppProxyMode.values.firstWhere(
         (PerAppProxyMode mode) => mode.name == json['per_app_mode'],
         orElse: () => fallback.perAppMode,
@@ -200,6 +212,8 @@ class SettingsStore {
   static const int schema = 2;
 
   final JsonFileStore _store;
+
+  bool get hasPersistedSettings => _store.read().isNotEmpty;
 
   AppSettings load() {
     final Map<String, dynamic> data = _store.read();

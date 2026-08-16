@@ -18,6 +18,8 @@ class GroupIcon extends StatelessWidget {
   final bool selectable;
   final double size;
 
+  static const String defaultUrl = 'https://rules.ecydy.com/images/Custom.png';
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -28,8 +30,9 @@ class GroupIcon extends StatelessWidget {
       color: theme.colorScheme.primary,
     );
 
+    final String? raw = url;
     final String? resolved = UserAvatar.resolveUrl(
-      url,
+      raw == null || raw.isEmpty ? defaultUrl : raw,
       origin: AppScope.of(context).auth.siteOrigin,
     );
     if (resolved == null) {

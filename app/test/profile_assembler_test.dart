@@ -333,6 +333,39 @@ void main() {
     expect(profile.remoteProviderCount, 2);
   });
 
+  test('用户上次选择写入 select 组的 default-selected，不改成员列表', () {
+    final Map<String, dynamic> remote = remoteProfile();
+    final AssembledProfile profile = assembler.assemble(
+      remote: remote,
+      template: template(),
+      selectorDefaults: const <String, String>{'主节点': 'node-12'},
+    );
+    final Map<String, dynamic> group =
+        (profile.config['proxy-groups'] as List<dynamic>).first
+            as Map<String, dynamic>;
+    expect(group['proxies'], <String>['node-12', 'DIRECT']);
+    expect(group['default-selected'], 'node-12');
+    expect(profile.config['profile'], containsPair('store-selected', false));
+    expect(
+      (remote['proxy-groups'] as List<dynamic>).first,
+      isNot(containsPair('default-selected', 'node-12')),
+    );
+  });
+
+  test('default-selected 不是分组成员时不写入', () {
+    final Map<String, dynamic> config = assembler
+        .assemble(
+          remote: remoteProfile(),
+          template: template(),
+          selectorDefaults: const <String, String>{'主节点': 'node-missing'},
+        )
+        .config;
+    final Map<String, dynamic> group =
+        (config['proxy-groups'] as List<dynamic>).first as Map<String, dynamic>;
+    expect(group.containsKey('default-selected'), isFalse);
+    expect(config['profile'], containsPair('store-selected', true));
+  });
+
   test('面板未下发节点或缺少分流规则时拒绝生成配置', () {
     expect(
       () => assembler.assemble(

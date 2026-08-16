@@ -6,6 +6,7 @@ import '../../core/app_paths.dart';
 import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import 'text_viewer_page.dart';
+import '../../l10n/l10n.dart';
 
 /// 列出已落盘的 rule-providers，点进只读查看。
 class RuleProvidersPage extends StatelessWidget {
@@ -20,13 +21,13 @@ class RuleProvidersPage extends StatelessWidget {
         '${AppPaths.kernelRunDir}${Platform.pathSeparator}ECYCloud-Rules';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('分流规则')),
+      appBar: AppBar(title: Text(L10n.t('分流规则'))),
       body: items.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  '暂无分流规则。连接一次后，规则会下载到运行目录。',
+                  L10n.t('暂无分流规则。连接一次后，规则会下载到运行目录。'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge,
                 ),

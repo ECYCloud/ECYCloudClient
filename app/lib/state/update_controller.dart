@@ -11,6 +11,7 @@ import '../core/logger.dart';
 import '../domain/kernel/kernel_update.dart';
 import '../domain/platform/platform_service.dart';
 import '../domain/update/app_update.dart';
+import '../l10n/l10n.dart';
 import '../domain/update/github_release.dart';
 import 'connection_controller.dart';
 
@@ -38,7 +39,7 @@ class UpdateController extends ChangeNotifier {
   String? _appStage;
   int _appPercent = 0;
 
-  String _kernelStatus = '正在读取版本…';
+  String _kernelStatus = L10n.t('正在读取版本…');
   KernelUpdate? _kernel;
   bool _kernelUpgrading = false;
   int _kernelPercent = 0;
@@ -61,17 +62,17 @@ class UpdateController extends ChangeNotifier {
     }
     final AppUpdate? app = _app;
     if (app == null) {
-      return '尚未检查';
+      return L10n.t('尚未检查');
     }
     if (!app.outdated) {
-      return '已是最新（${app.latest}）';
+      return L10n.t('已是最新（{0}）', <Object>[app.latest]);
     }
     if (!AppUpdate.selfInstallable) {
-      return '发现新版本（${app.latest}），需自行安装';
+      return L10n.t('发现新版本（{0}），需自行安装', <Object>[app.latest]);
     }
     return app.installer == null
-        ? '发现新版本（${app.latest}），无对应安装包'
-        : '发现新版本（${app.latest}）';
+        ? L10n.t('发现新版本（{0}），无对应安装包', <Object>[app.latest])
+        : L10n.t('发现新版本（{0}）', <Object>[app.latest]);
   }
 
   bool get appInstallable =>
@@ -182,7 +183,7 @@ class UpdateController extends ChangeNotifier {
       _appError = null;
       _retryWhenConnected = false;
     } on Object catch (e) {
-      _appError = '检查失败：$e';
+      _appError = L10n.t('检查失败：{0}', <Object>['$e']);
       _retryWhenConnected = true;
       Logger.instance.debug(_source, '检查客户端更新失败: $e');
     } finally {
@@ -200,17 +201,16 @@ class UpdateController extends ChangeNotifier {
       );
       _kernel = update;
       if (update.current.isEmpty) {
-        _kernelStatus = '本机版本未知，最新（${update.latest}）';
+        _kernelStatus = L10n.t('本机版本未知，最新（{0}）', <Object>[update.latest]);
       } else if (update.outdated) {
-        final String hint = _connection.kernelUpgradeSupported
-            ? ''
-            : '，随客户端整包更新';
-        _kernelStatus = '发现新版本（${update.latest}）$hint';
+        _kernelStatus = _connection.kernelUpgradeSupported
+            ? L10n.t('发现新版本（{0}）', <Object>[update.latest])
+            : L10n.t('发现新版本（{0}），随客户端整包更新', <Object>[update.latest]);
       } else {
-        _kernelStatus = '已是最新（${update.current}）';
+        _kernelStatus = L10n.t('已是最新（{0}）', <Object>[update.current]);
       }
     } on Object catch (e) {
-      _kernelStatus = '检查失败：$e';
+      _kernelStatus = L10n.t('检查失败：{0}', <Object>['$e']);
       _retryWhenConnected = true;
       Logger.instance.debug(_source, '检查内核更新失败: $e');
     } finally {
@@ -225,7 +225,9 @@ class UpdateController extends ChangeNotifier {
       return;
     }
     final String version = await _connection.kernelVersion();
-    _kernelStatus = version.isEmpty ? '本机版本未知' : '当前（$version）';
+    _kernelStatus = version.isEmpty
+        ? L10n.t('本机版本未知')
+        : L10n.t('当前（{0}）', <Object>[version]);
     notifyListeners();
   }
 
@@ -237,16 +239,16 @@ class UpdateController extends ChangeNotifier {
 
     _kernelUpgrading = true;
     _kernelPercent = 0;
-    _kernelStatus = '正在更新（$version）';
+    _kernelStatus = L10n.t('正在更新（{0}）', <Object>[version]);
     notifyListeners();
     _startKernelProgressPoll();
 
     try {
       final String installed = await _connection.upgradeKernel(version);
       _kernel = KernelUpdate(current: installed, latest: installed);
-      _kernelStatus = '更新成功（$installed）';
+      _kernelStatus = L10n.t('更新成功（{0}）', <Object>[installed]);
     } on Object catch (e) {
-      _kernelStatus = '更新失败：$e';
+      _kernelStatus = L10n.t('更新失败：{0}', <Object>['$e']);
     } finally {
       _stopKernelProgressPoll();
       _kernelUpgrading = false;
@@ -300,11 +302,11 @@ class UpdateController extends ChangeNotifier {
       percent > 0 ? '$stage（$percent%）' : stage;
 
   static String _kernelStageLabel(String stage) => switch (stage) {
-    'resolving' => '正在解析发布信息',
-    'downloading' => '正在下载内核',
-    'verifying' => '正在校验内核',
-    'extracting' => '正在解压内核',
-    'installing' => '正在安装内核',
+    'resolving' => L10n.t('正在解析发布信息'),
+    'downloading' => L10n.t('正在下载内核'),
+    'verifying' => L10n.t('正在校验内核'),
+    'extracting' => L10n.t('正在解压内核'),
+    'installing' => L10n.t('正在安装内核'),
     _ => '',
   };
 
@@ -317,14 +319,14 @@ class UpdateController extends ChangeNotifier {
     }
 
     _appError = null;
-    _appStage = '正在下载 ${asset.name}';
+    _appStage = L10n.t('正在下载 {0}', <Object>[asset.name]);
     _appPercent = 0;
     notifyListeners();
 
     try {
       final File file = await _download(asset);
 
-      _appStage = '正在校验安装包';
+      _appStage = L10n.t('正在校验安装包');
       _appPercent = 0;
       notifyListeners();
 
@@ -337,7 +339,7 @@ class UpdateController extends ChangeNotifier {
         throw GithubReleaseException('安装包校验失败，已删除');
       }
 
-      _appStage = '正在启动安装程序';
+      _appStage = L10n.t('正在启动安装程序');
       notifyListeners();
 
       if (!await _platform.runInstaller(file.path)) {
@@ -347,7 +349,7 @@ class UpdateController extends ChangeNotifier {
       Logger.instance.info(_source, '安装器已启动，客户端退出让位');
       exit(0);
     } on Object catch (e) {
-      _appError = '更新失败：$e';
+      _appError = L10n.t('更新失败：{0}', <Object>['$e']);
       Logger.instance.error(_source, '安装客户端更新失败', e);
     } finally {
       _appStage = null;

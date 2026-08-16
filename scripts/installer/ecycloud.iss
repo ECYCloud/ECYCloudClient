@@ -50,23 +50,63 @@ ArchitecturesInstallIn64BitMode=arm64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 #endif
-LicenseFile={#StageDir}\LICENSE.txt
-
 [Languages]
-; Inno Setup 6 未随包分发简体中文，语言文件随仓库落地，不依赖构建机安装了哪些语言
-Name: "chinese"; MessagesFile: "lang\ChineseSimplified.isl"
+; Inno Setup 6 未随包分发简体/繁体中文，语言文件随仓库落地，不依赖构建机安装了哪些语言
+; 许可协议按安装语言切换；中文为 FSF 认可链路上的非官方译本，英文原文仍有法律效力
+Name: "chinese"; MessagesFile: "lang\ChineseSimplified.isl"; LicenseFile: "lang\LICENSE.zh-CN.txt"
+Name: "chinesetraditional"; MessagesFile: "lang\ChineseTraditional.isl"; LicenseFile: "lang\LICENSE.zh-TW.txt"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "{#StageDir}\LICENSE.txt"
 
 [Messages]
 ; 只有 CloseRunningApp 连强杀都没关掉客户端时才会看到；关窗口只是缩到托盘，必须点明从托盘退出
-SetupAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出安装程序。
-UninstallAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出卸载程序。
+chinese.SetupAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出安装程序。
+chinese.UninstallAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出卸载程序。
+chinesetraditional.SetupAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「退出」，然後按「確定」繼續，或按「取消」結束安裝程式。
+chinesetraditional.UninstallAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「退出」，然後按「確定」繼續，或按「取消」結束解除安裝程式。
+english.SetupAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Setup.
+english.UninstallAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Uninstall.
 
 [LangOptions]
-; 语言文件本身不指定字体，默认会退到 Tahoma 再逐字回退，中文字形发虚
-DialogFontName=Microsoft YaHei UI
-DialogFontSize=9
-WelcomeFontName=Microsoft YaHei UI
-WelcomeFontSize=12
+chinese.DialogFontName=Microsoft YaHei UI
+chinese.DialogFontSize=9
+chinese.WelcomeFontName=Microsoft YaHei UI
+chinese.WelcomeFontSize=12
+chinesetraditional.DialogFontName=Microsoft JhengHei UI
+chinesetraditional.DialogFontSize=9
+chinesetraditional.WelcomeFontName=Microsoft JhengHei UI
+chinesetraditional.WelcomeFontSize=12
+
+[CustomMessages]
+chinese.CloseRunningPrompt=%1 正在运行。%n%n点击「确定」关闭客户端并继续安装，或点击「取消」退出安装程序。
+chinesetraditional.CloseRunningPrompt=%1 正在執行。%n%n按「確定」關閉用戶端並繼續安裝，或按「取消」結束安裝程式。
+english.CloseRunningPrompt=%1 is running.%n%nClick OK to close the app and continue, or Cancel to exit Setup.
+chinese.UninstallCaption=卸载 %1
+chinesetraditional.UninstallCaption=解除安裝 %1
+english.UninstallCaption=Uninstall %1
+chinese.UninstallPrompt=即将卸载 %1，后台服务会一并注销，系统代理与 TUN 网卡会自动还原。
+chinesetraditional.UninstallPrompt=即將解除安裝 %1，背景服務會一併註銷，系統代理與 TUN 網卡會自動還原。
+english.UninstallPrompt=%1 will be uninstalled. The background service will be removed, and the system proxy and TUN adapter will be restored.
+chinese.RemoveUserData=删除应用数据
+chinesetraditional.RemoveUserData=刪除應用程式資料
+english.RemoveUserData=Delete application data
+chinese.RemoveUserDataDetail=含登录凭据、偏好设置、日志与内核缓存，删除后不可恢复；不勾选则全部保留，重装后可直接继续使用。
+chinesetraditional.RemoveUserDataDetail=含登入憑證、偏好設定、日誌與核心快取，刪除後無法復原；不勾選則全部保留，重裝後可直接繼續使用。
+english.RemoveUserDataDetail=Includes sign-in credentials, preferences, logs, and kernel cache. This cannot be undone. Leave unchecked to keep them for the next install.
+chinese.StartUninstall=开始卸载
+chinesetraditional.StartUninstall=開始解除安裝
+english.StartUninstall=Uninstall
+chinese.UninstallDone=%1 卸载完成。
+chinesetraditional.UninstallDone=%1 已解除安裝。
+english.UninstallDone=%1 has been uninstalled.
+chinese.RegisterService=正在注册后台服务...
+chinesetraditional.RegisterService=正在註冊背景服務...
+english.RegisterService=Registering the background service...
+chinese.LaunchNow=立即运行 %1
+chinesetraditional.LaunchNow=立即執行 %1
+english.LaunchNow=Launch %1 now
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -75,12 +115,9 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
-[Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"
-
 [Run]
-Filename: "{app}\service\{#ServiceExeName}"; Parameters: "install"; StatusMsg: "正在注册后台服务..."; Flags: runhidden waituntilterminated
-Filename: "{app}\{#AppExeName}"; Description: "立即运行 {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\service\{#ServiceExeName}"; Parameters: "install"; StatusMsg: "{cm:RegisterService}"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchNow,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 服务停止时会还原系统代理并清理 TUN 网卡，必须等它执行完再删文件
@@ -136,13 +173,27 @@ begin
 end;
 
 // 安装侧的互斥体检查紧跟在 InitializeSetup 之后、向导显示之前，只能在这里关
+procedure WriteInstallerLocale;
+var
+  Locale, Dir: String;
+begin
+  if CompareText(ActiveLanguage(), 'chinesetraditional') = 0 then
+    Locale := 'zh_TW'
+  else if CompareText(ActiveLanguage(), 'english') = 0 then
+    Locale := 'en'
+  else
+    Locale := 'zh_CN';
+  Dir := ExpandConstant('{userappdata}\ECYCloud');
+  ForceDirectories(Dir);
+  SaveStringToFile(Dir + '\installer-locale', Locale, False);
+end;
+
 function InitializeSetup(): Boolean;
 begin
   if CheckForMutexes('{#SetupSetting("AppMutex")}') and not WizardSilent then
   begin
     if MsgBox(
-      '{#AppName} 正在运行。' + #13#10#13#10 +
-      '点击「确定」关闭客户端并继续安装，或点击「取消」退出安装程序。',
+      FmtMessage(CustomMessage('CloseRunningPrompt'), ['{#AppName}']),
       mbConfirmation, MB_OKCANCEL or MB_TOPMOST) <> IDOK then
     begin
       Result := False;
@@ -163,6 +214,7 @@ begin
     UninstallCmd := '"' + ExpandConstant('{uninstallexe}') + '" /SILENT /SUPPRESSMSGBOXES';
     RegWriteStringValue(HKLM64, UninstallRegKey, 'UninstallString', UninstallCmd);
     RegWriteStringValue(HKLM64, UninstallRegKey, 'QuietUninstallString', UninstallCmd);
+    WriteInstallerLocale;
   end;
 end;
 
@@ -232,7 +284,7 @@ begin
   // 传 ScaleX / ScaleY 的结果会被平方放大（200% 缩放下宽度从 1117 涨到 2281 像素）
   Form := CreateCustomForm(440, 165, False, True);
   try
-    Form.Caption := '卸载 {#AppName}';
+    Form.Caption := FmtMessage(CustomMessage('UninstallCaption'), ['{#AppName}']);
 
     Prompt := TNewStaticText.Create(Form);
     Prompt.Parent := Form;
@@ -241,7 +293,7 @@ begin
     Prompt.Width := Form.ClientWidth - ScaleX(32);
     Prompt.WordWrap := True;
     Prompt.AutoSize := True;
-    Prompt.Caption := '即将卸载 {#AppName}，后台服务会一并注销，系统代理与 TUN 网卡会自动还原。';
+    Prompt.Caption := FmtMessage(CustomMessage('UninstallPrompt'), ['{#AppName}']);
 
     DataCheck := TNewCheckBox.Create(Form);
     DataCheck.Parent := Form;
@@ -250,7 +302,7 @@ begin
     DataCheck.Width := Form.ClientWidth - ScaleX(32);
     DataCheck.Height := ScaleY(20);
     DataCheck.Checked := False;
-    DataCheck.Caption := '删除应用数据';
+    DataCheck.Caption := CustomMessage('RemoveUserData');
 
     Detail := TNewStaticText.Create(Form);
     Detail.Parent := Form;
@@ -259,13 +311,13 @@ begin
     Detail.Width := Form.ClientWidth - Detail.Left - ScaleX(16);
     Detail.WordWrap := True;
     Detail.AutoSize := True;
-    Detail.Caption := '含登录凭据、偏好设置、日志与内核缓存，删除后不可恢复；不勾选则全部保留，重装后可直接继续使用。';
+    Detail.Caption := CustomMessage('RemoveUserDataDetail');
 
     OkButton := TNewButton.Create(Form);
     OkButton.Parent := Form;
     OkButton.Height := ScaleY(26);
     OkButton.Top := Form.ClientHeight - ScaleY(16) - OkButton.Height;
-    OkButton.Caption := '开始卸载';
+    OkButton.Caption := CustomMessage('StartUninstall');
     OkButton.ModalResult := mrOk;
     OkButton.Default := True;
 
@@ -273,7 +325,7 @@ begin
     CancelButton.Parent := Form;
     CancelButton.Height := OkButton.Height;
     CancelButton.Top := OkButton.Top;
-    CancelButton.Caption := '取消';
+    CancelButton.Caption := SetupMessage(msgButtonCancel);
     CancelButton.ModalResult := mrCancel;
     CancelButton.Cancel := True;
 
@@ -327,5 +379,5 @@ begin
   end;
 
   if (CurUninstallStep = usDone) and UninstallSilent then
-    MsgBox('{#AppName} 卸载完成。', mbInformation, MB_OK or MB_TOPMOST);
+    MsgBox(FmtMessage(CustomMessage('UninstallDone'), ['{#AppName}']), mbInformation, MB_OK or MB_TOPMOST);
 end;

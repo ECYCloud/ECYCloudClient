@@ -10,6 +10,7 @@ import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/simple_data_table.dart';
+import '../../l10n/l10n.dart';
 
 class UsageIpsPage extends StatefulWidget {
   const UsageIpsPage({super.key});
@@ -71,7 +72,7 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -86,11 +87,11 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '最近 $_logKeepDays 天的使用IP',
+              title: L10n.t('最近 {0} 天的使用IP', <Object>[_logKeepDays]),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -99,7 +100,7 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '请确认均为本人 IP，异常请及时重置订阅与节点密码。',
+                L10n.t('请确认均为本人 IP，异常请及时重置订阅与节点密码。'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -134,8 +135,8 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
                       padding: const EdgeInsets.all(14),
                       children: <Widget>[
                         SimpleDataTable(
-                          columns: const <String>['IP', '归属地', '最后使用时间'],
-                          emptyText: '最近 $_logKeepDays 天没有使用记录',
+                          columns: <String>['IP', L10n.t('归属地'), L10n.t('最后使用时间')],
+                          emptyText: L10n.t('最近 {0} 天没有使用记录', <Object>[_logKeepDays]),
                           rows: <List<Widget>>[
                             for (final UsageIpItem item in _items)
                               <Widget>[

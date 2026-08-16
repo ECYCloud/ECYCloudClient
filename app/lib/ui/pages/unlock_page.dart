@@ -12,6 +12,7 @@ import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import '../widgets/tag_chip.dart';
+import '../../l10n/l10n.dart';
 
 class UnlockPage extends StatefulWidget {
   const UnlockPage({super.key});
@@ -82,7 +83,7 @@ class _UnlockPageState extends State<UnlockPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -119,10 +120,10 @@ class _UnlockPageState extends State<UnlockPage> {
     return Column(
       children: <Widget>[
         PageHeader(
-          title: '解锁检测',
+          title: L10n.t('解锁检测'),
           showUserAvatar: true,
           actions: <Widget>[
-            RefreshButton(tooltip: '刷新', onRefresh: _load),
+            RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
           ],
         ),
         ListToolbar(
@@ -130,7 +131,7 @@ class _UnlockPageState extends State<UnlockPage> {
           lastPage: _lastPage,
           total: _total,
           perPage: _perPage,
-          searchHint: '搜索节点',
+          searchHint: L10n.t('搜索节点'),
           onSearchChanged: _onSearch,
           onPerPageChanged: (int value) {
             _perPage = value;
@@ -160,18 +161,18 @@ class _UnlockPageState extends State<UnlockPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
-                                const Text(
-                                  '您可以在这里查看节点的流媒体和各大AI平台解锁情况。',
+                                Text(
+                                  L10n.t('您可以在这里查看节点的流媒体和各大AI平台解锁情况。'),
                                 ),
                                 if (_unlockCheckInterval > 0) ...<Widget>[
                                   const SizedBox(height: 8),
                                   Text(
-                                    '每 $_unlockCheckInterval 小时更新一次，测试结果仅供参考，请以实际使用情况为准。',
+                                    L10n.t('每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。', <Object>[_unlockCheckInterval]),
                                   ),
                                 ],
                                 const SizedBox(height: 8),
                                 Text(
-                                  '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)',
+                                  L10n.t('(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)'),
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(
                                     color: scheme.onSurfaceVariant,
@@ -183,9 +184,9 @@ class _UnlockPageState extends State<UnlockPage> {
                         );
                       }
                       if (_results.isEmpty) {
-                        return const Padding(
+                        return Padding(
                           padding: EdgeInsets.only(top: 80),
-                          child: Center(child: Text('暂无解锁检测结果')),
+                          child: Center(child: Text(L10n.t('暂无解锁检测结果'))),
                         );
                       }
                       final UnlockResult item = _results[index - 1];

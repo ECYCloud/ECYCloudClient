@@ -39,4 +39,16 @@ void main() {
       isTrue,
     );
   });
+
+  test('语言变更不重启内核，缺省为空表示尚未选定', () {
+    expect(defaults.locale, isEmpty);
+    expect(
+      defaults.affectsKernel(defaults.copyWith(locale: 'en')),
+      isFalse,
+    );
+    expect(
+      AppSettings.fromJson(defaults.toJson()..['locale'] = 'zh_TW').locale,
+      'zh_TW',
+    );
+  });
 }

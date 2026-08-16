@@ -24,6 +24,13 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var busy = false
   private var systemProxy = false
   private var tun = false
+  private var labelConnect = "连接"
+  private var labelDisconnect = "断开连接"
+  private var labelCancel = "取消连接"
+  private var labelSystemProxy = "系统代理"
+  private var labelTun = "TUN 模式"
+  private var labelShow = "显示主界面"
+  private var labelQuit = "退出"
 
   init(messenger: FlutterBinaryMessenger, window: NSWindow) {
     channel = FlutterMethodChannel(
@@ -63,6 +70,27 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       busy = arguments["busy"] as? Bool ?? false
       systemProxy = arguments["system_proxy"] as? Bool ?? false
       tun = arguments["tun"] as? Bool ?? false
+      if let value = arguments["label_connect"] as? String, !value.isEmpty {
+        labelConnect = value
+      }
+      if let value = arguments["label_disconnect"] as? String, !value.isEmpty {
+        labelDisconnect = value
+      }
+      if let value = arguments["label_cancel"] as? String, !value.isEmpty {
+        labelCancel = value
+      }
+      if let value = arguments["label_system_proxy"] as? String, !value.isEmpty {
+        labelSystemProxy = value
+      }
+      if let value = arguments["label_tun"] as? String, !value.isEmpty {
+        labelTun = value
+      }
+      if let value = arguments["label_show"] as? String, !value.isEmpty {
+        labelShow = value
+      }
+      if let value = arguments["label_quit"] as? String, !value.isEmpty {
+        labelQuit = value
+      }
       result(nil)
     case "secret.protect":
       guard let arguments = call.arguments as? [String: Any],
@@ -151,29 +179,29 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     menu.autoenablesItems = false
 
     if busy {
-      menu.addItem(makeItem("取消连接", .disconnect))
+      menu.addItem(makeItem(labelCancel, .disconnect))
     } else if connected {
-      menu.addItem(makeItem("断开连接", .disconnect))
+      menu.addItem(makeItem(labelDisconnect, .disconnect))
     } else {
-      menu.addItem(makeItem("连接", .connect))
+      menu.addItem(makeItem(labelConnect, .connect))
     }
     menu.addItem(.separator())
 
     // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
-    let proxyItem = makeItem("系统代理", .systemProxy)
+    let proxyItem = makeItem(labelSystemProxy, .systemProxy)
     proxyItem.isEnabled = connected
     proxyItem.state = systemProxy ? .on : .off
     menu.addItem(proxyItem)
 
-    let tunItem = makeItem("TUN 模式", .tun)
+    let tunItem = makeItem(labelTun, .tun)
     tunItem.isEnabled = connected
     tunItem.state = tun ? .on : .off
     menu.addItem(tunItem)
 
     menu.addItem(.separator())
-    menu.addItem(makeItem("显示主界面", .show))
+    menu.addItem(makeItem(labelShow, .show))
     menu.addItem(.separator())
-    menu.addItem(makeItem("退出", .quit))
+    menu.addItem(makeItem(labelQuit, .quit))
     return menu
   }
 

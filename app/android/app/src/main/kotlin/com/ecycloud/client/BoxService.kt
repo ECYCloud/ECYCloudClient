@@ -72,6 +72,9 @@ class BoxService : VpnService() {
         super.onDestroy()
     }
 
+    // 系统按 START_STICKY 重建服务与界面下发的 kernel.start 是两条独立的路，内核进程
+    // 独立后两者会真的并发；同时进两次 Mihomo.start 会把内核搞成半启动状态
+    @Synchronized
     private fun launch() {
         BoxState.revoked = false
         BoxState.stoppedByUser = false
@@ -338,7 +341,7 @@ class BoxService : VpnService() {
             // 这一轮接不接管出口由配置里的 tun.enable 表达，与桌面端同一份装配逻辑。
             // 不接管时内核只需在进程内跑起来供控制面使用：不建隧道、不弹授权、
             // 不占通知栏，用户没按连接却看见一条 VPN 才是不对的
-            if (!takesOverExit(config)) {
+            if (!BoxState.takesOverExit(config)) {
                 standby(config)
                 return
             }
@@ -365,13 +368,8 @@ class BoxService : VpnService() {
             }
         }
 
-        /** 这一份配置要不要接管出口。装配逻辑全端共用，Kotlin 侧只读结论 */
-        fun takesOverExit(config: String): Boolean = runCatching {
-            JSONObject(config).getJSONObject("tun").getBoolean("enable")
-        }.getOrDefault(false)
-
         /**
-         * 内核常驻但不接管出口。mihomo 与界面同进程，起它不需要 VpnService。
+         * 内核常驻但不接管出口。起它不需要 VpnService。
          *
          * protect 回调必须摘掉：它要经 VpnService 实例才能生效，服务不在时每个出站
          * socket 都会被判成 protect 失败，内核一条连接也拨不出去。

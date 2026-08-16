@@ -10,6 +10,7 @@ import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/simple_data_table.dart';
+import '../../l10n/l10n.dart';
 
 class BalanceRecordsPage extends StatefulWidget {
   const BalanceRecordsPage({super.key});
@@ -78,7 +79,7 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -101,11 +102,11 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '余额记录',
+              title: L10n.t('余额记录'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -114,7 +115,7 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
             lastPage: _lastPage,
             total: _total,
             perPage: _perPage,
-            searchHint: '订单号',
+            searchHint: L10n.t('订单号'),
             onSearchChanged: _onSearch,
             onPerPageChanged: (int value) {
               _perPage = value;
@@ -137,13 +138,13 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
                       padding: const EdgeInsets.all(14),
                       children: <Widget>[
                         SimpleDataTable(
-                          columns: const <String>[
-                            '订单号',
-                            '类型',
-                            '金额',
-                            '时间',
+                          columns: <String>[
+                            L10n.t('订单号'),
+                            L10n.t('类型'),
+                            L10n.t('金额'),
+                            L10n.t('时间'),
                           ],
-                          emptyText: '暂无余额记录',
+                          emptyText: L10n.t('暂无余额记录'),
                           rows: <List<Widget>>[
                             for (final BalanceTransactionItem item in _items)
                               <Widget>[

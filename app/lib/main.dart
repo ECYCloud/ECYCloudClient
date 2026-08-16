@@ -9,6 +9,8 @@ import 'core/error_logger.dart';
 import 'core/logger.dart';
 import 'data/store/credential_store.dart';
 import 'data/store/settings_store.dart';
+import 'l10n/app_language.dart';
+import 'l10n/l10n.dart';
 import 'domain/kernel/kernel_controller.dart';
 import 'domain/platform/platform_service.dart';
 import 'platform/platform_factory.dart';
@@ -19,6 +21,7 @@ import 'state/update_controller.dart';
 import 'ui/app_scope.dart';
 import 'ui/node_labels.dart';
 import 'ui/pages/account_status_page.dart';
+import 'ui/pages/language_setup_page.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
@@ -36,7 +39,12 @@ Future<void> main() async {
   }
 
   final SettingsStore settingsStore = SettingsStore();
-  Logger.instance.level = settingsStore.load().logLevel;
+  final AppSettings seeded = AppLanguage.seed(
+    settingsStore,
+    settingsStore.load(),
+  );
+  L10n.current = AppLanguage.resolve(stored: seeded.locale);
+  Logger.instance.level = seeded.logLevel;
   Logger.instance.info('app', '客户端启动');
 
   await NodeLabels.load();
@@ -79,6 +87,7 @@ class EcyCloudApp extends StatefulWidget {
 class _EcyCloudAppState extends State<EcyCloudApp> {
   bool _bootstrapped = false;
   ThemeMode _themeMode = ThemeMode.system;
+  Locale _locale = L10n.current.flutterLocale;
   AuthController? _auth;
   ConnectionController? _connection;
   AnnouncementController? _announcements;
@@ -98,6 +107,10 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       _update = scope.update;
       _platform = scope.platform;
       _themeMode = scope.connection.settings.themeMode;
+      L10n.current = AppLanguage.resolve(
+        stored: scope.connection.settings.locale,
+      );
+      _locale = L10n.current.flutterLocale;
       unawaited(_bootstrap());
     }
   }
@@ -144,10 +157,18 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     // 监听回调不用 AppScope.of：of 走 dependOnInherited，应在 build /
     // didChangeDependencies 里取好引用（见 Flutter BuildContext 文档）。
     final ThemeMode next = connection.settings.themeMode;
-    if (next == _themeMode) {
+    final AppLanguage language = AppLanguage.resolve(
+      stored: connection.settings.locale,
+    );
+    final Locale nextLocale = language.flutterLocale;
+    if (next == _themeMode && nextLocale == _locale) {
       return;
     }
-    setState(() => _themeMode = next);
+    L10n.current = language;
+    setState(() {
+      _themeMode = next;
+      _locale = nextLocale;
+    });
   }
 
   void _onAuthChanged() {
@@ -160,8 +181,9 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
         announcements == null) {
       return;
     }
+    final AuthStage previous = _authStage;
     final bool leftRestricted = auth.stage == AuthStage.loggedIn &&
-        _authStage == AuthStage.accountRestricted;
+        previous == AuthStage.accountRestricted;
     _authStage = auth.stage;
 
     connection.attachApi(auth.api, accountKey: auth.accountKey);
@@ -174,6 +196,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     }
 
     if (auth.stage == AuthStage.loggedIn &&
+        previous != AuthStage.loggedIn &&
         connection.settings.autoConnect &&
         connection.state == ConnectionPhase.disconnected &&
         !connection.busy) {
@@ -188,8 +211,12 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     return MaterialApp(
       title: 'ECY Cloud',
       debugShowCheckedModeBanner: false,
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const <Locale>[Locale('zh', 'CN')],
+      locale: _locale,
+      supportedLocales: const <Locale>[
+        Locale('zh', 'CN'),
+        Locale('zh', 'TW'),
+        Locale('en'),
+      ],
       localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -198,15 +225,27 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: _themeMode,
-      home: ListenableBuilder(
-        listenable: scope.auth,
-        builder: (BuildContext context, _) => switch (scope.auth.stage) {
-          AuthStage.unknown => const _Splash(),
-          AuthStage.loggedIn => const Shell(),
-          AuthStage.accountRestricted => const AccountStatusPage(),
-          _ => const LoginPage(),
-        },
-      ),
+      home: scope.connection.settings.locale.isEmpty
+          ? LanguageSetupPage(
+              initial: AppLanguage.resolve(stored: ''),
+              onChosen: (AppLanguage language) {
+                L10n.current = language;
+                unawaited(
+                  scope.connection.updateSettings(
+                    scope.connection.settings.copyWith(locale: language.code),
+                  ),
+                );
+              },
+            )
+          : ListenableBuilder(
+              listenable: scope.auth,
+              builder: (BuildContext context, _) => switch (scope.auth.stage) {
+                AuthStage.unknown => const _Splash(),
+                AuthStage.loggedIn => const Shell(),
+                AuthStage.accountRestricted => const AccountStatusPage(),
+                _ => const LoginPage(),
+              },
+            ),
     );
   }
 }

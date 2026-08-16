@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
 import '../widgets/tag_chip.dart';
+import '../../l10n/l10n.dart';
 
 enum _Scope { all, active, closed }
 
@@ -30,11 +31,11 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
       listenable: connection,
       builder: (BuildContext context, _) => Column(
         children: <Widget>[
-          const PageHeader(title: '连接'),
+          PageHeader(title: L10n.t('连接')),
           Expanded(
             child: connection.state == ConnectionPhase.connected
                 ? _body(connection)
-                : const Center(child: Text('连接后可查看连接明细')),
+                : Center(child: Text(L10n.t('连接后可查看连接明细'))),
           ),
         ],
       ),
@@ -51,15 +52,17 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
       segments: <ButtonSegment<_Scope>>[
         ButtonSegment<_Scope>(
           value: _Scope.all,
-          label: Text('全部 ${activeCount + closedCount}'),
+          label: Text(
+            L10n.t('全部 {0}', <Object>[activeCount + closedCount]),
+          ),
         ),
         ButtonSegment<_Scope>(
           value: _Scope.active,
-          label: Text('活跃中 $activeCount'),
+          label: Text(L10n.t('活跃中 {0}', <Object>[activeCount])),
         ),
         ButtonSegment<_Scope>(
           value: _Scope.closed,
-          label: Text('已关闭 $closedCount'),
+          label: Text(L10n.t('已关闭 {0}', <Object>[closedCount])),
         ),
       ],
       selected: <_Scope>{_scope},
@@ -69,7 +72,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     );
 
     final Widget searchActions = SearchField(
-      hintText: '搜索域名、IP、进程、规则',
+      hintText: L10n.t('搜索域名、IP、进程、规则'),
       width: double.infinity,
       onChanged: (String value) =>
           setState(() => _keyword = value.trim().toLowerCase()),
@@ -110,7 +113,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         const Divider(height: 1),
         Expanded(
           child: rows.isEmpty
-              ? const Center(child: Text('没有符合条件的连接'))
+              ? Center(child: Text(L10n.t('没有符合条件的连接')))
               : ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   itemCount: rows.length,
@@ -331,7 +334,7 @@ class _ConnectionRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  row.active ? row.lifetime : '已关闭 · ${row.lifetime}',
+                  row.active ? row.lifetime : L10n.t('已关闭 · {0}', <Object>[row.lifetime]),
                   style: theme.textTheme.bodySmall?.copyWith(color: faded),
                 ),
               ],

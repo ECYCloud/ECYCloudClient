@@ -13,6 +13,7 @@ import '../widgets/refresh_button.dart';
 import '../widgets/rich_html_view.dart';
 import '../widgets/simple_data_table.dart';
 import 'account_page.dart';
+import '../../l10n/l10n.dart';
 
 class PurchasesPage extends StatefulWidget {
   const PurchasesPage({super.key});
@@ -81,7 +82,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : '加载失败：$e';
+        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -117,11 +118,11 @@ class _PurchasesPageState extends State<PurchasesPage> {
           SafeArea(
             bottom: false,
             child: PageHeader(
-              title: '购买记录',
+              title: L10n.t('购买记录'),
               showBackButton: true,
               showUserAvatar: true,
               actions: <Widget>[
-                RefreshButton(tooltip: '刷新', onRefresh: _load),
+                RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
               ],
             ),
           ),
@@ -130,7 +131,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
             lastPage: _lastPage,
             total: _total,
             perPage: _perPage,
-            searchHint: '订单号 / 商品名',
+            searchHint: L10n.t('订单号 / 商品名'),
             onSearchChanged: _onSearch,
             onPerPageChanged: (int value) {
               _perPage = value;
@@ -154,17 +155,17 @@ class _PurchasesPageState extends State<PurchasesPage> {
                       children: <Widget>[
                         SimpleDataTable(
                           minWidth: 1280,
-                          columns: const <String>[
-                            '操作',
-                            '订单号',
-                            '商品名称',
-                            '购买价格',
-                            '商品详情',
-                            '购买时间',
-                            '套餐过期时间',
-                            '自动续费时间',
+                          columns: <String>[
+                            L10n.t('操作'),
+                            L10n.t('订单号'),
+                            L10n.t('商品名称'),
+                            L10n.t('购买价格'),
+                            L10n.t('商品详情'),
+                            L10n.t('购买时间'),
+                            L10n.t('套餐过期时间'),
+                            L10n.t('自动续费时间'),
                           ],
-                          emptyText: '暂无购买记录',
+                          emptyText: L10n.t('暂无购买记录'),
                           rows: <List<Widget>>[
                             for (final PurchaseRecord item in _items)
                               <Widget>[
@@ -174,7 +175,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
                                           _toggle(item, !item.autoRenew),
                                         ),
                                         child: Text(
-                                          item.autoRenew ? '关闭自动续费' : '开启自动续费',
+                                          item.autoRenew ? L10n.t('关闭自动续费') : L10n.t('开启自动续费'),
                                         ),
                                       )
                                     : const TableText('-', muted: true),

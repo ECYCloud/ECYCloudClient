@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:ecycloud_client/core/logger.dart';
 import 'package:ecycloud_client/ui/pages/logs_page.dart';
 import 'package:ecycloud_client/ui/widgets/search_field.dart';
@@ -53,6 +55,21 @@ void main() {
     expect(bar.left, greaterThanOrEqualTo(0));
     expect(bar.right, lessThanOrEqualTo(390));
     expect(_segment('error'), findsOneWidget);
+  });
+
+  test('日志储存路径在设置页展示，不在日志页', () {
+    final String logs = File('lib/ui/pages/logs_page.dart').readAsStringSync();
+    final String settings = File(
+      'lib/ui/pages/settings_page.dart',
+    ).readAsStringSync();
+
+    expect(logs.contains("L10n.t('储存路径')"), isFalse);
+    expect(logs.contains('AppPaths.logs'), isFalse);
+    expect(settings.contains("L10n.t('储存路径')"), isTrue);
+    expect(settings.contains('AppPaths.logs.path'), isTrue);
+    expect(settings.contains("L10n.t('打开目录')"), isTrue);
+    expect(settings.contains("L10n.t('复制路径')"), isFalse);
+    expect(settings.contains('openDirectory'), isTrue);
   });
 
   testWidgets('silent 不出现在筛选里', (WidgetTester tester) async {

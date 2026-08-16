@@ -94,11 +94,19 @@ abstract class UnixPlatformService implements PlatformService {
   Future<bool> runInstaller(String path) => _spawn(<String>[path]);
 
   @override
-  Future<void> openUrl(String url) {
+  Future<bool> openUrl(String url) {
     if (!SafeUrl.canOpen(url)) {
-      return Future<void>.value();
+      return Future<bool>.value(false);
     }
     return _spawn(<String>[url]);
+  }
+
+  @override
+  Future<bool> openDirectory(String path) {
+    if (path.isEmpty) {
+      return Future<bool>.value(false);
+    }
+    return _spawn(<String>[path]);
   }
 
   @override

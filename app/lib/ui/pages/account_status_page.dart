@@ -10,6 +10,7 @@ import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'tickets_page.dart';
+import '../../l10n/l10n.dart';
 
 class AccountStatusPage extends StatefulWidget {
   const AccountStatusPage({super.key});
@@ -25,16 +26,16 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('确认取消删除请求吗？'),
-        content: const Text('取消后，您的账户将恢复正常状态。'),
+        title: Text(L10n.t('确认取消删除请求吗？')),
+        content: Text(L10n.t('取消后，您的账户将恢复正常状态。')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(L10n.t('取消')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
+            child: Text(L10n.t('确定')),
           ),
         ],
       ),
@@ -88,16 +89,16 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
         return Scaffold(
           body: Column(
             children: <Widget>[
-              const PageHeader(title: '账户状态', showBackButton: false),
+              PageHeader(title: L10n.t('账户状态'), showBackButton: false),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.all(14),
                   children: <Widget>[
                     if (status == null)
-                      const SectionCard(
+                      SectionCard(
                         icon: Icons.info_outline,
-                        title: '账户状态',
-                        child: Text('无法获取账户状态'),
+                        title: L10n.t('账户状态'),
+                        child: Text(L10n.t('无法获取账户状态')),
                       )
                     else if (status.isPendingDeletion)
                       _PendingDeletionCard(
@@ -108,10 +109,10 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                     else if (status.isBanned)
                       _BannedCard(status: status)
                     else
-                      const SectionCard(
+                      SectionCard(
                         icon: Icons.info_outline,
-                        title: '账户状态',
-                        child: Text('当前账户状态正常。'),
+                        title: L10n.t('账户状态'),
+                        child: Text(L10n.t('当前账户状态正常。')),
                       ),
                     const SizedBox(height: 10),
                     ListTile(
@@ -124,7 +125,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                       iconColor: Theme.of(context).colorScheme.error,
                       textColor: Theme.of(context).colorScheme.error,
                       leading: const Icon(Icons.logout),
-                      title: const Text('退出登录'),
+                      title: Text(L10n.t('退出登录')),
                       onTap: _busy ? null : () => unawaited(_logout(auth)),
                     ),
                   ],
@@ -153,16 +154,24 @@ class _PendingDeletionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return SectionCard(
       icon: Icons.delete_outline,
-      title: '您的账户已提交删除请求',
+      title: L10n.t('您的账户已提交删除请求'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text('提交删除时间：${status.submitAccountDeletionTime ?? '未知'}'),
+          Text(
+            L10n.t('提交删除时间：{0}', <Object>[
+              status.submitAccountDeletionTime ?? L10n.t('未知'),
+            ]),
+          ),
           const SizedBox(height: 6),
-          Text('预计删除时间：${status.deletionTime ?? '未知'}'),
+          Text(
+            L10n.t('预计删除时间：{0}', <Object>[
+              status.deletionTime ?? L10n.t('未知'),
+            ]),
+          ),
           const SizedBox(height: 6),
-          const Text(
-            '状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。',
+          Text(
+            L10n.t('状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。'),
           ),
           const SizedBox(height: 12),
           Align(
@@ -170,7 +179,7 @@ class _PendingDeletionCard extends StatelessWidget {
             child: FilledButton.icon(
               onPressed: busy ? null : onCancel,
               icon: const Icon(Icons.history, size: 18),
-              label: const Text('取消删除'),
+              label: Text(L10n.t('取消删除')),
             ),
           ),
         ],
@@ -189,21 +198,33 @@ class _BannedCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     return SectionCard(
       icon: Icons.block,
-      title: '你的账户已被封禁',
+      title: L10n.t('你的账户已被封禁'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text('封禁原因：${status.banReason ?? '特殊原因被封禁'}'),
+          Text(
+            L10n.t('封禁原因：{0}', <Object>[
+              status.banReason ?? L10n.t('特殊原因被封禁'),
+            ]),
+          ),
           const SizedBox(height: 6),
           if (status.banPermanent ||
               (status.banTimeText == null || status.banTimeText!.isEmpty))
-            const Text('封禁期限：永久封禁')
+            Text(L10n.t('封禁期限：永久封禁'))
           else ...<Widget>[
-            Text('封禁时长：${status.banTimeText}'),
+            Text(L10n.t('封禁时长：{0}', <Object>[status.banTimeText ?? ''])),
             const SizedBox(height: 6),
-            Text('封禁开始时间：${status.banStartTime ?? '未知'}'),
+            Text(
+              L10n.t('封禁开始时间：{0}', <Object>[
+                status.banStartTime ?? L10n.t('未知'),
+              ]),
+            ),
             const SizedBox(height: 6),
-            Text('封禁结束时间：${status.banEndTime ?? '未知'}'),
+            Text(
+              L10n.t('封禁结束时间：{0}', <Object>[
+                status.banEndTime ?? L10n.t('未知'),
+              ]),
+            ),
           ],
           const SizedBox(height: 12),
           if (status.ticketEnabled)
@@ -211,7 +232,7 @@ class _BannedCard extends StatelessWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
-                  '如果我们错误地禁用了您的账户，请 ',
+                  L10n.t('如果我们错误地禁用了您的账户，请 '),
                   style: theme.textTheme.bodySmall,
                 ),
                 TextButton(
@@ -224,10 +245,10 @@ class _BannedCard extends StatelessWidget {
                       ),
                     );
                   },
-                  child: const Text('发送工单'),
+                  child: Text(L10n.t('发送工单')),
                 ),
                 Text(
-                  ' 与我们联系。',
+                  L10n.t(' 与我们联系。'),
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -243,14 +264,14 @@ class _BannedCard extends StatelessWidget {
                 TextSpan(
                   style: theme.textTheme.bodySmall,
                   children: <InlineSpan>[
-                    const TextSpan(text: '如果我们错误地禁用了您的账户，请通过邮箱：'),
+                    TextSpan(text: L10n.t('如果我们错误地禁用了您的账户，请通过邮箱：')),
                     TextSpan(
                       text: status.supportEmail,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.primary,
                       ),
                     ),
-                    const TextSpan(text: ' 与我们联系。'),
+                    TextSpan(text: L10n.t(' 与我们联系。')),
                   ],
                 ),
               ),

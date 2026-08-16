@@ -58,6 +58,7 @@ class UserProfile {
     required this.speedLimitMbps,
     required this.connectorLimit,
     required this.onlineIpCount,
+    this.onlineIpSelf = false,
     required this.money,
     required this.lastDayT,
     required this.lastCheckInTime,
@@ -89,6 +90,7 @@ class UserProfile {
     speedLimitMbps: (json['node_speedlimit'] as num?)?.toDouble() ?? 0,
     connectorLimit: (json['node_connector'] as num?)?.toInt() ?? 0,
     onlineIpCount: (json['online_ip_count'] as num?)?.toInt() ?? 0,
+    onlineIpSelf: json['online_ip_self'] == true,
     money: (json['money'] as num?)?.toDouble() ?? 0,
     lastDayT: (json['last_day_t'] as num?)?.toInt() ?? 0,
     lastCheckInTime: _checkInTimeText(json['last_check_in_time']),
@@ -122,6 +124,7 @@ class UserProfile {
   final double speedLimitMbps;
   final int connectorLimit;
   final int onlineIpCount;
+  final bool onlineIpSelf;
   final double money;
   final int lastDayT;
   final String lastCheckInTime;
@@ -162,9 +165,9 @@ class UserProfile {
   bool get expired =>
       classExpire != null && classExpire!.isBefore(DateTime.now());
 
-  /// 有上限且当前在线 IP 已占满；官方客户端确认后才踢最旧在线 IP
+  /// 有上限、名额已满且本机出口 IP 不在在线集合中；确认后才踢最旧在线 IP
   bool get onlineIpLimitReached =>
-      connectorLimit > 0 && onlineIpCount >= connectorLimit;
+      connectorLimit > 0 && onlineIpCount >= connectorLimit && !onlineIpSelf;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -181,6 +184,7 @@ class UserProfile {
     'node_speedlimit': speedLimitMbps,
     'node_connector': connectorLimit,
     'online_ip_count': onlineIpCount,
+    'online_ip_self': onlineIpSelf,
     'money': money,
     'last_day_t': lastDayT,
     'last_check_in_time': lastCheckInTime,

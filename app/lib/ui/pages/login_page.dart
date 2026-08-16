@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/app_config.dart';
 import '../../data/store/credential_store.dart';
+import '../../l10n/l10n.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
@@ -200,8 +201,8 @@ class _LoginPageState extends State<LoginPage> {
     final String email = _email.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先填写邮箱'),
+        SnackBar(
+          content: Text(L10n.t('请先填写邮箱')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -218,8 +219,8 @@ class _LoginPageState extends State<LoginPage> {
 
     _startCooldown();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('验证码已发送，请查收邮件'),
+      SnackBar(
+        content: Text(L10n.t('验证码已发送，请查收邮件')),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -279,10 +280,10 @@ class _LoginPageState extends State<LoginPage> {
     }
     setState(() => _entering = true);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('登录成功'),
+      SnackBar(
+        content: Text(L10n.t('登录成功')),
         behavior: SnackBarBehavior.floating,
-        duration: Duration(milliseconds: 900),
+        duration: const Duration(milliseconds: 900),
       ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 900));
@@ -324,7 +325,9 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '使用 ${AppConfig.siteHost} 账号登录，登录后自动获取可用节点',
+                        L10n.t('使用 {0} 账号登录，登录后自动获取可用节点', <Object>[
+                          AppConfig.siteHost,
+                        ]),
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
@@ -337,13 +340,13 @@ class _LoginPageState extends State<LoginPage> {
                         autocorrect: false,
                         enableSuggestions: false,
                         autofillHints: const <String>[AutofillHints.email],
-                        decoration: const InputDecoration(
-                          labelText: '邮箱',
-                          prefixIcon: Icon(Icons.mail_outline),
+                        decoration: InputDecoration(
+                          labelText: L10n.t('邮箱'),
+                          prefixIcon: const Icon(Icons.mail_outline),
                         ),
                         validator: (String? value) =>
                             (value == null || value.trim().isEmpty)
-                            ? '请填写邮箱'
+                            ? L10n.t('请填写邮箱')
                             : null,
                       ),
                       const SizedBox(height: 16),
@@ -367,13 +370,13 @@ class _LoginPageState extends State<LoginPage> {
                                     inputFormatters: <TextInputFormatter>[
                                       OtpCodeFormatter(),
                                     ],
-                                    decoration: const InputDecoration(
-                                      labelText: '验证码',
-                                      prefixIcon: Icon(Icons.pin_outlined),
+                                    decoration: InputDecoration(
+                                      labelText: L10n.t('验证码'),
+                                      prefixIcon: const Icon(Icons.pin_outlined),
                                     ),
                                     validator: (String? value) =>
                                         (value == null || value.trim().isEmpty)
-                                        ? '请填写验证码'
+                                        ? L10n.t('请填写验证码')
                                         : null,
                                     onFieldSubmitted: (_) =>
                                         auth.busy || _entering
@@ -396,63 +399,78 @@ class _LoginPageState extends State<LoginPage> {
                                 child: Text(
                                   _sendCooldown > 0
                                       ? '${_sendCooldown}s'
-                                      : '获取验证码',
+                                      : L10n.t('获取验证码'),
                                 ),
                               ),
                             ),
                           ],
                         )
                       else
-                        TextFormField(
-                          controller: _password,
-                          obscureText: _obscure,
-                          keyboardType: TextInputType.visiblePassword,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          autofillHints: const <String>[AutofillHints.password],
-                          inputFormatters: <TextInputFormatter>[
-                            asciiOnlyFormatter,
-                          ],
-                          decoration: InputDecoration(
-                            labelText: '密码',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscure
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
+                        EmailOtpIme(
+                          builder:
+                              (BuildContext context, FocusNode focusNode) {
+                            return TextFormField(
+                              controller: _password,
+                              focusNode: focusNode,
+                              obscureText: _obscure,
+                              keyboardType: TextInputType.visiblePassword,
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              autofillHints: const <String>[
+                                AutofillHints.password,
+                              ],
+                              inputFormatters: <TextInputFormatter>[
+                                asciiOnlyFormatter,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: L10n.t('密码'),
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscure
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                  onPressed: () =>
+                                      setState(() => _obscure = !_obscure),
+                                ),
                               ),
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
-                            ),
-                          ),
-                          validator: (String? value) =>
-                              (value == null || value.isEmpty)
-                              ? '请填写密码'
-                              : null,
-                          onFieldSubmitted: (_) =>
-                              auth.busy || _entering ? null : _submit(auth),
+                              validator: (String? value) =>
+                                  (value == null || value.isEmpty)
+                                  ? L10n.t('请填写密码')
+                                  : null,
+                              onFieldSubmitted: (_) =>
+                                  auth.busy || _entering
+                                  ? null
+                                  : _submit(auth),
+                            );
+                          },
                         ),
                       Row(
                         children: <Widget>[
-                          Expanded(
-                            child: CheckboxListTile(
-                              dense: true,
-                              visualDensity: VisualDensity.compact,
-                              contentPadding: EdgeInsets.zero,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              value: _remember,
-                              onChanged: (bool? value) =>
-                                  _setRemember(auth, value ?? false),
-                              title: const Text('记住账号密码'),
+                          Checkbox(
+                            value: _remember,
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            mouseCursor: SystemMouseCursors.basic,
+                            onChanged: (bool? value) =>
+                                _setRemember(auth, value ?? false),
+                          ),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.basic,
+                            child: GestureDetector(
+                              onTap: () => _setRemember(auth, !_remember),
+                              child: Text(L10n.t('记住账号密码')),
                             ),
                           ),
+                          const Spacer(),
                           TextButton(
                             onPressed: () => setState(
                               () => _emailCodeMode = !_emailCodeMode,
                             ),
                             child: Text(
-                              _emailCodeMode ? '密码登录' : '邮箱验证码登录',
+                              _emailCodeMode ? L10n.t('密码登录') : L10n.t('邮箱验证码登录'),
                             ),
                           ),
                         ],
@@ -475,18 +493,18 @@ class _LoginPageState extends State<LoginPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text('登录'),
+                            : Text(L10n.t('登录')),
                       ),
                       Row(
                         children: <Widget>[
                           TextButton(
                             onPressed: _openRegister,
-                            child: const Text('注册账号'),
+                            child: Text(L10n.t('注册账号')),
                           ),
                           const Spacer(),
                           TextButton(
                             onPressed: _openForgotPassword,
-                            child: const Text('忘记密码？'),
+                            child: Text(L10n.t('忘记密码？')),
                           ),
                         ],
                       ),
@@ -554,12 +572,12 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
     final ThemeData theme = Theme.of(context);
 
     return AlertDialog(
-      title: const Text('两步验证', textAlign: TextAlign.center),
+      title: Text(L10n.t('两步验证'), textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Text(
-            '请输入您的两步验证码',
+            L10n.t('请输入您的两步验证码'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -607,7 +625,7 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(L10n.t('取消')),
         ),
       ],
     );

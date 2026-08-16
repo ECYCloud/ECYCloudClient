@@ -48,6 +48,7 @@ class ProfileAssembler {
   AssembledProfile assemble({
     required Map<String, dynamic> remote,
     required LocalTemplate template,
+    Map<String, String> selectorDefaults = const <String, String>{},
   }) {
     final Object? proxies = remote['proxies'];
     if (proxies is! List || proxies.isEmpty) {
@@ -86,9 +87,72 @@ class ProfileAssembler {
       };
     }
 
+    // NewSelector 的初始 now 是 default-selected。ApplyConfig 先开 TUN 再
+    // patchSelectGroup，有落盘选择时必须关掉 store-selected，否则会被盖成首个成员。
+    if (selectorDefaults.isNotEmpty) {
+      final Object? groups = config['proxy-groups'];
+      if (groups is List) {
+        final List<Object?> next = <Object?>[
+          for (final Object? entry in groups)
+            _withSelectorDefault(entry, selectorDefaults),
+        ];
+        config['proxy-groups'] = next;
+        if (_appliedSelectorDefault(next, selectorDefaults)) {
+          final Object? profile = config['profile'];
+          if (profile is Map) {
+            config['profile'] = <String, dynamic>{
+              ...profile.cast<String, dynamic>(),
+              'store-selected': false,
+            };
+          }
+        }
+      }
+    }
+
     return AssembledProfile(
       config,
       const JsonEncoder.withIndent('  ').convert(config),
     );
+  }
+
+  static Object? _withSelectorDefault(
+    Object? entry,
+    Map<String, String> defaults,
+  ) {
+    if (entry is! Map) {
+      return entry;
+    }
+    final Map<String, dynamic> group = Map<String, dynamic>.from(entry);
+    if (group['type'] != 'select') {
+      return group;
+    }
+    final String name = group['name'] as String? ?? '';
+    final String? want = defaults[name];
+    if (want == null || want.isEmpty) {
+      return group;
+    }
+    final Object? members = group['proxies'];
+    if (members is! List || !members.contains(want)) {
+      return group;
+    }
+    group['default-selected'] = want;
+    return group;
+  }
+
+  static bool _appliedSelectorDefault(
+    List<Object?> groups,
+    Map<String, String> defaults,
+  ) {
+    for (final Object? entry in groups) {
+      if (entry is! Map) {
+        continue;
+      }
+      final String name = entry['name'] as String? ?? '';
+      final String? want = defaults[name];
+      if (want != null && entry['default-selected'] == want) {
+        return true;
+      }
+    }
+    return false;
   }
 }

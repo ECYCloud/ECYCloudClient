@@ -140,11 +140,19 @@ class WindowsPlatformService implements PlatformService {
       false;
 
   @override
-  Future<void> openUrl(String url) {
+  Future<bool> openUrl(String url) {
     if (!SafeUrl.canOpen(url)) {
-      return Future<void>.value();
+      return Future<bool>.value(false);
     }
     return Isolate.run(() => _shellOpen(url));
+  }
+
+  @override
+  Future<bool> openDirectory(String path) {
+    if (path.isEmpty) {
+      return Future<bool>.value(false);
+    }
+    return Isolate.run(() => _shellOpen(path));
   }
 
   @override
@@ -199,21 +207,18 @@ typedef _ShellExecuteWDart =
 
 /// 只能走 ShellExecuteW：经由 cmd 打开时，URL 查询串里的 & 会被当成命令分隔符，
 /// 链接在第一个 & 处被截断
-void _shellOpen(String url) {
+bool _shellOpen(String url) {
   final Pointer<Utf16> operation = 'open'.toNativeUtf16();
   final Pointer<Utf16> file = url.toNativeUtf16();
 
   try {
-    DynamicLibrary.open(
-      'shell32.dll',
-    ).lookupFunction<_ShellExecuteWNative, _ShellExecuteWDart>('ShellExecuteW')(
-      0,
-      operation,
-      file,
-      nullptr,
-      nullptr,
-      _swShowNormal,
-    );
+    // ShellExecuteW 的返回值大于 32 才算启动成功，小于等于 32 的都是错误码
+    return DynamicLibrary.open(
+          'shell32.dll',
+        ).lookupFunction<_ShellExecuteWNative, _ShellExecuteWDart>(
+          'ShellExecuteW',
+        )(0, operation, file, nullptr, nullptr, _swShowNormal) >
+        32;
   } finally {
     malloc.free(operation);
     malloc.free(file);
