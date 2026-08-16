@@ -53,7 +53,7 @@ class RuleProvidersPage extends StatelessWidget {
                 return ListTile(
                   title: Text(item.name),
                   subtitle: Text(item.relativePath),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => TextViewerPage(

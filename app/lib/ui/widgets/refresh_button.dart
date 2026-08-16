@@ -26,7 +26,7 @@ class RefreshButton extends StatefulWidget {
     this.action,
     this.tooltip,
   }) : label = null,
-       iconSize = 24,
+       iconSize = 20,
        color = null;
 
   final Future<void> Function() onRefresh;
@@ -100,15 +100,25 @@ class _RefreshButtonState extends State<RefreshButton>
     if (title != null) {
       final Widget? action = widget.action;
       final String? subtitle = widget.subtitle;
+      // ListTile 只把 trailing 整体靠右，图标居中于按钮盒子时右边缘会比同列的
+      // chevron 内缩，同一张卡里就参差；把内边距全留在左侧让图标贴住右边缘
+      final Widget trailing = IconButton(
+        tooltip: widget.tooltip,
+        icon: icon,
+        padding: const EdgeInsets.only(left: 12),
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        onPressed: onPressed,
+      );
       return ListTile(
         title: Text(title),
         subtitle: subtitle == null ? null : Text(subtitle),
         trailing: action == null
-            ? iconButton
+            ? trailing
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 spacing: 4,
-                children: <Widget>[action, iconButton],
+                children: <Widget>[action, trailing],
               ),
         onTap: onPressed,
       );

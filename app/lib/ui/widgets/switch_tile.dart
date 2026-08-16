@@ -45,6 +45,7 @@ class SwitchTile extends StatelessWidget {
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: Transform.scale(
         scale: AppTheme.switchScale,
+        alignment: Alignment.centerRight,
         child: Switch(value: value, onChanged: onChanged),
       ),
     );

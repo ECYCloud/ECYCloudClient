@@ -527,6 +527,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                     title: Text(name),
                     trailing: Transform.scale(
                       scale: AppTheme.switchScale,
+                      alignment: Alignment.centerRight,
                       child: Switch(
                         value: !_disabled.contains(name),
                         onChanged: (bool enabled) {

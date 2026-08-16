@@ -13,17 +13,20 @@ class AppTheme {
   // 全局按钮圆角：胶囊形
   static const OutlinedBorder pillShape = StadiumBorder();
 
-  static ButtonStyle inlineTextLink(ColorScheme scheme) => TextButton.styleFrom(
-        padding: EdgeInsets.zero,
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
-        foregroundColor: scheme.primary,
-        textStyle: _componentText(13).copyWith(
-          decoration: TextDecoration.underline,
-          decorationColor: scheme.primary,
-        ),
-      );
+  static ButtonStyle inlineTextLink(ColorScheme scheme, {Color? color}) {
+    final Color foreground = color ?? scheme.primary;
+    return TextButton.styleFrom(
+      padding: EdgeInsets.zero,
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+      foregroundColor: foreground,
+      textStyle: _componentText(13).copyWith(
+        decoration: TextDecoration.underline,
+        decorationColor: foreground,
+      ),
+    );
+  }
 
   // 卡片与卡片内小块的圆角，成套用才不会看起来东拼西凑
   static const double cardRadius = 12;

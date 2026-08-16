@@ -66,9 +66,14 @@ class BoxService : VpnService() {
         Thread { shutdown() }.start()
     }
 
+    // 只收内核，不调 shutdown()：其中的 stopSelf 会把 START_STICKY 取消，
+    // 系统本要重建服务时反被告知「不必再起」，隧道就此消失。
+    // instance 判等是因为重建后的新实例可能已在 onCreate 里登记过自己
     override fun onDestroy() {
-        instance = null
-        shutdown()
+        if (instance === this) {
+            instance = null
+        }
+        closeKernel()
         super.onDestroy()
     }
 
@@ -203,6 +208,12 @@ class BoxService : VpnService() {
     }
 
     private fun shutdown() {
+        closeKernel()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun closeKernel() {
         Mihomo.stop()
         Mihomo.setProtector(null)
         tun?.let { runCatching { it.close() } }
@@ -211,8 +222,6 @@ class BoxService : VpnService() {
         BoxState.running = false
         BoxState.takeover = false
         QuickToggleService.refresh()
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private fun foreground(text: String) {

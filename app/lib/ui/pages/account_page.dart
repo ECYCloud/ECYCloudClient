@@ -8,6 +8,7 @@ import '../../data/models/account.dart';
 import '../../data/models/user_profile.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
@@ -157,7 +158,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.edit_outlined, size: 20),
                             title: Text(L10n.t('修改信息')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -169,7 +170,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.tune, size: 20),
                             title: Text(L10n.t('自定义策略')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -182,7 +183,7 @@ class _AccountPageState extends State<AccountPage> {
                             leading:
                                 const Icon(Icons.card_giftcard_outlined, size: 20),
                             title: Text(L10n.t('邀请返利')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -194,7 +195,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.data_usage, size: 20),
                             title: Text(L10n.t('流量记录')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -206,7 +207,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.lan_outlined, size: 20),
                             title: Text(L10n.t('使用 IP')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -218,7 +219,7 @@ class _AccountPageState extends State<AccountPage> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.history, size: 20),
                             title: Text(L10n.t('登录记录')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -233,7 +234,7 @@ class _AccountPageState extends State<AccountPage> {
                               size: 20,
                             ),
                             title: Text(L10n.t('余额充值')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -246,7 +247,7 @@ class _AccountPageState extends State<AccountPage> {
                             leading:
                                 const Icon(Icons.receipt_long_outlined, size: 20),
                             title: Text(L10n.t('余额记录')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -259,7 +260,7 @@ class _AccountPageState extends State<AccountPage> {
                             leading:
                                 const Icon(Icons.shopping_bag_outlined, size: 20),
                             title: Text(L10n.t('购买记录')),
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (BuildContext context) =>
@@ -319,8 +320,9 @@ class _UserCard extends StatelessWidget {
               ),
               icon: const Icon(Icons.block, size: 16),
               label: Text(L10n.t('删除账号')),
-              style: TextButton.styleFrom(
-                foregroundColor: theme.colorScheme.error,
+              style: AppTheme.inlineTextLink(
+                theme.colorScheme,
+                color: theme.colorScheme.error,
               ),
             )
           : null,

@@ -155,7 +155,7 @@ const Map<String, String> _zhTW = <String, String>{
   '注册账号': '註冊帳號',
   '重置密码': '重設密碼',
   '本机版本未知，最新（{0}）': '本機版本未知，最新（{0}）',
-  '发现新版本（{0}），随客户端整包更新': '發現新版本（{0}），隨用戶端整包更新',
+  '发现新版本（{0}），将随新版客户端提供，无需单独更新': '發現新版本（{0}），將隨新版用戶端提供，無需單獨更新',
   '本机版本未知': '本機版本未知',
   '当前（{0}）': '目前（{0}）',
   '正在更新（{0}）': '正在更新（{0}）',
@@ -889,8 +889,8 @@ const Map<String, String> _en = <String, String>{
   '注册账号': 'Create account',
   '重置密码': 'Reset password',
   '本机版本未知，最新（{0}）': 'Local version unknown, latest ({0})',
-  '发现新版本（{0}），随客户端整包更新':
-      'Update available ({0}); ships with the next app installer',
+  '发现新版本（{0}），将随新版客户端提供，无需单独更新':
+      'Update available ({0}); ships with the next app release, no separate update needed',
   '本机版本未知': 'Local version unknown',
   '当前（{0}）': 'Current ({0})',
   '正在更新（{0}）': 'Updating ({0})',

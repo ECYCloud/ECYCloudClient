@@ -13,6 +13,7 @@ import '../../l10n/l10n.dart';
 import '../../state/connection_controller.dart';
 import '../../state/update_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
@@ -63,7 +64,7 @@ class SettingsPage extends StatelessWidget {
                         ListTile(
                           title: Text(L10n.t('系统代理绕过')),
                           subtitle: Text(_systemProxyBypassSummary(settings)),
-                          trailing: const Icon(Icons.chevron_right),
+                          trailing: const Icon(Icons.chevron_right, size: 20),
                           onTap: () => unawaited(
                             _editSegments(
                               context,
@@ -106,7 +107,7 @@ class SettingsPage extends StatelessWidget {
                         ListTile(
                           title: Text(L10n.t('分应用代理')),
                           subtitle: Text(_perAppSummary(settings)),
-                          trailing: const Icon(Icons.chevron_right),
+                          trailing: const Icon(Icons.chevron_right, size: 20),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute<void>(
                               builder: (BuildContext context) =>
@@ -117,7 +118,7 @@ class SettingsPage extends StatelessWidget {
                       ListTile(
                         title: Text(L10n.t('TUN 排除自定义网段')),
                         subtitle: Text(_tunExcludeSummary(settings)),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: const Icon(Icons.chevron_right, size: 20),
                         onTap: () => unawaited(
                           _editSegments(
                             context,
@@ -260,7 +261,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                             child: Row(
                               children: <Widget>[
                                 Text(
@@ -283,9 +284,14 @@ class SettingsPage extends StatelessWidget {
                                   tooltip: L10n.t('打开目录'),
                                   icon: const Icon(
                                     Icons.folder_open_outlined,
-                                    size: 16,
+                                    size: 20,
                                   ),
+                                  padding: const EdgeInsets.only(left: 12),
                                   visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 32,
+                                    height: 32,
+                                  ),
                                   onPressed: () => unawaited(
                                     AppScope.of(
                                       context,
@@ -311,7 +317,7 @@ class SettingsPage extends StatelessWidget {
                       ListTile(
                         title: Text(L10n.t('查看运行配置')),
                         subtitle: Text(L10n.t('只读查看内核落盘的 config.json')),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: const Icon(Icons.chevron_right, size: 20),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => TextViewerPage(
@@ -325,7 +331,7 @@ class SettingsPage extends StatelessWidget {
                       ListTile(
                         title: Text(L10n.t('查看分流规则')),
                         subtitle: Text(L10n.t('只读查看已下载的 rule-providers')),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: const Icon(Icons.chevron_right, size: 20),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => const RuleProvidersPage(),
@@ -456,6 +462,9 @@ class _AppUpdateTile extends StatelessWidget {
               ? const _Spinner()
               : update.appManualOnly
               ? TextButton(
+                  style: AppTheme.inlineTextLink(
+                    Theme.of(context).colorScheme,
+                  ),
                   onPressed: () => unawaited(
                     AppScope.of(
                       context,
@@ -468,6 +477,9 @@ class _AppUpdateTile extends StatelessWidget {
               // 版本号已在 subtitle 与确认弹窗里，按钮再带一遍会把 ListTile
               // 的 trailing 撑到整行宽度，窄屏放大字号时直接报错
               : TextButton(
+                  style: AppTheme.inlineTextLink(
+                    Theme.of(context).colorScheme,
+                  ),
                   onPressed: () => unawaited(_install(context, app.latest)),
                   child: Text(L10n.t('更新')),
                 ),
@@ -525,6 +537,9 @@ class _KernelTile extends StatelessWidget {
               : upgradable == null
               ? null
               : TextButton(
+                  style: AppTheme.inlineTextLink(
+                    Theme.of(context).colorScheme,
+                  ),
                   onPressed: () => unawaited(_upgrade(context, upgradable)),
                   child: Text(L10n.t('升级')),
                 ),

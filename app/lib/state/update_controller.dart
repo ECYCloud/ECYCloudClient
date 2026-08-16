@@ -205,7 +205,9 @@ class UpdateController extends ChangeNotifier {
       } else if (update.outdated) {
         _kernelStatus = _connection.kernelUpgradeSupported
             ? L10n.t('发现新版本（{0}）', <Object>[update.latest])
-            : L10n.t('发现新版本（{0}），随客户端整包更新', <Object>[update.latest]);
+            : L10n.t('发现新版本（{0}），将随新版客户端提供，无需单独更新', <Object>[
+                update.latest,
+              ]);
       } else {
         _kernelStatus = L10n.t('已是最新（{0}）', <Object>[update.current]);
       }
