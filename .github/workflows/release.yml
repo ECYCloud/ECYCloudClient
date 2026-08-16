@@ -22,6 +22,8 @@ env:
   # 安装器脚本用到 6.6.0 起的窗体行为，不能退回更早版本
   INNO_SETUP_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
   FLUTTER_REPO: https://github.com/flutter/flutter.git
+  # 必须钉版本：stable 抬高 Gradle / AGP / KGP 下限时会直接让 assembleRelease 失败
+  FLUTTER_TAG: "3.44.8"
 
 jobs:
   prepare:
@@ -87,7 +89,7 @@ jobs:
       - name: 安装 Flutter
         shell: pwsh
         run: |
-          git clone --depth 1 --branch stable $env:FLUTTER_REPO "$env:RUNNER_TEMP\flutter"
+          git clone --depth 1 --branch $env:FLUTTER_TAG $env:FLUTTER_REPO "$env:RUNNER_TEMP\flutter"
           "$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: 安装 Inno Setup
@@ -128,7 +130,7 @@ jobs:
 
       - name: 安装 Flutter
         run: |
-          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          git clone --depth 1 --branch "$FLUTTER_TAG" "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
       - name: 出包
@@ -179,7 +181,7 @@ jobs:
 
       - name: 安装 Flutter
         run: |
-          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          git clone --depth 1 --branch "$FLUTTER_TAG" "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
       - name: 出包
@@ -218,7 +220,7 @@ jobs:
 
       - name: 安装 Flutter
         run: |
-          git clone --depth 1 --branch stable "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
+          git clone --depth 1 --branch "$FLUTTER_TAG" "$FLUTTER_REPO" "$RUNNER_TEMP/flutter"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
       # 未配置签名密钥时 Gradle 退回 debug 签名，装不上已有的正式版，不能进 Release
