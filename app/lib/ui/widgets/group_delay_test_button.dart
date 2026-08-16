@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
+import '../theme.dart';
 
 class GroupDelayTestButton extends StatelessWidget {
   const GroupDelayTestButton({
@@ -15,8 +16,8 @@ class GroupDelayTestButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     tooltip: L10n.t('测试本组全部节点延迟'),
     iconSize: 16,
-    visualDensity: VisualDensity.compact,
-    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+    visualDensity: AppTheme.iconActionDensity,
+    constraints: AppTheme.iconActionBox(compact: 28),
     padding: EdgeInsets.zero,
     icon: testing
         ? const SizedBox(

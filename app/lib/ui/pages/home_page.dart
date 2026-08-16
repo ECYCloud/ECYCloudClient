@@ -364,11 +364,13 @@ class _ConnectionCard extends StatelessWidget {
                           Icons.notifications_outlined,
                           size: 20,
                         ),
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 32,
-                        ),
+                        visualDensity: AppTheme.iconActionDensity,
+                        constraints: AppTheme.touchDevice
+                            ? AppTheme.iconActionBox()
+                            : const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 32,
+                              ),
                         padding: EdgeInsets.zero,
                       ),
                     ),

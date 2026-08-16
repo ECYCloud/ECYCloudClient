@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme.dart';
 import 'option_dropdown.dart';
 import 'search_field.dart';
 import '../../l10n/l10n.dart';
@@ -8,7 +9,7 @@ import '../../l10n/l10n.dart';
 /// 列表页搜索 + 每页条数 + 翻页 / 跳页。
 ///
 /// 每页条数复用 [OptionDropdown]，搜索复用 [SearchField]；
-/// 控件高度统一为 [_rowHeight]，翻页键尺寸对齐刷新按钮（24×24）。
+/// 控件高度统一为 [rowHeight]，翻页键与刷新按钮同一套触摸尺寸。
 class ListToolbar extends StatefulWidget {
   const ListToolbar({
     super.key,
@@ -34,7 +35,8 @@ class ListToolbar extends StatefulWidget {
   final bool showSearch;
 
   static const List<int> pageSizes = <int>[10, 25, 50, 100];
-  static const double _rowHeight = 30;
+  static double get rowHeight =>
+      AppTheme.touchDevice ? kMinInteractiveDimension : 30;
   static const double _gap = 8;
 
   @override
@@ -76,7 +78,7 @@ class _ListToolbarState extends State<ListToolbar> {
     final Widget perPageDropdown = OptionDropdown<int>(
       value: perPage,
       width: 120,
-      height: ListToolbar._rowHeight,
+      height: ListToolbar.rowHeight,
       options: <int, String>{
         for (final int size in ListToolbar.pageSizes) size: L10n.t('每页 {0} 项', <Object>[size]),
       },
@@ -93,8 +95,8 @@ class _ListToolbarState extends State<ListToolbar> {
           : null,
       icon: const Icon(Icons.chevron_left, size: 20),
       padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      visualDensity: AppTheme.iconActionDensity,
+      constraints: AppTheme.iconActionBox(compact: 24),
     );
     final Widget nextButton = IconButton(
       tooltip: L10n.t('下一页'),
@@ -103,12 +105,12 @@ class _ListToolbarState extends State<ListToolbar> {
           : null,
       icon: const Icon(Icons.chevron_right, size: 20),
       padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      visualDensity: AppTheme.iconActionDensity,
+      constraints: AppTheme.iconActionBox(compact: 24),
     );
     final Widget jumpField = SizedBox(
       width: 64,
-      height: ListToolbar._rowHeight,
+      height: ListToolbar.rowHeight,
       child: TextField(
         controller: _jump,
         keyboardType: TextInputType.number,
@@ -121,15 +123,15 @@ class _ListToolbarState extends State<ListToolbar> {
         decoration: InputDecoration(
           hintText: L10n.t('页码'),
           // 与 SearchField 相同：用 30 高 icon 槽把输入行撑满，文字垂直居中
-          prefixIcon: SizedBox(height: ListToolbar._rowHeight),
+          prefixIcon: SizedBox(height: ListToolbar.rowHeight),
           prefixIconConstraints: BoxConstraints.tightFor(
             width: 10,
-            height: ListToolbar._rowHeight,
+            height: ListToolbar.rowHeight,
           ),
-          suffixIcon: SizedBox(height: ListToolbar._rowHeight),
+          suffixIcon: SizedBox(height: ListToolbar.rowHeight),
           suffixIconConstraints: BoxConstraints.tightFor(
             width: 10,
-            height: ListToolbar._rowHeight,
+            height: ListToolbar.rowHeight,
           ),
           contentPadding: EdgeInsets.zero,
         ),
@@ -196,7 +198,7 @@ class _ListToolbarState extends State<ListToolbar> {
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(
-                height: ListToolbar._rowHeight,
+                height: ListToolbar.rowHeight,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[

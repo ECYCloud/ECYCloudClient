@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 /// 刷新是个瞬时动作，没有动画时用户分不清点没点上；
 /// 至少转满一圈再停，避免请求过快时只闪一下。
 /// [label] 为空时渲染成纯图标按钮，否则渲染成带文字的按钮；
@@ -91,8 +93,8 @@ class _RefreshButtonState extends State<RefreshButton>
       tooltip: widget.tooltip,
       icon: icon,
       padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      visualDensity: AppTheme.iconActionDensity,
+      constraints: AppTheme.iconActionBox(),
       onPressed: onPressed,
     );
 
@@ -105,9 +107,9 @@ class _RefreshButtonState extends State<RefreshButton>
       final Widget trailing = IconButton(
         tooltip: widget.tooltip,
         icon: icon,
-        padding: const EdgeInsets.only(left: 12),
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        padding: AppTheme.iconActionFlushRightPadding,
+        visualDensity: AppTheme.iconActionDensity,
+        constraints: AppTheme.iconActionBox(),
         onPressed: onPressed,
       );
       return ListTile(

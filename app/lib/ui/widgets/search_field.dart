@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
+import '../theme.dart';
 
 /// 列表页通用搜索框。受控用法：由调用方持有关键词，本组件只负责输入与清除。
 class SearchField extends StatefulWidget {
@@ -37,9 +38,12 @@ class _SearchFieldState extends State<SearchField> {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
+    final double fieldHeight = AppTheme.touchDevice
+        ? kMinInteractiveDimension
+        : 30;
     return SizedBox(
       width: widget.width,
-      height: 30,
+      height: fieldHeight,
       child: TextField(
         controller: _controller,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
@@ -50,9 +54,9 @@ class _SearchFieldState extends State<SearchField> {
         decoration: InputDecoration(
           hintText: widget.hintText ?? L10n.t('搜索'),
           prefixIcon: Icon(Icons.search, size: 15, color: scheme.outline),
-          prefixIconConstraints: const BoxConstraints.tightFor(
-            width: 30,
-            height: 30,
+          prefixIconConstraints: BoxConstraints.tightFor(
+            width: fieldHeight,
+            height: fieldHeight,
           ),
           suffixIcon: _controller.text.isEmpty
               ? null
@@ -60,15 +64,12 @@ class _SearchFieldState extends State<SearchField> {
                   icon: const Icon(Icons.close, size: 14),
                   onPressed: _clear,
                   padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 26,
-                    height: 26,
-                  ),
+                  visualDensity: AppTheme.iconActionDensity,
+                  constraints: AppTheme.iconActionBox(compact: 26),
                 ),
-          suffixIconConstraints: const BoxConstraints.tightFor(
-            width: 30,
-            height: 30,
+          suffixIconConstraints: BoxConstraints.tightFor(
+            width: fieldHeight,
+            height: fieldHeight,
           ),
           contentPadding: const EdgeInsets.symmetric(vertical: 6),
         ),

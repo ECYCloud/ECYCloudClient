@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class AppTheme {
@@ -13,13 +14,39 @@ class AppTheme {
   // 全局按钮圆角：胶囊形
   static const OutlinedBorder pillShape = StadiumBorder();
 
+  // 手指接触面中心比瞄准点偏下。可点高度低于 [kMinInteractiveDimension]
+  // 时，点在按钮下半截会落到控件外面，表现为「必须偏上才触发」。
+  static bool get touchDevice {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static const double iconActionIconSize = 20;
+  static double get iconActionExtent =>
+      touchDevice ? kMinInteractiveDimension : 32;
+  static VisualDensity get iconActionDensity =>
+      touchDevice ? VisualDensity.standard : VisualDensity.compact;
+  static BoxConstraints iconActionBox({double compact = 32}) {
+    final double side = touchDevice ? kMinInteractiveDimension : compact;
+    return BoxConstraints.tightFor(width: side, height: side);
+  }
+
+  static EdgeInsets get iconActionFlushRightPadding =>
+      EdgeInsets.only(left: iconActionExtent - iconActionIconSize);
+
   static ButtonStyle inlineTextLink(ColorScheme scheme, {Color? color}) {
     final Color foreground = color ?? scheme.primary;
     return TextButton.styleFrom(
       padding: EdgeInsets.zero,
-      minimumSize: Size.zero,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.compact,
+      minimumSize: Size(0, iconActionExtent),
+      tapTargetSize: touchDevice
+          ? MaterialTapTargetSize.padded
+          : MaterialTapTargetSize.shrinkWrap,
       foregroundColor: foreground,
       textStyle: _componentText(13).copyWith(
         decoration: TextDecoration.underline,
@@ -39,8 +66,9 @@ class AppTheme {
   // 雅黑 UI 只在 Windows 上存在。Android / 鸿蒙 / WSA / macOS / Linux 强制指定
   // 会走到残缺回退链，中文易糊、缺字或度量错乱，宽屏切换时更像「看不清」。
   static final bool _windowsUiFont = Platform.isWindows;
-  static final String? _fontFamily =
-      _windowsUiFont ? 'Microsoft YaHei UI' : null;
+  static final String? _fontFamily = _windowsUiFont
+      ? 'Microsoft YaHei UI'
+      : null;
   static final List<String> _fontFamilyFallback = _windowsUiFont
       ? const <String>['Microsoft YaHei', 'Segoe UI']
       : const <String>[];
@@ -64,13 +92,20 @@ class AppTheme {
     color: color,
   );
 
-  // ColorScheme.fromSeed 开销不低，而 MaterialApp 会随设置变更反复重建
-  static final ThemeData _light = _build(Brightness.light);
-  static final ThemeData _dark = _build(Brightness.dark);
+  // ColorScheme.fromSeed 开销不低，而 MaterialApp 会随设置变更反复重建。
+  // 触摸 / 指针两套分开缓存：同一进程里平台不会变，测试里可以切。
+  static ThemeData? _light;
+  static ThemeData? _dark;
+  static ThemeData? _lightTouch;
+  static ThemeData? _darkTouch;
 
-  static ThemeData light() => _light;
+  static ThemeData light() => touchDevice
+      ? (_lightTouch ??= _build(Brightness.light, touch: true))
+      : (_light ??= _build(Brightness.light, touch: false));
 
-  static ThemeData dark() => _dark;
+  static ThemeData dark() => touchDevice
+      ? (_darkTouch ??= _build(Brightness.dark, touch: true))
+      : (_dark ??= _build(Brightness.dark, touch: false));
 
   // Material 的字阶按移动端触摸场景设定，桌面上普遍大一到两号。
   // 这里显式给全字阶定尺寸，不用 TextTheme.apply(fontSizeDelta:)：
@@ -110,11 +145,18 @@ class AppTheme {
     );
   }
 
-  static ThemeData _build(Brightness brightness) {
+  static ThemeData _build(Brightness brightness, {required bool touch}) {
     final ColorScheme scheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: brightness,
     );
+    final Size touchMin = const Size(64, kMinInteractiveDimension);
+    final ButtonStyle? touchTap = touch
+        ? ButtonStyle(
+            minimumSize: WidgetStatePropertyAll<Size>(touchMin),
+            tapTargetSize: MaterialTapTargetSize.padded,
+          )
+        : null;
 
     return ThemeData(
       colorScheme: scheme,
@@ -122,10 +164,13 @@ class AppTheme {
       fontFamily: _fontFamily,
       fontFamilyFallback: _fontFamilyFallback,
       textTheme: _textTheme(scheme),
-      // 桌面端收紧留白；Android / iOS 保持默认触摸密度，避免平板上更挤更难辨认
-      visualDensity: Platform.isAndroid || Platform.isIOS
+      // 桌面端收紧留白；触摸设备保持默认密度，并把可点高度钉在 48
+      visualDensity: touch
           ? VisualDensity.standard
           : const VisualDensity(horizontal: -2, vertical: -2),
+      materialTapTargetSize: touch
+          ? MaterialTapTargetSize.padded
+          : MaterialTapTargetSize.shrinkWrap,
       // 底色比卡片更沉一档：卡片靠明度差浮出来，不靠描边和投影
       scaffoldBackgroundColor: brightness == Brightness.dark
           ? scheme.surfaceContainerLowest
@@ -182,28 +227,28 @@ class AppTheme {
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
           textStyle: _componentText(13, weight: FontWeight.w600),
-        ),
+        ).merge(touchTap),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
           textStyle: _componentText(13, weight: FontWeight.w600),
-        ),
+        ).merge(touchTap),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           textStyle: _componentText(13, weight: FontWeight.w600),
-        ),
+        ).merge(touchTap),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
           textStyle: _componentText(13, weight: FontWeight.w600),
-        ),
+        ).merge(touchTap),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: SegmentedButton.styleFrom(
@@ -212,10 +257,19 @@ class AppTheme {
           textStyle: _componentText(12, weight: FontWeight.w600),
           selectedBackgroundColor: scheme.primary,
           selectedForegroundColor: scheme.onPrimary,
-        ),
+        ).merge(touchTap),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(iconSize: 20, shape: pillShape),
+        style: IconButton.styleFrom(
+          iconSize: 20,
+          shape: pillShape,
+          minimumSize: touch
+              ? const Size(kMinInteractiveDimension, kMinInteractiveDimension)
+              : null,
+          tapTargetSize: touch
+              ? MaterialTapTargetSize.padded
+              : MaterialTapTargetSize.shrinkWrap,
+        ),
       ),
       listTileTheme: const ListTileThemeData(
         minVerticalPadding: 6,

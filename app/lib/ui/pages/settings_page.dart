@@ -286,12 +286,9 @@ class SettingsPage extends StatelessWidget {
                                     Icons.folder_open_outlined,
                                     size: 20,
                                   ),
-                                  padding: const EdgeInsets.only(left: 12),
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 32,
-                                    height: 32,
-                                  ),
+                                  padding: AppTheme.iconActionFlushRightPadding,
+                                  visualDensity: AppTheme.iconActionDensity,
+                                  constraints: AppTheme.iconActionBox(),
                                   onPressed: () => unawaited(
                                     AppScope.of(
                                       context,
