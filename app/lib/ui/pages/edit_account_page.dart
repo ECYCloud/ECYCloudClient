@@ -284,7 +284,6 @@ class _EditAccountPageState extends State<EditAccountPage> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
-        final ColorScheme scheme = Theme.of(context).colorScheme;
         return AlertDialog(
           title: Text(L10n.t('您确定要解除Telegram绑定吗？')),
           content: Column(
@@ -327,13 +326,12 @@ class _EditAccountPageState extends State<EditAccountPage> {
           ),
           actions: <Widget>[
             TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: TextButton.styleFrom(foregroundColor: scheme.onSurface),
-              child: Text(L10n.t('确定')),
-            ),
-            TextButton(
               onPressed: () => Navigator.of(context).pop(false),
               child: Text(L10n.t('取消')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(L10n.t('确定')),
             ),
           ],
         );
@@ -1087,22 +1085,11 @@ class _TelegramLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () => unawaited(AppScope.of(context).platform.openUrl(url)),
-        child: Tooltip(
-          message: url,
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: scheme.primary,
-              decoration: TextDecoration.underline,
-              decorationColor: scheme.primary,
-            ),
-          ),
-        ),
+    return Tooltip(
+      message: url,
+      child: TextButton(
+        onPressed: () => unawaited(AppScope.of(context).platform.openUrl(url)),
+        child: Text(label),
       ),
     );
   }

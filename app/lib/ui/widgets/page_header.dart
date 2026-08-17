@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
 import 'user_avatar.dart';
 
 /// 与侧栏连接状态图标垂直居中对齐。
@@ -34,8 +35,9 @@ class PageHeader extends StatelessWidget {
 
   // 与账户页 ListTile leading / RefreshButton 默认尺寸一致。
   static const double _actionIconSize = 20;
-  static const double _actionButtonSize = 32;
-  static const double _actionIconInset =
+
+  static double get _actionButtonSize => AppTheme.minTapTarget;
+  static double get _actionIconInset =>
       (_actionButtonSize - _actionIconSize) / 2;
 
   @override
@@ -55,8 +57,8 @@ class PageHeader extends StatelessWidget {
                   icon: const BackButtonIcon(),
                   iconSize: _actionIconSize,
                   padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
+                  visualDensity: VisualDensity.standard,
+                  constraints: BoxConstraints.tightFor(
                     width: _actionButtonSize,
                     height: _actionButtonSize,
                   ),

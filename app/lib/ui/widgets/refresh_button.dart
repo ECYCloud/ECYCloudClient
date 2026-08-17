@@ -93,8 +93,11 @@ class _RefreshButtonState extends State<RefreshButton>
       tooltip: widget.tooltip,
       icon: icon,
       padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      visualDensity: VisualDensity.standard,
+      constraints: BoxConstraints.tightFor(
+        width: AppTheme.minTapTarget,
+        height: AppTheme.minTapTarget,
+      ),
       onPressed: onPressed,
     );
 

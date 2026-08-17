@@ -39,15 +39,20 @@ void main() {
                   padding: EdgeInsets.fromLTRB(
                     16,
                     0,
-                    AppTheme.trailingIconButtonInset(16),
+                    AppTheme.trailingIconButtonInset(24),
                     8,
                   ),
                   child: Row(
                     children: <Widget>[
                       const Expanded(child: Text('储存路径')),
                       IconButton(
-                        icon: const Icon(Icons.folder_open_outlined, size: 16),
-                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.folder_open_outlined, size: 24),
+                        visualDensity: VisualDensity.standard,
+                        constraints: BoxConstraints.tightFor(
+                          width: AppTheme.minTapTarget,
+                          height: AppTheme.minTapTarget,
+                        ),
+                        padding: EdgeInsets.zero,
                         onPressed: () {},
                       ),
                     ],
@@ -86,12 +91,27 @@ void main() {
       reason: '日志目录',
     );
 
-    // 图标缩到 16 也不能让可点范围跟着缩：对齐是靠挪内边距，不是靠削触摸盒
+    // 同一列的尾部图标必须一样大，否则小的那个看着就是没对齐
+    final Size iconSize = tester.getSize(find.byIcon(Icons.chevron_right));
+    expect(
+      tester.getSize(find.byIcon(Icons.refresh)),
+      iconSize,
+      reason: '刷新图标',
+    );
+    expect(
+      tester.getSize(find.byIcon(Icons.folder_open_outlined)),
+      iconSize,
+      reason: '日志目录图标',
+    );
+
+    // 图标尺寸不等于可点范围：对齐是靠挪内边距，不是靠削触摸盒。
+    // 必须断言「恰好等于 minTapTarget」——只查下限会漏掉 visualDensity 把紧约束
+    // 退化成松约束的情况（盒子变小，图标随之偏出右列，见 AppTheme.minTapTarget）
     final Finder buttons = find.byType(IconButton);
     for (int i = 0; i < buttons.evaluate().length; i++) {
       final Size box = tester.getSize(buttons.at(i));
-      expect(box.width, greaterThanOrEqualTo(40), reason: '图标按钮 $i 可点宽度');
-      expect(box.height, greaterThanOrEqualTo(40), reason: '图标按钮 $i 可点高度');
+      expect(box.width, AppTheme.minTapTarget, reason: '图标按钮 $i 可点宽度');
+      expect(box.height, AppTheme.minTapTarget, reason: '图标按钮 $i 可点高度');
     }
   });
 

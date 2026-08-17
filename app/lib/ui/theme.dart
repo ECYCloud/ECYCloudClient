@@ -1,5 +1,7 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 
 class AppTheme {
@@ -13,26 +15,41 @@ class AppTheme {
   // 全局按钮圆角：胶囊形
   static const OutlinedBorder pillShape = StadiumBorder();
 
-  static ButtonStyle inlineTextLink(ColorScheme scheme) => TextButton.styleFrom(
-        padding: EdgeInsets.zero,
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
-        foregroundColor: scheme.primary,
-        textStyle: _componentText(13).copyWith(
-          decoration: TextDecoration.underline,
-          decorationColor: scheme.primary,
-        ),
-      );
+  // 触控平台（Android/iOS）手指需要 48dp 触控目标，桌面用鼠标 32 即可。
+  // 只放大触控盒，图标与文字的视觉尺寸不变。
+  static bool get isTouch =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.fuchsia;
+
+  // 小图标键与头像的可点盒子。配 BoxConstraints.tightFor 用时 visualDensity
+  // 必须显式给 standard：VisualDensity 只把约束的 min 减 8、max 不动，本主题的
+  // 全局 compact 会让紧约束退化成松约束，盒子按内容缩小并脱离右侧那一列。
+  static double get minTapTarget => isTouch ? 48 : 32;
+
+  // 描边按钮用 tonal 实体（配色同 FilledButton.tonal）。
+  static ButtonStyle _tonalPill(ColorScheme scheme) => FilledButton.styleFrom(
+    backgroundColor: scheme.secondaryContainer,
+    foregroundColor: scheme.onSecondaryContainer,
+    // 这份样式整体盖掉控件默认值，禁用态的底色与字色必须一起给，
+    // 少给底色禁用时就退回透明底，只剩一行灰字
+    disabledBackgroundColor: scheme.onSurface.withValues(alpha: 0.12),
+    disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
+    // OutlinedButton 默认自带描边，不显式抹掉界面上就有两种次要按钮外观
+    side: BorderSide.none,
+    shape: pillShape,
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+    textStyle: _componentText(13, weight: FontWeight.w600),
+  );
 
   // 卡片与卡片内小块的圆角，成套用才不会看起来东拼西凑
   static const double cardRadius = 12;
   static const double tileRadius = 9;
 
-  // 24 是 ListTile 的 trailing 内边距，40 是本主题密度下的触摸盒：图标被触摸盒
-  // 居中后会内缩，行的右内边距减掉这段，才与同列的 chevron、开关落在一条边上
+  // 24 是 ListTile 的 trailing 内边距；图标被触摸盒（minTapTarget）居中后会内缩，
+  // 行的右内边距减掉这段，才与同列的 chevron、开关落在一条边上
   static double trailingIconButtonInset(double iconSize) =>
-      24 - (40 - iconSize) / 2;
+      24 - (minTapTarget - iconSize) / 2;
 
   // Switch 的轨道尺寸由 Material 写死（M3 为 52×32），主题里改不动，
   // 只能整体缩放；桌面端按 0.8 收到约 42×26
@@ -184,18 +201,27 @@ class AppTheme {
           textStyle: _componentText(13, weight: FontWeight.w600),
         ),
       ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          shape: pillShape,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-          textStyle: _componentText(13, weight: FontWeight.w600),
+      outlinedButtonTheme: OutlinedButtonThemeData(style: _tonalPill(scheme)),
+      textButtonTheme: TextButtonThemeData(
+        style: _tonalPill(scheme).copyWith(
+          backgroundColor: const WidgetStatePropertyAll<Color>(
+            Colors.transparent,
+          ),
+          side: WidgetStateProperty<BorderSide>.fromMap(
+            <WidgetStatesConstraint, BorderSide>{
+              WidgetState.disabled: BorderSide(
+                color: scheme.onSurface.withValues(alpha: 0.12),
+              ),
+              WidgetState.any: BorderSide(color: scheme.outline),
+            },
+          ),
         ),
       ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          shape: pillShape,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          textStyle: _componentText(13, weight: FontWeight.w600),
+      // MenuItemButton 内部是 TextButton，会再套一层 textButtonTheme。
+      // 文字按钮的描边不挡掉，就会画进每一项，两项交界叠成分隔线。
+      menuButtonTheme: const MenuButtonThemeData(
+        style: ButtonStyle(
+          side: WidgetStatePropertyAll<BorderSide>(BorderSide.none),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(

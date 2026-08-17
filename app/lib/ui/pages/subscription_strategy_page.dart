@@ -642,20 +642,13 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             Row(
                               children: <Widget>[
                                 TextButton(
-                                  style: AppTheme.inlineTextLink(
-                                    theme.colorScheme,
-                                  ),
                                   onPressed: _busy
                                       ? null
                                       : () =>
                                           _commitCustomGroup(replaceAt: i),
                                   child: Text(L10n.t('保存')),
                                 ),
-                                const SizedBox(width: 10),
                                 TextButton(
-                                  style: AppTheme.inlineTextLink(
-                                    theme.colorScheme,
-                                  ),
                                   onPressed: _busy
                                       ? null
                                       : () => setState(_clearGroupForm),
@@ -688,19 +681,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             TextButton(
-                              style: AppTheme.inlineTextLink(
-                                theme.colorScheme,
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _beginEditGroup(i),
                               child: Text(L10n.t('编辑')),
                             ),
-                            const SizedBox(width: 10),
                             TextButton(
-                              style: AppTheme.inlineTextLink(
-                                theme.colorScheme,
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => unawaited(_removeCustomGroup(i)),
@@ -933,20 +919,13 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             Row(
                               children: <Widget>[
                                 TextButton(
-                                  style: AppTheme.inlineTextLink(
-                                    theme.colorScheme,
-                                  ),
                                   onPressed: _busy
                                       ? null
                                       : () =>
                                           _commitRuleProvider(replaceAt: i),
                                   child: Text(L10n.t('保存')),
                                 ),
-                                const SizedBox(width: 10),
                                 TextButton(
-                                  style: AppTheme.inlineTextLink(
-                                    theme.colorScheme,
-                                  ),
                                   onPressed: _busy
                                       ? null
                                       : () => setState(_clearProviderForm),
@@ -966,19 +945,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             TextButton(
-                              style: AppTheme.inlineTextLink(
-                                theme.colorScheme,
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _beginEditProvider(i),
                               child: Text(L10n.t('编辑')),
                             ),
-                            const SizedBox(width: 10),
                             TextButton(
-                              style: AppTheme.inlineTextLink(
-                                theme.colorScheme,
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _removeRuleProvider(i),

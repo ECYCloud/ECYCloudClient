@@ -463,7 +463,6 @@ class _ShopPageState extends State<ShopPage> {
           icon: Icons.account_balance_wallet_outlined,
           title: L10n.t('账户余额'),
           action: TextButton(
-            style: AppTheme.inlineTextLink(theme.colorScheme),
             onPressed: () => unawaited(_openRecharge()),
             child: Text(L10n.t('余额充值')),
           ),
@@ -496,7 +495,6 @@ class _ShopPageState extends State<ShopPage> {
                   children: <Widget>[
                     Text(L10n.t('接独享节点定制，请 '), style: noticeStyle),
                     TextButton(
-                      style: AppTheme.inlineTextLink(theme.colorScheme),
                       onPressed: () => ShellNavigator.go(
                         context,
                         ShellNavigator.ticketsTab,
@@ -533,7 +531,6 @@ class _ShopPageState extends State<ShopPage> {
                   children: <Widget>[
                     Text(L10n.t('自动续费可在 '), style: noticeStyle),
                     TextButton(
-                      style: AppTheme.inlineTextLink(theme.colorScheme),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (BuildContext context) =>

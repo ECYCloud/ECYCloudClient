@@ -245,7 +245,7 @@ class SettingsPage extends StatelessWidget {
                             title: Text(L10n.t('日志落盘级别')),
                             subtitle: Text(
                               L10n.t(
-                                '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入',
+                                '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入，选 silent 则不写日志文件',
                               ),
                             ),
                             trailing: OptionDropdown<LogLevel>(
@@ -261,12 +261,13 @@ class SettingsPage extends StatelessWidget {
                             ),
                           ),
                           Padding(
-                            // 左 16 与各行标题同列；右侧的 16 是下方「打开目录」的
-                            // 图标大小，两处必须一致，否则这个图标会脱离右侧那一列
+                            // 左 16 与各行标题同列；右侧的 24 是下方「打开目录」的图标
+                            // 大小，与同卡片其它行的尾部图标一致，两处不一致这个图标
+                            // 就会脱离右侧那一列
                             padding: EdgeInsets.fromLTRB(
                               16,
                               0,
-                              AppTheme.trailingIconButtonInset(16),
+                              AppTheme.trailingIconButtonInset(24),
                               8,
                             ),
                             child: Row(
@@ -291,9 +292,14 @@ class SettingsPage extends StatelessWidget {
                                   tooltip: L10n.t('打开目录'),
                                   icon: const Icon(
                                     Icons.folder_open_outlined,
-                                    size: 16,
+                                    size: 24,
                                   ),
-                                  visualDensity: VisualDensity.compact,
+                                  visualDensity: VisualDensity.standard,
+                                  constraints: BoxConstraints.tightFor(
+                                    width: AppTheme.minTapTarget,
+                                    height: AppTheme.minTapTarget,
+                                  ),
+                                  padding: EdgeInsets.zero,
                                   onPressed: () => unawaited(
                                     AppScope.of(
                                       context,

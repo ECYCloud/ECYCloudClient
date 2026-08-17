@@ -193,7 +193,10 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     return Scaffold(
       body: Column(
         children: <Widget>[
-          PageHeader(title: L10n.t('删除账号'), showBackButton: true),
+          SafeArea(
+            bottom: false,
+            child: PageHeader(title: L10n.t('删除账号'), showBackButton: true),
+          ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())

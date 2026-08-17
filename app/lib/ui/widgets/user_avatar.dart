@@ -236,7 +236,13 @@ class UserAvatarButton extends StatelessWidget {
                         );
                       }
                     },
-                    child: avatar,
+                    child: AppTheme.isTouch
+                        ? SizedBox(
+                            width: AppTheme.minTapTarget,
+                            height: AppTheme.minTapTarget,
+                            child: Center(child: avatar),
+                          )
+                        : avatar,
                   ),
                 );
               },

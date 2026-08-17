@@ -8,7 +8,6 @@ import '../../data/models/account.dart';
 import '../app_scope.dart';
 import '../format.dart';
 import '../shell_navigator.dart';
-import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
@@ -214,7 +213,6 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
     final TrafficLogBundle? bundle = _bundle;
     final List<String> days =
         bundle == null ? const <String>[] : _allDays(bundle);
@@ -274,7 +272,6 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                   TextButton(
-                                    style: AppTheme.inlineTextLink(scheme),
                                     onPressed: _showTrafficInfo,
                                     child: Text(L10n.t('查看说明')),
                                   ),
@@ -288,7 +285,6 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                   TextButton(
-                                    style: AppTheme.inlineTextLink(scheme),
                                     onPressed: () {
                                       Navigator.of(context).popUntil(
                                         (Route<dynamic> route) => route.isFirst,

@@ -429,28 +429,16 @@ class _RegisterPageState extends State<RegisterPage> {
                                           child: Text(L10n.t('注册即代表同意本站')),
                                         ),
                                       ),
-                                      MouseRegion(
-                                        cursor: SystemMouseCursors.click,
-                                        child: GestureDetector(
-                                          onTap: () =>
-                                              Navigator.of(context).push(
-                                                MaterialPageRoute<void>(
-                                                  builder:
-                                                      (BuildContext context) =>
-                                                          const TosPage(),
-                                                ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute<void>(
+                                                builder:
+                                                    (BuildContext context) =>
+                                                        const TosPage(),
                                               ),
-                                          child: Text(
-                                            L10n.t('服务条款'),
-                                            style: theme.textTheme.bodyMedium
-                                                ?.copyWith(
-                                                  color:
-                                                      theme.colorScheme.primary,
-                                                  decoration:
-                                                      TextDecoration.underline,
-                                                ),
-                                          ),
-                                        ),
+                                            ),
+                                        child: Text(L10n.t('服务条款')),
                                       ),
                                     ],
                                   ),

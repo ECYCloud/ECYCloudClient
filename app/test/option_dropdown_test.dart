@@ -49,6 +49,23 @@ void main() {
       expect(tester.getRect(find.text(label)).top, greaterThan(anchor.bottom));
     }
 
+    expect(find.byType(MenuItemButton), findsNWidgets(3));
+    for (int i = 0; i < 3; i++) {
+      final Material material = tester.widget<Material>(
+        find
+            .descendant(
+              of: find.byType(MenuItemButton).at(i),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      expect(
+        (material.shape! as OutlinedBorder).side.style,
+        BorderStyle.none,
+        reason: '菜单项 $i 描边',
+      );
+    }
+
     await tester.tap(find.text('深色'));
     await tester.pumpAndSettle();
 

@@ -59,8 +59,8 @@ const Map<String, String> _zhTW = <String, String>{
   '启动后自动连接': '啟動後自動連線',
   '关闭窗口时最小化到托盘': '關閉視窗時最小化到系統匣',
   '日志落盘级别': '日誌寫入磁碟層級',
-  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入':
-      '日誌頁始終顯示核心全部日誌；此項決定寫進日誌檔的門檻，調低會顯著增加磁碟寫入',
+  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入，选 silent 则不写日志文件':
+      '日誌頁始終顯示核心全部日誌；此項決定寫進日誌檔的門檻，調低會顯著增加磁碟寫入，選 silent 則不寫日誌檔',
   '查看运行配置': '檢視執行設定',
   '只读查看内核落盘的 config.json': '唯讀檢視核心落地的 config.json',
   '运行配置': '執行設定',
@@ -365,7 +365,6 @@ const Map<String, String> _zhTW = <String, String>{
   '剩余流量': '剩餘流量',
   '账户总流量': '帳戶總流量',
   '流量不够用？前往 ': '流量不夠用？前往 ',
-  '商店 ›': '商店 ›',
   ' 选购流量包': ' 選購流量包',
   '下次重置已使用流量日期': '下次重置已使用流量日期',
   '上次使用时间': '上次使用時間',
@@ -790,8 +789,8 @@ const Map<String, String> _en = <String, String>{
   '启动后自动连接': 'Connect on launch',
   '关闭窗口时最小化到托盘': 'Minimize to tray on close',
   '日志落盘级别': 'Log file level',
-  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入':
-      'The Logs page always shows all kernel logs. This only sets the file-write threshold; lowering it increases disk writes.',
+  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入，选 silent 则不写日志文件':
+      'The Logs page always shows all kernel logs. This only sets the file-write threshold: lowering it increases disk writes, and silent writes no log file.',
   '查看运行配置': 'View runtime config',
   '只读查看内核落盘的 config.json': 'Read-only view of the kernel config.json',
   '运行配置': 'Runtime config',
@@ -1100,7 +1099,6 @@ const Map<String, String> _en = <String, String>{
   '剩余流量': 'Remaining',
   '账户总流量': 'Total allowance',
   '流量不够用？前往 ': 'Need more traffic? Go to ',
-  '商店 ›': 'Shop ›',
   ' 选购流量包': ' for a traffic pack',
   '下次重置已使用流量日期': 'Next usage reset',
   '上次使用时间': 'Last used',

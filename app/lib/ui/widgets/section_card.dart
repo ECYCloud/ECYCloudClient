@@ -30,8 +30,9 @@ class SectionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             if (title != null) ...<Widget>[
-              SizedBox(
-                height: 22,
+              // 只保底高度：右侧动作是按钮时比标题文字高，写死高度会把按钮压扁
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 22),
                 child: Row(
                   children: <Widget>[
                     if (icon != null) ...<Widget>[

@@ -641,7 +641,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
               ),
               TextButton(
                 onPressed: () => ShellNavigator.openShopTraffic(context),
-                child: Text(L10n.t('商店 ›')),
+                child: Text(L10n.t('商店')),
               ),
               Text(
                 L10n.t(' 选购流量包'),

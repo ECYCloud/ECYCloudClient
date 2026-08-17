@@ -6,7 +6,6 @@ import '../../data/api/api_exception.dart';
 import '../../data/models/account.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
-import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'tickets_page.dart';
@@ -89,7 +88,13 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
         return Scaffold(
           body: Column(
             children: <Widget>[
-              PageHeader(title: L10n.t('账户状态'), showBackButton: false),
+              SafeArea(
+                bottom: false,
+                child: PageHeader(
+                  title: L10n.t('账户状态'),
+                  showBackButton: false,
+                ),
+              ),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.all(14),
@@ -236,7 +241,6 @@ class _BannedCard extends StatelessWidget {
                   style: theme.textTheme.bodySmall,
                 ),
                 TextButton(
-                  style: AppTheme.inlineTextLink(theme.colorScheme),
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -254,27 +258,26 @@ class _BannedCard extends StatelessWidget {
               ],
             )
           else if (status.supportEmail.isNotEmpty)
-            InkWell(
-              onTap: () => unawaited(
-                AppScope.of(context).platform.openUrl(
-                  'mailto:${status.supportEmail}',
-                ),
-              ),
-              child: Text.rich(
-                TextSpan(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                Text(
+                  L10n.t('如果我们错误地禁用了您的账户，请通过邮箱：'),
                   style: theme.textTheme.bodySmall,
-                  children: <InlineSpan>[
-                    TextSpan(text: L10n.t('如果我们错误地禁用了您的账户，请通过邮箱：')),
-                    TextSpan(
-                      text: status.supportEmail,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    TextSpan(text: L10n.t(' 与我们联系。')),
-                  ],
                 ),
-              ),
+                TextButton(
+                  onPressed: () => unawaited(
+                    AppScope.of(context).platform.openUrl(
+                      'mailto:${status.supportEmail}',
+                    ),
+                  ),
+                  child: Text(status.supportEmail),
+                ),
+                Text(
+                  L10n.t(' 与我们联系。'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
         ],
       ),
