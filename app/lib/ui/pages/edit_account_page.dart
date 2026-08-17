@@ -793,7 +793,6 @@ class _EditAccountPageState extends State<EditAccountPage> {
                     icon: Icons.phonelink_lock_outlined,
                     title: L10n.t('两步验证'),
                     action: TextButton(
-                      style: AppTheme.inlineTextLink(theme.colorScheme),
                       onPressed: _busy ? null : () => unawaited(_resetGa()),
                       child: Text(L10n.t('重置密钥')),
                     ),

@@ -146,8 +146,7 @@ class UserAvatarButton extends StatelessWidget {
   static const double edge = 14;
 
   static const double _menuWidth = 116;
-  static double get _itemHeight =>
-      AppTheme.touchDevice ? kMinInteractiveDimension : 30;
+  static const double _itemHeight = 30;
 
   final double radius;
   final double leadingGap;
@@ -223,25 +222,21 @@ class UserAvatarButton extends StatelessWidget {
               (BuildContext context, MenuController controller, Widget? child) {
                 return Tooltip(
                   message: L10n.t('账户信息'),
-                  child: SizedBox(
-                    width: AppTheme.iconActionExtent,
-                    height: AppTheme.iconActionExtent,
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () {
-                        if (controller.isOpen) {
-                          controller.close();
-                        } else {
-                          controller.open(
-                            position: Offset(
-                              avatarSize - _menuWidth,
-                              avatarSize + 4,
-                            ),
-                          );
-                        }
-                      },
-                      child: Center(child: avatar),
-                    ),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () {
+                      if (controller.isOpen) {
+                        controller.close();
+                      } else {
+                        controller.open(
+                          position: Offset(
+                            avatarSize - _menuWidth,
+                            avatarSize + 4,
+                          ),
+                        );
+                      }
+                    },
+                    child: avatar,
                   ),
                 );
               },
@@ -271,9 +266,9 @@ class UserAvatarButton extends StatelessWidget {
       child: MenuItemButton(
         onPressed: onPressed,
         style: MenuItemButton.styleFrom(
-          minimumSize: Size(_menuWidth, _itemHeight),
-          fixedSize: Size(_menuWidth, _itemHeight),
-          maximumSize: Size(_menuWidth, _itemHeight),
+          minimumSize: const Size(_menuWidth, _itemHeight),
+          fixedSize: const Size(_menuWidth, _itemHeight),
+          maximumSize: const Size(_menuWidth, _itemHeight),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           visualDensity: VisualDensity.standard,

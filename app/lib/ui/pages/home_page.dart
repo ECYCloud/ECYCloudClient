@@ -364,13 +364,11 @@ class _ConnectionCard extends StatelessWidget {
                           Icons.notifications_outlined,
                           size: 20,
                         ),
-                        visualDensity: AppTheme.iconActionDensity,
-                        constraints: AppTheme.touchDevice
-                            ? AppTheme.iconActionBox()
-                            : const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 32,
-                              ),
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 32,
+                        ),
                         padding: EdgeInsets.zero,
                       ),
                     ),
@@ -581,7 +579,6 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
             onRefresh: auth.refreshProfile,
           ),
           TextButton(
-            style: AppTheme.inlineTextLink(theme.colorScheme),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (BuildContext context) => const TrafficLogPage(),
@@ -643,7 +640,6 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
                 ),
               ),
               TextButton(
-                style: AppTheme.inlineTextLink(theme.colorScheme),
                 onPressed: () => ShellNavigator.openShopTraffic(context),
                 child: Text(L10n.t('商店 ›')),
               ),
@@ -985,7 +981,6 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
             onPressed: () => connection.testGroup(group.name),
           ),
           TextButton(
-            style: AppTheme.inlineTextLink(Theme.of(context).colorScheme),
             onPressed: () =>
                 ShellNavigator.go(context, ShellNavigator.nodesTab),
             child: Text(L10n.t('节点 ›')),

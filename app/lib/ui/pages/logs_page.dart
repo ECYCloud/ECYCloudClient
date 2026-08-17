@@ -106,7 +106,7 @@ class _LogsPageState extends State<LogsPage> {
         style: compact
             ? SegmentedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                visualDensity: AppTheme.iconActionDensity,
+                visualDensity: VisualDensity.compact,
                 // 必须从主题派生：给裸 TextStyle 会与默认样式的 inherit 不一致，
                 // 选中动画插值时抛断言
                 textStyle: theme.textTheme.labelLarge?.copyWith(fontSize: 12),
@@ -132,8 +132,7 @@ class _LogsPageState extends State<LogsPage> {
       IconButton(
         tooltip: L10n.t('复制当前列表'),
         icon: const Icon(Icons.copy_all_outlined, size: 16),
-        visualDensity: AppTheme.iconActionDensity,
-        constraints: AppTheme.iconActionBox(),
+        visualDensity: VisualDensity.compact,
         onPressed: () => Clipboard.setData(
           ClipboardData(
             text: visible.map((LogEntry entry) => entry.toString()).join('\n'),

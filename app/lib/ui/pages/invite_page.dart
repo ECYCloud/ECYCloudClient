@@ -7,7 +7,6 @@ import '../../data/api/api_exception.dart';
 import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../app_scope.dart';
-import '../theme.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
@@ -309,9 +308,6 @@ class _InvitePageState extends State<InvitePage> {
                   icon: Icons.link,
                   title: L10n.t('邀请信息'),
                   action: TextButton(
-                    style: AppTheme.inlineTextLink(
-                      Theme.of(context).colorScheme,
-                    ),
                     onPressed: _busy ? null : () => unawaited(_confirmReset()),
                     child: Text(L10n.t('重置链接 / 邀请码')),
                   ),
@@ -364,9 +360,6 @@ class _InvitePageState extends State<InvitePage> {
                   icon: Icons.account_balance_wallet_outlined,
                   title: L10n.t('提现'),
                   action: TextButton(
-                    style: AppTheme.inlineTextLink(
-                      Theme.of(context).colorScheme,
-                    ),
                     onPressed: _applyWithdraw,
                     child: Text(
                       summary.withdrawChannels.isEmpty ? L10n.t('提现到余额') : L10n.t('申请提现'),
