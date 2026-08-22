@@ -15,8 +15,6 @@ import '../l10n/l10n.dart';
 import '../domain/update/github_release.dart';
 import 'connection_controller.dart';
 
-/// 客户端与内核的版本检查。启动后查一次，之后每 24 小时再查；
-/// 首次查询失败时等隧道连上再补一次（GitHub 在部分网络下要走代理才通）。
 class UpdateController extends ChangeNotifier {
   // 命名参数不能写成 this._field，只能在初始化列表里赋值
   // ignore_for_file: prefer_initializing_formals
@@ -83,8 +81,7 @@ class UpdateController extends ChangeNotifier {
 
   bool get appBusy => _appStage != null;
 
-  int? get appPercent =>
-      appBusy && _appPercent > 0 ? _appPercent : null;
+  int? get appPercent => appBusy && _appPercent > 0 ? _appPercent : null;
 
   KernelUpdate? get kernelUpdate => _kernel;
 
@@ -107,7 +104,6 @@ class UpdateController extends ChangeNotifier {
   bool get shouldPromptUpdate =>
       requiresUpdate && _updateKey.isNotEmpty && _updateKey != _dismissedKey;
 
-  /// 已连接且开启系统代理或 TUN，更新流量才能走节点出网。
   bool get updateNetworkReady =>
       _connection.state == ConnectionPhase.connected &&
       (_connection.settings.systemProxyEnabled ||
@@ -127,7 +123,6 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
-  /// 走本地 mixed 入口，与系统代理/TUN 场景下的真实出网路径一致。
   http.Client _httpClient() {
     if (!updateNetworkReady) {
       return http.Client();
@@ -139,18 +134,17 @@ class UpdateController extends ChangeNotifier {
   }
 
   String get _updateKey {
-    final String app =
-        _app?.outdated == true && _app?.installer != null
-            ? 'app${_app!.latest}'
-            : '';
-    final String kernel =
-        kernelUpgradable == null ? '' : 'kernel$kernelUpgradable';
+    final String app = _app?.outdated == true && _app?.installer != null
+        ? 'app${_app!.latest}'
+        : '';
+    final String kernel = kernelUpgradable == null
+        ? ''
+        : 'kernel$kernelUpgradable';
     return '$app$kernel';
   }
 
   void start() {
     _connection.addListener(_onConnectionChanged);
-    // 先把本机内核版本显示出来：联网检查失败时界面上也不该是一片空白
     unawaited(loadKernelVersion().then((_) => checkAll()));
     _timer = Timer.periodic(interval, (_) => unawaited(checkAll()));
   }
@@ -205,9 +199,7 @@ class UpdateController extends ChangeNotifier {
       } else if (update.outdated) {
         _kernelStatus = _connection.kernelUpgradeSupported
             ? L10n.t('发现新版本（{0}）', <Object>[update.latest])
-            : L10n.t('发现新版本（{0}），将随新版客户端提供，无需单独更新', <Object>[
-                update.latest,
-              ]);
+            : L10n.t('发现新版本（{0}），将随新版客户端提供，无需单独更新', <Object>[update.latest]);
       } else {
         _kernelStatus = L10n.t('已是最新（{0}）', <Object>[update.current]);
       }
@@ -221,7 +213,6 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 只读本机内核自报版本，不联网。界面首次挂载时用它先把版本显示出来。
   Future<void> loadKernelVersion() async {
     if (_kernel != null) {
       return;
@@ -295,9 +286,7 @@ class UpdateController extends ChangeNotifier {
       _kernelStatus = next;
       _kernelPercent = percent;
       notifyListeners();
-    } on Object {
-      // 轮询失败不打断升级本身
-    }
+    } on Object catch (_) {}
   }
 
   static String _statusWithPercent(String stage, int percent) =>
@@ -360,8 +349,11 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<File> _download(GithubAsset asset) async {
+    if (!asset.url.startsWith(AppUpdate.downloadPrefix)) {
+      throw GithubReleaseException('下载地址不在官方发布路径下，已中止更新');
+    }
     final File file = File(
-      '${AppPaths.updates.path}${Platform.pathSeparator}${asset.name}',
+      '${AppPaths.updates.path}${Platform.pathSeparator}${_localName(asset.name)}',
     );
     final http.Client client = _httpClient();
 
@@ -395,6 +387,11 @@ class UpdateController extends ChangeNotifier {
       client.close();
     }
   }
+
+  // 资产名来自 GitHub 应答，直接拼进路径就等于让对方决定写到哪；
+  // 只留文件名允许的字符，目录分隔与盘符一律落成下划线
+  static String _localName(String name) =>
+      name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
 
   void _onConnectionChanged() {
     if (!_retryWhenConnected || !updateNetworkReady) {

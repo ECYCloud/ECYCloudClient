@@ -39,9 +39,7 @@ WizardStyle=modern
 SetupIconFile={#IconFile}
 ; 逗号分隔的多尺寸供 Inno 按显示缩放挑选，缺档位会被拉伸糊掉
 WizardSmallImageFile=wizard\shield-55.bmp,wizard\shield-83.bmp,wizard\shield-110.bmp,wizard\shield-138.bmp,wizard\shield-165.bmp,wizard\shield-192.bmp
-; 注册系统服务必须提权；安装与卸载各弹一次
 PrivilegesRequired=admin
-; Windows 10 1809 是最低支持版本
 MinVersion=10.0.17763
 #if AppArch == "arm64"
 ArchitecturesAllowed=arm64
@@ -117,7 +115,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Run]
 Filename: "{app}\service\{#ServiceExeName}"; Parameters: "install"; StatusMsg: "{cm:RegisterService}"; Flags: runhidden waituntilterminated
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchNow,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchNow,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 ; 服务停止时会还原系统代理并清理 TUN 网卡，必须等它执行完再删文件
@@ -143,7 +141,6 @@ var
   WizardFronted: Boolean;
   RemoveUserData: Boolean;
 
-// 客户端占着 exe 与 dll。广播客户端注册的退出消息（摘掉托盘后自行退出），旧版本不认则超时强杀。
 // 等的是互斥体而不是进程：Inno 后面的检查同样只看互斥体
 procedure CloseRunningApp;
 var
@@ -172,7 +169,6 @@ begin
   end;
 end;
 
-// 安装侧的互斥体检查紧跟在 InitializeSetup 之后、向导显示之前，只能在这里关
 procedure WriteInstallerLocale;
 var
   Locale, Dir: String;
@@ -186,6 +182,11 @@ begin
   Dir := ExpandConstant('{userappdata}\ECYCloud');
   ForceDirectories(Dir);
   SaveStringToFile(Dir + '\installer-locale', Locale, False);
+end;
+
+procedure InitializeWizard;
+begin
+  WizardForm.LicenseAcceptedRadio.Checked := True;
 end;
 
 function InitializeSetup(): Boolean;
@@ -230,9 +231,7 @@ begin
   SetForegroundWindow(WizardForm.Handle);
 end;
 
-// 覆盖安装时旧服务还占着 ecycloud-service.exe 与内核，且 install 子命令
-// 遇到已注册的服务会直接报错，必须先让旧版自己注销：它会停内核并还原系统代理。
-// 未注册时 uninstall 会返回非零，忽略即可
+// install 遇到已注册的服务会报错，必须先让旧版 uninstall；未注册时非零可忽略
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Service: String;
@@ -257,10 +256,8 @@ begin
     end;
 end;
 
-// 卸载器没有向导页，只能自己拼一个窗体来问是否连数据一起删。
-// 默认不勾：重装后用户还能保留登录状态、节点选择与内核缓存。
-// ConfirmUninstall 只在非 Silent 时出现；设置常丢掉 /SILENT，所以点「开始卸载」后
-// 若当前不是 Silent，先退出释放 unins000.dat 独占锁，再延迟以 Silent 重入完成卸载。
+// ConfirmUninstall 只在非 Silent 时出现；设置常丢掉 /SILENT，
+// 须先退出释放 unins000.dat 独占锁，再以 Silent 重入完成卸载
 function InitializeUninstall(): Boolean;
 var
   Form: TSetupForm;

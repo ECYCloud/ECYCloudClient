@@ -6,6 +6,7 @@ import '../../data/api/api_exception.dart';
 import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
@@ -26,9 +27,11 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
   int _total = 0;
   int _perPage = 10;
   int _logKeepDays = 30;
+  String _search = '';
   String? _error;
   bool _busy = false;
   bool _started = false;
+  Timer? _searchDebounce;
 
   @override
   void didChangeDependencies() {
@@ -37,6 +40,12 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
       _started = true;
       unawaited(_load());
     }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -52,6 +61,7 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
       final LoginLogListPage result = await api.fetchLoginLogs(
         page: _page,
         length: _perPage,
+        search: _search,
       );
       if (!mounted) {
         return;
@@ -72,10 +82,21 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
+  }
+
+  void _onSearch(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _search = value.trim();
+      _page = 1;
+      unawaited(_load());
+    });
   }
 
   @override
@@ -100,7 +121,9 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                L10n.t('最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。', <Object>[_logKeepDays]),
+                L10n.t('最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。', <Object>[
+                  _logKeepDays,
+                ]),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -112,8 +135,8 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
             lastPage: _lastPage,
             total: _total,
             perPage: _perPage,
-            showSearch: false,
-            onSearchChanged: (_) {},
+            searchHint: L10n.t('IP / 归属地 / 设备'),
+            onSearchChanged: _onSearch,
             onPerPageChanged: (int value) {
               _perPage = value;
               _page = 1;
@@ -132,7 +155,7 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView(
-                      padding: const EdgeInsets.all(14),
+                      padding: AppTheme.pageScrollPadding,
                       children: <Widget>[
                         SimpleDataTable(
                           columns: <String>[
@@ -143,7 +166,9 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
                             L10n.t('登录方式'),
                             L10n.t('登录时间'),
                           ],
-                          emptyText: L10n.t('最近 {0} 天内还没有登录记录', <Object>[_logKeepDays]),
+                          emptyText: L10n.t('最近 {0} 天内还没有登录记录', <Object>[
+                            _logKeepDays,
+                          ]),
                           rows: <List<Widget>>[
                             for (final LoginLogItem item in _items)
                               <Widget>[

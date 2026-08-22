@@ -11,8 +11,16 @@ class SystemProxyState {
   final bool snapshotPresent;
 }
 
-// toggle 由 Android 通知栏磁贴发出：磁贴只有一个按钮，该连还是该断由状态机判断
-enum TrayAction { connect, disconnect, toggle, toggleSystemProxy, toggleTun }
+enum TrayAction {
+  connect,
+  disconnect,
+  toggle,
+  toggleSystemProxy,
+  toggleTun,
+  modeRule,
+  modeGlobal,
+  modeDirect,
+}
 
 class InstalledApp {
   const InstalledApp({
@@ -33,6 +41,9 @@ class TrayLabels {
     required this.cancel,
     required this.systemProxy,
     required this.tun,
+    required this.rule,
+    required this.global,
+    required this.direct,
     required this.show,
     required this.quit,
   });
@@ -42,6 +53,9 @@ class TrayLabels {
   final String cancel;
   final String systemProxy;
   final String tun;
+  final String rule;
+  final String global;
+  final String direct;
   final String show;
   final String quit;
 
@@ -53,12 +67,25 @@ class TrayLabels {
       other.cancel == cancel &&
       other.systemProxy == systemProxy &&
       other.tun == tun &&
+      other.rule == rule &&
+      other.global == global &&
+      other.direct == direct &&
       other.show == show &&
       other.quit == quit;
 
   @override
-  int get hashCode =>
-      Object.hash(connect, disconnect, cancel, systemProxy, tun, show, quit);
+  int get hashCode => Object.hash(
+    connect,
+    disconnect,
+    cancel,
+    systemProxy,
+    tun,
+    rule,
+    global,
+    direct,
+    show,
+    quit,
+  );
 }
 
 class TrayState {
@@ -67,6 +94,9 @@ class TrayState {
     required this.busy,
     required this.systemProxyEnabled,
     required this.tunEnabled,
+    required this.routeMode,
+    required this.modeEnabled,
+    required this.statusTip,
     required this.darkMenu,
     required this.labels,
   });
@@ -75,6 +105,10 @@ class TrayState {
   final bool busy;
   final bool systemProxyEnabled;
   final bool tunEnabled;
+  final String routeMode;
+  final bool modeEnabled;
+
+  final String statusTip;
 
   // Win32 弹出菜单不走 Flutter 主题，明暗只能由原生侧另行设置
   final bool darkMenu;
@@ -85,12 +119,18 @@ class TrayState {
     'busy': busy,
     'system_proxy': systemProxyEnabled,
     'tun': tunEnabled,
+    'route_mode': routeMode,
+    'mode_enabled': modeEnabled,
+    'status_tip': statusTip,
     'dark': darkMenu,
     'label_connect': labels.connect,
     'label_disconnect': labels.disconnect,
     'label_cancel': labels.cancel,
     'label_system_proxy': labels.systemProxy,
     'label_tun': labels.tun,
+    'label_rule': labels.rule,
+    'label_global': labels.global,
+    'label_direct': labels.direct,
     'label_show': labels.show,
     'label_quit': labels.quit,
   };
@@ -102,6 +142,9 @@ class TrayState {
       other.busy == busy &&
       other.systemProxyEnabled == systemProxyEnabled &&
       other.tunEnabled == tunEnabled &&
+      other.routeMode == routeMode &&
+      other.modeEnabled == modeEnabled &&
+      other.statusTip == statusTip &&
       other.darkMenu == darkMenu &&
       other.labels == labels;
 
@@ -111,6 +154,9 @@ class TrayState {
     busy,
     systemProxyEnabled,
     tunEnabled,
+    routeMode,
+    modeEnabled,
+    statusTip,
     darkMenu,
     labels,
   );
@@ -143,9 +189,14 @@ abstract class PlatformService {
   // 能否按应用分流。只有 Android 有应用清单，桌面端的 tun 入站没有对应字段
   bool get supportsPerAppProxy;
 
-  // TUN 网卡名，落到配置的 tun.device。darwin 的 utun 设备只能叫 utunN，内核的
-  // checkTunName（listener/sing_tun/server.go）见到别的名字会打一行告警再自己改掉，
-  // 因此 macOS 返回空串，让它直接走 CalculateInterfaceName，不留那行告警
+  // 认证 Android TV / 声明了 Leanback 的设备。只由原生按系统口径填写
+  bool get isTelevision;
+
+  // 电视没有支付宝 / 微信客户端，禁止走 scheme
+  bool get supportsPayScheme;
+
+  // darwin 的 utun 设备只能叫 utunN，内核 checkTunName（listener/sing_tun/server.go）
+  // 见到别的名字会打一行告警再自己改掉，因此 macOS 返回空串走 CalculateInterfaceName
   String get tunInterfaceName;
 
   Future<void> initialize();
@@ -174,16 +225,14 @@ abstract class PlatformService {
 
   Future<String> deviceName();
 
-  /// 分应用代理的候选列表，只有 Android 拿得到，其余平台返回空
+  Future<({String model, String os})> deviceProfile();
+
   Future<List<InstalledApp>> installedApps();
 
-  /// 以管理员权限启动客户端安装包，返回 false 表示用户拒绝了提权
   Future<bool> runInstaller(String path);
 
-  /// 返回 false 表示系统里没有能接手该链接的程序（如未安装支付 App），调用方需降级
   Future<bool> openUrl(String url);
 
-  /// 用系统文件管理器打开本地目录。路径不存在或系统拒绝时返回 false
   Future<bool> openDirectory(String path);
 
   Future<String> protectSecret(String name, String plaintext);

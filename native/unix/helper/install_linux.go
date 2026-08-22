@@ -30,6 +30,8 @@ Type=simple
 ExecStart=%s run
 Restart=on-failure
 RestartSec=3
+ProtectSystem=full
+ProtectHome=read-only
 
 [Install]
 WantedBy=multi-user.target
@@ -53,7 +55,6 @@ func uninstall() error {
 	return systemctl("daemon-reload")
 }
 
-// 内核降权跑在这个账户下，它不需要登录，也不需要家目录
 func ensureKernelUser() error {
 	if _, err := user.Lookup(kernelUserName); err == nil {
 		return nil

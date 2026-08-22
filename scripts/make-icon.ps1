@@ -7,7 +7,8 @@
     换图标时只改主图，跑一遍本脚本重新生成，不要手工塞二进制。
     Windows：ICO 各尺寸以 PNG 负载嵌入（Vista 起支持），保留透明通道；
     向导图按 Inno Setup 的缩放档位输出 24 位 BMP，白底以贴合向导页背景。
-    macOS：按 AppIcon.appiconset 的档位输出；Android：按 mipmap 密度输出；
+    macOS：按 AppIcon.appiconset 的档位输出；Android：按 mipmap 密度输出，
+    并生成 Android TV 主屏 banner（`drawable-*/ic_banner.png`，xhdpi 为 320×180）；
     Linux：按 hicolor 档位输出，随 deb 装进 /usr/share/icons。
 #>
 [CmdletBinding()]
@@ -56,6 +57,58 @@ function New-Square {
     return $bitmap
 }
 
+function Save-Banner {
+    param(
+        [System.Drawing.Image]$Image,
+        [int]$BannerWidth,
+        [int]$BannerHeight,
+        [string]$Path,
+        [string]$Label
+    )
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $bitmap = New-Object System.Drawing.Bitmap($BannerWidth, $BannerHeight, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+        $graphics.Clear($bannerColor)
+        $iconSize = [int][Math]::Floor($BannerHeight * 0.48)
+        $iconTop = [int][Math]::Floor($BannerHeight * 0.14)
+        $iconLeft = [int][Math]::Floor(($BannerWidth - $iconSize) / 2)
+        $graphics.DrawImage($Image, (New-Object System.Drawing.Rectangle($iconLeft, $iconTop, $iconSize, $iconSize)))
+        $fontSize = [Math]::Max(10, [int][Math]::Floor($BannerHeight * 0.13))
+        $font = New-Object System.Drawing.Font('Segoe UI', $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+        $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+        $format = New-Object System.Drawing.StringFormat
+        $format.Alignment = [System.Drawing.StringAlignment]::Center
+        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+        $textTop = [int]($iconTop + $iconSize)
+        $textRect = New-Object System.Drawing.RectangleF(0, $textTop, $BannerWidth, ($BannerHeight - $textTop))
+        try {
+            $graphics.DrawString($Label, $font, $brush, $textRect, $format)
+        }
+        finally {
+            $format.Dispose()
+            $brush.Dispose()
+            $font.Dispose()
+        }
+    }
+    finally {
+        $graphics.Dispose()
+    }
+    try {
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
+
 function Save-Png {
     param(
         [System.Drawing.Image]$Image,
@@ -81,8 +134,24 @@ $wizardSizes = @(55, 83, 110, 138, 165, 192)
 # 与 app/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json 的档位一致
 $macSizes = @(16, 32, 64, 128, 256, 512, 1024)
 $linuxSizes = @(16, 32, 48, 64, 128, 256)
-# mipmap 密度对应的 ic_launcher 边长
 $androidSizes = [ordered]@{ mdpi = 48; hdpi = 72; xhdpi = 96; xxhdpi = 144; xxxhdpi = 192 }
+# Android TV banner：官方规格是 xhdpi 320×180，其余密度按 160dpi 基线等比
+$androidBanners = @(
+    @{ Density = 'mdpi'; Width = 160; Height = 90 }
+    @{ Density = 'hdpi'; Width = 240; Height = 135 }
+    @{ Density = 'xhdpi'; Width = 320; Height = 180 }
+    @{ Density = 'xxhdpi'; Width = 480; Height = 270 }
+    @{ Density = 'xxxhdpi'; Width = 640; Height = 360 }
+)
+$bannerColor = [System.Drawing.Color]::FromArgb(255, 47, 107, 255)
+$stringsFile = Join-Path $rootDir 'app\android\app\src\main\res\values\strings.xml'
+$bannerLabel = 'ECY Cloud'
+if (Test-Path $stringsFile) {
+    $match = Select-String -Path $stringsFile -Pattern '<string name="app_name">([^<]+)</string>'
+    if ($match) {
+        $bannerLabel = $match.Matches[0].Groups[1].Value
+    }
+}
 
 $macIconDir = Join-Path $rootDir 'app\macos\Runner\Assets.xcassets\AppIcon.appiconset'
 $androidResDir = Join-Path $rootDir 'app\android\app\src\main\res'
@@ -130,6 +199,11 @@ try {
         Save-Png -Image $master -Size $androidSizes[$density] `
             -Path (Join-Path $androidResDir "mipmap-$density\ic_launcher.png")
     }
+    foreach ($banner in $androidBanners) {
+        Save-Banner -Image $master -BannerWidth ([int]$banner.Width) -BannerHeight ([int]$banner.Height) `
+            -Path (Join-Path $androidResDir "drawable-$($banner.Density)\ic_banner.png") `
+            -Label $bannerLabel
+    }
 }
 finally {
     $master.Dispose()
@@ -139,8 +213,8 @@ $file = [System.IO.File]::Create($Output)
 $writer = New-Object System.IO.BinaryWriter($file)
 
 try {
-    $writer.Write([uint16]0)              # 保留
-    $writer.Write([uint16]1)              # 类型：图标
+    $writer.Write([uint16]0)
+    $writer.Write([uint16]1)
     $writer.Write([uint16]$sizes.Count)
 
     # ICONDIRENTRY 定长 16 字节，图像数据紧随目录
@@ -150,10 +224,10 @@ try {
         # 256 在单字节字段里记作 0
         $writer.Write([byte]($size % 256))
         $writer.Write([byte]($size % 256))
-        $writer.Write([byte]0)            # 调色板数：真彩色为 0
-        $writer.Write([byte]0)            # 保留
-        $writer.Write([uint16]1)          # 色彩平面
-        $writer.Write([uint16]32)         # 位深
+        $writer.Write([byte]0)
+        $writer.Write([byte]0)
+        $writer.Write([uint16]1)
+        $writer.Write([uint16]32)
         $writer.Write([uint32]$payloads[$i].Length)
         $writer.Write([uint32]$offset)
         $offset += $payloads[$i].Length
@@ -173,3 +247,4 @@ Write-Host "向导图已生成：$WizardDir（$($wizardSizes -join '/') px）"
 Write-Host "macOS 图标已生成：$macIconDir（$($macSizes -join '/') px）"
 Write-Host "Linux 图标已生成：$linuxIconDir（$($linuxSizes -join '/') px）"
 Write-Host "Android 图标已生成：$androidResDir（$($androidSizes.Values -join '/') px）"
+Write-Host "Android TV banner 已生成：$androidResDir（xhdpi 320x180）"

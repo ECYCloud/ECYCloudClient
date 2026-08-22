@@ -1,10 +1,14 @@
 #include "platform_channel.h"
 
+#include <commctrl.h>
 #include <flutter/standard_method_codec.h>
 #include <imm.h>
 #include <shellapi.h>
 
+#include <algorithm>
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include "resource.h"
 
@@ -26,6 +30,9 @@ constexpr UINT kMenuCommandConnect = 40003;
 constexpr UINT kMenuCommandDisconnect = 40004;
 constexpr UINT kMenuCommandSystemProxy = 40005;
 constexpr UINT kMenuCommandTun = 40006;
+constexpr UINT kMenuCommandModeRule = 40007;
+constexpr UINT kMenuCommandModeGlobal = 40008;
+constexpr UINT kMenuCommandModeDirect = 40009;
 
 constexpr const wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -45,8 +52,203 @@ std::wstring g_label_disconnect = L"\u65ad\u5f00\u8fde\u63a5";
 std::wstring g_label_cancel = L"\u53d6\u6d88\u8fde\u63a5";
 std::wstring g_label_system_proxy = L"\u7cfb\u7edf\u4ee3\u7406";
 std::wstring g_label_tun = L"TUN \u6a21\u5f0f";
+std::wstring g_label_rule = L"\u89c4\u5219";
+std::wstring g_label_global = L"\u5168\u5c40";
+std::wstring g_label_direct = L"\u76f4\u8fde";
 std::wstring g_label_show = L"\u663e\u793a\u4e3b\u754c\u9762";
 std::wstring g_label_quit = L"\u9000\u51fa";
+
+std::string ReadUtf8(const flutter::EncodableMap& arguments,
+                     const char* key,
+                     const std::string& fallback) {
+  auto entry = arguments.find(flutter::EncodableValue(key));
+  if (entry == arguments.end() ||
+      !std::holds_alternative<std::string>(entry->second)) {
+    return fallback;
+  }
+  const std::string& text = std::get<std::string>(entry->second);
+  return text.empty() ? fallback : text;
+}
+
+void AppendRadioItem(HMENU menu,
+                     UINT id,
+                     const std::wstring& label,
+                     bool checked,
+                     bool enabled) {
+  MENUITEMINFOW info = {};
+  info.cbSize = sizeof(info);
+  info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE;
+  info.fType = MFT_STRING | MFT_RADIOCHECK;
+  info.wID = id;
+  info.dwTypeData = const_cast<LPWSTR>(label.c_str());
+  info.cch = static_cast<UINT>(label.size());
+  info.fState = (checked ? MFS_CHECKED : 0) | (enabled ? 0 : MFS_GRAYED);
+  ::InsertMenuItemW(menu, static_cast<UINT>(::GetMenuItemCount(menu)), TRUE,
+                    &info);
+}
+
+void RgbToHsl(float r, float g, float b, float* h, float* s, float* l) {
+  const float max = std::max({r, g, b});
+  const float min = std::min({r, g, b});
+  *l = (max + min) / 2.f;
+  if (max == min) {
+    *h = 0;
+    *s = 0;
+    return;
+  }
+  const float d = max - min;
+  *s = *l > 0.5f ? d / (2.f - max - min) : d / (max + min);
+  if (max == r) {
+    *h = (g - b) / d + (g < b ? 6.f : 0);
+  } else if (max == g) {
+    *h = (b - r) / d + 2.f;
+  } else {
+    *h = (r - g) / d + 4.f;
+  }
+  *h *= 60.f;
+}
+
+float HueToChannel(float p, float q, float t) {
+  if (t < 0) {
+    t += 1.f;
+  }
+  if (t > 1.f) {
+    t -= 1.f;
+  }
+  if (t < 1.f / 6.f) {
+    return p + (q - p) * 6.f * t;
+  }
+  if (t < 0.5f) {
+    return q;
+  }
+  if (t < 2.f / 3.f) {
+    return p + (q - p) * (2.f / 3.f - t) * 6.f;
+  }
+  return p;
+}
+
+void HslToRgb(float h, float s, float l, float* r, float* g, float* b) {
+  if (s == 0) {
+    *r = *g = *b = l;
+    return;
+  }
+  const float q = l < 0.5f ? l * (1.f + s) : l + s - l * s;
+  const float p = 2.f * l - q;
+  const float hk = h / 360.f;
+  *r = HueToChannel(p, q, hk + 1.f / 3.f);
+  *g = HueToChannel(p, q, hk);
+  *b = HueToChannel(p, q, hk - 1.f / 3.f);
+}
+
+HICON CreateTintedIcon(HICON source, float target_hue, int size) {
+  if (source == nullptr || size <= 0) {
+    return nullptr;
+  }
+  HICON sized = static_cast<HICON>(
+      ::CopyImage(source, IMAGE_ICON, size, size, 0));
+  if (sized == nullptr) {
+    return nullptr;
+  }
+
+  ICONINFO info = {};
+  if (!::GetIconInfo(sized, &info) || info.hbmColor == nullptr) {
+    ::DestroyIcon(sized);
+    return nullptr;
+  }
+
+  BITMAP bm = {};
+  ::GetObject(info.hbmColor, sizeof(bm), &bm);
+  const int width = bm.bmWidth;
+  const int height = bm.bmHeight;
+  if (width <= 0 || height <= 0) {
+    ::DeleteObject(info.hbmColor);
+    if (info.hbmMask != nullptr) {
+      ::DeleteObject(info.hbmMask);
+    }
+    ::DestroyIcon(sized);
+    return nullptr;
+  }
+
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = width;
+  bmi.bmiHeader.biHeight = -height;
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+
+  std::vector<UINT32> pixels(static_cast<size_t>(width) * height);
+  HDC dc = ::GetDC(nullptr);
+  const int copied = ::GetDIBits(dc, info.hbmColor, 0, height, pixels.data(),
+                                 &bmi, DIB_RGB_COLORS);
+  if (copied != height) {
+    ::ReleaseDC(nullptr, dc);
+    ::DeleteObject(info.hbmColor);
+    if (info.hbmMask != nullptr) {
+      ::DeleteObject(info.hbmMask);
+    }
+    ::DestroyIcon(sized);
+    return nullptr;
+  }
+
+  for (UINT32& pixel : pixels) {
+    const BYTE a = static_cast<BYTE>((pixel >> 24) & 0xFF);
+    if (a == 0) {
+      continue;
+    }
+    const float r = static_cast<float>((pixel >> 16) & 0xFF) / 255.f;
+    const float g = static_cast<float>((pixel >> 8) & 0xFF) / 255.f;
+    const float b = static_cast<float>(pixel & 0xFF) / 255.f;
+    float h = 0;
+    float s = 0;
+    float l = 0;
+    RgbToHsl(r, g, b, &h, &s, &l);
+    if (s <= 0.12f || h < 170.f || h > 270.f) {
+      continue;
+    }
+    float nr = 0;
+    float ng = 0;
+    float nb = 0;
+    HslToRgb(target_hue, s, l, &nr, &ng, &nb);
+    pixel = (static_cast<UINT32>(a) << 24) |
+            (static_cast<UINT32>(nr * 255.f + 0.5f) << 16) |
+            (static_cast<UINT32>(ng * 255.f + 0.5f) << 8) |
+            static_cast<UINT32>(nb * 255.f + 0.5f);
+  }
+
+  void* bits = nullptr;
+  HBITMAP color =
+      ::CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (color == nullptr || bits == nullptr) {
+    ::ReleaseDC(nullptr, dc);
+    ::DeleteObject(info.hbmColor);
+    if (info.hbmMask != nullptr) {
+      ::DeleteObject(info.hbmMask);
+    }
+    ::DestroyIcon(sized);
+    return nullptr;
+  }
+  std::memcpy(bits, pixels.data(), pixels.size() * sizeof(UINT32));
+
+  HBITMAP mask = ::CreateBitmap(width, height, 1, 1, nullptr);
+  ICONINFO out = {};
+  out.fIcon = TRUE;
+  out.hbmMask = mask;
+  out.hbmColor = color;
+  HICON result = ::CreateIconIndirect(&out);
+
+  ::DeleteObject(color);
+  if (mask != nullptr) {
+    ::DeleteObject(mask);
+  }
+  ::DeleteObject(info.hbmColor);
+  if (info.hbmMask != nullptr) {
+    ::DeleteObject(info.hbmMask);
+  }
+  ::ReleaseDC(nullptr, dc);
+  ::DestroyIcon(sized);
+  return result;
+}
 
 std::wstring ReadLabel(const flutter::EncodableMap& arguments,
                        const char* key,
@@ -60,11 +262,8 @@ std::wstring ReadLabel(const flutter::EncodableMap& arguments,
   return text.empty() ? fallback : WideFromUtf8(text);
 }
 
-// Win32 弹出菜单由 uxtheme 绘制，不受 Flutter 主题影响，只能切进程级的
-// 深色模式。相关导出没有头文件声明，只能按序号取：
-// 1809 的 135 号是 AllowDarkModeForApp(BOOL)，1903 起换成
-// SetPreferredAppMode(枚举)，两者调用约定一致，按内部版本号区分传参即可。
-// 取不到导出就保持系统默认外观，不影响其余功能。
+// 托盘菜单由 uxtheme 画，不受 Flutter 主题影响。135/136 号导出无头文件：
+// 1809 是 AllowDarkModeForApp(BOOL)，1903 起是 SetPreferredAppMode(枚举)
 enum PreferredAppMode { kAppModeDefault = 0, kAppModeForceLight = 3, kAppModeForceDark = 2 };
 
 void ApplyMenuTheme(bool dark) {
@@ -90,7 +289,6 @@ void ApplyMenuTheme(bool dark) {
       }
     }
     if (major >= 10 && build >= 17763) {
-      // 用 GetModuleHandle：uxtheme 已由 Flutter 的窗口初始化加载，不额外持有引用
       if (HMODULE uxtheme = ::GetModuleHandleW(L"uxtheme.dll")) {
         set_mode = reinterpret_cast<SetPreferredAppModeProc>(
             ::GetProcAddress(uxtheme, MAKEINTRESOURCEA(135)));
@@ -218,13 +416,96 @@ PlatformChannel::PlatformChannel(flutter::BinaryMessenger* messenger,
       [this](const auto& call, auto result) {
         HandleMethodCall(call, std::move(result));
       });
+  if (view_ != nullptr) {
+    ::SetWindowSubclass(view_, ViewSubclassProc, 1,
+                        reinterpret_cast<DWORD_PTR>(this));
+  }
 }
 
 PlatformChannel::~PlatformChannel() {
+  if (view_ != nullptr) {
+    ::RemoveWindowSubclass(view_, ViewSubclassProc, 1);
+  }
   RemoveTray();
+  DestroyTintedIcons();
 }
 
-// 解除关联只让本窗口收不到组字，用户的系统输入法与其它程序不受影响
+HICON PlatformChannel::DefaultIcon() {
+  if (default_icon_ == nullptr) {
+    default_icon_ = ::LoadIconW(::GetModuleHandleW(nullptr),
+                                MAKEINTRESOURCEW(IDI_APP_ICON));
+  }
+  return default_icon_;
+}
+
+void PlatformChannel::DestroyTintedIcons() {
+  if (small_icon_ != nullptr && small_icon_ != default_icon_) {
+    ::DestroyIcon(small_icon_);
+  }
+  if (big_icon_ != nullptr && big_icon_ != default_icon_ &&
+      big_icon_ != small_icon_) {
+    ::DestroyIcon(big_icon_);
+  }
+  small_icon_ = nullptr;
+  big_icon_ = nullptr;
+  icon_tint_ = -1;
+}
+
+void PlatformChannel::EnsureStatusIcons() {
+  const int want = tun_ ? 2 : (system_proxy_ ? 1 : 0);
+  if (want == icon_tint_ && small_icon_ != nullptr && big_icon_ != nullptr) {
+    return;
+  }
+
+  DestroyTintedIcons();
+  HICON source = DefaultIcon();
+  if (want == 0) {
+    small_icon_ = source;
+    big_icon_ = source;
+    icon_tint_ = want;
+    return;
+  }
+
+  const float hue = want == 2 ? 150.f : 42.f;
+  small_icon_ = CreateTintedIcon(source, hue, ::GetSystemMetrics(SM_CXSMICON));
+  big_icon_ = CreateTintedIcon(source, hue, ::GetSystemMetrics(SM_CXICON));
+  if (small_icon_ == nullptr) {
+    small_icon_ = source;
+  }
+  if (big_icon_ == nullptr) {
+    big_icon_ = source;
+  }
+  icon_tint_ = want;
+}
+
+std::wstring PlatformChannel::TrayTip() const {
+  std::wstring tip = kWindowTitle;
+  if (!status_tip_.empty()) {
+    tip += L'\n';
+    tip += status_tip_;
+  }
+  return tip;
+}
+
+void PlatformChannel::ApplyStatusIcons() {
+  EnsureStatusIcons();
+  ::SendMessageW(window_, WM_SETICON, ICON_SMALL,
+                 reinterpret_cast<LPARAM>(small_icon_));
+  ::SendMessageW(window_, WM_SETICON, ICON_BIG,
+                 reinterpret_cast<LPARAM>(big_icon_));
+  if (!tray_installed_) {
+    return;
+  }
+  NOTIFYICONDATAW data = {};
+  data.cbSize = sizeof(data);
+  data.hWnd = window_;
+  data.uID = kTrayIconId;
+  data.uFlags = NIF_ICON | NIF_TIP;
+  data.hIcon = small_icon_;
+  wcsncpy_s(data.szTip, TrayTip().c_str(), _TRUNCATE);
+  ::Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
 void PlatformChannel::SetImeEnabled(bool enabled) {
   if (view_ == nullptr) {
     return;
@@ -239,16 +520,46 @@ void PlatformChannel::SetImeEnabled(bool enabled) {
   ::ImmAssociateContextEx(view_, nullptr, enabled ? IACE_DEFAULT : 0);
 }
 
+// Win11 剪贴板历史用 SendInput 合成 Ctrl+V，扫描码为 0。引擎把这类按键映射坏，
+// 焦点字段收不到 PasteTextIntent，只能在壳层拦下来交给 Dart 走同一条粘贴动作。
+bool PlatformChannel::HandleViewMessage(UINT message,
+                                        WPARAM wparam,
+                                        LPARAM lparam) {
+  if (message != WM_KEYDOWN || wparam != 'V') {
+    return false;
+  }
+  if ((::GetKeyState(VK_CONTROL) & 0x8000) == 0) {
+    return false;
+  }
+  if (((lparam >> 16) & 0xFF) != 0) {
+    return false;
+  }
+  channel_->InvokeMethod("clipboard.paste", nullptr);
+  return true;
+}
+
+LRESULT CALLBACK PlatformChannel::ViewSubclassProc(HWND hwnd,
+                                                   UINT message,
+                                                   WPARAM wparam,
+                                                   LPARAM lparam,
+                                                   UINT_PTR subclass_id,
+                                                   DWORD_PTR ref_data) {
+  auto* self = reinterpret_cast<PlatformChannel*>(ref_data);
+  if (self != nullptr && self->HandleViewMessage(message, wparam, lparam)) {
+    return 0;
+  }
+  return DefSubclassProc(hwnd, message, wparam, lparam);
+}
+
 void PlatformChannel::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const std::string& method = call.method_name();
 
   if (method == "tray.install") {
-    if (!InstallTray()) {
-      result->Error("tray", "创建托盘图标失败");
-      return;
-    }
+    // 加不上不算失败：TaskbarCreated 会重试。报错会让 Dart 侧 initialize() 抛出，
+    // 连同一个 try 里的 syncPlatformSettings() 一起跳过，整个会话的平台设置不同步
+    InstallTray();
     result->Success();
     return;
   }
@@ -288,6 +599,9 @@ void PlatformChannel::HandleMethodCall(
     busy_ = ReadBool(*arguments, "busy");
     system_proxy_ = ReadBool(*arguments, "system_proxy");
     tun_ = ReadBool(*arguments, "tun");
+    mode_enabled_ = ReadBool(*arguments, "mode_enabled");
+    route_mode_ = ReadUtf8(*arguments, "route_mode", route_mode_);
+    status_tip_ = ReadLabel(*arguments, "status_tip", status_tip_);
     g_label_connect = ReadLabel(*arguments, "label_connect", g_label_connect);
     g_label_disconnect =
         ReadLabel(*arguments, "label_disconnect", g_label_disconnect);
@@ -295,9 +609,13 @@ void PlatformChannel::HandleMethodCall(
     g_label_system_proxy =
         ReadLabel(*arguments, "label_system_proxy", g_label_system_proxy);
     g_label_tun = ReadLabel(*arguments, "label_tun", g_label_tun);
+    g_label_rule = ReadLabel(*arguments, "label_rule", g_label_rule);
+    g_label_global = ReadLabel(*arguments, "label_global", g_label_global);
+    g_label_direct = ReadLabel(*arguments, "label_direct", g_label_direct);
     g_label_show = ReadLabel(*arguments, "label_show", g_label_show);
     g_label_quit = ReadLabel(*arguments, "label_quit", g_label_quit);
     ApplyMenuTheme(ReadBool(*arguments, "dark"));
+    ApplyStatusIcons();
     result->Success();
     return;
   }
@@ -366,17 +684,26 @@ bool PlatformChannel::InstallTray() {
     return true;
   }
 
+  // Shell_NotifyIcon 在通知区未就绪时会堵几秒消息循环；窗口要等第一帧才 Show，先探测再交给 TaskbarCreated
+  if (::FindWindowW(L"Shell_TrayWnd", nullptr) == nullptr) {
+    return false;
+  }
+
   NOTIFYICONDATAW data = {};
   data.cbSize = sizeof(data);
   data.hWnd = window_;
   data.uID = kTrayIconId;
   data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
   data.uCallbackMessage = kTrayCallbackMessage;
-  data.hIcon = ::LoadIconW(::GetModuleHandleW(nullptr),
-                           MAKEINTRESOURCEW(IDI_APP_ICON));
-  wcsncpy_s(data.szTip, kWindowTitle, _TRUNCATE);
+  EnsureStatusIcons();
+  data.hIcon = small_icon_;
+  wcsncpy_s(data.szTip, TrayTip().c_str(), _TRUNCATE);
 
   tray_installed_ = ::Shell_NotifyIconW(NIM_ADD, &data) != FALSE;
+  ::SendMessageW(window_, WM_SETICON, ICON_SMALL,
+                 reinterpret_cast<LPARAM>(small_icon_));
+  ::SendMessageW(window_, WM_SETICON, ICON_BIG,
+                 reinterpret_cast<LPARAM>(big_icon_));
   return tray_installed_;
 }
 
@@ -391,6 +718,11 @@ void PlatformChannel::RemoveTray() {
   data.uID = kTrayIconId;
   ::Shell_NotifyIconW(NIM_DELETE, &data);
   tray_installed_ = false;
+  DestroyTintedIcons();
+  HICON icon = DefaultIcon();
+  ::SendMessageW(window_, WM_SETICON, ICON_SMALL,
+                 reinterpret_cast<LPARAM>(icon));
+  ::SendMessageW(window_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
 }
 
 void PlatformChannel::ShowTrayMenu() {
@@ -409,7 +741,6 @@ void PlatformChannel::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_STRING, kMenuCommandConnect, g_label_connect.c_str());
   }
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
   const UINT proxy_state = connected_ ? 0 : MF_GRAYED;
   ::AppendMenuW(menu,
                 MF_STRING | proxy_state |
@@ -418,6 +749,16 @@ void PlatformChannel::ShowTrayMenu() {
   ::AppendMenuW(menu,
                 MF_STRING | proxy_state | (tun_ ? MF_CHECKED : MF_UNCHECKED),
                 kMenuCommandTun, g_label_tun.c_str());
+  ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  const std::string& mode =
+      (route_mode_ == "global" || route_mode_ == "direct") ? route_mode_
+                                                          : "rule";
+  AppendRadioItem(menu, kMenuCommandModeRule, g_label_rule, mode == "rule",
+                  mode_enabled_);
+  AppendRadioItem(menu, kMenuCommandModeGlobal, g_label_global,
+                  mode == "global", mode_enabled_);
+  AppendRadioItem(menu, kMenuCommandModeDirect, g_label_direct,
+                  mode == "direct", mode_enabled_);
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   ::AppendMenuW(menu, MF_STRING, kMenuCommandShow, g_label_show.c_str());
   ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -442,7 +783,6 @@ void PlatformChannel::RestoreMainWindow() {
   ::SetForegroundWindow(window_);
 }
 
-// 托盘只上报动作，连不连、开不开由 Dart 侧状态机决定
 void PlatformChannel::EmitTrayAction(const char* action) {
   channel_->InvokeMethod(
       "tray.action",
@@ -466,11 +806,9 @@ bool PlatformChannel::HandleWindowMessage(UINT message,
   }
 
   if (message == TaskbarCreatedMessageId()) {
-    // 图标已随旧 Explorer 一起消失，先把状态清掉才能重新添加
-    if (tray_installed_) {
-      tray_installed_ = false;
-      InstallTray();
-    }
+    // 首次因通知区未就绪而跳过时 tray_installed_ 也是 false，必须无条件重试
+    tray_installed_ = false;
+    InstallTray();
     return false;
   }
 
@@ -504,6 +842,15 @@ bool PlatformChannel::HandleWindowMessage(UINT message,
           break;
         case kMenuCommandTun:
           EmitTrayAction("tun");
+          break;
+        case kMenuCommandModeRule:
+          EmitTrayAction("mode_rule");
+          break;
+        case kMenuCommandModeGlobal:
+          EmitTrayAction("mode_global");
+          break;
+        case kMenuCommandModeDirect:
+          EmitTrayAction("mode_direct");
           break;
         default:
           return false;

@@ -65,8 +65,7 @@ class AccountStatus {
   factory AccountStatus.fromJson(Map<String, dynamic> json) => AccountStatus(
     enable: (json['enable'] as num?)?.toInt() ?? 1,
     email: json['email'] as String? ?? '',
-    submitAccountDeletionTime:
-        json['submit_account_deletion_time'] as String?,
+    submitAccountDeletionTime: json['submit_account_deletion_time'] as String?,
     deletionTime: json['deletion_time'] as String?,
     banReason: json['ban_reason'] as String?,
     banTimeText: json['ban_time_text'] as String?,
@@ -332,7 +331,8 @@ class InviteSummary {
       withdrawChannels: <WithdrawChannelItem>[
         if (channels is List)
           for (final Object? item in channels)
-            if (item is Map<String, dynamic>) WithdrawChannelItem.fromJson(item),
+            if (item is Map<String, dynamic>)
+              WithdrawChannelItem.fromJson(item),
       ],
       money: (json['money'] as num?)?.toDouble() ?? 0,
       invitedUsers: <InvitedUserItem>[
@@ -358,7 +358,8 @@ class InviteSummary {
       paybackLastPage: (json['payback_last_page'] as num?)?.toInt() ?? 1,
       paybackTotal: (json['payback_total'] as num?)?.toInt() ?? 0,
       paybackPerPage: (json['payback_per_page'] as num?)?.toInt() ?? 10,
-      withdrawCurrentPage: (json['withdraw_current_page'] as num?)?.toInt() ?? 1,
+      withdrawCurrentPage:
+          (json['withdraw_current_page'] as num?)?.toInt() ?? 1,
       withdrawLastPage: (json['withdraw_last_page'] as num?)?.toInt() ?? 1,
       withdrawTotal: (json['withdraw_total'] as num?)?.toInt() ?? 0,
       withdrawPerPage: (json['withdraw_per_page'] as num?)?.toInt() ?? 10,
@@ -441,8 +442,7 @@ class EditAccountOptions {
     bindToken: bindToken ?? this.bindToken,
     telegramUnbindKick: telegramUnbindKick,
     mailNotifySettings: mailNotifySettings,
-    mailNotifyPreferences:
-        mailNotifyPreferences ?? this.mailNotifyPreferences,
+    mailNotifyPreferences: mailNotifyPreferences ?? this.mailNotifyPreferences,
   );
 }
 
@@ -715,16 +715,27 @@ class UsageIpItem {
     required this.ip,
     required this.location,
     required this.datetime,
+    required this.online,
+    required this.device,
+    required this.appVersion,
   });
 
   final String ip;
   final String location;
   final String datetime;
 
+  final bool online;
+
+  final String device;
+  final String appVersion;
+
   factory UsageIpItem.fromJson(Map<String, dynamic> json) => UsageIpItem(
     ip: json['ip'] as String? ?? '',
     location: json['location'] as String? ?? '',
     datetime: json['datetime'] as String? ?? '',
+    online: json['online'] as bool? ?? false,
+    device: json['device'] as String? ?? '',
+    appVersion: json['app_version'] as String? ?? '',
   );
 }
 
@@ -813,6 +824,77 @@ class LoginLogListPage {
         if (raw is List)
           for (final Object? item in raw)
             if (item is Map<String, dynamic>) LoginLogItem.fromJson(item),
+      ],
+      logKeepDays: (json['log_keep_days'] as num?)?.toInt() ?? 30,
+      currentPage: (json['current_page'] as num?)?.toInt() ?? 1,
+      lastPage: (json['last_page'] as num?)?.toInt() ?? 1,
+      total: (json['total'] as num?)?.toInt() ?? 0,
+      perPage: (json['per_page'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class OperationLogItem {
+  const OperationLogItem({
+    required this.datetime,
+    required this.operationDescription,
+    required this.oldValue,
+    required this.newValue,
+    required this.ipAddress,
+    required this.location,
+    required this.requestMethod,
+    required this.requestUrl,
+    required this.userAgent,
+  });
+
+  final String datetime;
+  final String operationDescription;
+  final String oldValue;
+  final String newValue;
+  final String ipAddress;
+  final String location;
+  final String requestMethod;
+  final String requestUrl;
+  final String userAgent;
+
+  factory OperationLogItem.fromJson(Map<String, dynamic> json) =>
+      OperationLogItem(
+        datetime: json['datetime'] as String? ?? '',
+        operationDescription: json['operation_description'] as String? ?? '',
+        oldValue: json['old_value'] as String? ?? '',
+        newValue: json['new_value'] as String? ?? '',
+        ipAddress: json['ip_address'] as String? ?? '',
+        location: json['location'] as String? ?? '',
+        requestMethod: json['request_method'] as String? ?? '',
+        requestUrl: json['request_url'] as String? ?? '',
+        userAgent: json['user_agent'] as String? ?? '',
+      );
+}
+
+class OperationLogListPage {
+  const OperationLogListPage({
+    required this.items,
+    required this.logKeepDays,
+    required this.currentPage,
+    required this.lastPage,
+    required this.total,
+    required this.perPage,
+  });
+
+  final List<OperationLogItem> items;
+  final int logKeepDays;
+  final int currentPage;
+  final int lastPage;
+  final int total;
+  final int perPage;
+
+  factory OperationLogListPage.fromJson(Map<String, dynamic> json) {
+    final Object? raw = json['items'];
+    return OperationLogListPage(
+      items: <OperationLogItem>[
+        if (raw is List)
+          for (final Object? item in raw)
+            if (item is Map<String, dynamic>) OperationLogItem.fromJson(item),
       ],
       logKeepDays: (json['log_keep_days'] as num?)?.toInt() ?? 30,
       currentPage: (json['current_page'] as num?)?.toInt() ?? 1,

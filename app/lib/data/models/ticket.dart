@@ -5,6 +5,7 @@ class TicketSummary {
     required this.status,
     required this.statusText,
     required this.datetime,
+    required this.lastReplyTime,
   });
 
   final int id;
@@ -12,6 +13,7 @@ class TicketSummary {
   final int status;
   final String statusText;
   final String datetime;
+  final String lastReplyTime;
 
   factory TicketSummary.fromJson(Map<String, dynamic> json) => TicketSummary(
     id: (json['id'] as num).toInt(),
@@ -19,6 +21,7 @@ class TicketSummary {
     status: (json['status'] as num?)?.toInt() ?? 0,
     statusText: json['status_text'] as String? ?? '',
     datetime: json['datetime'] as String? ?? '',
+    lastReplyTime: json['last_reply_time'] as String? ?? '',
   );
 }
 

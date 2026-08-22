@@ -93,12 +93,39 @@ void main() {
         .assemble(remote: remoteProfile(), template: template())
         .config;
 
-    expect(config['mode'], 'global');
     expect(config['ipv6'], isTrue);
     expect(config['sniffer'], containsPair('enable', true));
     expect(config['ntp'], containsPair('server', 'time.apple.com'));
     expect(config['hosts'], containsPair('example.test', '127.0.0.1'));
     expect(config['dns'], containsPair('nameserver', <String>['223.6.6.6']));
+  });
+
+  test('分流模式由客户端覆盖面板', () {
+    expect(
+      assembler
+          .assemble(remote: remoteProfile(), template: template())
+          .config['mode'],
+      'rule',
+    );
+
+    final LocalTemplate global = LocalTemplate(
+      const LocalTemplateOptions(
+        tunEnabled: true,
+        tunStrictRoute: false,
+        mixedPort: 12334,
+        allowLan: false,
+        ipv6Enabled: true,
+        logLevel: 'warning',
+        routeMode: 'global',
+      ),
+      const ClashApiOptions(port: 19090, secret: 'secret'),
+    );
+    expect(
+      assembler
+          .assemble(remote: remoteProfile(), template: global)
+          .config['mode'],
+      'global',
+    );
   });
 
   test('面板缺失的通用段由本地模板补默认值', () {
@@ -128,6 +155,7 @@ void main() {
     expect(config['allow-lan'], isFalse);
     expect(config['bind-address'], '127.0.0.1');
     expect(config['log-level'], 'warning');
+    expect(config['mode'], 'rule');
     expect(config['profile'], containsPair('store-selected', true));
   });
 
@@ -137,8 +165,6 @@ void main() {
         .config;
 
     expect(config['mixed-port'], 12334);
-    // 0 即不监听。照抄面板的 7890 会与用户机上别的 Clash 客户端撞车，
-    // 且这些口界面从不显示、allow-lan 打开时还会跟着对局域网敞开
     for (final String key in const <String>[
       'port',
       'socks-port',
@@ -156,9 +182,7 @@ void main() {
                 .config['dns']
             as Map<String, dynamic>;
 
-    // 空串即不监听。0.0.0.0 会绕过 allow-lan 开关对局域网敞开
     expect(dns['listen'], '');
-    // 面板那些有价值的键不能被连带丢掉
     expect(dns['nameserver'], <String>['223.6.6.6']);
     expect(dns['enable'], isTrue);
   });

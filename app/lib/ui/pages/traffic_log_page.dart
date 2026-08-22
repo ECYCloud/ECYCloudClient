@@ -13,8 +13,9 @@ import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import '../widgets/simple_data_table.dart';
 import '../../l10n/l10n.dart';
+import '../theme.dart';
+import '../widgets/overlay_scroll_view.dart';
 
-/// 与网页 trafficlog.tpl 列一致的可排序字段。
 enum _TrafficSortCol { date, upload, download, rate, usage, nodeName }
 
 enum _TrafficSortType { date, traffic, rate, string }
@@ -28,15 +29,12 @@ _TrafficSortType _sortTypeOf(_TrafficSortCol col) => switch (col) {
   _TrafficSortCol.nodeName => _TrafficSortType.string,
 };
 
-/// 对齐网页 `sortKey`：流量串 / 倍率 / 日期 / 文本。
 Comparable<Object> _sortKey(String text, _TrafficSortType type) {
   final String raw = text.trim();
   switch (type) {
     case _TrafficSortType.traffic:
       final String s = raw.replaceAll(RegExp(r'\s+'), '');
-      final Match? m = RegExp(
-        r'^(-?\d+(?:\.\d+)?)([A-Za-z]+)$',
-      ).firstMatch(s);
+      final Match? m = RegExp(r'^(-?\d+(?:\.\d+)?)([A-Za-z]+)$').firstMatch(s);
       if (m == null) {
         return double.tryParse(s) ?? 0;
       }
@@ -127,7 +125,9 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -193,7 +193,7 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
       context: context,
       builder: (BuildContext context) => AlertDialog(
         title: Text(L10n.t('流量记录说明')),
-        content: SingleChildScrollView(
+        content: OverlayScrollView(
           child: Text(
             L10n.t(
               '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。',
@@ -214,8 +214,9 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final TrafficLogBundle? bundle = _bundle;
-    final List<String> days =
-        bundle == null ? const <String>[] : _allDays(bundle);
+    final List<String> days = bundle == null
+        ? const <String>[]
+        : _allDays(bundle);
     final String? expandedDay =
         _expandedDay != null && days.contains(_expandedDay)
         ? _expandedDay
@@ -246,19 +247,23 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView(
-                      padding: const EdgeInsets.all(14),
+                      padding: AppTheme.pageScrollPadding,
                       children: <Widget>[
                         SectionCard(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                L10n.t('此处只展示最近 {0} 天的每日流量记录。', <Object>[keepDays]),
+                                L10n.t('此处只展示最近 {0} 天的每日流量记录。', <Object>[
+                                  keepDays,
+                                ]),
                                 style: theme.textTheme.bodyMedium,
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                L10n.t('当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。'),
+                                L10n.t(
+                                  '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。',
+                                ),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -291,7 +296,7 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
                                       );
                                       ShellNavigator.openShopTraffic(context);
                                     },
-                                    child: Text(L10n.t('商店')),
+                                    child: Text('${L10n.t('商店')} ›'),
                                   ),
                                   Text(
                                     L10n.t(' 选购流量包'),
@@ -430,31 +435,35 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
   }) {
     final bool active = activeCol == col;
     final Color base = scheme.onSurfaceVariant;
-    TextStyle arrowStyle(bool highlight) => theme.textTheme.labelSmall!
-        .copyWith(
+    TextStyle arrowStyle(bool highlight) =>
+        theme.textTheme.labelSmall!.copyWith(
           color: base.withValues(alpha: highlight ? 1 : (active ? 0.45 : 0.65)),
           fontWeight: FontWeight.w600,
           height: 1,
         );
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              title,
-              style: theme.textTheme.labelMedium!.copyWith(
-                color: base,
-                fontWeight: FontWeight.w600,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: InkWell(
+        onTap: onTap,
+        mouseCursor: SystemMouseCursors.click,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                title,
+                style: theme.textTheme.labelMedium!.copyWith(
+                  color: base,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(width: 4),
-            Text('↑', style: arrowStyle(active && asc)),
-            Text('↓', style: arrowStyle(active && !asc)),
-          ],
+              const SizedBox(width: 4),
+              Text('↑', style: arrowStyle(active && asc)),
+              Text('↓', style: arrowStyle(active && !asc)),
+            ],
+          ),
         ),
       ),
     );
@@ -560,6 +569,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                   color: Colors.transparent,
                   child: InkWell(
                     onTap: () => widget.onToggleDay(day),
+                    mouseCursor: SystemMouseCursors.click,
                     child: segment(<TableRow>[
                       cells(
                         <Widget>[
@@ -579,10 +589,10 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                             ),
                           ),
                           TableText(bundle.traffic[day]?.totalUpload ?? '0B'),
+                          TableText(bundle.traffic[day]?.totalDownload ?? '0B'),
                           TableText(
-                            bundle.traffic[day]?.totalDownload ?? '0B',
+                            L10n.t(bundle.traffic[day]?.rateInfo ?? '无'),
                           ),
-                          TableText(bundle.traffic[day]?.rateInfo ?? L10n.t('无')),
                           TableText(
                             bundle.traffic[day]?.totalUsage ?? '0B',
                             bold: true,
@@ -608,7 +618,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                   TableText(L10n.t('累计使用流量'), bold: true),
                   TableText(bundle.totalUpload, bold: true),
                   TableText(bundle.totalDownload, bold: true),
-                  TableText(bundle.totalRateInfo, bold: true),
+                  TableText(L10n.t(bundle.totalRateInfo), bold: true),
                   TableText(bundle.totalUsage, bold: true),
                 ]),
               ], topBorder: true),
@@ -633,12 +643,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
     );
   }
 
-  Widget _kv(
-    ThemeData theme,
-    ColorScheme scheme,
-    String label,
-    Widget value,
-  ) {
+  Widget _kv(ThemeData theme, ColorScheme scheme, String label, Widget value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -679,6 +684,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
               color: Colors.transparent,
               child: InkWell(
                 onTap: () => widget.onToggleDay(days[i]),
+                mouseCursor: SystemMouseCursors.click,
                 child: DecoratedBox(
                   decoration: expandedDay == days[i]
                       ? _expandedRowDecoration(scheme)
@@ -703,9 +709,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                                     : Icons.chevron_right,
                                 size: 18,
                               ),
-                              Expanded(
-                                child: TableText(days[i], bold: true),
-                              ),
+                              Expanded(child: TableText(days[i], bold: true)),
                             ],
                           ),
                         ),
@@ -730,7 +734,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                           scheme,
                           L10n.t('倍率'),
                           TableText(
-                            bundle.traffic[days[i]]?.rateInfo ?? L10n.t('无'),
+                            L10n.t(bundle.traffic[days[i]]?.rateInfo ?? '无'),
                           ),
                         ),
                         _kv(
@@ -784,7 +788,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                   theme,
                   scheme,
                   L10n.t('倍率'),
-                  TableText(bundle.totalRateInfo, bold: true),
+                  TableText(L10n.t(bundle.totalRateInfo), bold: true),
                 ),
                 _kv(
                   theme,
@@ -843,7 +847,12 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
                   L10n.t('实际下载流量'),
                   TableText(Format.bytes(nodes[i].dailyDownload)),
                 ),
-                _kv(theme, scheme, L10n.t('倍率'), TableText(nodes[i].nodeRateStr)),
+                _kv(
+                  theme,
+                  scheme,
+                  L10n.t('倍率'),
+                  TableText(nodes[i].nodeRateStr),
+                ),
                 _kv(
                   theme,
                   scheme,
@@ -861,7 +870,7 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
     required BuildContext context,
     required String day,
     required TableRow Function(List<Widget> children, {Decoration? decoration})
-        cells,
+    cells,
     required Widget Function(List<TableRow> rows, {bool topBorder}) segment,
   }) {
     final ThemeData theme = Theme.of(context);
@@ -870,50 +879,47 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
 
     return ColoredBox(
       color: scheme.surfaceContainerHighest.withValues(alpha: 0.28),
-      child: segment(
-        <TableRow>[
-          cells(
-            <Widget>[
-              for (final (_TrafficSortCol, String) h in _nodeHeaders)
-                _sortLabel(
-                  theme: theme,
-                  scheme: scheme,
-                  title: L10n.t(h.$2),
-                  col: h.$1,
-                  activeCol: _nodeSortCol,
-                  asc: _nodeSortAsc,
-                  onTap: () => _onNodeSort(h.$1),
-                ),
-            ],
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-            ),
-          ),
-          if (nodes.isEmpty)
-            cells(<Widget>[
-              Text(
-                L10n.t('该日期没有节点使用数据'),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+      child: segment(<TableRow>[
+        cells(
+          <Widget>[
+            for (final (_TrafficSortCol, String) h in _nodeHeaders)
+              _sortLabel(
+                theme: theme,
+                scheme: scheme,
+                title: L10n.t(h.$2),
+                col: h.$1,
+                activeCol: _nodeSortCol,
+                asc: _nodeSortAsc,
+                onTap: () => _onNodeSort(h.$1),
               ),
-              const SizedBox.shrink(),
-              const SizedBox.shrink(),
-              const SizedBox.shrink(),
-              const SizedBox.shrink(),
-            ])
-          else
-            for (final TrafficNodeItem node in nodes)
-              cells(<Widget>[
-                TableText(node.nodeName, bold: true),
-                TableText(Format.bytes(node.dailyUpload)),
-                TableText(Format.bytes(node.dailyDownload)),
-                TableText(node.nodeRateStr),
-                TableText(Format.bytes(node.dailyUsage), bold: true),
-              ]),
-        ],
-        topBorder: true,
-      ),
+          ],
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+          ),
+        ),
+        if (nodes.isEmpty)
+          cells(<Widget>[
+            Text(
+              L10n.t('该日期没有节点使用数据'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox.shrink(),
+            const SizedBox.shrink(),
+            const SizedBox.shrink(),
+            const SizedBox.shrink(),
+          ])
+        else
+          for (final TrafficNodeItem node in nodes)
+            cells(<Widget>[
+              TableText(node.nodeName, bold: true),
+              TableText(Format.bytes(node.dailyUpload)),
+              TableText(Format.bytes(node.dailyDownload)),
+              TableText(node.nodeRateStr),
+              TableText(Format.bytes(node.dailyUsage), bold: true),
+            ]),
+      ], topBorder: true),
     );
   }
 }

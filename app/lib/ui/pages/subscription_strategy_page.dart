@@ -104,7 +104,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _loading = false;
       });
     }
@@ -180,11 +182,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
   void _persistCustomGroups() {
     unawaited(
       _save(<String, dynamic>{
-        'custom_groups': jsonEncode(
-          <Map<String, dynamic>>[
-            for (final CustomProxyGroup g in _customGroups) g.toJson(),
-          ],
-        ),
+        'custom_groups': jsonEncode(<Map<String, dynamic>>[
+          for (final CustomProxyGroup g in _customGroups) g.toJson(),
+        ]),
       }),
     );
   }
@@ -198,9 +198,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       builder: (BuildContext context) => AlertDialog(
         title: Text(L10n.t('确认删除')),
         content: Text(
-          L10n.t('确定要删除自定义策略组「{0}」吗？', <Object>[
-            _customGroups[i].name,
-          ]),
+          L10n.t('确定要删除自定义策略组「{0}」吗？', <Object>[_customGroups[i].name]),
         ),
         actions: <Widget>[
           TextButton(
@@ -244,11 +242,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       );
       return;
     }
-    if (replaceAt == null &&
-        _customGroups.length >= config.maxCustomGroups) {
+    if (replaceAt == null && _customGroups.length >= config.maxCustomGroups) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(L10n.t('最多添加 {0} 个自定义策略组', <Object>[config.maxCustomGroups])),
+          content: Text(
+            L10n.t('最多添加 {0} 个自定义策略组', <Object>[config.maxCustomGroups]),
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -393,14 +392,17 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         _customRuleProviders.length >= config.maxCustomRuleProviders) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(L10n.t('最多添加 {0} 个远程规则集', <Object>[config.maxCustomRuleProviders])),
+          content: Text(
+            L10n.t('最多添加 {0} 个远程规则集', <Object>[config.maxCustomRuleProviders]),
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
-    final CustomRuleProvider? old =
-        replaceAt != null ? _customRuleProviders[replaceAt] : null;
+    final CustomRuleProvider? old = replaceAt != null
+        ? _customRuleProviders[replaceAt]
+        : null;
     final bool sameUrl = old != null && old.url == url;
     final CustomRuleProvider provider = CustomRuleProvider(
       name: sameUrl ? old.name : '',
@@ -421,12 +423,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     if (replaceAt != null) {
       unawaited(
         _save(<String, dynamic>{
-          'custom_rule_providers': jsonEncode(
-            <Map<String, dynamic>>[
-              for (final CustomRuleProvider p in _customRuleProviders)
-                p.toJson(),
-            ],
-          ),
+          'custom_rule_providers': jsonEncode(<Map<String, dynamic>>[
+            for (final CustomRuleProvider p in _customRuleProviders) p.toJson(),
+          ]),
         }),
       );
     }
@@ -493,7 +492,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     }
 
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: AppTheme.pageScrollPadding,
       children: <Widget>[
         SectionCard(
           icon: Icons.tune,
@@ -572,7 +571,10 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  L10n.t('仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 {0} 个。', <Object>[config.maxCustomGroups]),
+                  L10n.t(
+                    '仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 {0} 个。',
+                    <Object>[config.maxCustomGroups],
+                  ),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -641,13 +643,13 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             const SizedBox(height: 8),
                             Row(
                               children: <Widget>[
-                                TextButton(
+                                FilledButton(
                                   onPressed: _busy
                                       ? null
-                                      : () =>
-                                          _commitCustomGroup(replaceAt: i),
+                                      : () => _commitCustomGroup(replaceAt: i),
                                   child: Text(L10n.t('保存')),
                                 ),
+                                const SizedBox(width: 8),
                                 TextButton(
                                   onPressed: _busy
                                       ? null
@@ -749,7 +751,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: OutlinedButton(
+                    child: FilledButton(
                       onPressed: _busy ? null : _commitCustomGroup,
                       child: Text(L10n.t('添加')),
                     ),
@@ -779,7 +781,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
         : (policies.isNotEmpty ? policies.first : '');
 
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: AppTheme.pageScrollPadding,
       children: <Widget>[
         if (config.allowCustomHosts)
           SectionCard(
@@ -789,7 +791,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  L10n.t('每行一条：domain = ip。最多 {0} 条。', <Object>[config.maxCustomHosts]),
+                  L10n.t('每行一条：domain = ip。最多 {0} 条。', <Object>[
+                    config.maxCustomHosts,
+                  ]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -814,7 +818,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  L10n.t('每行一条：TYPE,value,POLICY。最多 {0} 条。', <Object>[config.maxCustomRules]),
+                  L10n.t('每行一条：TYPE,value,POLICY。最多 {0} 条。', <Object>[
+                    config.maxCustomRules,
+                  ]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -860,7 +866,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  L10n.t('填写规则集 URL 并选择策略，仅 Clash / 官方客户端生效。需同时在上方设置自定义分流规则。最多 {0} 个。', <Object>[config.maxCustomRuleProviders]),
+                  L10n.t('填写规则集 URL 并选择策略。需同时在上方设置自定义分流规则。最多 {0} 个。', <Object>[
+                    config.maxCustomRuleProviders,
+                  ]),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -887,7 +895,10 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             const SizedBox(height: 8),
                             Row(
                               children: <Widget>[
-                                Text(L10n.t('策略'), style: theme.textTheme.bodyMedium),
+                                Text(
+                                  L10n.t('策略'),
+                                  style: theme.textTheme.bodyMedium,
+                                ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: LayoutBuilder(
@@ -896,21 +907,24 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                           BuildContext context,
                                           BoxConstraints constraints,
                                         ) {
-                                      return OptionDropdown<String>(
-                                        width: constraints.maxWidth,
-                                        height: 36,
-                                        value: draftPolicy.isEmpty
-                                            ? null
-                                            : draftPolicy,
-                                        placeholder: L10n.t('选择策略'),
-                                        options: <String, String>{
-                                          for (final String name in policies)
-                                            name: name,
+                                          return OptionDropdown<String>(
+                                            width: constraints.maxWidth,
+                                            height: 36,
+                                            value: draftPolicy.isEmpty
+                                                ? null
+                                                : draftPolicy,
+                                            placeholder: L10n.t('选择策略'),
+                                            options: <String, String>{
+                                              for (final String name
+                                                  in policies)
+                                                name: name,
+                                            },
+                                            onChanged: (String value) =>
+                                                setState(
+                                                  () => _draftPolicy = value,
+                                                ),
+                                          );
                                         },
-                                        onChanged: (String value) =>
-                                            setState(() => _draftPolicy = value),
-                                      );
-                                    },
                                   ),
                                 ),
                               ],
@@ -918,13 +932,13 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                             const SizedBox(height: 8),
                             Row(
                               children: <Widget>[
-                                TextButton(
+                                FilledButton(
                                   onPressed: _busy
                                       ? null
-                                      : () =>
-                                          _commitRuleProvider(replaceAt: i),
+                                      : () => _commitRuleProvider(replaceAt: i),
                                   child: Text(L10n.t('保存')),
                                 ),
+                                const SizedBox(width: 8),
                                 TextButton(
                                   onPressed: _busy
                                       ? null
@@ -982,18 +996,21 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                 BuildContext context,
                                 BoxConstraints constraints,
                               ) {
-                            return OptionDropdown<String>(
-                              width: constraints.maxWidth,
-                              height: 36,
-                              value: draftPolicy.isEmpty ? null : draftPolicy,
-                              placeholder: L10n.t('选择策略'),
-                              options: <String, String>{
-                                for (final String name in policies) name: name,
+                                return OptionDropdown<String>(
+                                  width: constraints.maxWidth,
+                                  height: 36,
+                                  value: draftPolicy.isEmpty
+                                      ? null
+                                      : draftPolicy,
+                                  placeholder: L10n.t('选择策略'),
+                                  options: <String, String>{
+                                    for (final String name in policies)
+                                      name: name,
+                                  },
+                                  onChanged: (String value) =>
+                                      setState(() => _draftPolicy = value),
+                                );
                               },
-                              onChanged: (String value) =>
-                                  setState(() => _draftPolicy = value),
-                            );
-                          },
                         ),
                       ),
                     ],
@@ -1004,7 +1021,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                   spacing: 8,
                   children: <Widget>[
                     if (_editingProviderIdx == null)
-                      OutlinedButton(
+                      FilledButton(
                         onPressed: _busy ? null : _commitRuleProvider,
                         child: Text(L10n.t('添加')),
                       ),
@@ -1013,13 +1030,12 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                           ? null
                           : () => unawaited(
                               _save(<String, dynamic>{
-                                'custom_rule_providers': jsonEncode(
-                                  <Map<String, dynamic>>[
-                                    for (final CustomRuleProvider p
-                                        in _customRuleProviders)
-                                      p.toJson(),
-                                  ],
-                                ),
+                                'custom_rule_providers':
+                                    jsonEncode(<Map<String, dynamic>>[
+                                      for (final CustomRuleProvider p
+                                          in _customRuleProviders)
+                                        p.toJson(),
+                                    ]),
                               }),
                             ),
                       child: Text(L10n.t('保存远程规则集')),

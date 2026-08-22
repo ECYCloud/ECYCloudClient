@@ -9,7 +9,7 @@
 | Linux（deb） | Debian 12+ / Ubuntu 22.04+ 及衍生版 | x64 / arm64 | `linux-x64.deb` / `linux-arm64.deb` |
 | Linux（rpm） | Fedora 36+ / openSUSE Leap 15.6+ / RHEL 10+ 系 | x64 / arm64 | `linux-x64.rpm` / `linux-arm64.rpm` |
 | Linux（tar.gz） | 其它带 systemd 与 GTK3 的发行版（Arch 等），glibc 2.35+ | x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` |
-| Android | 7.0（API 24） | arm64-v8a / armeabi-v7a / x86_64（按 ABI 分包） | `android-arm64.apk` / `android-arm.apk` / `android-x64.apk` |
+| Android | 7.0（API 24）；含 Android TV（同一 APK） | arm64-v8a / armeabi-v7a / x86_64（按 ABI 分包） | `android-arm64.apk` / `android-arm.apk` / `android-x64.apk` |
 
 ## 安装与更新
 
@@ -49,7 +49,7 @@ pwsh scripts/build-windows.ps1 -Arch x64 -Installer
 ./scripts/build-android.sh --version 1.0.1
 ```
 
-Flutter 不支持交叉编译 Windows / Linux 桌面产物，对应 arm64 包须在 arm64 机器上构建；macOS 可在 Apple Silicon 上构建并 thin 出 Intel 包。发布流水线见 `.github/workflows/release.yml`。
+Flutter 不支持交叉编译 Windows / Linux 桌面产物，对应 arm64 包须在 arm64 机器上构建；macOS 可在 Apple Silicon 上构建并 thin 出 Intel 包。推送到仓库后 GitHub Actions 会按 `.github/workflows/release.yml` 出各端安装包（Artifacts）；打 `v*` tag 或手动触发才会写入 Releases。
 
 ## 许可证
 

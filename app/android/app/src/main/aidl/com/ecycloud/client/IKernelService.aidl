@@ -16,6 +16,6 @@ interface IKernelService {
 
     void stop();
 
-    // 界面进程绑上来时登记转交入口。不需要应答，也不该让界面的主线程等 Binder 往返
+    // oneway：不该让界面主线程等 Binder 往返
     oneway void registerUi(IUiCallback callback);
 }

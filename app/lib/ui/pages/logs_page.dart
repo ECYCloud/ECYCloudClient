@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/logger.dart';
 import '../../l10n/l10n.dart';
+import '../node_labels.dart';
 import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
@@ -25,8 +26,6 @@ class _LogsPageState extends State<LogsPage> {
   final ScrollController _scroll = ScrollController();
   List<LogEntry> _visible = const <LogEntry>[];
 
-  // 逐档筛选，null 为不筛。按钮读起来是「日志类型」，用「不低于该级别」的阈值语义
-  // 会让选 info 时仍混进一堆 error，看着像筛选没生效
   LogLevel? _level;
   String _keyword = '';
   Timer? _pending;
@@ -46,18 +45,23 @@ class _LogsPageState extends State<LogsPage> {
     super.dispose();
   }
 
-  // 过滤只在数据或条件变化时做一次，不放在 build 里按帧重算
   List<LogEntry> _filter() => Logger.instance.entries
       .where(
         (LogEntry entry) =>
             (_level == null || entry.level == _level) &&
             (_keyword.isEmpty ||
+                entry.source.toLowerCase().contains(_keyword) ||
                 entry.message.toLowerCase().contains(_keyword) ||
-                entry.source.toLowerCase().contains(_keyword)),
+                NodeLabels.annotateText(
+                  entry.message,
+                ).toLowerCase().contains(_keyword)),
       )
       .toList(growable: false)
       .reversed
       .toList(growable: false);
+
+  static String _shown(LogEntry entry) =>
+      NodeLabels.annotateText(entry.message);
 
   void _refresh() {
     _pending?.cancel();
@@ -88,8 +92,7 @@ class _LogsPageState extends State<LogsPage> {
   ];
 
   // 铺满整行由 SegmentedButton 自己等分，不能塞进横向滚动条：那样它按自然宽度排版，
-  // 窄屏放不下的档位会被裁在屏幕外，也看不出还能横滑。挤不下时它会把标签折行加高，
-  // 窄屏调紧字号与内边距，常见机型宽度下仍是一行
+  // 窄屏放不下的档位会被裁在屏幕外，也看不出还能横滑
   Widget _levelFilter(ThemeData theme, {required bool compact}) =>
       SegmentedButton<LogLevel?>(
         segments: <ButtonSegment<LogLevel?>>[
@@ -116,7 +119,10 @@ class _LogsPageState extends State<LogsPage> {
 
   Widget _searchActions(ThemeData theme, List<LogEntry> visible) => Row(
     children: <Widget>[
-      Text(L10n.t('{0} 条', <Object>[visible.length]), style: theme.textTheme.bodySmall),
+      Text(
+        L10n.t('{0} 条', <Object>[visible.length]),
+        style: theme.textTheme.bodySmall,
+      ),
       const SizedBox(width: 10),
       Expanded(
         child: SearchField(
@@ -135,7 +141,12 @@ class _LogsPageState extends State<LogsPage> {
         visualDensity: VisualDensity.compact,
         onPressed: () => Clipboard.setData(
           ClipboardData(
-            text: visible.map((LogEntry entry) => entry.toString()).join('\n'),
+            text: visible
+                .map(
+                  (LogEntry entry) =>
+                      '${entry.time.toIso8601String()} [${entry.level.label}] [${entry.source}] ${_shown(entry)}',
+                )
+                .join('\n'),
           ),
         ),
       ),
@@ -187,14 +198,15 @@ class _LogsPageState extends State<LogsPage> {
               : SelectionArea(
                   child: ListView.builder(
                     controller: _scroll,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
+                    padding: const EdgeInsets.fromLTRB(
+                      14,
+                      6,
+                      AppTheme.overlayScrollGutter,
+                      6,
                     ),
                     itemCount: visible.length,
                     // 每行都是可选中文本时滚动会明显掉帧：选区命中测试要为每个
-                    // 子节点各建一份，条目一多就顶不住。列表整体套一个
-                    // SelectionArea，行内用普通 Text
+                    // 子节点各建一份，条目一多就顶不住
                     itemBuilder: (BuildContext context, int index) {
                       final LogEntry entry = visible[index];
 
@@ -225,7 +237,7 @@ class _LogsPageState extends State<LogsPage> {
                             ),
                             Expanded(
                               child: Text(
-                                entry.message,
+                                _shown(entry),
                                 style: _mono(_color(entry.level, scheme)),
                               ),
                             ),

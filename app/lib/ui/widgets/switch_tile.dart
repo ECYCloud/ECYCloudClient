@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// 带说明文字的开关行。开关按 [AppTheme.switchScale] 缩小，
-/// Switch 的轨道尺寸在 Material 里写死、主题无法调整，只能整体缩放，
-/// 而 [SwitchListTile] 不允许替换内部的开关，故自行拼装。
-///
-/// 与 [SwitchListTile] 的区别：只有开关本体可点，点标题不会误触发。
+// Switch 轨道尺寸 Material 写死，SwitchListTile 不能换内部开关
 class SwitchTile extends StatelessWidget {
   const SwitchTile({
     super.key,
@@ -16,6 +12,8 @@ class SwitchTile extends StatelessWidget {
     this.subtitle,
     this.icon,
     this.contentPadding,
+    this.onSettings,
+    this.settingsTooltip,
   });
 
   final String title;
@@ -24,14 +22,18 @@ class SwitchTile extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
   final IconData? icon;
   final EdgeInsetsGeometry? contentPadding;
+  final VoidCallback? onSettings;
+  final String? settingsTooltip;
 
   @override
   Widget build(BuildContext context) {
     final ValueChanged<bool>? onChanged = this.onChanged;
+    final VoidCallback? onSettings = this.onSettings;
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return ListTile(
       contentPadding: contentPadding,
+      onTap: onChanged == null ? null : () => onChanged(!value),
       leading: icon == null
           ? null
           : Icon(
@@ -41,12 +43,37 @@ class SwitchTile extends StatelessWidget {
             ),
       minLeadingWidth: 18,
       horizontalTitleGap: 10,
-      title: Text(title),
+      title: onSettings == null
+          ? Text(title)
+          : Row(
+              children: <Widget>[
+                Flexible(child: Text(title, overflow: TextOverflow.ellipsis)),
+                IconButton(
+                  tooltip: settingsTooltip,
+                  icon: Icon(
+                    Icons.settings_outlined,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  visualDensity: VisualDensity.standard,
+                  constraints: BoxConstraints.tightFor(
+                    width: AppTheme.minTapTarget,
+                    height: AppTheme.minTapTarget,
+                  ),
+                  padding: EdgeInsets.zero,
+                  onPressed: onSettings,
+                ),
+              ],
+            ),
       subtitle: subtitle == null ? null : Text(subtitle!),
-      trailing: Transform.scale(
-        scale: AppTheme.switchScale,
-        alignment: Alignment.centerRight,
-        child: Switch(value: value, onChanged: onChanged),
+      trailing: Focus(
+        canRequestFocus: false,
+        descendantsAreFocusable: false,
+        child: Transform.scale(
+          scale: AppTheme.switchScale,
+          alignment: Alignment.centerRight,
+          child: Switch(value: value, onChanged: onChanged),
+        ),
       ),
     );
   }

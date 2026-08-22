@@ -71,7 +71,6 @@ class AnnouncementController extends ChangeNotifier {
       _loaded = false;
       notifyListeners();
     }
-    // 不在登录绑定时拉取；由首页访问时拉一次（与网页打开用户中心一致）
   }
 
   Future<void> refresh() async {
@@ -90,7 +89,6 @@ class AnnouncementController extends ChangeNotifier {
       _popup = bundle.popup;
       _loaded = true;
     } on ApiException catch (e) {
-      // 公告也走面板限流；429 不刷到界面，也不打 warn 刷屏
       if (e.rateLimited) {
         Logger.instance.debug(_source, '拉取公告限流，稍后重试');
       } else {

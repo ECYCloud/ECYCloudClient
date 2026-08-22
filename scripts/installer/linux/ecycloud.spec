@@ -16,6 +16,8 @@ Requires:       libsecret-1.so.0()(64bit)
 Requires:       (iproute or iproute2)
 # 系统代理默认开启，读写的 org.gnome.system.proxy 由它提供，GTK3 并不带
 Requires:       gsettings-desktop-schemas
+# 公告 / 商店 / 工单内视频走 media_kit，运行期 dlopen libmpv，ldd 看不到
+Requires:       (libmpv.so.2()(64bit) or libmpv.so.1()(64bit))
 
 %description
 基于 mihomo 内核的 ECY Cloud 客户端，含特权后台服务。

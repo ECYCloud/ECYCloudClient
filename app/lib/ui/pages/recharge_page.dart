@@ -8,6 +8,8 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../../data/models/shop.dart';
 import '../app_scope.dart';
+import '../theme.dart';
+import '../widgets/icon_image.dart';
 import '../widgets/page_header.dart';
 import '../widgets/payment_wait_dialog.dart';
 import '../widgets/refresh_button.dart';
@@ -145,7 +147,9 @@ class _RechargePageState extends State<RechargePage> {
       if (!result.needsOnlinePayment) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result.message.isEmpty ? L10n.t('充值已提交') : result.message),
+            content: Text(
+              result.message.isEmpty ? L10n.t('充值已提交') : result.message,
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -223,101 +227,115 @@ class _RechargePageState extends State<RechargePage> {
                 : info == null
                 ? const SizedBox.shrink()
                 : ListView(
-                    padding: const EdgeInsets.all(14),
+                    padding: AppTheme.pageScrollPadding,
                     children: <Widget>[
-                SectionCard(
-                  icon: Icons.account_balance_wallet_outlined,
-                  title: L10n.t('账户余额'),
-                  child: Column(
-                    children: <Widget>[
-                      InfoRow(
-                        label: L10n.t('当前余额'),
-                        value: '¥ ${info.money.toStringAsFixed(2)}',
-                      ),
-                      InfoRow(label: L10n.t('累计充值'), value: '¥ ${info.totalTopUp}'),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SectionCard(
-                  icon: Icons.confirmation_number_outlined,
-                  title: L10n.t('充值码兑换'),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      TextField(
-                        controller: _code,
-                        inputFormatters: <TextInputFormatter>[
-                          asciiOnlyFormatter,
-                        ],
-                        decoration: InputDecoration(
-                          labelText: L10n.t('充值码'),
-                          prefixIcon: Icon(Icons.vpn_key_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton(
-                          onPressed: _busy ? null : _redeem,
-                          child: Text(L10n.t('兑换')),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (info.hasEpay) ...<Widget>[
-                  const SizedBox(height: 10),
-                  SectionCard(
-                    icon: Icons.payment_outlined,
-                    title: L10n.t('在线充值'),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        TextField(
-                          controller: _amount,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: L10n.t('充值金额'),
-                            prefixIcon: Icon(Icons.attach_money),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
+                      SectionCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: L10n.t('账户余额'),
+                        child: Column(
                           children: <Widget>[
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: _busy
-                                    ? null
-                                    : () => unawaited(_pay('alipay')),
-                                icon: const Icon(Icons.account_balance_wallet, size: 16),
-                                label: Text(L10n.t('支付宝')),
+                            InfoRow(
+                              label: L10n.t('当前余额'),
+                              value: '¥ ${info.money.toStringAsFixed(2)}',
+                            ),
+                            InfoRow(
+                              label: L10n.t('累计充值'),
+                              value: '¥ ${info.totalTopUp}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SectionCard(
+                        icon: Icons.confirmation_number_outlined,
+                        title: L10n.t('充值码兑换'),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            TextField(
+                              controller: _code,
+                              inputFormatters: <TextInputFormatter>[
+                                asciiOnlyFormatter,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: L10n.t('充值码'),
+                                prefixIcon: Icon(Icons.vpn_key_outlined),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton.tonalIcon(
-                                onPressed: _busy
-                                    ? null
-                                    : () => unawaited(_pay('wxpay')),
-                                icon: const Icon(Icons.chat, size: 16),
-                                label: Text(L10n.t('微信支付')),
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton(
+                                onPressed: _busy ? null : _redeem,
+                                child: Text(L10n.t('兑换')),
                               ),
                             ),
                           ],
                         ),
+                      ),
+                      if (info.hasEpay) ...<Widget>[
+                        const SizedBox(height: 10),
+                        SectionCard(
+                          icon: Icons.payment_outlined,
+                          title: L10n.t('在线充值'),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              TextField(
+                                controller: _amount,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText: L10n.t('充值金额'),
+                                  prefixIcon: Icon(Icons.currency_yuan),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: TextButton.icon(
+                                      onPressed: _busy
+                                          ? null
+                                          : () => unawaited(_pay('alipay')),
+                                      icon: const LocalIcon(
+                                        assets: <String>['assets/alipay.png'],
+                                        width: 18,
+                                        fallback: Icon(
+                                          Icons.account_balance_wallet,
+                                          size: 16,
+                                        ),
+                                      ),
+                                      label: Text(L10n.t('支付宝')),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: TextButton.icon(
+                                      onPressed: _busy
+                                          ? null
+                                          : () => unawaited(_pay('wxpay')),
+                                      icon: const LocalIcon(
+                                        assets: <String>['assets/wxpay.png'],
+                                        width: 18,
+                                        fallback: Icon(Icons.chat, size: 16),
+                                      ),
+                                      label: Text(L10n.t('微信支付')),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
-                    ),
+                    ],
                   ),
-                ],
-              ],
-            ),
           ),
         ],
       ),
     );
   }
 }
-

@@ -9,17 +9,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// GUI 只能给版本号，资产名、下载地址与校验值一律由服务自己从官方仓库解析：
-// 这段代码跑在 SYSTEM 下、写的是安装目录，不能让调用方指定下载什么。
+// GUI 只能给版本号；资产名、地址与校验值由本进程从官方仓库解析，不能让调用方指定
 const (
 	releaseAPI      = "https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v%s"
 	downloadPrefix  = "https://github.com/MetaCubeX/mihomo/releases/download/"
@@ -31,8 +33,7 @@ const (
 
 var kernelVersionPattern = regexp.MustCompile(`^\d+(\.\d+){1,3}$`)
 
-// amd64 一律取 compatible（GOAMD64=v1）：官方不带后缀的 amd64 目标是 GOAMD64=v3，
-// 在 Haswell 之前的 CPU 上会因非法指令崩溃。须与 scripts/kernel.lock.json 一致。
+// amd64 必须取 compatible（GOAMD64=v1），须与 scripts/kernel.lock.json 一致
 func kernelAssetTarget() string {
 	if runtime.GOARCH == "amd64" {
 		return "windows-amd64-compatible"
@@ -57,8 +58,7 @@ func (s *server) upgradeProgress() map[string]any {
 	return map[string]any{"stage": s.progress.stage, "percent": s.progress.percent}
 }
 
-// 返回实际安装到的版本。GUI 负责在成功后决定是否重连内核。
-func (s *server) upgradeKernel(version string) (string, error) {
+func (s *server) upgradeKernel(version string, proxyPort int) (string, error) {
 	if !kernelVersionPattern.MatchString(version) {
 		return "", fmt.Errorf("版本号 %q 不合法", version)
 	}
@@ -69,7 +69,7 @@ func (s *server) upgradeKernel(version string) (string, error) {
 	defer s.setUpgradeProgress("", 0)
 
 	s.setUpgradeProgress("resolving", 0)
-	name, url, want, err := resolveKernelAsset(version)
+	name, url, want, err := resolveKernelAsset(version, proxyPort)
 	if err != nil {
 		return "", err
 	}
@@ -82,7 +82,7 @@ func (s *server) upgradeKernel(version string) (string, error) {
 
 	archive := filepath.Join(dir, name)
 	logf("开始下载内核 %s", url)
-	if err := s.downloadVerified(url, archive, want); err != nil {
+	if err := s.downloadVerified(url, archive, want, proxyPort); err != nil {
 		return "", err
 	}
 
@@ -92,14 +92,12 @@ func (s *server) upgradeKernel(version string) (string, error) {
 		return "", err
 	}
 
-	// 新内核先自证能跑：装到位之后才发现它起不来，用户就只剩重装客户端一条路
 	installed := kernelVersionOf(staged)
 	if installed == "" {
 		return "", fmt.Errorf("新内核无法运行，已放弃升级")
 	}
 
-	// 下载与校验期间内核一直在跑：网络受限时只有隧道通着才取得到 GitHub。
-	// 到这一步才停，替换完由 GUI 决定是否重连
+	// 下载走本地 mixed 出网，内核必须撑到校验通过后才停
 	s.setUpgradeProgress("installing", 0)
 	s.kernel.stop()
 	if err := installKernel(staged); err != nil {
@@ -110,8 +108,29 @@ func (s *server) upgradeKernel(version string) (string, error) {
 	return version, nil
 }
 
-func resolveKernelAsset(version string) (name string, url string, sha256Hex string, err error) {
-	client := &http.Client{Timeout: apiTimeout}
+func githubHTTPClient(timeout time.Duration, proxyPort int) (*http.Client, error) {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("无法配置 HTTP 传输")
+	}
+	transport := base.Clone()
+	if proxyPort != 0 {
+		if proxyPort <= 1024 || proxyPort > 65535 {
+			return nil, fmt.Errorf("非法代理端口 %d", proxyPort)
+		}
+		transport.Proxy = http.ProxyURL(&url.URL{
+			Scheme: "http",
+			Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(proxyPort)),
+		})
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
+}
+
+func resolveKernelAsset(version string, proxyPort int) (name string, url string, sha256Hex string, err error) {
+	client, err := githubHTTPClient(apiTimeout, proxyPort)
+	if err != nil {
+		return "", "", "", err
+	}
 	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf(releaseAPI, version), nil)
 	if err != nil {
 		return "", "", "", err
@@ -158,11 +177,13 @@ func resolveKernelAsset(version string) (name string, url string, sha256Hex stri
 	return "", "", "", fmt.Errorf("该版本没有提供 %s", wanted)
 }
 
-// 校验值来自 Releases API，与二进制同源：它挡的是传输损坏与镜像替换，
-// 所以下载允许跟随 GitHub 自己的重定向（正文会重定向到 objects.githubusercontent.com）
-func (s *server) downloadVerified(url, path, want string) error {
-	client := &http.Client{Timeout: upgradeTimeout}
-	response, err := client.Get(url)
+// digest 来自 Releases API，下载可跟随 GitHub 重定向
+func (s *server) downloadVerified(fileURL, path, want string, proxyPort int) error {
+	client, err := githubHTTPClient(upgradeTimeout, proxyPort)
+	if err != nil {
+		return err
+	}
+	response, err := client.Get(fileURL)
 	if err != nil {
 		return fmt.Errorf("下载内核失败: %w", err)
 	}
@@ -227,7 +248,6 @@ func (s *server) downloadVerified(url, path, want string) error {
 	return nil
 }
 
-// 发布包内只有一个可执行文件，取出来按安装后的名字暂存到 dir 下并返回其路径
 func extractKernel(archive, dir string) (string, error) {
 	reader, err := zip.OpenReader(archive)
 	if err != nil {
@@ -272,7 +292,6 @@ func extractOne(entry *zip.File, path string) error {
 	return nil
 }
 
-// 旧文件先改名留底，替换失败就换回去：宁可留在旧版本，也不能让安装目录停在坏状态
 func installKernel(source string) error {
 	path := kernelPath()
 	backup := path + kernelBackupExt

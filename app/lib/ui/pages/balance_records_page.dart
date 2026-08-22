@@ -6,6 +6,7 @@ import '../../data/api/api_exception.dart';
 import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
@@ -79,7 +80,9 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -135,7 +138,7 @@ class _BalanceRecordsPageState extends State<BalanceRecordsPage> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView(
-                      padding: const EdgeInsets.all(14),
+                      padding: AppTheme.pageScrollPadding,
                       children: <Widget>[
                         SimpleDataTable(
                           columns: <String>[

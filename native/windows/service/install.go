@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -14,10 +15,7 @@ import (
 
 const stopTimeout = 20 * time.Second
 
-// 默认服务 DACL 只给交互用户查询权限，启动要管理员。客户端是普通权限进程，
-// 服务若因异常退出正处在 SCM 的重启等待窗口里，客户端就只能干等或弹 UAC。
-// 这里在默认项之外给交互用户补一个 RP（SERVICE_START）：
-// 已登录用户可以把服务拉起来，但停不了、也改不了配置。
+// 默认服务 DACL 不给交互用户 SERVICE_START，补 RP：能启动，停不了、改不了
 const serviceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)" +
 	"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)" +
 	"(A;;CCLCSWRPLOCRRC;;;IU)" +
@@ -27,6 +25,11 @@ func install() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("定位可执行文件失败: %w", err)
+	}
+
+	// 不支持 ACL 的卷（exFAT 等）上会失败，只记录，不拦住安装
+	if err := applyDACL(filepath.Dir(installDir()), installDirSDDL); err != nil {
+		logf("收紧安装目录权限失败: %v", err)
 	}
 
 	manager, err := mgr.Connect()
@@ -51,7 +54,6 @@ func install() error {
 	}
 	defer service.Close()
 
-	// 服务挂掉就没人还原系统代理了，必须让 SCM 自动拉起
 	recovery := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},

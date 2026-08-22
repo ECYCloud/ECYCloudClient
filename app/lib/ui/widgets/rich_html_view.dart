@@ -5,10 +5,19 @@ import '../../core/safe_url.dart';
 import '../app_scope.dart';
 import '../shell_navigator.dart';
 import '../../l10n/l10n.dart';
+import '../pages/account_page.dart';
+import '../pages/balance_records_page.dart';
+import '../pages/delete_account_page.dart';
+import '../pages/edit_account_page.dart';
+import '../pages/invite_page.dart';
+import '../pages/operation_logs_page.dart';
+import '../pages/purchases_page.dart';
+import '../pages/recharge_page.dart';
+import '../pages/traffic_log_page.dart';
 import 'image_viewer.dart';
+import 'video_viewer.dart';
 import 'zoom_cursors.dart';
 
-/// 从若干段 HTML 中按出现顺序收集去重后的 img src（与网站 collectImageList 同口径）。
 List<String> collectHtmlImageSrcs(Iterable<String> htmlFragments) {
   final RegExp re = RegExp(
     r'''<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1''',
@@ -34,13 +43,10 @@ String _decodeHtmlSrc(String value) {
       .replaceAll('&apos;', "'");
 }
 
-/// 渲染面板下发的安全 HTML（文字格式 / 图片 / 视频链接）。
 class RichHtmlView extends StatelessWidget {
   const RichHtmlView(this.html, {super.key, this.imageAlbum});
 
   final String html;
-
-  /// 非空时放大浏览使用该相册（如工单整单会话）；空则仅本段 HTML 内的图。
   final List<String>? imageAlbum;
 
   @override
@@ -76,9 +82,7 @@ class RichHtmlView extends StatelessWidget {
         'hr': Style(
           margin: Margins.symmetric(vertical: 10),
           height: Height(1),
-          border: Border(
-            top: BorderSide(color: theme.dividerColor, width: 1),
-          ),
+          border: Border(top: BorderSide(color: theme.dividerColor, width: 1)),
           backgroundColor: theme.dividerColor,
         ),
         'a': Style(
@@ -99,22 +103,17 @@ class RichHtmlView extends StatelessWidget {
             final bool canTap = href != null && _canTapLink(href, base);
             final TextStyle? linkStyle = ctx.style?.generateTextStyle();
             final Widget label = Text.rich(
-              TextSpan(
-                children: ctx.inlineSpanChildren,
-                style: linkStyle,
-              ),
+              TextSpan(children: ctx.inlineSpanChildren, style: linkStyle),
             );
             final Widget link = MouseRegion(
-              cursor: canTap
-                  ? SystemMouseCursors.click
-                  : MouseCursor.defer,
-              child: GestureDetector(
+              cursor: canTap ? SystemMouseCursors.click : MouseCursor.defer,
+              child: InkWell(
                 onTap: canTap
                     ? () => ctx.parser.internalOnAnchorTap?.call(
-                          href,
-                          ctx.attributes,
-                          ctx.element,
-                        )
+                        href,
+                        ctx.attributes,
+                        ctx.element,
+                      )
                     : null,
                 child: label,
               ),
@@ -136,9 +135,9 @@ class RichHtmlView extends StatelessWidget {
             return _TicketImage(
               src,
               alt: ctx.attributes['alt'] ?? '',
-              // 与网站 collectImageList 同一口径：有外部相册用外部，否则本段富文本内切换
               album: () {
-                final Iterable<String> raw = imageAlbum ??
+                final Iterable<String> raw =
+                    imageAlbum ??
                     ctx.parser.htmlData
                         .querySelectorAll('img')
                         .map((e) => e.attributes['src'] ?? '')
@@ -158,19 +157,11 @@ class RichHtmlView extends StatelessWidget {
         TagExtension(
           tagsToExtend: <String>{'video'},
           builder: (ExtensionContext ctx) {
-            final String? src = _httpUrl(ctx.attributes['src'] ?? '', base);
+            final String? src = _videoUrl(ctx, base);
             if (src == null) {
               return const SizedBox.shrink();
             }
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: OutlinedButton.icon(
-                onPressed: () =>
-                    AppScope.of(context).platform.openUrl(src),
-                icon: const Icon(Icons.play_circle_outline, size: 18),
-                label: Text(L10n.t('播放视频')),
-              ),
-            );
+            return HtmlVideoView(src, key: ValueKey<String>(src));
           },
         ),
       ],
@@ -178,7 +169,7 @@ class RichHtmlView extends StatelessWidget {
         if (url == null || url.isEmpty) {
           return;
         }
-        if (_isUserTicketLink(url) && ShellNavigator.openTickets(context)) {
+        if (_openInApp(context, _appRoute(url, base))) {
           return;
         }
         final String? abs = _openableLink(url, base);
@@ -211,9 +202,24 @@ class RichHtmlView extends StatelessWidget {
     'frameset',
   };
 
-  static String _absolute(String url, String base) => url.startsWith('/')
-      ? '${base.replaceAll(RegExp(r'/+$'), '')}$url'
-      : url;
+  static String _absolute(String url, String base) =>
+      url.startsWith('/') ? '${base.replaceAll(RegExp(r'/+$'), '')}$url' : url;
+
+  static String? _videoUrl(ExtensionContext ctx, String base) {
+    final List<String> candidates = <String>[ctx.attributes['src'] ?? ''];
+    for (final child in ctx.elementChildren) {
+      if (child.localName == 'source') {
+        candidates.add(child.attributes['src'] ?? '');
+      }
+    }
+    for (final String url in candidates) {
+      final String? ok = _httpUrl(url, base);
+      if (ok != null) {
+        return ok;
+      }
+    }
+    return null;
+  }
 
   static String? _httpUrl(String url, String base) {
     if (url.isEmpty) {
@@ -232,17 +238,72 @@ class RichHtmlView extends StatelessWidget {
   }
 
   static bool _canTapLink(String href, String base) =>
-      _isUserTicketLink(href) || _openableLink(href, base) != null;
+      _appRoute(href, base).isNotEmpty || _openableLink(href, base) != null;
 
-  static bool _isUserTicketLink(String url) {
-    final String path = url.startsWith('/')
-        ? url.split('?').first
-        : (Uri.tryParse(url)?.path ?? '');
-    return path == '/user/ticket' || path.startsWith('/user/ticket/');
+  static int? _tabOf(String route) => switch (route) {
+    '/user' => ShellNavigator.homeTab,
+    '/user/node' => ShellNavigator.nodesTab,
+    '/user/shop' => ShellNavigator.shopTab,
+    '/user/ticket' => ShellNavigator.ticketsTab,
+    '/user/unlock' => ShellNavigator.unlockTab,
+    _ => null,
+  };
+
+  static Widget? _pageOf(String route) => switch (route) {
+    '/user/profile' => const AccountPage(),
+    '/user/edit' => const EditAccountPage(),
+    '/user/invite' => const InvitePage(),
+    '/user/trafficlog' => const TrafficLogPage(),
+    '/user/operation_logs' => const OperationLogsPage(),
+    '/user/recharge' => const RechargePage(),
+    '/user/balance-transactions' => const BalanceRecordsPage(),
+    '/user/purchases' => const PurchasesPage(),
+    '/user/kill' => const DeleteAccountPage(),
+    _ => null,
+  };
+
+  static String _appRoute(String url, String base) {
+    final Uri? uri = Uri.tryParse(url);
+    if (uri == null ||
+        (uri.hasAuthority && uri.host != Uri.tryParse(base)?.host)) {
+      return '';
+    }
+    String path = uri.path;
+    while (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    if (_tabOf(path) != null || _pageOf(path) != null) {
+      return path;
+    }
+    // 只回退一级：再往上走会把 /user/tutorial 这类没有对应页面的路径落到 /user 首页
+    final List<String> parts = path.split('/');
+    if (parts.length > 3) {
+      final String parent = parts.take(3).join('/');
+      if (_tabOf(parent) != null || _pageOf(parent) != null) {
+        return parent;
+      }
+    }
+    return '';
+  }
+
+  static bool _openInApp(BuildContext context, String route) {
+    final int? tab = _tabOf(route);
+    if (tab != null) {
+      return ShellNavigator.openTab(context, tab);
+    }
+    final Widget? page = _pageOf(route);
+    if (page == null) {
+      return false;
+    }
+    final NavigatorState nav = Navigator.of(context);
+    if (ModalRoute.of(context) is PopupRoute) {
+      nav.pop();
+    }
+    nav.push(MaterialPageRoute<void>(builder: (BuildContext context) => page));
+    return true;
   }
 }
 
-/// 失败 URL 全局记住，避免 ListView / Html 重建时 Image.network 反复重试导致高度闪烁。
 class _TicketImage extends StatefulWidget {
   const _TicketImage(this.src, {required this.alt, required this.album});
 
@@ -293,7 +354,7 @@ class _TicketImageState extends State<_TicketImage> {
               ? _placeholder(theme)
               : MouseRegion(
                   cursor: ZoomCursors.zoomIn,
-                  child: GestureDetector(
+                  child: InkWell(
                     onTap: () {
                       final List<String> album = widget.album();
                       if (album.isEmpty) {

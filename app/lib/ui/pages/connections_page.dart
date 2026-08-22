@@ -45,16 +45,16 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   Widget _body(ConnectionController connection) {
     final List<_Row> rows = _rows(connection);
     final int activeCount = _matchCount(connection.connections, active: true);
-    final int closedCount =
-        _matchCount(connection.closedConnections, active: false);
+    final int closedCount = _matchCount(
+      connection.closedConnections,
+      active: false,
+    );
 
     final SegmentedButton<_Scope> scopeFilter = SegmentedButton<_Scope>(
       segments: <ButtonSegment<_Scope>>[
         ButtonSegment<_Scope>(
           value: _Scope.all,
-          label: Text(
-            L10n.t('全部 {0}', <Object>[activeCount + closedCount]),
-          ),
+          label: Text(L10n.t('全部 {0}', <Object>[activeCount + closedCount])),
         ),
         ButtonSegment<_Scope>(
           value: _Scope.active,
@@ -115,7 +115,12 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
           child: rows.isEmpty
               ? Center(child: Text(L10n.t('没有符合条件的连接')))
               : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  padding: const EdgeInsets.fromLTRB(
+                    0,
+                    2,
+                    AppTheme.overlayScrollGutter,
+                    2,
+                  ),
                   itemCount: rows.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (BuildContext context, int index) =>
@@ -158,7 +163,6 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   }
 }
 
-/// 一条连接的展示用视图。内核给的键见 tunnel/statistic/tracker.go 的 TrackerInfo。
 class _Row {
   _Row(Map<String, dynamic> item, {required this.active})
     : meta = item['metadata'] is Map<String, dynamic>
@@ -192,14 +196,15 @@ class _Row {
     final String host = _text(meta['host']);
     final String ip = _text(meta['destinationIP']);
     final String port = _text(meta['destinationPort']);
-    final String address = host.isNotEmpty
-        ? (ip.isEmpty ? host : '$host ($ip)')
-        : (ip.isEmpty ? '—' : ip);
-
+    final String address = host.isNotEmpty ? host : (ip.isEmpty ? '—' : ip);
     return port.isEmpty ? address : '$address:$port';
   }
 
   String get process {
+    final String name = _text(meta['process']);
+    if (name.isNotEmpty) {
+      return name;
+    }
     final String path = _text(meta['processPath']);
     if (path.isEmpty) {
       return '';
@@ -222,6 +227,7 @@ class _Row {
   // 只收原始值会让用户搜「香港」搜不到明明写着「香港 01」的那几行，两者都收进来
   late final String haystack = <String>[
     target,
+    _text(meta['destinationIP']),
     process,
     rule,
     network,
@@ -238,7 +244,6 @@ class _ConnectionRow extends StatelessWidget {
 
   final _Row row;
 
-  // 状态点固定占位：活跃与已关闭两种图标尺寸不同，不定宽会让各行文字左边缘错开
   static const double _markerWidth = 12;
   static const double _markerGap = 8;
 
@@ -258,8 +263,6 @@ class _ConnectionRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  // 状态点与首行同在一个 Row 里居中，才能跟文字对齐；
-                  // 放在外层 Row 里只会顶在整块内容的最上沿
                   Row(
                     children: <Widget>[
                       SizedBox(
@@ -334,7 +337,9 @@ class _ConnectionRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  row.active ? row.lifetime : L10n.t('已关闭 · {0}', <Object>[row.lifetime]),
+                  row.active
+                      ? row.lifetime
+                      : L10n.t('已关闭 · {0}', <Object>[row.lifetime]),
                   style: theme.textTheme.bodySmall?.copyWith(color: faded),
                 ),
               ],

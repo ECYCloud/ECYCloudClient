@@ -10,12 +10,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-/**
- * 界面进程通往 `:kernel` 进程的唯一通道。
- *
- * 界面进程禁止引用 `com.ecycloud.mihomo.*`：那些类在静态初始化里
- * `System.loadLibrary("gojni")`，碰一下就把整个 Go 运行时载进界面进程，拆进程白做。
- */
+// 禁止引用 com.ecycloud.mihomo.*：静态初始化会 loadLibrary("gojni")，把 Go 运行时载进界面进程
 object KernelClient {
     // 启停指令允许等绑定；状态轮询不能，Dart 每秒问一次，等久了会在轮询线程上堆积
     private const val COMMAND_WAIT_MS = 20_000L
@@ -44,8 +39,6 @@ object KernelClient {
             }
         }
 
-        // 内核进程被系统回收或 Go 侧崩溃时到这里。BIND_AUTO_CREATE 会把服务重新拉起，
-        // 期间句柄置空，调用方等下一次连接
         override fun onServiceDisconnected(name: ComponentName) {
             lock.withLock { service = null }
         }
@@ -73,7 +66,6 @@ object KernelClient {
         }
     }
 
-    /** 内核进程不可达时返回 null，由调用方决定如何表达，不当成错误 */
     fun <T> poll(block: (IKernelService) -> T): T? = try {
         handle(STATUS_WAIT_MS)?.let(block)
     } catch (e: RemoteException) {

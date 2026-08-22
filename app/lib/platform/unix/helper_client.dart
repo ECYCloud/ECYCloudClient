@@ -5,11 +5,7 @@ import 'dart:io';
 import '../../core/logger.dart';
 import '../service/service_transport.dart';
 
-/// Unix 域套接字上的一问一答：一条连接只发一条请求，服务端应答后立刻关闭，
-/// 客户端以 EOF 判定应答结束，与 Windows 命名管道同一约定。
-///
-/// 守护进程异常退出后由 launchd / systemd 拉起，这段窗口里套接字文件不存在，
-/// connect 直接失败；此时退避重试一次再向上报错，不把偶发重启甩给用户。
+/// 一条连接一问一答，客户端以 EOF 判定结束。
 class HelperClient implements ServiceTransport {
   const HelperClient(this.socketPath, this.missingHint);
 
@@ -20,7 +16,6 @@ class HelperClient implements ServiceTransport {
 
   final String socketPath;
 
-  /// 重试后仍连不上时给用户的处置说明，各平台不同
   final String missingHint;
 
   @override
@@ -71,10 +66,7 @@ class HelperClient implements ServiceTransport {
     try {
       socket.add(utf8.encode('$requestLine\n'));
       await socket.flush();
-      responseLine = (await utf8.decoder
-              .bind(socket)
-              .join()
-              .timeout(_timeout))
+      responseLine = (await utf8.decoder.bind(socket).join().timeout(_timeout))
           .trim();
     } on TimeoutException {
       throw HelperException('后台服务在超时内没有应答 $command');

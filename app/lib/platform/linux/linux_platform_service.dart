@@ -6,8 +6,7 @@ import '../../domain/config/network_bypass.dart';
 import '../../domain/platform/platform_service.dart';
 import '../unix/unix_platform_service.dart';
 
-/// 系统代理是用户会话的设置（GSettings 走会话 D-Bus），以 root 运行的 helper
-/// 改不到，因此这一项不下沉到特权侧，由 GUI 自己读写并快照。
+/// 系统代理走会话 D-Bus，helper（root）改不到。
 class LinuxPlatformService extends UnixPlatformService {
   LinuxPlatformService();
 
@@ -92,6 +91,25 @@ class LinuxPlatformService extends UnixPlatformService {
   }
 
   @override
+  Future<({String model, String os})> deviceProfile() async {
+    final File release = File('/etc/os-release');
+    if (!release.existsSync()) {
+      return (model: 'Linux', os: '');
+    }
+
+    final Map<String, String> fields = <String, String>{};
+    for (final String line in release.readAsLinesSync()) {
+      final int split = line.indexOf('=');
+      if (split > 0) {
+        fields[line.substring(0, split)] = _unquoteRelease(
+          line.substring(split + 1),
+        );
+      }
+    }
+    return (model: fields['NAME'] ?? 'Linux', os: fields['VERSION_ID'] ?? '');
+  }
+
+  @override
   Future<bool> launchAtLoginEnabled() async => _autostartEntry.existsSync();
 
   @override
@@ -152,8 +170,14 @@ X-GNOME-Autostart-enabled=true
     }
   }
 
+  // gsettings 按 GVariant 解析，反斜杠与单引号各自加反斜杠，不能用 shell 的 '\''
   static String _gsettingsString(String value) =>
-      "'${value.replaceAll("'", r"'\''")}'";
+      "'${value.replaceAll(r'\', r'\\').replaceAll("'", r"\'")}'";
+
+  static String _unquoteRelease(String value) =>
+      value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+      ? value.substring(1, value.length - 1)
+      : value;
 
   static String _unquote(String value) =>
       value.length >= 2 && value.startsWith("'") && value.endsWith("'")

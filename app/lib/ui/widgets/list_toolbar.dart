@@ -4,11 +4,8 @@ import 'package:flutter/services.dart';
 import 'option_dropdown.dart';
 import 'search_field.dart';
 import '../../l10n/l10n.dart';
+import 'overlay_scroll_view.dart';
 
-/// 列表页搜索 + 每页条数 + 翻页 / 跳页。
-///
-/// 每页条数复用 [OptionDropdown]，搜索复用 [SearchField]；
-/// 控件高度统一为 [_rowHeight]，翻页键尺寸对齐刷新按钮（24×24）。
 class ListToolbar extends StatefulWidget {
   const ListToolbar({
     super.key,
@@ -55,7 +52,10 @@ class _ListToolbarState extends State<ListToolbar> {
     if (page == null) {
       return;
     }
-    final int clamped = page.clamp(1, widget.lastPage < 1 ? 1 : widget.lastPage);
+    final int clamped = page.clamp(
+      1,
+      widget.lastPage < 1 ? 1 : widget.lastPage,
+    );
     widget.onPageChanged(clamped);
   }
 
@@ -78,12 +78,17 @@ class _ListToolbarState extends State<ListToolbar> {
       width: 120,
       height: ListToolbar._rowHeight,
       options: <int, String>{
-        for (final int size in ListToolbar.pageSizes) size: L10n.t('每页 {0} 项', <Object>[size]),
+        for (final int size in ListToolbar.pageSizes)
+          size: L10n.t('每页 {0} 项', <Object>[size]),
       },
       onChanged: widget.onPerPageChanged,
     );
     final Widget stats = Text(
-      L10n.t('共 {0} 条 · 第 {1}/{2} 页', <Object>[widget.total, widget.currentPage, lastPage]),
+      L10n.t('共 {0} 条 · 第 {1}/{2} 页', <Object>[
+        widget.total,
+        widget.currentPage,
+        lastPage,
+      ]),
       style: theme.textTheme.bodySmall,
     );
     final Widget prevButton = IconButton(
@@ -170,10 +175,7 @@ class _ListToolbarState extends State<ListToolbar> {
                   spacing: ListToolbar._gap,
                   runSpacing: ListToolbar._gap,
                   crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    perPageDropdown,
-                    ...pageControls,
-                  ],
+                  children: <Widget>[perPageDropdown, ...pageControls],
                 ),
               ],
             ),
@@ -193,7 +195,7 @@ class _ListToolbarState extends State<ListToolbar> {
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
           child: Align(
             alignment: Alignment.centerRight,
-            child: SingleChildScrollView(
+            child: OverlayScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(
                 height: ListToolbar._rowHeight,

@@ -81,7 +81,6 @@ if [[ ! -d "$bundle" ]]; then
     exit 1
 fi
 
-# 把 .app 内所有胖二进制收成单架构，与随包内核 / helper 一致
 while IFS= read -r -d '' file; do
     if ! file -b "$file" | grep -q 'Mach-O'; then
         continue
@@ -101,19 +100,17 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "$bundle" -type f -print0)
 
-# pkg 载荷按目标绝对路径铺好，两块内容一次装：GUI 进 /Applications，
-# helper 与内核同目录进 /Library/Application Support，helper 按自身目录定位 mihomo
+# helper 与内核同目录，helper 按自身目录定位 mihomo
 stage_dir="$root_dir/build/macos/$arch/pkgroot"
 bin_dir="$stage_dir/Library/Application Support/ECYCloud/bin"
 rm -rf "$stage_dir"
 mkdir -p "$stage_dir/Applications" "$bin_dir"
 cp -R "$bundle" "$stage_dir/Applications/"
-# 逐个点名而不是拷整个 deps 目录：它是增量的，换内核后旧二进制还躺在里面
+# 逐个点名：deps 是增量的，换内核后旧文件还在
 install -m 0755 "$deps_dir/mihomo" "$bin_dir/mihomo"
 install -m 0755 "$deps_dir/ecycloud-helper" "$bin_dir/ecycloud-helper"
 install -m 0644 "$deps_dir/LICENSE.mihomo.txt" "$bin_dir/LICENSE.mihomo.txt"
-# geodata 与内核同目录：内核校验配置时要就地读 GEOIP/GEOSITE 库，缺了会去 geox-url 现下载，
-# 面板下发的地址在目标网络里不可达，下不到整份配置就校验失败。helper 启动前播种进运行目录
+# geodata 与内核同目录：缺了内核会按 geox-url 同步下载，面板地址在目标网络不可达
 install -m 0644 "$deps_dir/geoip.metadb" "$bin_dir/geoip.metadb"
 install -m 0644 "$deps_dir/GeoSite.dat" "$bin_dir/GeoSite.dat"
 

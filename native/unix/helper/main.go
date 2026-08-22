@@ -33,7 +33,6 @@ func main() {
 	}
 }
 
-// 建 TUN、改系统代理、写安装目录都要特权，早失败早给提示
 func requireRoot(action func() error) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("需要以 root 身份运行：sudo %s %s", os.Args[0], os.Args[1])
@@ -74,7 +73,6 @@ func exit(err error) {
 	}
 }
 
-// 外部命令失败时 stderr 往往比 exit code 有用，两者都空才退回错误本身
 func trimOutput(out []byte, err error) string {
 	if message := strings.TrimSpace(string(out)); message != "" {
 		return message

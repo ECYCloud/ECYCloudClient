@@ -46,9 +46,6 @@ func processExePath(pid int) (string, error) {
 	return path, nil
 }
 
-// helper 以 root 运行才能读到别的用户的 /proc/<pid>/exe，但内核本身不需要 root：
-// 按 AGENTS.md 的要求只给它 CAP_NET_ADMIN / CAP_NET_RAW。用户缺失时退回 root，
-// 否则装包脚本没跑全就会连不上网，比降权失败更难排查。
 func parseKernelID(s string) (int, bool) {
 	n, err := strconv.ParseUint(s, 10, 32)
 	if err != nil || n > math.MaxInt32 {
@@ -57,6 +54,7 @@ func parseKernelID(s string) (int, bool) {
 	return int(n), true
 }
 
+// 用户缺失时退回 root（0,0），装包脚本没跑全时比降权失败更能连上网
 func resolveKernelUser() (int, int) {
 	account, err := user.Lookup(kernelUserName)
 	if err != nil {

@@ -51,4 +51,22 @@ void main() {
       'zh_TW',
     );
   });
+
+  test('分流模式缺省为规则，非法值回落到规则，切换不重启内核', () {
+    expect(defaults.routeMode, 'rule');
+    expect(
+      AppSettings.fromJson(defaults.toJson()..['route_mode'] = 'global')
+          .routeMode,
+      'global',
+    );
+    expect(
+      AppSettings.fromJson(defaults.toJson()..['route_mode'] = 'script')
+          .routeMode,
+      'rule',
+    );
+    expect(
+      defaults.affectsKernel(defaults.copyWith(routeMode: 'global')),
+      isFalse,
+    );
+  });
 }

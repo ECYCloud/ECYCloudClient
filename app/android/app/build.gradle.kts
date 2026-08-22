@@ -60,8 +60,6 @@ android {
         }
     }
 
-    // 默认不压缩 .so（便于直接 mmap），内核单 ABI 就有几十 MB、三合一会到两百多；
-    // 改为安装时解压，把下载体积压回可接受范围。
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -70,7 +68,6 @@ android {
 }
 
 dependencies {
-    // 由 scripts/build-libmihomo.sh 现编，不入库
     implementation(files("libs/libmihomo.aar"))
     implementation("androidx.core:core-ktx:1.13.1")
 }

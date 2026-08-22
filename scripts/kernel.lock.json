@@ -1,5 +1,5 @@
 {
-  "comment": "内核一律使用官方发布二进制，不 fork、不自行编译。Android 的 libmihomo.aar 例外：官方不发布移动端产物，由 build-libmihomo.sh 以依赖方式 import 同一 tag 的内核构建。amd64 一律取 compatible（GOAMD64=v1）：官方不带后缀的 amd64 目标是 GOAMD64=v3，在 Haswell 之前的 CPU 上会因非法指令直接崩溃。mihomo 已内嵌 wintun，不再单独分发 wintun.dll。发布包内不含 LICENSE，内核许可证与本项目同为逐字 GPL-3.0，出包时直接复用仓库根的 LICENSE。更新版本时同步更新此处 sha256。",
+  "comment": "只用官方发布二进制。amd64 必须取 compatible（GOAMD64=v1）。Android 由 build-libmihomo.sh 以同一 tag 依赖构建。发布包不含 LICENSE，出包复用仓库根 LICENSE。",
   "mihomo": {
     "tag": "v1.19.30",
     "version": "1.19.30",
@@ -34,7 +34,7 @@
     }
   },
   "geodata": {
-    "comment": "随包分发，安装后由服务/helper 播种进内核运行目录。内核解析 GEOIP/GEOSITE 规则时会同步下载缺失的 geodata（component/geodata/init.go 的 InitGeoIP/InitGeoSite，每文件 90 秒超时），下不到就整份配置校验失败、内核起不来——面板下发的 geox-url 指向 GitHub，在目标网络里必然超时。target 是内核认的本地文件名（constant/path.go：MMDB() 认 Country.mmdb/geoip.db/geoip.metadb，GeoSite 认 GeoSite.dat），与上游资产名不同故需改名。上游只有滚动的 latest tag、每天重发，无法固定 sha256，因此改为校验体积下限与 MaxMind 魔数，只拦 404 页面与截断；内容合法性由内核运行时的 mmdb.Verify / geodata.Verify 兜底。",
+    "comment": "target 是内核认的本地文件名（MMDB() / GeoSite）。上游滚动 latest、锁不住 sha256，只校验体积下限与 MaxMind 魔数。",
     "assets": {
       "mmdb": {
         "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb",

@@ -6,7 +6,6 @@ import '../../core/app_config.dart';
 import '../../core/app_paths.dart';
 import '../../core/logger.dart' show LogLevel, LogLevelName;
 import '../../data/store/settings_store.dart';
-import '../../domain/config/network_bypass.dart';
 import '../../domain/update/app_update.dart';
 import '../../l10n/app_language.dart';
 import '../../l10n/l10n.dart';
@@ -18,8 +17,8 @@ import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/switch_tile.dart';
-import '../widgets/tag_chip.dart';
 import '../widgets/update_progress_bar.dart';
+import 'network_segments_page.dart';
 import 'per_app_proxy_page.dart';
 import 'rule_providers_page.dart';
 import 'text_viewer_page.dart';
@@ -43,7 +42,7 @@ class SettingsPage extends StatelessWidget {
             PageHeader(title: L10n.t('设置')),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.all(14),
+                padding: AppTheme.pageScrollPadding,
                 children: <Widget>[
                   _Section(
                     icon: Icons.vpn_lock_outlined,
@@ -59,39 +58,9 @@ class SettingsPage extends StatelessWidget {
                           onChanged: (bool value) => connection.updateSettings(
                             settings.copyWith(systemProxyEnabled: value),
                           ),
-                        ),
-                      if (scope.platform.supportsSystemProxy)
-                        ListTile(
-                          title: Text(L10n.t('系统代理绕过')),
-                          subtitle: Text(_systemProxyBypassSummary(settings)),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => unawaited(
-                            _editSegments(
-                              context,
-                              title: L10n.t('系统代理绕过'),
-                              helperText: scope.platform.platformId == 'windows'
-                                  ? L10n.t(
-                                      '追加到默认列表，支持通配，例如 192.168.56.* 或 example.com',
-                                    )
-                                  : L10n.t(
-                                      '追加到默认列表，例如 192.168.56.0/24 或 *.local',
-                                    ),
-                              hintText: scope.platform.platformId == 'windows'
-                                  ? '192.168.56.*'
-                                  : '192.168.56.0/24',
-                              items: settings.systemProxyBypass,
-                              lockedItems: defaultSystemProxyBypass(
-                                scope.platform.platformId,
-                              ),
-                              lockedLabel: L10n.t('默认绕过'),
-                              onSave: (List<String> value) =>
-                                  connection.updateSettings(
-                                    connection.settings.copyWith(
-                                      systemProxyBypass: value,
-                                    ),
-                                  ),
-                            ),
-                          ),
+                          settingsTooltip: L10n.t('系统代理绕过'),
+                          onSettings: () =>
+                              unawaited(openSystemProxyBypass(context)),
                         ),
                       SwitchTile(
                         title: L10n.t('TUN 模式'),
@@ -102,6 +71,9 @@ class SettingsPage extends StatelessWidget {
                             : (bool value) => connection.updateSettings(
                                 settings.copyWith(tunEnabled: value),
                               ),
+                        settingsTooltip: L10n.t('TUN 排除自定义网段'),
+                        onSettings: () =>
+                            unawaited(openTunExcludeAddresses(context)),
                       ),
                       if (scope.platform.supportsPerAppProxy)
                         ListTile(
@@ -115,30 +87,6 @@ class SettingsPage extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ListTile(
-                        title: Text(L10n.t('TUN 排除自定义网段')),
-                        subtitle: Text(_tunExcludeSummary(settings)),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => unawaited(
-                          _editSegments(
-                            context,
-                            title: L10n.t('排除自定义网段'),
-                            helperText: L10n.t(
-                              '仅支持 IPv4/IPv6 CIDR，例如 192.168.56.0/24 或 fd00::/8；局域网与回环已默认排除',
-                            ),
-                            hintText: '192.168.56.0/24',
-                            items: settings.tunExcludeAddresses,
-                            validate: (String value) =>
-                                isIpCidr(value) ? null : L10n.t('仅支持 IPv4/IPv6 CIDR'),
-                            onSave: (List<String> value) =>
-                                connection.updateSettings(
-                                  connection.settings.copyWith(
-                                    tunExcludeAddresses: value,
-                                  ),
-                                ),
-                          ),
-                        ),
-                      ),
                       SwitchTile(
                         title: L10n.t('严格路由'),
                         subtitle: L10n.t(
@@ -283,8 +231,7 @@ class SettingsPage extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
+                                      color: theme.colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ),
@@ -300,13 +247,8 @@ class SettingsPage extends StatelessWidget {
                                     height: AppTheme.minTapTarget,
                                   ),
                                   padding: EdgeInsets.zero,
-                                  onPressed: () => unawaited(
-                                    AppScope.of(
-                                      context,
-                                    ).platform.openDirectory(
-                                      AppPaths.logs.path,
-                                    ),
-                                  ),
+                                  onPressed: () =>
+                                      unawaited(_openLogsDirectory(context)),
                                 ),
                               ],
                             ),
@@ -387,18 +329,6 @@ class SettingsPage extends StatelessWidget {
           settings.perAppPackages.length,
         ]),
       };
-
-  static String _systemProxyBypassSummary(AppSettings settings) =>
-      settings.systemProxyBypass.isEmpty
-      ? L10n.t('局域网与回环默认绕过，可追加网段或域名')
-      : L10n.t('已追加 {0} 条', <Object>[settings.systemProxyBypass.length]);
-
-  static String _tunExcludeSummary(AppSettings settings) =>
-      settings.tunExcludeAddresses.isEmpty
-      ? L10n.t('局域网与回环已默认排除，可追加自定义网段')
-      : L10n.t('已排除 {0} 条自定义网段', <Object>[
-          settings.tunExcludeAddresses.length,
-        ]);
 }
 
 class _Section extends StatelessWidget {
@@ -449,7 +379,6 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// 客户端更新：安装包由本进程下载校验，替换文件要管理员权限，交给安装器接手。
 class _AppUpdateTile extends StatelessWidget {
   const _AppUpdateTile({required this.update});
 
@@ -475,7 +404,7 @@ class _AppUpdateTile extends StatelessWidget {
                       context,
                     ).platform.openUrl(AppUpdate.releasesUrl),
                   ),
-                  child: Text(L10n.t('打开发布页')),
+                  child: Text('${L10n.t('打开发布页')} ›'),
                 )
               : app == null
               ? null
@@ -516,8 +445,6 @@ class _AppUpdateTile extends StatelessWidget {
   }
 }
 
-/// mihomo 内核版本与升级。内核装在 Program Files 下，替换要管理员权限，
-/// 因此下载、校验与替换全在特权服务里完成，这里只发起并回报进度。
 class _KernelTile extends StatelessWidget {
   const _KernelTile({required this.update});
 
@@ -572,6 +499,16 @@ class _KernelTile extends StatelessWidget {
       _toastStatus(context, L10n.t('内核'), update.kernelStatus);
     }
   }
+}
+
+Future<void> _openLogsDirectory(BuildContext context) async {
+  final bool opened = await AppScope.of(
+    context,
+  ).platform.openDirectory(AppPaths.logs.path);
+  if (opened || !context.mounted) {
+    return;
+  }
+  _toastStatus(context, L10n.t('打开目录'), L10n.t('系统里没有可用的文件管理器'));
 }
 
 void _toastStatus(BuildContext context, String name, String status) {
@@ -649,7 +586,11 @@ class _PanelConfigTileState extends State<_PanelConfigTile> {
       _toastStatus(context, L10n.t('面板配置'), message);
     } on Object catch (e) {
       if (mounted) {
-        _toastStatus(context, L10n.t('面板配置'), L10n.t('更新失败：{0}', <Object>['$e']));
+        _toastStatus(
+          context,
+          L10n.t('面板配置'),
+          L10n.t('更新失败：{0}', <Object>['$e']),
+        );
       }
     } finally {
       if (mounted) {
@@ -750,188 +691,6 @@ class _PortTile extends StatelessWidget {
           },
         ),
       ),
-    );
-  }
-}
-
-Future<void> _editSegments(
-  BuildContext context, {
-  required String title,
-  required String helperText,
-  required String hintText,
-  required List<String> items,
-  required Future<void> Function(List<String> value) onSave,
-  List<String> lockedItems = const <String>[],
-  String? lockedLabel,
-  String? Function(String value)? validate,
-}) async {
-  final List<String>? next = await showDialog<List<String>>(
-    context: context,
-    builder: (BuildContext context) => _SegmentListDialog(
-      title: title,
-      helperText: helperText,
-      hintText: hintText,
-      items: items,
-      lockedItems: lockedItems,
-      lockedLabel: lockedLabel,
-      validate: validate,
-    ),
-  );
-  if (next == null) {
-    return;
-  }
-  await onSave(next);
-}
-
-class _SegmentListDialog extends StatefulWidget {
-  const _SegmentListDialog({
-    required this.title,
-    required this.helperText,
-    required this.hintText,
-    required this.items,
-    required this.lockedItems,
-    required this.lockedLabel,
-    required this.validate,
-  });
-
-  final String title;
-  final String helperText;
-  final String hintText;
-  final List<String> items;
-  final List<String> lockedItems;
-  final String? lockedLabel;
-  final String? Function(String value)? validate;
-
-  @override
-  State<_SegmentListDialog> createState() => _SegmentListDialogState();
-}
-
-class _SegmentListDialogState extends State<_SegmentListDialog> {
-  late final List<String> _items = List<String>.of(widget.items);
-  final TextEditingController _input = TextEditingController();
-  String? _error;
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  void _add() {
-    final List<String> candidates = splitNetworkSegments(_input.text);
-    if (candidates.isEmpty) {
-      setState(() => _error = L10n.t('请输入网段'));
-      return;
-    }
-
-    String? error;
-    for (final String item in candidates) {
-      error = widget.validate?.call(item);
-      if (error != null) {
-        break;
-      }
-      if (_items.contains(item) || widget.lockedItems.contains(item)) {
-        error = L10n.t('已存在');
-        break;
-      }
-    }
-    if (error != null) {
-      setState(() => _error = error);
-      return;
-    }
-
-    setState(() {
-      _items.addAll(candidates);
-      _error = null;
-    });
-    _input.clear();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final String? lockedLabel = widget.lockedLabel;
-    final TextStyle? helperStyle = theme.textTheme.bodySmall?.copyWith(
-      color: scheme.onSurfaceVariant,
-    );
-
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (lockedLabel != null &&
-                widget.lockedItems.isNotEmpty) ...<Widget>[
-              Text(lockedLabel, style: helperStyle),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: <Widget>[
-                  for (final String item in widget.lockedItems)
-                    TagChip(label: item),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(L10n.t('自定义'), style: helperStyle),
-              const SizedBox(height: 8),
-            ],
-            if (_items.isEmpty)
-              Text(L10n.t('尚未添加'), style: helperStyle)
-            else
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: <Widget>[
-                  for (final String item in _items)
-                    InputChip(
-                      label: Text(item),
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onDeleted: () => setState(() => _items.remove(item)),
-                    ),
-                ],
-              ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _input,
-                    decoration: InputDecoration(hintText: widget.hintText),
-                    onSubmitted: (_) => _add(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(onPressed: _add, child: Text(L10n.t('添加'))),
-              ],
-            ),
-            if (_error != null) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text(widget.helperText, style: helperStyle),
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(L10n.t('取消')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(List<String>.of(_items)),
-          child: Text(L10n.t('保存')),
-        ),
-      ],
     );
   }
 }

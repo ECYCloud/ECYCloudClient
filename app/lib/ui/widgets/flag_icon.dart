@@ -2,23 +2,28 @@ import 'package:flutter/material.dart';
 
 import 'icon_image.dart';
 
-/// 节点地区旗帜，取 `assets/flags/<iso>.svg`，与面板 `/images/flags` 同一套素材。
-/// 该地区没有旗帜素材时退回字母角标。
 class FlagIcon extends StatelessWidget {
   const FlagIcon({super.key, required this.code, this.width = 18});
 
   final String code;
   final double width;
 
+  // 雅黑 ascent(2167) 与 descent(536) 不对称，汉字墨迹中线比行盒中线低 0.1~0.4px
+  // （随字号取整浮动），旗帜按行盒居中就会偏上。上边距在居中时只生效一半，故取 0.6。
+  static const EdgeInsets _inkInset = EdgeInsets.only(top: 0.6);
+
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(2),
-    child: LocalIcon(
-      assets: <String>['assets/flags/$code.svg'],
-      width: width,
-      height: width * 0.75,
-      fit: BoxFit.cover,
-      fallback: _LetterBadge(code: code),
+  Widget build(BuildContext context) => Padding(
+    padding: _inkInset,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: LocalIcon(
+        assets: <String>['assets/flags/$code.svg'],
+        width: width,
+        height: width * 0.75,
+        fit: BoxFit.cover,
+        fallback: _LetterBadge(code: code),
+      ),
     ),
   );
 }

@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
 
-/// 随包资源里的图标，取 [assets] 里第一个存在的；都不存在时用 [fallback]。
 class LocalIcon extends StatelessWidget {
   const LocalIcon({
     super.key,
@@ -52,8 +51,6 @@ class LocalIcon extends StatelessWidget {
   );
 }
 
-/// 面板下发地址的图标（策略组图标）。首次显示时下载并落盘到用户数据目录，
-/// 之后一律读本地文件；地址变了缓存名也变，面板换图标自动生效。取不到就用 [fallback]。
 class RemoteIcon extends StatelessWidget {
   const RemoteIcon({
     super.key,
@@ -72,6 +69,10 @@ class RemoteIcon extends StatelessWidget {
 
   static const Duration _timeout = Duration(seconds: 10);
 
+  // 图标是几 KB 的量级，给到 1 MiB 已经宽松；没有上限的话，地址指到大文件上
+  // 就会把整份响应读进内存
+  static const int _maxBytes = 1 << 20;
+
   static final Map<String, Future<Uint8List?>> _cache =
       <String, Future<Uint8List?>>{};
 
@@ -85,18 +86,17 @@ class RemoteIcon extends StatelessWidget {
           if (file.existsSync()) {
             return await file.readAsBytes();
           }
+          // 地址由面板下发：明文 http 会把用得上哪个策略组暴露在链路上
+          final Uri? uri = Uri.tryParse(url);
+          if (uri == null || uri.scheme != 'https') {
+            Logger.instance.warn('icon', '图标地址不是 https，已忽略：$url');
+            return null;
+          }
 
-          final http.Response response = await http
-              .get(Uri.parse(url))
-              .timeout(_timeout);
-          final Uint8List bytes = response.bodyBytes;
-
-          // 面板地址填错时拿到的多是 HTML 错误页，按首字节挡掉，别把它当图标存下来
-          if (response.statusCode != 200 || !_isImage(bytes)) {
-            Logger.instance.warn(
-              'icon',
-              '图标取回失败（HTTP ${response.statusCode}）：$url',
-            );
+          final Uint8List? bytes = await _fetch(uri);
+          // 面板地址填错时拿到的多是 HTML 错误页，按魔数挡掉，别把它当图标存下来
+          if (bytes == null || !_isImage(bytes)) {
+            Logger.instance.warn('icon', '图标取回失败：$url');
             return null;
           }
 
@@ -108,16 +108,60 @@ class RemoteIcon extends StatelessWidget {
         }
       });
 
-  // PNG / JPEG / GIF / WebP(RIFF) 按魔数认，SVG 认起始的 '<'
-  static bool _isImage(Uint8List bytes) =>
-      bytes.length > 8 &&
-      (bytes[0] == 0x89 ||
-          bytes[0] == 0xFF ||
-          bytes[0] == 0x47 ||
-          bytes[0] == 0x52 ||
-          bytes[0] == 0x3C);
+  static Future<Uint8List?> _fetch(Uri uri) async {
+    final http.Client client = http.Client();
+    try {
+      final http.StreamedResponse response = await client
+          .send(http.Request('GET', uri))
+          .timeout(_timeout);
+      if (response.statusCode != 200 ||
+          (response.contentLength ?? 0) > _maxBytes) {
+        return null;
+      }
 
-  // 缓存文件名只需稳定且随地址变化，用 FNV-1a
+      final List<int> body = <int>[];
+      await for (final List<int> chunk in response.stream) {
+        body.addAll(chunk);
+        if (body.length > _maxBytes) {
+          return null;
+        }
+      }
+      return Uint8List.fromList(body);
+    } finally {
+      client.close();
+    }
+  }
+
+  // PNG / JPEG / GIF / WebP 按各自魔数认；SVG 必须以 <svg 或 <?xml 起头，
+  // 只认 '<' 会把 HTML 错误页也当成图标缓存下来
+  static bool _isImage(Uint8List bytes) {
+    if (bytes.length < 12) {
+      return false;
+    }
+    if (_startsWith(bytes, <int>[0x89, 0x50, 0x4E, 0x47]) ||
+        _startsWith(bytes, <int>[0xFF, 0xD8, 0xFF]) ||
+        _startsWith(bytes, <int>[0x47, 0x49, 0x46, 0x38])) {
+      return true;
+    }
+    if (_startsWith(bytes, <int>[0x52, 0x49, 0x46, 0x46]) &&
+        _startsWith(bytes.sublist(8), <int>[0x57, 0x45, 0x42, 0x50])) {
+      return true;
+    }
+    final String head = String.fromCharCodes(
+      bytes.sublist(0, bytes.length < 64 ? bytes.length : 64),
+    ).toLowerCase();
+    return head.startsWith('<svg') || head.startsWith('<?xml');
+  }
+
+  static bool _startsWith(Uint8List bytes, List<int> magic) {
+    for (int i = 0; i < magic.length; i++) {
+      if (bytes[i] != magic[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static String _key(String url) {
     int hash = 0x811C9DC5;
     for (final int unit in url.codeUnits) {
@@ -164,7 +208,6 @@ class _IconBytes extends StatelessWidget {
               ? fallback
               : const SizedBox.shrink();
         }
-        // PNG 与 SVG 都可能，按首字节区分
         return data.first == 0x3C
             ? SvgPicture.memory(data, fit: fit)
             : Image.memory(data, fit: fit, gaplessPlayback: true);

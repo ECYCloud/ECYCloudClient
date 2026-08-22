@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
 
-/// 列表页通用搜索框。受控用法：由调用方持有关键词，本组件只负责输入与清除。
 class SearchField extends StatefulWidget {
   const SearchField({
     super.key,

@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import '../../core/app_paths.dart';
 import '../../state/connection_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import 'text_viewer_page.dart';
 import '../../l10n/l10n.dart';
 
-/// 列出已落盘的 rule-providers，点进只读查看。
 class RuleProvidersPage extends StatelessWidget {
   const RuleProvidersPage({super.key});
 
@@ -34,7 +34,12 @@ class RuleProvidersPage extends StatelessWidget {
               ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.fromLTRB(
+                0,
+                8,
+                AppTheme.overlayScrollGutter,
+                8,
+              ),
               itemCount: items.length + 1,
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {

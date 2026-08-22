@@ -13,9 +13,7 @@ Widget wrap(Widget child) => MaterialApp(
 );
 
 void main() {
-  testWidgets('连接/工单按钮使用主题默认样式，不再套自定义矮按钮', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('连接/工单按钮使用主题默认样式，不再套自定义矮按钮', (WidgetTester tester) async {
     await tester.pumpWidget(
       wrap(
         Row(
@@ -44,20 +42,24 @@ void main() {
     expect(connect.height, ticket.height);
 
     final String themeSrc = File('lib/ui/theme.dart').readAsStringSync();
-    final String homeSrc = File('lib/ui/pages/home_page.dart').readAsStringSync();
-    final String ticketsSrc = File('lib/ui/pages/tickets_page.dart').readAsStringSync();
+    final String homeSrc = File(
+      'lib/ui/pages/home_page.dart',
+    ).readAsStringSync();
+    final String ticketsSrc = File(
+      'lib/ui/pages/tickets_page.dart',
+    ).readAsStringSync();
     expect(themeSrc.contains('actionButtonStyle'), isFalse);
     expect(homeSrc.contains('actionButtonStyle'), isFalse);
     expect(ticketsSrc.contains('actionButtonStyle'), isFalse);
   });
 
-  testWidgets('多行内容框滚动条在独立轨道且使用箭头光标', (WidgetTester tester) async {
+  testWidgets('多行内容框仍是圆角矩形输入', (WidgetTester tester) async {
     await tester.pumpWidget(
       wrap(
         SizedBox(
           width: 460,
           child: MultilineContentField(
-            controller: TextEditingController(text: '${'测试内容' * 20}\n' * 12),
+            controller: TextEditingController(text: '短内容'),
             labelText: '内容',
           ),
         ),
@@ -65,19 +67,99 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(MultilineContentField), findsOneWidget);
-    expect(find.byType(MouseRegion), findsWidgets);
-    expect(find.byType(CustomPaint), findsWidgets);
-
-    final MouseRegion rail = tester.widget<MouseRegion>(
-      find
-          .descendant(
-            of: find.byType(MultilineContentField),
-            matching: find.byType(MouseRegion),
-          )
-          .last,
+    expect(find.text('内容'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(MultilineContentField),
+        matching: find.byType(TextField),
+      ),
+      findsOneWidget,
     );
-    expect(rail.cursor, SystemMouseCursors.basic);
+  });
+
+  test('滚动条边距走全局主题，卡密描述与公告共用同一滚动容器', () {
+    final String theme = File('lib/ui/theme.dart').readAsStringSync();
+    final String announcement = File(
+      'lib/ui/widgets/announcement_dialog.dart',
+    ).readAsStringSync();
+    final String field = File(
+      'lib/ui/widgets/multiline_content_field.dart',
+    ).readAsStringSync();
+    final String shop = File('lib/ui/pages/shop_page.dart').readAsStringSync();
+    final String body = File(
+      'lib/ui/widgets/clipped_scroll_body.dart',
+    ).readAsStringSync();
+    expect(theme.contains('mainAxisMargin: 4'), isTrue);
+    expect(theme.contains('crossAxisMargin: 2'), isTrue);
+    expect(theme.contains('interactive: true'), isTrue);
+    expect(theme.contains('overlayScrollPadding'), isTrue);
+    expect(announcement.contains('ClippedScrollBody'), isTrue);
+    expect(announcement.contains('OverlayScrollView'), isTrue);
+    expect(shop.contains('ClippedScrollBody'), isTrue);
+    final int desc = shop.indexOf("L10n.t('商品描述')");
+    expect(desc, greaterThanOrEqualTo(0));
+    final int tileStart = shop.lastIndexOf('ExpansionTile(', desc);
+    final int bodyStart = shop.indexOf('ClippedScrollBody(', desc);
+    expect(tileStart, greaterThanOrEqualTo(0));
+    expect(bodyStart, greaterThan(tileStart));
+    final String descHeader = shop.substring(tileStart, bodyStart);
+    expect(descHeader.contains('childrenPadding'), isFalse);
+    expect(descHeader.contains('CrossAxisAlignment.stretch'), isTrue);
+    expect(
+      descHeader.contains('backgroundColor: scheme.primary.withValues'),
+      isTrue,
+    );
+    expect(shop.contains('filled: false'), isTrue);
+    expect(field.contains('_ScrollRail'), isFalse);
+    expect(field.contains('alignLabelWithHint: true'), isTrue);
+    expect(field.contains('labelText: labelText'), isTrue);
+    expect(body.contains('maxHeight = 360'), isTrue);
+    expect(body.contains('OverlayScrollView'), isTrue);
+    expect(body.contains('pointerSignalResolver'), isTrue);
+  });
+
+  test('SingleChildScrollView 只允许出现在 OverlayScrollView 内；列表必须留 gutter', () {
+    final RegExp listCtor = RegExp(r'ListView(?:\.\w+)?\s*\(');
+    const Set<String> tokens = <String>{
+      'overlayScrollGutter',
+      'overlayScrollPadding',
+      'overlayScrollPaddingBottom',
+      'pageScrollPadding',
+      'overlayGutterOf',
+      'EdgeInsets.all(24)',
+      'EdgeInsets.all(32)',
+    };
+    final List<String> missing = <String>[];
+    for (final FileSystemEntity entity in Directory(
+      'lib/ui',
+    ).listSync(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.dart')) {
+        continue;
+      }
+      final String rel = entity.path.replaceAll('\\', '/');
+      final List<String> lines = entity.readAsStringSync().split('\n');
+      for (int i = 0; i < lines.length; i++) {
+        if (lines[i].contains('SingleChildScrollView(') &&
+            !rel.endsWith('/widgets/overlay_scroll_view.dart')) {
+          missing.add('$rel:${i + 1}: raw SingleChildScrollView');
+          continue;
+        }
+        if (!listCtor.hasMatch(lines[i])) {
+          continue;
+        }
+        if (rel.endsWith('/widgets/overlay_scroll_view.dart')) {
+          continue;
+        }
+        final String window = lines
+            .sublist(i, i + 12 > lines.length ? lines.length : i + 12)
+            .join('\n');
+        if (tokens.any(window.contains)) {
+          continue;
+        }
+        missing.add('$rel:${i + 1}');
+      }
+    }
+    expect(missing, isEmpty, reason: missing.join('\n'));
   });
 
   test('验证码 formatter：只保留大写字母数字，且不靠丢弃组字来对抗 IME', () {
@@ -156,7 +238,7 @@ void main() {
     final int emailField = login.indexOf("labelText: L10n.t('邮箱')");
     expect(emailField, greaterThanOrEqualTo(0));
     final String emailBlock = login.substring(
-      login.lastIndexOf('TextFormField(', emailField),
+      login.lastIndexOf('TextField(', emailField),
       emailField,
     );
     expect(emailBlock.contains('asciiOnlyFormatter'), isFalse);
@@ -210,13 +292,15 @@ void main() {
   });
 
   test('公告/工单 HTML 链接使用手型光标并悬停显示地址', () {
-    final String src =
-        File('lib/ui/widgets/rich_html_view.dart').readAsStringSync();
+    final String src = File(
+      'lib/ui/widgets/rich_html_view.dart',
+    ).readAsStringSync();
     expect(src, contains('SystemMouseCursors.click'));
     expect(src, contains('Tooltip'));
     expect(src, contains("tagsToExtend: <String>{'a'}"));
     expect(src, contains('TagExtension.inline'));
-    expect(src, contains('ShellNavigator.openTickets'));
+    expect(src, contains('ShellNavigator.openTab'));
+    expect(src, contains("'/user/ticket' => ShellNavigator.ticketsTab"));
     expect(src, contains('Style.fromThemeData'));
     expect(src, contains("'*': uiFont"));
     expect(src, contains('doNotRenderTheseTags'));

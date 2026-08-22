@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../domain/kernel/clash_api_client.dart';
@@ -24,8 +26,7 @@ class NodesPage extends StatelessWidget {
     return ListenableBuilder(
       listenable: connection,
       builder: (BuildContext context, _) {
-        final List<ProxyGroup> groups = connection.groups;
-        // 内核常驻，控制面在线就能选节点；不必等到接管出口
+        final List<ProxyGroup> groups = connection.groupsForMode;
         final bool live = connection.controlPlaneReady;
 
         return Column(
@@ -46,16 +47,24 @@ class NodesPage extends StatelessWidget {
                       icon: Icons.inbox_outlined,
                       message: L10n.t('面板未下发节点分组'),
                     )
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(14),
-                      itemCount: groups.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (BuildContext context, int index) =>
+                  : CustomScrollView(
+                      slivers: <Widget>[
+                        const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                        for (int i = 0; i < groups.length; i++) ...<Widget>[
+                          if (i > 0)
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 10),
+                            ),
                           _GroupCard(
-                            group: groups[index],
+                            key: ValueKey<String>(groups[i].name),
+                            group: groups[i],
                             live: live,
                             connection: connection,
+                            initiallyExpanded: connection.routeMode == 'global',
                           ),
+                        ],
+                        const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                      ],
                     ),
             ),
           ],
@@ -70,24 +79,54 @@ class _GroupCard extends StatefulWidget {
     required this.group,
     required this.live,
     required this.connection,
+    this.initiallyExpanded = false,
+    super.key,
   });
 
   final ProxyGroup group;
   final bool live;
   final ConnectionController connection;
+  final bool initiallyExpanded;
 
   @override
   State<_GroupCard> createState() => _GroupCardState();
 }
 
 class _GroupCardState extends State<_GroupCard> {
-  // 单卡最小宽度，据此按可用宽度算列数：窗口变宽先加列，不是把卡拉长
-  static const double _minTileWidth = 210;
+  // 须放下 VLESS + TCP + REALITY + XUDP 单行，再窄就减列而不是把标签折行
+  static const double _minTileWidth = 260;
   static const double _tileGap = 8;
 
-  bool _expanded = false;
+  final GlobalKey _selectedTileKey = GlobalKey();
 
-  // 选中项本身是分组时（如「主节点」），补上它最终落到哪个节点
+  late bool _expanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+  }
+
+  Future<void> _locateSelected() async {
+    if (!_expanded) {
+      setState(() => _expanded = true);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        return;
+      }
+    }
+    final BuildContext? target = _selectedTileKey.currentContext;
+    if (target == null || !target.mounted) {
+      return;
+    }
+    await Scrollable.ensureVisible(
+      target,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
   static String _nowLabel(ConnectionController connection, ProxyGroup group) {
     if (group.now.isEmpty) {
       return '';
@@ -107,13 +146,19 @@ class _GroupCardState extends State<_GroupCard> {
     String member, {
     required bool canSelect,
   }) {
-    // 成员是分组时，延迟、协议与探测状态都记在它解析出的叶子节点上
     final String leaf = connection.resolveNode(member);
+    final ProxyGroup? nested = connection.groupByName(member);
 
     return _NodeTile(
       name: member,
+      groupTag: nested == null
+          ? null
+          : (nested.selectable ? L10n.t('手动') : L10n.t('自动')),
       via: leaf == member ? null : leaf,
-      protocol: connection.typeOf(leaf),
+      protocol: leaf == member ? connection.typeOf(leaf) : '',
+      network: leaf == member ? connection.networkOf(leaf) : '',
+      tls: leaf == member ? connection.tlsOf(leaf) : '',
+      udp: leaf == member ? connection.udpOf(leaf) : '',
       selected: member == group.now,
       // 必须走 delayOf：逐个探测的结果先落在控制器的延迟表里，
       // 取 ProxyNode.delay 要等下一轮 /proxies 才更新，看着像没反应
@@ -137,105 +182,190 @@ class _GroupCardState extends State<_GroupCard> {
     final bool canSelect = live && group.selectable;
     final bool testing = connection.testingGroups.contains(group.name);
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        // 默认展开态会画上下分割线，与卡片自身的描边叠在一起很脏
-        shape: const Border(),
-        collapsedShape: const Border(),
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
-        minTileHeight: 54,
-        onExpansionChanged: (bool value) => setState(() => _expanded = value),
-        leading: GroupIcon(
-          url: connection.groupIconOf(group.name),
-          selectable: group.selectable,
-        ),
-        title: Row(
-          children: <Widget>[
-            Flexible(
-              child: Text(
-                group.name,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
-              ),
-            ),
-            const SizedBox(width: 6),
-            TagChip(label: group.selectable ? L10n.t('手动') : L10n.t('自动')),
-          ],
-        ),
-        subtitle: Text(
-          L10n.t('{0} 个节点{1}', <Object>[group.members.length, _nowLabel(connection, group)]),
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-        // 延迟测试按钮必须和展开箭头同在 trailing：放进 title 时两者分别按标题行与
-        // 整块 tile 垂直居中，视觉上不在同一条线上
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            GroupDelayTestButton(
-              testing: testing,
-              onPressed: () => connection.testGroup(group.name),
-            ),
-            const SizedBox(width: 2),
-            AnimatedRotation(
-              turns: _expanded ? 0.5 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: Icon(
-                Icons.expand_more,
-                size: 18,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-        children: <Widget>[
-          // 展开区紧贴标题行时看着像两块叠在一起，用一条分割线加间距断开。
-          // ExpansionTile 自带的 shape 描边画在卡片边缘、会和卡片自身描边重合，
-          // 所以分割线画在内容区里
-          const Divider(height: 1),
-          const SizedBox(height: 10),
-          if (!group.selectable)
-            _AutoGroupHint(connection: connection, group: group),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final int columns =
-                  ((constraints.maxWidth + _tileGap) /
-                          (_minTileWidth + _tileGap))
-                      .floor()
-                      .clamp(1, 6);
-              final double tileWidth =
-                  (constraints.maxWidth - _tileGap * (columns - 1)) / columns;
+    final ShapeBorder headerShape = _cardShape(top: true, bottom: !_expanded);
+    final ShapeBorder bodyShape = _cardShape(top: false, bottom: true);
 
-              return Wrap(
-                spacing: _tileGap,
-                runSpacing: _tileGap,
-                children: <Widget>[
-                  for (final String member in group.members)
-                    SizedBox(
-                      width: tileWidth,
-                      child: _buildTile(
-                        connection,
-                        group,
-                        member,
-                        canSelect: canSelect,
+    return SliverMainAxisGroup(
+      slivers: <Widget>[
+        PinnedHeaderSliver(
+          child: ColoredBox(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: AppTheme.pageScrollPadding.left,
+                right: AppTheme.pageScrollPadding.right,
+              ),
+              child: Material(
+                color: scheme.surface,
+                shape: headerShape,
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  mouseCursor: SystemMouseCursors.click,
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 54),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        children: <Widget>[
+                          GroupIcon(
+                            url: connection.groupIconOf(group.name),
+                            selectable: group.selectable,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                Row(
+                                  children: <Widget>[
+                                    Flexible(
+                                      child: Text(
+                                        group.name,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.titleSmall,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    TagChip(
+                                      label: group.selectable
+                                          ? L10n.t('手动')
+                                          : L10n.t('自动'),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  L10n.t('{0} 个节点{1}', <Object>[
+                                    group.members.length,
+                                    _nowLabel(connection, group),
+                                  ]),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          GroupDelayTestButton(
+                            testing: testing,
+                            onPressed: () => connection.testGroup(group.name),
+                          ),
+                          IconButton(
+                            tooltip: L10n.t('定位到当前节点'),
+                            iconSize: 16,
+                            visualDensity: VisualDensity.standard,
+                            constraints: BoxConstraints.tightFor(
+                              width: AppTheme.minTapTarget,
+                              height: AppTheme.minTapTarget,
+                            ),
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(Icons.my_location_outlined),
+                            onPressed: group.now.isEmpty
+                                ? null
+                                : () => unawaited(_locateSelected()),
+                          ),
+                          const SizedBox(width: 2),
+                          AnimatedRotation(
+                            turns: _expanded ? 0.5 : 0,
+                            duration: const Duration(milliseconds: 180),
+                            child: Icon(
+                              Icons.expand_more,
+                              size: 18,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                ],
-              );
-            },
+                  ),
+                ),
+              ),
+            ),
           ),
-        ],
+        ),
+        if (_expanded)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: AppTheme.pageScrollPadding.left,
+                right: AppTheme.pageScrollPadding.right,
+              ),
+              child: Material(
+                color: scheme.surface,
+                shape: bodyShape,
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const Divider(height: 1),
+                      const SizedBox(height: 10),
+                      if (!group.selectable)
+                        _AutoGroupHint(connection: connection, group: group),
+                      LayoutBuilder(
+                        builder:
+                            (BuildContext context, BoxConstraints constraints) {
+                              final int columns =
+                                  ((constraints.maxWidth + _tileGap) /
+                                          (_minTileWidth + _tileGap))
+                                      .floor()
+                                      .clamp(1, 6);
+                              final double tileWidth =
+                                  (constraints.maxWidth -
+                                      _tileGap * (columns - 1)) /
+                                  columns;
+
+                              return Wrap(
+                                spacing: _tileGap,
+                                runSpacing: _tileGap,
+                                children: <Widget>[
+                                  for (final String member in group.members)
+                                    SizedBox(
+                                      key: member == group.now
+                                          ? _selectedTileKey
+                                          : null,
+                                      width: tileWidth,
+                                      child: _buildTile(
+                                        connection,
+                                        group,
+                                        member,
+                                        canSelect: canSelect,
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  ShapeBorder _cardShape({required bool top, required bool bottom}) {
+    return RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(
+        top: top ? const Radius.circular(AppTheme.cardRadius) : Radius.zero,
+        bottom: bottom
+            ? const Radius.circular(AppTheme.cardRadius)
+            : Radius.zero,
+      ),
+      side: BorderSide(
+        color: Theme.of(
+          context,
+        ).colorScheme.outlineVariant.withValues(alpha: 0.6),
       ),
     );
   }
 }
 
-// 非 Selector 组的选中项由内核持有：URLTest 按延迟，Fallback 按列表顺序取第一个可用
 class _AutoGroupHint extends StatelessWidget {
   const _AutoGroupHint({required this.connection, required this.group});
 
@@ -269,27 +399,28 @@ class _AutoGroupHint extends StatelessWidget {
 
   String _detail() {
     if (group.type == 'Fallback') {
-      return L10n.t(
-        '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选',
-      );
+      return L10n.t('本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选');
     }
 
     final String? fastest = connection.fastestMember(group);
     if (fastest == null || fastest == group.now) {
       return L10n.t('本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选');
     }
-    return L10n.t(
-      '本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去',
-      <Object>[NodeLabels.displayName(fastest)],
-    );
+    return L10n.t('本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去', <Object>[
+      NodeLabels.displayName(fastest),
+    ]);
   }
 }
 
 class _NodeTile extends StatelessWidget {
   const _NodeTile({
     required this.name,
+    required this.groupTag,
     required this.via,
     required this.protocol,
+    required this.network,
+    required this.tls,
+    required this.udp,
     required this.selected,
     required this.delay,
     required this.testing,
@@ -300,9 +431,13 @@ class _NodeTile extends StatelessWidget {
 
   final String name;
 
-  // 成员本身是分组时，它当前落到的叶子节点
+  final String? groupTag;
+
   final String? via;
   final String protocol;
+  final String network;
+  final String tls;
+  final String udp;
   final bool selected;
   final int delay;
   final bool testing;
@@ -341,32 +476,32 @@ class _NodeTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 6, 5, 6),
           child: Row(
             children: <Widget>[
-              if (region != null) ...<Widget>[
-                FlagIcon(code: region),
-                const SizedBox(width: 7),
-              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        if (selected)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 3),
-                            child: Icon(
-                              Icons.check_circle,
-                              size: 12,
-                              color: scheme.primary,
+                    Tooltip(
+                      message: via == null
+                          ? NodeLabels.originalName(name)
+                          : '${NodeLabels.originalName(name)} → ${NodeLabels.originalName(via!)}',
+                      waitDuration: const Duration(milliseconds: 600),
+                      child: Row(
+                        children: <Widget>[
+                          if (via == null && region != null) ...<Widget>[
+                            FlagIcon(code: region),
+                            const SizedBox(width: 4),
+                          ],
+                          if (selected)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 3),
+                              child: Icon(
+                                Icons.check_circle,
+                                size: 12,
+                                color: scheme.primary,
+                              ),
                             ),
-                          ),
-                        Expanded(
-                          child: Tooltip(
-                            message: via == null
-                                ? label
-                                : '$label → ${NodeLabels.displayName(via!)}',
-                            waitDuration: const Duration(milliseconds: 600),
+                          Flexible(
                             child: Text(
                               label,
                               maxLines: 1,
@@ -375,31 +510,42 @@ class _NodeTile extends StatelessWidget {
                                   ?.copyWith(fontSize: 12, color: titleColor),
                             ),
                           ),
-                        ),
-                      ],
+                          if (groupTag != null) ...<Widget>[
+                            const SizedBox(width: 6),
+                            TagChip(label: groupTag!),
+                          ],
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: <Widget>[
-                        // 协议名照内核给的 type 原样显示，不缩写
-                        if (protocol.isNotEmpty) TagChip(label: protocol),
-                        if (via != null) ...<Widget>[
-                          if (protocol.isNotEmpty) const SizedBox(width: 4),
+                    const SizedBox(height: 6),
+                    if (via != null)
+                      Row(
+                        children: <Widget>[
+                          if (region != null) ...<Widget>[
+                            FlagIcon(code: region),
+                            const SizedBox(width: 6),
+                          ],
                           Flexible(
                             child: Text(
-                              '→ ${NodeLabels.displayName(via!)}',
+                              NodeLabels.displayName(via!),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelSmall
+                              style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
-                                    fontSize: 10,
+                                    fontSize: 12,
                                     color: scheme.onSurfaceVariant,
                                   ),
                             ),
                           ),
                         ],
-                      ],
-                    ),
+                      )
+                    else
+                      TagChip.wrap(
+                        protocol: protocol,
+                        network: network,
+                        tls: tls,
+                        udp: udp,
+                      ),
                   ],
                 ),
               ),

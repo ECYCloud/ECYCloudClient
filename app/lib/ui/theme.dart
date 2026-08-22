@@ -12,7 +12,6 @@ class AppTheme {
   static const Color warning = Color(0xFFE0A800);
   static const Color danger = Color(0xFFE5484D);
 
-  // 全局按钮圆角：胶囊形
   static const OutlinedBorder pillShape = StadiumBorder();
 
   // 触控平台（Android/iOS）手指需要 48dp 触控目标，桌面用鼠标 32 即可。
@@ -27,24 +26,59 @@ class AppTheme {
   // 全局 compact 会让紧约束退化成松约束，盒子按内容缩小并脱离右侧那一列。
   static double get minTapTarget => isTouch ? 48 : 32;
 
-  // 描边按钮用 tonal 实体（配色同 FilledButton.tonal）。
-  static ButtonStyle _tonalPill(ColorScheme scheme) => FilledButton.styleFrom(
-    backgroundColor: scheme.secondaryContainer,
-    foregroundColor: scheme.onSecondaryContainer,
-    // 这份样式整体盖掉控件默认值，禁用态的底色与字色必须一起给，
-    // 少给底色禁用时就退回透明底，只剩一行灰字
-    disabledBackgroundColor: scheme.onSurface.withValues(alpha: 0.12),
-    disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
-    // OutlinedButton 默认自带描边，不显式抹掉界面上就有两种次要按钮外观
-    side: BorderSide.none,
-    shape: pillShape,
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-    textStyle: _componentText(13, weight: FontWeight.w600),
-  );
+  static ButtonStyle _tonalPill(ColorScheme scheme) =>
+      FilledButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        foregroundColor: scheme.onSurface,
+        disabledBackgroundColor: Colors.transparent,
+        disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
+        shape: pillShape,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        textStyle: _componentText(13, weight: FontWeight.w600),
+      ).copyWith(
+        side: WidgetStateProperty<BorderSide>.fromMap(
+          <WidgetStatesConstraint, BorderSide>{
+            WidgetState.disabled: BorderSide(
+              color: scheme.onSurface.withValues(alpha: 0.12),
+            ),
+            WidgetState.any: BorderSide(color: scheme.outline),
+          },
+        ),
+      );
 
-  // 卡片与卡片内小块的圆角，成套用才不会看起来东拼西凑
   static const double cardRadius = 12;
   static const double tileRadius = 9;
+
+  // overlay 滚动条不占布局（厚度 7 + crossAxisMargin 2）。滚动区内侧至少留这段，否则文字会被拇指盖住。
+  static const double overlayScrollGutter = 16;
+  static const EdgeInsets overlayScrollPadding = EdgeInsets.only(
+    right: overlayScrollGutter,
+  );
+  static const EdgeInsets overlayScrollPaddingBottom = EdgeInsets.only(
+    bottom: overlayScrollGutter,
+  );
+  static const EdgeInsets pageScrollPadding = EdgeInsets.fromLTRB(
+    14,
+    14,
+    overlayScrollGutter,
+    14,
+  );
+
+  static EdgeInsets overlayGutterOf(
+    EdgeInsets? padding, {
+    Axis axis = Axis.vertical,
+  }) {
+    if (axis == Axis.horizontal) {
+      final EdgeInsets base = padding ?? overlayScrollPaddingBottom;
+      return base.bottom >= overlayScrollGutter
+          ? base
+          : base.copyWith(bottom: overlayScrollGutter);
+    }
+    final EdgeInsets base = padding ?? overlayScrollPadding;
+    return base.right >= overlayScrollGutter
+        ? base
+        : base.copyWith(right: overlayScrollGutter);
+  }
 
   // 24 是 ListTile 的 trailing 内边距；图标被触摸盒（minTapTarget）居中后会内缩，
   // 行的右内边距减掉这段，才与同列的 chevron、开关落在一条边上
@@ -55,13 +89,13 @@ class AppTheme {
   // 只能整体缩放；桌面端按 0.8 收到约 42×26
   static const double switchScale = 0.8;
 
-  // 雅黑 UI 只在 Windows 上存在。Android / 鸿蒙 / WSA / macOS / Linux 强制指定
+  // 雅黑只在 Windows 上存在。Android / 鸿蒙 / WSA / macOS / Linux 强制指定
   // 会走到残缺回退链，中文易糊、缺字或度量错乱，宽屏切换时更像「看不清」。
+  // 正文字用雅黑本体：雅黑 UI 为小控件削细之后，11–13 号正文容易发灰发糊。
   static final bool _windowsUiFont = Platform.isWindows;
-  static final String? _fontFamily =
-      _windowsUiFont ? 'Microsoft YaHei UI' : null;
+  static final String? _fontFamily = _windowsUiFont ? 'Microsoft YaHei' : null;
   static final List<String> _fontFamilyFallback = _windowsUiFont
-      ? const <String>['Microsoft YaHei', 'Segoe UI']
+      ? const <String>['Microsoft YaHei UI', 'Segoe UI']
       : const <String>[];
 
   // 组件主题里的 TextStyle 必须自带字族。ThemeData.fontFamily 只会应用到
@@ -143,7 +177,6 @@ class AppTheme {
       textTheme: _textTheme(scheme),
       // 全端同一密度：按平台分档会让 Android 的按钮、输入框、列表行比桌面各高一档
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-      // 底色比卡片更沉一档：卡片靠明度差浮出来，不靠描边和投影
       scaffoldBackgroundColor: brightness == Brightness.dark
           ? scheme.surfaceContainerLowest
           : scheme.surfaceContainer,
@@ -188,6 +221,9 @@ class AppTheme {
       scrollbarTheme: ScrollbarThemeData(
         thickness: const WidgetStatePropertyAll<double>(7),
         radius: const Radius.circular(4),
+        mainAxisMargin: 4,
+        crossAxisMargin: 2,
+        interactive: true,
         thumbColor:
             WidgetStateProperty<Color>.fromMap(<WidgetStatesConstraint, Color>{
               WidgetState.hovered: scheme.outline.withValues(alpha: 0.6),
@@ -202,20 +238,12 @@ class AppTheme {
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(style: _tonalPill(scheme)),
-      textButtonTheme: TextButtonThemeData(
-        style: _tonalPill(scheme).copyWith(
-          backgroundColor: const WidgetStatePropertyAll<Color>(
-            Colors.transparent,
-          ),
-          side: WidgetStateProperty<BorderSide>.fromMap(
-            <WidgetStatesConstraint, BorderSide>{
-              WidgetState.disabled: BorderSide(
-                color: scheme.onSurface.withValues(alpha: 0.12),
-              ),
-              WidgetState.any: BorderSide(color: scheme.outline),
-            },
-          ),
-        ),
+      textButtonTheme: TextButtonThemeData(style: _tonalPill(scheme)),
+      chipTheme: ChipThemeData(
+        shape: pillShape,
+        backgroundColor: Colors.transparent,
+        selectedColor: scheme.primary.withValues(alpha: 0.14),
+        side: BorderSide(color: scheme.outline),
       ),
       // MenuItemButton 内部是 TextButton，会再套一层 textButtonTheme。
       // 文字按钮的描边不挡掉，就会画进每一项，两项交界叠成分隔线。
@@ -236,6 +264,7 @@ class AppTheme {
           shape: pillShape,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           textStyle: _componentText(12, weight: FontWeight.w600),
+          backgroundColor: Colors.transparent,
           selectedBackgroundColor: scheme.primary,
           selectedForegroundColor: scheme.onPrimary,
         ),
@@ -311,6 +340,63 @@ class AppTheme {
           11,
           color: scheme.onSurfaceVariant,
         ),
+      ),
+    );
+  }
+
+  // 电视安全区：系统 insets 不足 48dp 时补到 48，已有的不叠加上去
+  static const double televisionOverscan = 48;
+
+  static EdgeInsets televisionPadding(EdgeInsets system) => EdgeInsets.fromLTRB(
+    system.left < televisionOverscan ? televisionOverscan : system.left,
+    system.top < televisionOverscan ? televisionOverscan : system.top,
+    system.right < televisionOverscan ? televisionOverscan : system.right,
+    system.bottom < televisionOverscan ? televisionOverscan : system.bottom,
+  );
+
+  static ButtonStyle _televisionFocusStyle(
+    ButtonStyle? current,
+    ColorScheme scheme,
+  ) {
+    final BorderSide focused = BorderSide(color: scheme.primary, width: 2);
+    return (current ?? const ButtonStyle()).copyWith(
+      side: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+        if (states.contains(WidgetState.focused)) {
+          return focused;
+        }
+        return current?.side?.resolve(states);
+      }),
+      overlayColor: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+        if (states.contains(WidgetState.focused)) {
+          return scheme.primary.withValues(alpha: 0.16);
+        }
+        return current?.overlayColor?.resolve(states);
+      }),
+    );
+  }
+
+  static ThemeData withTelevisionFocus(ThemeData base) {
+    final ColorScheme scheme = base.colorScheme;
+    return base.copyWith(
+      focusColor: scheme.primary.withValues(alpha: 0.28),
+      filledButtonTheme: FilledButtonThemeData(
+        style: _televisionFocusStyle(base.filledButtonTheme.style, scheme),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: _televisionFocusStyle(base.outlinedButtonTheme.style, scheme),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: _televisionFocusStyle(base.textButtonTheme.style, scheme),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: _televisionFocusStyle(base.elevatedButtonTheme.style, scheme),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: _televisionFocusStyle(base.iconButtonTheme.style, scheme),
+      ),
+      listTileTheme: base.listTileTheme.copyWith(
+        selectedColor: scheme.primary,
+        selectedTileColor: scheme.primary.withValues(alpha: 0.14),
       ),
     );
   }

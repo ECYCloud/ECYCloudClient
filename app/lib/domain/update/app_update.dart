@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import '../../core/app_config.dart';
 import 'github_release.dart';
 
-/// 客户端自身的版本检查。资产名由各平台出包脚本决定，按平台与架构后缀取。
 class AppUpdate {
   const AppUpdate({
     required this.current,
@@ -16,13 +15,16 @@ class AppUpdate {
 
   static const String repo = 'ECYCloud/ECYCloudClient';
 
+  /// 资产元数据与校验值同源于 GitHub 应答，被顶替时校验值也会跟着换，
+  /// 因此下载地址必须先落在本仓库的发布路径下才允许取
+  static const String downloadPrefix =
+      'https://github.com/$repo/releases/download/';
+
   static const String _prePrefix = 'Pre ';
 
-  /// 本机版本，Pre 通道形如 `Pre 1.0.3`，调试构建为 `dev`
   final String current;
   final String latest;
 
-  /// 本机架构对应的安装包，为空表示该发布没提供
   final GithubAsset? installer;
 
   bool get outdated {
@@ -36,8 +38,7 @@ class AppUpdate {
     return _newer(latest, current);
   }
 
-  /// Pre 客户端认时间线上的 tip（tip 是 Last 就回落到正式版）；
-  /// Last 客户端只跟 Last，忽略所有 Pre-release。
+  /// Pre 认时间线上的 tip（tip 是 Last 就回落到正式版）；Last 只跟 Last，忽略 Pre-release
   static Future<AppUpdate> check({http.Client? client}) async {
     final List<GithubRelease> releases = await GithubRelease.list(
       repo,
@@ -59,8 +60,7 @@ class AppUpdate {
 
   static String get releasesUrl => 'https://github.com/$repo/releases';
 
-  /// Linux 的 tar.gz 要 root 解包再跑 install.sh，没有能接手的安装器，
-  /// 客户端不下载也不代装，只把用户引到发布页。
+  // tar.gz 要 root 解包再跑 install.sh，没有能接手的安装器，客户端不代装
   static bool get selfInstallable =>
       !Platform.isLinux || _linuxPackageFormat != 'tar.gz';
 
@@ -75,12 +75,10 @@ class AppUpdate {
     if (Platform.isLinux) {
       return 'linux-$arch.$_linuxPackageFormat';
     }
-    // Android（及未识别平台的兜底）按 ABI 分包，与 build-android.sh 后缀一致
     return 'android-$arch.apk';
   }
 
-  /// Linux 同一架构出 deb / rpm / tar.gz 三种包，装的是哪种只有安装器知道，
-  /// 由 build-linux.sh 写在安装目录里；调试构建没有这份标记，退回 deb。
+  // Linux 同一架构出 deb / rpm / tar.gz，装的是哪种由安装器写入；调试构建没有这份标记，退回 deb
   static final String _linuxPackageFormat = _readPackageFormat();
 
   static String _readPackageFormat() {
@@ -97,8 +95,7 @@ class AppUpdate {
     Abi.androidArm64 ||
     Abi.windowsArm64 ||
     Abi.macosArm64 ||
-    Abi.linuxArm64 =>
-      'arm64',
+    Abi.linuxArm64 => 'arm64',
     Abi.androidArm => 'arm',
     _ => 'x64',
   };
@@ -120,10 +117,9 @@ class AppUpdate {
   static bool _isPre(String version) => version.startsWith(_prePrefix);
 
   static List<int>? _parse(String version) {
-    final List<String> parts = (_isPre(version)
-            ? version.substring(_prePrefix.length)
-            : version)
-        .split('.');
+    final List<String> parts =
+        (_isPre(version) ? version.substring(_prePrefix.length) : version)
+            .split('.');
     if (parts.length != 3) {
       return null;
     }

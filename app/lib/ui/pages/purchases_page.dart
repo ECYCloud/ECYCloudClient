@@ -7,6 +7,7 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
@@ -82,7 +83,9 @@ class _PurchasesPageState extends State<PurchasesPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -151,7 +154,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView(
-                      padding: const EdgeInsets.all(14),
+                      padding: AppTheme.pageScrollPadding,
                       children: <Widget>[
                         SimpleDataTable(
                           minWidth: 1280,
@@ -175,7 +178,9 @@ class _PurchasesPageState extends State<PurchasesPage> {
                                           _toggle(item, !item.autoRenew),
                                         ),
                                         child: Text(
-                                          item.autoRenew ? L10n.t('关闭自动续费') : L10n.t('开启自动续费'),
+                                          item.autoRenew
+                                              ? L10n.t('关闭自动续费')
+                                              : L10n.t('开启自动续费'),
                                         ),
                                       )
                                     : const TableText('-', muted: true),

@@ -14,9 +14,6 @@ const logMaxBytes = 2 << 20
 
 var logMu sync.Mutex
 
-// 任何一个 goroutine panic 都会带走整个 helper 进程，而 helper 一停就没人还原系统代理、
-// 客户端也会因为套接字消失而报「后台服务未运行」。请求处理与后台回调一律兜住，
-// 把现场记进日志而不是让进程消失。
 func guard(what string) {
 	if r := recover(); r != nil {
 		logf("%s 出现异常: %v\n%s", what, r, debug.Stack())
@@ -27,6 +24,7 @@ func logf(format string, args ...any) {
 	logMu.Lock()
 	defer logMu.Unlock()
 
+	// 不能收成 0700：Linux 上内核以受限用户运行，穿不过就读不到 run/
 	if err := os.MkdirAll(dataDir(), 0o755); err != nil {
 		return
 	}
@@ -34,7 +32,7 @@ func logf(format string, args ...any) {
 		os.Remove(helperLogPath())
 	}
 
-	file, err := os.OpenFile(helperLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	file, err := os.OpenFile(helperLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}

@@ -12,7 +12,6 @@ import '../pages/account_page.dart';
 import '../theme.dart';
 import '../../l10n/l10n.dart';
 
-/// 面板头像：管理员自定义 / QQ / 字母 SVG；失败时回退首字。
 class UserAvatar extends StatelessWidget {
   const UserAvatar({super.key, required this.profile, this.radius = 14});
 
@@ -138,15 +137,13 @@ class UserAvatar extends StatelessWidget {
   }
 }
 
-/// 右上角可点头像：下拉账户信息与退出登录（已在账户页时不重复入栈）。
 class UserAvatarButton extends StatelessWidget {
   const UserAvatarButton({super.key, this.radius = 14, this.leadingGap = 0});
 
-  /// 与 [PageHeader] 左右外边距 / AppBar `actionsPadding` 相同。
   static const double edge = 14;
 
   static const double _menuWidth = 116;
-  static const double _itemHeight = 30;
+  static const double _itemHeight = 36;
 
   final double radius;
   final double leadingGap;
@@ -160,7 +157,12 @@ class UserAvatarButton extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final TextStyle style = theme.textTheme.bodyMedium!;
     final BorderRadius menuRadius = BorderRadius.circular(AppTheme.tileRadius);
-    final double avatarSize = radius * 2;
+    // MenuAnchor 的 position 是相对锚点盒子左上角的偏移（_MenuLayout 按
+    // position + anchorRect.topLeft 落位），触控端盒子被放大到 minTapTarget，
+    // 按头像直径算菜单会落进盒子里压住头像
+    final double anchorSize = AppTheme.isTouch
+        ? AppTheme.minTapTarget
+        : radius * 2;
     final bool onAccount =
         context.findAncestorWidgetOfExactType<AccountPage>() != null;
 
@@ -176,10 +178,10 @@ class UserAvatarButton extends StatelessWidget {
             padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.zero),
             visualDensity: VisualDensity.standard,
             minimumSize: const WidgetStatePropertyAll<Size>(
-              Size(_menuWidth, 0),
+              Size(_menuWidth, _itemHeight * 2),
             ),
             maximumSize: const WidgetStatePropertyAll<Size>(
-              Size(_menuWidth, 320),
+              Size(_menuWidth, _itemHeight * 2),
             ),
             shape: WidgetStatePropertyAll<OutlinedBorder>(
               RoundedRectangleBorder(borderRadius: menuRadius),
@@ -230,19 +232,17 @@ class UserAvatarButton extends StatelessWidget {
                       } else {
                         controller.open(
                           position: Offset(
-                            avatarSize - _menuWidth,
-                            avatarSize + 4,
+                            anchorSize - _menuWidth,
+                            anchorSize + 4,
                           ),
                         );
                       }
                     },
-                    child: AppTheme.isTouch
-                        ? SizedBox(
-                            width: AppTheme.minTapTarget,
-                            height: AppTheme.minTapTarget,
-                            child: Center(child: avatar),
-                          )
-                        : avatar,
+                    child: SizedBox(
+                      width: anchorSize,
+                      height: anchorSize,
+                      child: Center(child: avatar),
+                    ),
                   ),
                 );
               },

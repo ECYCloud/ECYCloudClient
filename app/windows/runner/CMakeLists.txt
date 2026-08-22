@@ -51,6 +51,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "d3d11.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dxgi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "imm32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 

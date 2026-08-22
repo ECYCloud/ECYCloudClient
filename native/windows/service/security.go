@@ -11,19 +11,94 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// SYSTEM 与管理员完全控制，交互登录用户可读写，其余主体无权访问
 const pipeSDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
 
-// 仅 SYSTEM 与管理员，阻止本地其它账户读取 Clash API 密钥
+// 仅 SYSTEM/管理员，否则其它账户可读 Clash API 密钥
 const runDirSDDL = "D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
-// 目录已存在时也要重写 DACL，否则会沿用历史遗留的宽松权限
+// 缺这道 DACL 等于允许替换特权二进制
+const installDirSDDL = "D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FRFX;;;BU)"
+
+// %ProgramData% 默认 ACL 下普通用户可建目录并获 WRITE_DAC，只重写 DACL 会被改回来
 func ensureRestrictedDir(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
+	if err := ensureOwnedDir(path); err != nil {
+		return err
+	}
+	return applyDACL(path, runDirSDDL)
+}
+
+func ensureOwnedDir(path string) error {
+	err := os.Mkdir(path, 0o700)
+	if err == nil {
+		return nil
+	}
+	if !os.IsExist(err) {
 		return err
 	}
 
-	sd, err := windows.SecurityDescriptorFromString(runDirSDDL)
+	reparse, err := hasReparsePoint(path)
+	if err != nil {
+		return err
+	}
+	if reparse {
+		return fmt.Errorf("目录 %s 是重解析点，拒绝使用", path)
+	}
+
+	trusted, err := ownedByAdmins(path)
+	if err != nil {
+		return err
+	}
+	if trusted {
+		return nil
+	}
+	if err := takeOwnership(path); err != nil {
+		return fmt.Errorf("目录 %s 的属主不可信且无法收归管理员: %w", path, err)
+	}
+	return nil
+}
+
+func hasReparsePoint(path string) (bool, error) {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return false, err
+	}
+	attrs, err := windows.GetFileAttributes(name)
+	if err != nil {
+		return false, fmt.Errorf("读取 %s 的属性失败: %w", path, err)
+	}
+	return attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0, nil
+}
+
+func ownedByAdmins(path string) (bool, error) {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return false, fmt.Errorf("读取 %s 的属主失败: %w", path, err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return false, fmt.Errorf("解析 %s 的属主失败: %w", path, err)
+	}
+	return owner.IsWellKnown(windows.WinLocalSystemSid) ||
+		owner.IsWellKnown(windows.WinBuiltinAdministratorsSid), nil
+}
+
+// 收归 Administrators：该组在服务令牌里带 SE_GROUP_OWNER，不需要 SeRestorePrivilege
+func takeOwnership(path string) error {
+	owner, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION,
+		owner, nil, nil, nil,
+	)
+}
+
+// 目录已存在时也要重写 DACL，否则会沿用历史遗留的宽松权限
+func applyDACL(path string, sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return fmt.Errorf("解析目录 DACL 失败: %w", err)
 	}
@@ -40,8 +115,7 @@ func ensureRestrictedDir(path string) error {
 	)
 }
 
-// 不能改用 WTSQueryUserToken 取控制台会话用户：那需要 SE_TCB_NAME，
-// debug 模式下拿不到，也认不出远程桌面会话里的 GUI。
+// 不能改用 WTSQueryUserToken：需要 SE_TCB_NAME，debug 拿不到，也认不出远程桌面会话
 func clientUserSID(pid int) (string, error) {
 	if pid <= 0 {
 		return "", fmt.Errorf("请求缺少 GUI 进程 ID，无法定位用户配置单元")
@@ -66,8 +140,7 @@ func clientUserSID(pid int) (string, error) {
 	return user.User.Sid.String(), nil
 }
 
-// 管道 DACL 对所有交互用户开放读写（同一账户下的其它进程无法用 ACL 区分），
-// 请求体里的 PID 是调用方自己填的、不可信，只能取内核记录的真实连接进程
+// 请求体里的 PID 不可信，只能取管道对端的真实进程
 func pipeClientPID(conn net.Conn) (int, error) {
 	handle, ok := conn.(interface{ Fd() uintptr })
 	if !ok {
@@ -81,8 +154,7 @@ func pipeClientPID(conn net.Conn) (int, error) {
 	return int(pid), nil
 }
 
-// kernel.start / kernel.upgrade 会让 SYSTEM 执行调用方给的内容，只能放行安装目录下
-// 那个官方 GUI；DACL 管不到"同账户下哪个进程"，只能在应用层核对真实调用方的可执行文件路径
+// 管道 DACL 只能收到交互用户，必须再核对接官方 GUI 可执行文件路径
 func verifyGUICaller(pid int) error {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {

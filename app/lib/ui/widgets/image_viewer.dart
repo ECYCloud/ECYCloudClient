@@ -92,67 +92,65 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                       clipBehavior: Clip.hardEdge,
                       child: LayoutBuilder(
                         builder:
-                            (
-                              BuildContext context,
-                              BoxConstraints constraints,
-                            ) {
-                          // 按视口解码，避免原图像素进 GPU 导致缩放卡顿
-                          final double dpr =
-                              MediaQuery.devicePixelRatioOf(context);
-                          final int cacheW =
-                              (constraints.maxWidth * dpr * 2).round();
-                          final int cacheH =
-                              (constraints.maxHeight * dpr * 2).round();
-                          final String url = widget.images[_index];
-                          return GestureDetector(
-                            onTap: _close,
-                            child: RotatedBox(
-                              quarterTurns: _quarterTurns,
-                              child: Image(
-                                key: ValueKey<String>(url),
-                                image: ResizeImage(
-                                  NetworkImage(url),
-                                  width: cacheW,
-                                  height: cacheH,
-                                  policy: ResizeImagePolicy.fit,
-                                ),
-                                fit: BoxFit.contain,
-                                filterQuality: FilterQuality.low,
-                                gaplessPlayback: true,
-                                frameBuilder:
-                                    (
-                                      BuildContext context,
-                                      Widget child,
-                                      int? frame,
-                                      bool sync,
-                                    ) => sync || frame != null
-                                    ? child
-                                    : const Center(
-                                        child: SizedBox(
-                                          width: 28,
-                                          height: 28,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white70,
+                            (BuildContext context, BoxConstraints constraints) {
+                              // 按视口解码，避免原图像素进 GPU 导致缩放卡顿
+                              final double dpr = MediaQuery.devicePixelRatioOf(
+                                context,
+                              );
+                              final int cacheW =
+                                  (constraints.maxWidth * dpr * 2).round();
+                              final int cacheH =
+                                  (constraints.maxHeight * dpr * 2).round();
+                              final String url = widget.images[_index];
+                              return GestureDetector(
+                                onTap: _close,
+                                child: RotatedBox(
+                                  quarterTurns: _quarterTurns,
+                                  child: Image(
+                                    key: ValueKey<String>(url),
+                                    image: ResizeImage(
+                                      NetworkImage(url),
+                                      width: cacheW,
+                                      height: cacheH,
+                                      policy: ResizeImagePolicy.fit,
+                                    ),
+                                    fit: BoxFit.contain,
+                                    filterQuality: FilterQuality.low,
+                                    gaplessPlayback: true,
+                                    frameBuilder:
+                                        (
+                                          BuildContext context,
+                                          Widget child,
+                                          int? frame,
+                                          bool sync,
+                                        ) => sync || frame != null
+                                        ? child
+                                        : const Center(
+                                            child: SizedBox(
+                                              width: 28,
+                                              height: 28,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ),
+                                    errorBuilder:
+                                        (
+                                          BuildContext context,
+                                          Object error,
+                                          StackTrace? stack,
+                                        ) => const Center(
+                                          child: Icon(
+                                            Icons.broken_image_outlined,
+                                            size: 40,
+                                            color: Colors.white54,
                                           ),
                                         ),
-                                      ),
-                                errorBuilder:
-                                    (
-                                      BuildContext context,
-                                      Object error,
-                                      StackTrace? stack,
-                                    ) => const Center(
-                                      child: Icon(
-                                        Icons.broken_image_outlined,
-                                        size: 40,
-                                        color: Colors.white54,
-                                      ),
-                                    ),
-                              ),
-                            ),
-                          );
-                        },
+                                  ),
+                                ),
+                              );
+                            },
                       ),
                     ),
                   ),

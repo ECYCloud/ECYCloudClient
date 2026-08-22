@@ -33,17 +33,13 @@ class QuickToggleService : TileService() {
     }
 
     private fun startTunnel() {
-        // 界面在前台时交给 Dart 状态机（刷新面板配置、走完整连接流程）
         if (KernelService.requestToggle()) {
             return
         }
         if (BoxState.starting || !BoxState.configFile(this).isFile) {
             return
         }
-        // 已获 VPN 授权的应用不受 API 31+「后台不得启动前台服务」的限制（AOSP
-        // ActiveServices 的 REASON_OP_ACTIVATE_VPN），不必再把进程顶到前台，
-        // 面板也就不会被收起。授权被别的 VPN 收走时系统仍会拒绝，接住别让
-        // SystemUI 的回调带崩进程
+        // 已获 VPN 授权时 API 31+ 允许后台起前台服务（REASON_OP_ACTIVATE_VPN）；授权被抢走仍会抛
         runCatching {
             ContextCompat.startForegroundService(this, Intent(this, BoxService::class.java))
         }.onFailure {
@@ -55,7 +51,7 @@ class QuickToggleService : TileService() {
         if (KernelService.requestToggle()) {
             return
         }
-        // closeService 会阻塞，与 onRevoke 一样挪到后台；磁贴由 shutdown() 回刷
+        // TileService 回调里 stop 会阻塞，挪到后台；磁贴由 shutdown() 回刷
         Thread {
             BoxState.stoppedByUser = true
             BoxService.stop()

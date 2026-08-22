@@ -74,20 +74,18 @@ if [[ ! -x "$bundle/ECYCloud" ]]; then
     exit 1
 fi
 
-# 载荷按目标绝对路径铺好，deb / rpm / tar.gz 三种形态共用同一份；helper 与内核同目录
-# 进 /opt/ecycloud，helper 按自身目录定位 mihomo，GUI 路径也固定在这里（verifyGUICaller 只认它）
+# helper 与内核同目录进 /opt/ecycloud；verifyGUICaller 只认这个 GUI 路径
 stage_dir="$root_dir/build/linux/$arch/payload"
 deps_dir="$root_dir/build/deps/linux-$arch"
 rm -rf "$stage_dir"
 mkdir -p "$stage_dir/opt/ecycloud" "$stage_dir/usr/share/applications"
 
 cp -R "$bundle"/. "$stage_dir/opt/ecycloud/"
-# 逐个点名而不是拷整个 deps 目录：它是增量的，换内核后旧二进制还躺在里面
+# 逐个点名：deps 是增量的，换内核后旧文件还在
 install -m 0755 "$deps_dir/mihomo" "$stage_dir/opt/ecycloud/mihomo"
 install -m 0755 "$deps_dir/ecycloud-helper" "$stage_dir/opt/ecycloud/ecycloud-helper"
 install -m 0644 "$deps_dir/LICENSE.mihomo.txt" "$stage_dir/opt/ecycloud/LICENSE.mihomo.txt"
-# geodata 与内核同目录：内核校验配置时要就地读 GEOIP/GEOSITE 库，缺了会去 geox-url 现下载，
-# 面板下发的地址在目标网络里不可达，下不到整份配置就校验失败。helper 启动前播种进运行目录
+# geodata 与内核同目录：缺了内核会按 geox-url 同步下载，面板地址在目标网络不可达
 install -m 0644 "$deps_dir/geoip.metadb" "$stage_dir/opt/ecycloud/geoip.metadb"
 install -m 0644 "$deps_dir/GeoSite.dat" "$stage_dir/opt/ecycloud/GeoSite.dat"
 install -m 0644 "$root_dir/LICENSE" "$stage_dir/opt/ecycloud/LICENSE.txt"

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/announcement.dart';
 import '../../state/announcement_controller.dart';
+import 'clipped_scroll_body.dart';
+import 'overlay_scroll_view.dart';
 import 'rich_html_view.dart';
 import '../../l10n/l10n.dart';
 
@@ -18,7 +20,7 @@ Future<void> showAnnouncementPopup(
     barrierDismissible: dismissible,
     builder: (BuildContext context) => AlertDialog(
       title: Text(announcement.title),
-      content: SingleChildScrollView(
+      content: OverlayScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -52,8 +54,6 @@ Future<void> showAnnouncementBrowser(
   BuildContext context, {
   required AnnouncementController controller,
 }) async {
-  // 旧逻辑 await refresh()：点铃铛先等面板 RTT（约 1–2s）才弹窗，体感卡顿。
-  // 有缓存立刻弹；无缓存先出加载态；刷新一律后台进行。
   if (!controller.busy) {
     unawaited(controller.refresh());
   }
@@ -64,8 +64,6 @@ Future<void> showAnnouncementBrowser(
       listenable: controller,
       builder: (BuildContext context, _) {
         final List<Announcement> items = controller.items;
-        // 仅在「正在拉且尚无数据」时转圈；失败/429/确实无公告要落到文案，
-        // 不能用 !loaded 单独判断，否则会永远停在加载态。
         if (items.isEmpty && !controller.loaded && controller.busy) {
           return AlertDialog(
             title: Text(L10n.t('网站公告')),
@@ -86,7 +84,9 @@ Future<void> showAnnouncementBrowser(
             title: Text(L10n.t('网站公告')),
             content: Text(
               controller.error ??
-                  (controller.loaded ? L10n.t('暂无公告') : L10n.t('暂时无法获取公告，请稍后重试')),
+                  (controller.loaded
+                      ? L10n.t('暂无公告')
+                      : L10n.t('暂时无法获取公告，请稍后重试')),
             ),
             actions: <Widget>[
               TextButton(
@@ -142,12 +142,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(
-              child: RichHtmlView(current.content),
-            ),
-          ),
+          ClippedScrollBody(child: RichHtmlView(current.content)),
           if (multi) ...<Widget>[
             const SizedBox(height: 16),
             Row(

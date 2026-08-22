@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # 构建 Android 侧的 libmihomo.aar。
-# 官方不发布移动端产物：按 kernel.lock.json 锁定的 tag 以依赖方式 import 内核，
-# 对 native/android/mihomo 这层封装做 gomobile bind，不改一行内核代码。
+# 用法: build-libmihomo.sh
 # 依赖：Go、JDK 17、Android SDK（含 NDK），ANDROID_HOME 与 ANDROID_NDK_HOME 需已就绪。
 set -euo pipefail
 
@@ -28,19 +27,9 @@ mkdir -p "$GOBIN"
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 export PATH="$GOBIN:$PATH"
 
-# 三个 ABI 与 build-android.sh 的分包目标一一对应；androidapi 对齐 build.gradle.kts 的 minSdk。
-# with_gvisor 不能省：gvisor 与 mixed 两种栈的实现整体在这个标签后面
-# （sing-tun 的 stack_gvisor.go / stack_mixed.go），不带就只编进 stack_gvisor_stub.go，
-# 客户端下发的 stack: mixed 会在建栈时报 gVisor is not included in this build。
-# cmfa 更不能省（Clash Meta for Android 的 core/build.gradle.kts 同样带它）：内核用它
-# 区分「TUN 由内核自己建」与「TUN 由宿主的 VpnService 建」两种形态，而本项目是后者。
-# 不带的话编进 listener/sing_tun/server_android.go，它的 buildAndroidRules 会去读
-# /data/system/packages.xml 解析包名对应的 uid——非 root 机上必然 permission denied，
-# sing_tun.New 随之失败，而 listener.ReCreateTun 只打一行 ERROR 并把 tun.enable 抹成
-# false，ApplyConfig 不报错：系统那张网卡建好了却没人读它的 fd，界面显示已连接、
-# 全部流量掉进黑洞。同一标签还会关掉 loopback 探测器（它按 iface.IsLocalIp 判定，
-# Android 11+ 拿网卡表本就不可靠）。
-# 与官方 Makefile 的 GOBUILD 一致，ldflags 也照它注入版本号。
+# ABI 对齐 build-android.sh；androidapi 对齐 minSdk。
+# 必须带 with_gvisor（否则 mixed 栈只编进 stub）和 cmfa（否则走 packages.xml 解析 uid，
+# ReCreateTun 吞掉失败、流量进黑洞）。ldflags 与官方 Makefile 一样注入版本号。
 mkdir -p "$libs_dir"
 gomobile bind \
     -target=android/arm64,android/arm,android/amd64 \

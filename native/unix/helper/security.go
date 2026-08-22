@@ -12,13 +12,18 @@ import (
 
 const clientPollInterval = time.Second
 
-// 内核不与 helper 同权：Linux 上跑在受限用户下，macOS 上才是 root。
-// 运行目录与配置都要归到这个身份，否则内核读不了配置、写不了 cache.db。
+// Linux 上内核跑受限用户，macOS 上才是 root；运行目录须归这个身份
 var kernelUID, kernelGID = resolveKernelUser()
 
-// 目录里有 Clash API 密钥，只对内核身份开放；已存在时也要重设权限与属主，
-// 避免沿用历史遗留的宽松模式
+// 含 Clash API 密钥。软链接一律拒绝：/Library/Application Support 对 admin 可写
 func ensureRestrictedDir(path string) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("目录 %s 是软链接，拒绝使用", path)
+	}
+	// MkdirAll 会把 0700 一路盖到上级，受限用户穿不过就打不开 run/
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
@@ -35,8 +40,7 @@ func writeKernelFile(path string, content string) error {
 	return os.Chown(path, kernelUID, kernelGID)
 }
 
-// 与 writeKernelFile 同一要求，只是内容来自文件而非字符串（geodata 有十几 MB，
-// 不该先读进内存）。属主不归到内核身份，内核就打不开这些库
+// 属主不归到内核身份，内核就打不开这些库
 func copyKernelFile(source, path string) error {
 	if err := copyFile(source, path); err != nil {
 		return err
@@ -44,9 +48,7 @@ func copyKernelFile(source, path string) error {
 	return os.Chown(path, kernelUID, kernelGID)
 }
 
-// kernel.start / kernel.upgrade 会让 helper 以特权执行调用方给的内容，只能放行安装
-// 目录下那个官方 GUI；套接字权限管不到"哪个进程"，只能在应用层核对真实调用方的
-// 可执行文件路径。两侧都解一遍软链，避免 /opt 或 /Applications 被软链接绕过。
+// 套接字权限管不到哪个进程；两侧都解软链，避免 /opt 或 /Applications 被绕过
 func verifyGUICaller(pid int) error {
 	actual, err := processExePath(pid)
 	if err != nil {
@@ -65,7 +67,7 @@ func realPath(path string) string {
 	return path
 }
 
-// Unix 下 GUI 不是 helper 的子进程，等不到 SIGCHLD，只能按信号 0 探活
+// GUI 不是 helper 的子进程，等不到 SIGCHLD，只能按信号 0 探活
 func watchProcess(pid int, onExit func()) error {
 	if pid <= 0 {
 		return fmt.Errorf("无效的进程 ID %d", pid)

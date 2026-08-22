@@ -49,6 +49,44 @@ void main() {
     expect(result.appScheme, '');
   });
 
+  test('手机有 scheme 时唤起 App', () {
+    final ShopPurchaseResult result = parse(<String, dynamic>{
+      'tradeno': '2026081612000012345',
+      'pay_scheme': 'alipays://platformapi/startapp?appId=20000067',
+      'pay_qrcode': 'https://qr.alipay.com/bax001',
+    });
+
+    expect(
+      result.payLaunch(supportsPayScheme: true),
+      ShopPayLaunch.scheme,
+    );
+  });
+
+  test('电视即使有 scheme 也走二维码', () {
+    final ShopPurchaseResult result = parse(<String, dynamic>{
+      'tradeno': '2026081612000012345',
+      'pay_scheme': 'alipays://platformapi/startapp?appId=20000067',
+      'pay_qrcode': 'https://qr.alipay.com/bax001',
+    });
+
+    expect(
+      result.payLaunch(supportsPayScheme: false),
+      ShopPayLaunch.qrcode,
+    );
+  });
+
+  test('电视没有收款码时退回浏览器', () {
+    final ShopPurchaseResult result = parse(<String, dynamic>{
+      'tradeno': '2026081612000012345',
+      'payment_url': 'https://pay.example.com/submit.php?pid=1&sign=x',
+    });
+
+    expect(
+      result.payLaunch(supportsPayScheme: false),
+      ShopPayLaunch.browser,
+    );
+  });
+
   test('唤起链接优先于收款码', () {
     final ShopPurchaseResult result = parse(<String, dynamic>{
       'tradeno': '2026081612000012345',

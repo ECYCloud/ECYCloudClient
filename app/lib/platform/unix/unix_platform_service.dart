@@ -8,8 +8,6 @@ import '../../core/safe_url.dart';
 import '../../domain/config/local_template.dart';
 import '../../domain/platform/platform_service.dart';
 
-/// macOS 与 Linux 桌面端共用的平台能力。托盘由原生侧持有（Win32 之外没有
-/// 跨桌面的托盘 API），其余能力都能在 Dart 侧用进程与文件完成，不再下沉到原生。
 abstract class UnixPlatformService implements PlatformService {
   UnixPlatformService() {
     channel.setMethodCallHandler(_onNativeCall);
@@ -24,12 +22,14 @@ abstract class UnixPlatformService implements PlatformService {
     'disconnect': TrayAction.disconnect,
     'system_proxy': TrayAction.toggleSystemProxy,
     'tun': TrayAction.toggleTun,
+    'mode_rule': TrayAction.modeRule,
+    'mode_global': TrayAction.modeGlobal,
+    'mode_direct': TrayAction.modeDirect,
   };
 
   final StreamController<TrayAction> _trayActionController =
       StreamController<TrayAction>.broadcast();
 
-  /// 打开文件与链接的桌面入口命令
   String get openCommand;
 
   @override
@@ -49,6 +49,12 @@ abstract class UnixPlatformService implements PlatformService {
 
   @override
   bool get supportsPerAppProxy => false;
+
+  @override
+  bool get isTelevision => false;
+
+  @override
+  bool get supportsPayScheme => false;
 
   @override
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
@@ -71,8 +77,7 @@ abstract class UnixPlatformService implements PlatformService {
     });
   }
 
-  /// macOS 与 Linux 没有「与单个窗口绑定的输入法上下文」这一层，
-  /// 无法在不改用户系统输入法的前提下只关掉本窗口的组字
+  /// 无法只关本窗口 IME（无窗口级输入法上下文）。
   @override
   Future<void> setImeEnabled({required bool enabled}) async {}
 
@@ -128,20 +133,15 @@ abstract class UnixPlatformService implements PlatformService {
   @override
   Future<void> deleteSecret(String name) async {
     try {
-      await channel.invokeMethod<void>(
-        'secret.delete',
-        <String, dynamic>{'name': name},
-      );
+      await channel.invokeMethod<void>('secret.delete', <String, dynamic>{
+        'name': name,
+      });
     } on PlatformException catch (e) {
       throw PlatformServiceException(e.message ?? '无法清除凭据');
     }
   }
 
-  Future<String> _secretInvoke(
-    String method,
-    String name,
-    String value,
-  ) async {
+  Future<String> _secretInvoke(String method, String name, String value) async {
     try {
       final String? blob = await channel.invokeMethod<String>(
         method,
@@ -156,7 +156,7 @@ abstract class UnixPlatformService implements PlatformService {
     }
   }
 
-  /// 安装包与浏览器都由桌面环境接手，本进程随后会退出，必须脱离进程组
+  /// 必须脱离进程组。
   Future<bool> _spawn(List<String> arguments) async {
     try {
       await Process.start(
@@ -166,7 +166,11 @@ abstract class UnixPlatformService implements PlatformService {
       );
       return true;
     } on ProcessException catch (e) {
-      Logger.instance.error(source, '$openCommand ${arguments.join(' ')} 失败', e);
+      Logger.instance.error(
+        source,
+        '$openCommand ${arguments.join(' ')} 失败',
+        e,
+      );
       return false;
     }
   }

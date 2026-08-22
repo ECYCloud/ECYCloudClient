@@ -4,14 +4,11 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 enum WindowsServiceState {
-  /// 服务未安装
   missing,
   stopped,
   starting,
   stopping,
   running,
-
-  /// 能连上 SCM 但没权限查这个服务
   denied,
   unknown,
 }
@@ -35,10 +32,7 @@ class ServiceProbe {
   };
 }
 
-/// 服务由 SCM 托管：进程异常退出后 SCM 按失败恢复策略延迟重启，这段窗口里命名管道
-/// 不存在。客户端拿不到管道时要能自己判断服务到底是没装、还是停了、还是正在起来，
-/// 并在停了的情况下直接启动它——安装时已把 SERVICE_START 授权给交互用户，
-/// 不需要提权（见 native/windows/service/install.go 的 serviceSDDL）。
+/// SCM 失败恢复窗口内管道不存在；安装时 SERVICE_START 已授给交互用户（serviceSDDL）。
 class ServiceControl {
   const ServiceControl(this.serviceName);
 
@@ -51,7 +45,6 @@ class ServiceControl {
     return Isolate.run(() => _probe(name));
   }
 
-  /// 已在运行直接返回；已停止则启动并等到真正运行为止
   Future<ServiceProbe> ensureRunning({
     Duration timeout = const Duration(seconds: 15),
   }) async {
@@ -207,7 +200,6 @@ ServiceProbe _probe(String serviceName) {
   }
 }
 
-/// 返回 null 表示启动请求已发出
 String? _startService(String serviceName) {
   final _Scm scm = _Scm();
   final Pointer<Utf16> name = serviceName.toNativeUtf16();

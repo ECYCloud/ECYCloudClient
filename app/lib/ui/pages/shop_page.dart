@@ -8,8 +8,9 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/shop.dart';
 import '../app_scope.dart';
 import '../format.dart';
-import '../shell_navigator.dart';
 import '../theme.dart';
+import '../shell_navigator.dart';
+import '../widgets/icon_image.dart';
 import '../widgets/page_header.dart';
 import '../widgets/payment_wait_dialog.dart';
 import '../widgets/refresh_button.dart';
@@ -17,8 +18,10 @@ import '../widgets/rich_html_view.dart';
 import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
-import 'purchases_page.dart';
+import '../widgets/clipped_scroll_body.dart';
+import '../widgets/overlay_scroll_view.dart';
 import 'recharge_page.dart';
+import '../../l10n/app_language.dart';
 import '../../l10n/l10n.dart';
 
 enum _PayMethod { balance, alipay, wxpay }
@@ -76,7 +79,6 @@ class _ShopPageState extends State<ShopPage> {
     super.didChangeDependencies();
     if (!_started) {
       _started = true;
-      // 与首页账号刷新同间隔；/shop/products 不在面板限流名单内
       _catalogTicker = Timer.periodic(
         const Duration(seconds: 60),
         (_) => unawaited(_load(silent: true)),
@@ -155,7 +157,6 @@ class _ShopPageState extends State<ShopPage> {
         : null;
   }
 
-  /// 与网页一致的默认时长：已选 > 后台设置 > 最低天数
   int _resolveDuration(ShopCatalog catalog) {
     final List<int> durations = _durationsOf(catalog);
     if (durations.contains(_duration)) {
@@ -175,7 +176,6 @@ class _ShopPageState extends State<ShopPage> {
     return durations.toList()..sort();
   }
 
-  /// 倒计时逐秒刷新，无倒计时商品时不空转
   void _syncTicker(ShopCatalog catalog) {
     final bool needed = catalog.products.any(
       (ShopProduct product) => product.countdowns.isNotEmpty,
@@ -199,7 +199,9 @@ class _ShopPageState extends State<ShopPage> {
     }
     if (_cooldownRemaining > 0) {
       await _showMessage(
-        L10n.t('您在24小时内已购买过套餐了，请在 {0} 后再购买新套餐。', <Object>[_cooldownText(_cooldownRemaining)]),
+        L10n.t('您在24小时内已购买过套餐了，请在 {0} 后再购买新套餐。', <Object>[
+          _cooldownText(_cooldownRemaining),
+        ]),
       );
       return;
     }
@@ -452,157 +454,107 @@ class _ShopPageState extends State<ShopPage> {
         if (durations.isEmpty || product.classExpire == _duration) product,
     ];
 
-    final ThemeData theme = Theme.of(context);
-    final TextStyle? noticeStyle = theme.textTheme.bodyMedium;
-
-    return ListView(
+    return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(14),
-      children: <Widget>[
-        SectionCard(
-          icon: Icons.account_balance_wallet_outlined,
-          title: L10n.t('账户余额'),
-          action: TextButton(
-            onPressed: () => unawaited(_openRecharge()),
-            child: Text(L10n.t('余额充值')),
-          ),
-          child: InfoRow(
-            label: L10n.t('当前余额'),
-            value: '¥ ${catalog.money.toStringAsFixed(2)}',
-          ),
-        ),
-        const SizedBox(height: 12),
-        SectionCard(
-          icon: Icons.info_outline,
-          title: L10n.t('注意事项'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Text(
-                  L10n.t('每周六日所有的套餐、流量包将进行9折促销。'),
-                  style: noticeStyle?.copyWith(
-                    color: theme.colorScheme.error,
-                    fontWeight: FontWeight.w600,
-                  ),
+      slivers: <Widget>[
+        SliverPadding(
+          padding: AppTheme.pageScrollPadding.copyWith(bottom: 0),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(<Widget>[
+              SectionCard(
+                icon: Icons.account_balance_wallet_outlined,
+                title: L10n.t('账户余额'),
+                action: TextButton(
+                  onPressed: () => unawaited(_openRecharge()),
+                  child: Text('${L10n.t('余额充值')} ›'),
+                ),
+                child: InfoRow(
+                  label: L10n.t('当前余额'),
+                  value: '¥ ${catalog.money.toStringAsFixed(2)}',
                 ),
               ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Text(L10n.t('接独享节点定制，请 '), style: noticeStyle),
-                    TextButton(
-                      onPressed: () => ShellNavigator.go(
-                        context,
-                        ShellNavigator.ticketsTab,
-                      ),
-                      child: Text(L10n.t('提交工单')),
-                    ),
-                    Text(
-                      L10n.t(' 发送需求。请说明你的使用场景/需求，需要定制的地区，是否要优化线路等。'),
-                      style: noticeStyle,
-                    ),
-                  ],
+              if (catalog.notice.trim().isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                SectionCard(
+                  icon: Icons.info_outline,
+                  title: L10n.t('注意事项'),
+                  child: RichHtmlView(catalog.notice),
                 ),
-              ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Text(L10n.t('旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。')),
-              ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Text(L10n.t('流量不够用可以购买流量包，可和套餐流量叠加。')),
-              ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Text(L10n.t('购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。')),
-              ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Text(L10n.t('套餐内流量、流量包仅限在当前套餐有效期内使用，过期即失效。')),
-              ),
-              _ShopNotice(
-                icon: Icons.campaign_outlined,
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Text(L10n.t('自动续费可在 '), style: noticeStyle),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (BuildContext context) =>
-                              const PurchasesPage(),
-                        ),
-                      ),
-                      child: Text(L10n.t('购买记录')),
-                    ),
-                    Text(L10n.t(' 中关闭。'), style: noticeStyle),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Center(
-          child: SegmentedButton<String>(
-            segments: <ButtonSegment<String>>[
-              for (final (String type, String label) in _tabKeys)
-                ButtonSegment<String>(
-                  value: type,
-                  label: Text(L10n.t(label)),
-                ),
-            ],
-            selected: <String>{_tab},
-            onSelectionChanged: (Set<String> selection) =>
-                setState(() => _tab = selection.first),
-            showSelectedIcon: false,
-          ),
-        ),
-        if (durations.length > 1) ...<Widget>[
-          const SizedBox(height: 12),
-          Center(
-            child: SegmentedButton<int>(
-              segments: <ButtonSegment<int>>[
-                for (final int duration in durations)
-                  ButtonSegment<int>(
-                    value: duration,
-                    label: Text(L10n.t('{0}天', <Object>[duration])),
-                  ),
               ],
-              selected: <int>{_duration},
-              onSelectionChanged: (Set<int> selection) =>
-                  setState(() => _duration = selection.first),
-              showSelectedIcon: false,
+            ]),
+          ),
+        ),
+        PinnedHeaderSliver(
+          child: ColoredBox(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                AppTheme.pageScrollPadding.left,
+                AppTheme.pageScrollPadding.top,
+                AppTheme.pageScrollPadding.right,
+                12,
+              ),
+              child: Column(
+                children: <Widget>[
+                  Center(
+                    child: SegmentedButton<String>(
+                      segments: <ButtonSegment<String>>[
+                        for (final (String type, String label) in _tabKeys)
+                          ButtonSegment<String>(
+                            value: type,
+                            label: Text(L10n.t(label)),
+                          ),
+                      ],
+                      selected: <String>{_tab},
+                      onSelectionChanged: (Set<String> selection) =>
+                          setState(() => _tab = selection.first),
+                      showSelectedIcon: false,
+                    ),
+                  ),
+                  if (durations.length > 1) ...<Widget>[
+                    const SizedBox(height: 12),
+                    Center(
+                      child: SegmentedButton<int>(
+                        segments: <ButtonSegment<int>>[
+                          for (final int duration in durations)
+                            ButtonSegment<int>(
+                              value: duration,
+                              label: Text(L10n.t('{0}天', <Object>[duration])),
+                            ),
+                        ],
+                        selected: <int>{_duration},
+                        onSelectionChanged: (Set<int> selection) =>
+                            setState(() => _duration = selection.first),
+                        showSelectedIcon: false,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-        ],
-        const SizedBox(height: 12),
-        _grid(<Widget>[
-          for (final ShopProduct product in products)
-            switch (_tab) {
-              'plan' => _PlanCard(product: product, onBuy: _buyPlan),
-              'traffic_package' => _CompactCard(
-                product: product,
-                onBuy: _buyTrafficPackage,
-              ),
-              _ => _CompactCard(product: product, onBuy: _buyCardKey),
-            },
-        ]),
-        if (products.isEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 60),
-            child: Center(child: Text(L10n.t('暂无商品'))),
+        ),
+        SliverPadding(
+          padding: AppTheme.pageScrollPadding.copyWith(top: 0),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              children: <Widget>[
+                _grid(products),
+                if (products.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 60),
+                    child: Center(child: Text(L10n.t('暂无商品'))),
+                  ),
+              ],
+            ),
           ),
+        ),
       ],
     );
   }
 
-  Widget _grid(List<Widget> cards) {
-    if (cards.isEmpty) {
+  Widget _grid(List<ShopProduct> products) {
+    if (products.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -617,50 +569,84 @@ class _ShopPageState extends State<ShopPage> {
         final double width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
 
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
+        return Column(
           children: <Widget>[
-            for (final Widget card in cards)
-              SizedBox(width: width, child: card),
+            for (int start = 0; start < products.length; start += columns)
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: start + columns < products.length ? spacing : 0,
+                ),
+                child: _shopRow(
+                  products: products,
+                  start: start,
+                  columns: columns,
+                  width: width,
+                  spacing: spacing,
+                ),
+              ),
           ],
         );
       },
     );
   }
-}
 
-class _ShopNotice extends StatelessWidget {
-  const _ShopNotice({required this.icon, required this.child});
-
-  final IconData icon;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(
-            icon,
-            size: 18,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+  Widget _shopRow({
+    required List<ShopProduct> products,
+    required int start,
+    required int columns,
+    required double width,
+    required double spacing,
+  }) {
+    final List<ShopProduct> row = <ShopProduct>[
+      for (int i = start; i < start + columns && i < products.length; i++)
+        products[i],
+    ];
+    final bool reserveChipSlot = row.any(_ProductChips.visible);
+    final bool syncHeight = _tab != 'card_key';
+    final Widget cards = Row(
+      crossAxisAlignment: syncHeight
+          ? CrossAxisAlignment.stretch
+          : CrossAxisAlignment.start,
+      children: <Widget>[
+        for (int i = 0; i < row.length; i++) ...<Widget>[
+          if (i > 0) SizedBox(width: spacing),
+          SizedBox(
+            width: width,
+            child: switch (_tab) {
+              'plan' => _PlanCard(
+                product: row[i],
+                onBuy: _buyPlan,
+                reserveChipSlot: reserveChipSlot,
+              ),
+              'traffic_package' => _CompactCard(
+                product: row[i],
+                onBuy: _buyTrafficPackage,
+                reserveChipSlot: reserveChipSlot,
+              ),
+              _ => _CompactCard(
+                product: row[i],
+                onBuy: _buyCardKey,
+                reserveChipSlot: reserveChipSlot,
+              ),
+            },
           ),
-          const SizedBox(width: 8),
-          Expanded(child: child),
         ],
-      ),
+      ],
     );
+    return syncHeight ? IntrinsicHeight(child: cards) : cards;
   }
 }
 
 class _PlanCard extends StatelessWidget {
-  const _PlanCard({required this.product, required this.onBuy});
+  const _PlanCard({
+    required this.product,
+    required this.onBuy,
+    this.reserveChipSlot = false,
+  });
 
   final ShopProduct product;
   final ValueChanged<ShopProduct> onBuy;
+  final bool reserveChipSlot;
 
   @override
   Widget build(BuildContext context) {
@@ -671,168 +657,188 @@ class _PlanCard extends StatelessWidget {
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: scheme.primary.withValues(alpha: 0.06),
-              border: Border(
-                bottom: BorderSide(
-                  color: scheme.outlineVariant.withValues(alpha: 0.6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
                 ),
-              ),
-            ),
-            child: Column(
-              spacing: 8,
-              children: <Widget>[
-                Text(
-                  product.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge,
-                ),
-                _ProductChips(
-                  product: product,
-                  alignment: WrapAlignment.center,
-                  alwaysShowRegistration: true,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(
-                  '¥ ${product.price}',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: scheme.primary,
-                  ),
-                ),
-                if (product.classExpire > 1 && !unlimitedExpire)
-                  Text(
-                    L10n.t('≈ {0} 元 / 天', <Object>[
-                      (product.amount / product.classExpire).toStringAsFixed(2),
-                    ]),
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                if (product.hasLimitedSale)
-                  Text(
-                    L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      decoration: TextDecoration.lineThrough,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.06),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: scheme.outlineVariant.withValues(alpha: 0.6),
                     ),
                   ),
-                const SizedBox(height: 14),
-                Row(
+                ),
+                child: Column(
+                  spacing: 8,
                   children: <Widget>[
+                    Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    if (_ProductChips.visible(product) || reserveChipSlot)
+                      _ProductChips(
+                        product: product,
+                        alignment: WrapAlignment.center,
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      '¥ ${product.price}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    if (product.classExpire > 1 && !unlimitedExpire)
+                      Text(
+                        L10n.t('≈ {0} 元 / 天', <Object>[
+                          (product.amount / product.classExpire)
+                              .toStringAsFixed(2),
+                        ]),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (product.hasLimitedSale)
+                      Text(
+                        L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    _ProductCountdowns(product: product),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: <Widget>[
+                        for (final (String label, String value)
+                            in <(String, String)>[
+                              (L10n.t('等级'), 'VIP ${product.userClass}'),
+                              (
+                                L10n.t('在线IP数'),
+                                product.connector == 0
+                                    ? L10n.t('无限制')
+                                    : L10n.t('{0} 个', <Object>[
+                                        product.connector,
+                                      ]),
+                              ),
+                              (
+                                L10n.t('网络速率'),
+                                product.speedLimit == 0
+                                    ? L10n.t('无限制')
+                                    : '${Format.number(product.speedLimit)} Mbps',
+                              ),
+                            ])
+                          Expanded(
+                            child: Column(
+                              spacing: 2,
+                              children: <Widget>[
+                                Text(
+                                  value,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium,
+                                ),
+                                Text(label, style: theme.textTheme.bodySmall),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
                     for (final (String label, String value)
                         in <(String, String)>[
-                          (L10n.t('等级'), 'VIP ${product.userClass}'),
                           (
-                            L10n.t('在线IP数'),
-                            product.connector == 0
-                                ? L10n.t('无限制')
-                                : L10n.t('{0} 个', <Object>[product.connector]),
+                            L10n.t('VIP有效期'),
+                            unlimitedExpire
+                                ? L10n.t('不限时')
+                                : L10n.t('{0} 天', <Object>[
+                                    product.classExpire,
+                                  ]),
                           ),
                           (
-                            L10n.t('网络速率'),
-                            product.speedLimit == 0
+                            product.classExpire == 1
+                                ? L10n.t('试用流量')
+                                : L10n.t('每月流量'),
+                            product.bandwidth == 10000
                                 ? L10n.t('无限制')
-                                : '${Format.number(product.speedLimit)} Mbps',
+                                : '${Format.number(product.bandwidth)} GB',
                           ),
                         ])
-                      Expanded(
-                        child: Column(
-                          spacing: 2,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2.5),
+                        child: Row(
                           children: <Widget>[
-                            Text(
-                              value,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium,
+                            Expanded(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium,
+                              ),
                             ),
-                            Text(label, style: theme.textTheme.bodySmall),
+                            const Spacer(),
+                            Expanded(
+                              child: Text(
+                                value,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    for (final String service in product.contentExtra)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            Icon(
+                              Icons.check_circle_outline,
+                              size: 13,
+                              color: scheme.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                service,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                // 与上方三等分指标行同一栅格：标签落在左列、取值落在右列，
-                // 列宽不一致就会出现与上方内容错位的视觉效果
-                for (final (String label, String value) in <(String, String)>[
-                  (
-                    L10n.t('VIP有效期'),
-                    unlimitedExpire ? L10n.t('不限时') : L10n.t('{0} 天', <Object>[product.classExpire]),
-                  ),
-                  (
-                    product.classExpire == 1 ? L10n.t('试用流量') : L10n.t('每月流量'),
-                    product.bandwidth == 10000
-                        ? L10n.t('无限制')
-                        : '${Format.number(product.bandwidth)} GB',
-                  ),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2.5),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        const Spacer(),
-                        Expanded(
-                          child: Text(
-                            value,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                for (final String service in product.contentExtra)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Icon(
-                          Icons.check_circle_outline,
-                          size: 13,
-                          color: scheme.primary,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            service,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 14),
-                FilledButton(
-                  onPressed: product.inStock ? () => onBuy(product) : null,
-                  child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
-                ),
-              ],
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: FilledButton(
+              onPressed: product.inStock ? () => onBuy(product) : null,
+              child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
             ),
           ),
         ],
@@ -842,64 +848,143 @@ class _PlanCard extends StatelessWidget {
 }
 
 class _CompactCard extends StatelessWidget {
-  const _CompactCard({required this.product, required this.onBuy});
+  const _CompactCard({
+    required this.product,
+    required this.onBuy,
+    this.reserveChipSlot = false,
+  });
 
   final ShopProduct product;
   final ValueChanged<ShopProduct> onBuy;
+  final bool reserveChipSlot;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
 
-    return SectionCard(
+    return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Expanded(
-                child: Text(product.name, style: theme.textTheme.titleSmall),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.06),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: scheme.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ),
+                child: Column(
+                  spacing: 8,
+                  children: <Widget>[
+                    Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    if (_ProductChips.visible(product) || reserveChipSlot)
+                      _ProductChips(
+                        product: product,
+                        alignment: WrapAlignment.center,
+                      ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '¥ ${product.price}',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.primary,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      '¥ ${product.price}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    if (product.hasLimitedSale)
+                      Text(
+                        L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    _ProductCountdowns(product: product),
+                    if (product.isTrafficPackage) ...<Widget>[
+                      const SizedBox(height: 14),
+                      Center(
+                        child: TagChip(
+                          icon: Icons.data_usage,
+                          label: '${Format.number(product.bandwidth)} GB',
+                          color: _chipTeal,
+                          capsule: true,
+                        ),
+                      ),
+                    ],
+                    if (product.description.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Theme(
+                        data: theme.copyWith(
+                          dividerColor: Colors.transparent,
+                          hoverColor: scheme.primary.withValues(alpha: 0.06),
+                        ),
+                        child: ExpansionTile(
+                          title: Text(
+                            L10n.t('商品描述'),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.tileRadius,
+                            ),
+                          ),
+                          collapsedShape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.tileRadius,
+                            ),
+                          ),
+                          backgroundColor: scheme.primary.withValues(
+                            alpha: 0.06,
+                          ),
+                          collapsedBackgroundColor: Colors.transparent,
+                          expandedCrossAxisAlignment:
+                              CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            ClippedScrollBody(
+                              filled: false,
+                              child: RichHtmlView(product.description),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
           ),
-          if (product.hasLimitedSale)
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                L10n.t('原价 ¥ {0}', <Object>[product.basePrice]),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  decoration: TextDecoration.lineThrough,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: FilledButton(
+              onPressed: product.inStock ? () => onBuy(product) : null,
+              child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
             ),
-          const SizedBox(height: 8),
-          _ProductChips(product: product),
-          if (product.description.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 6),
-            Theme(
-              data: theme.copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                title: Text(L10n.t('商品描述'), style: theme.textTheme.bodySmall),
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: const EdgeInsets.only(bottom: 8),
-                expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[RichHtmlView(product.description)],
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          FilledButton(
-            onPressed: product.inStock ? () => onBuy(product) : null,
-            child: Text(product.inStock ? L10n.t('购买') : L10n.t('已售罄')),
           ),
         ],
       ),
@@ -911,73 +996,129 @@ class _ProductChips extends StatelessWidget {
   const _ProductChips({
     required this.product,
     this.alignment = WrapAlignment.start,
-    this.alwaysShowRegistration = false,
   });
 
   final ShopProduct product;
   final WrapAlignment alignment;
 
-  // 网页套餐卡三态显示注册天数（含「不限注册天数」），流量包 / 卡密仅有限制时才显示
-  final bool alwaysShowRegistration;
+  static bool visible(ShopProduct product) {
+    final bool showStock = product.stock.isNotEmpty && product.stock != '无限';
+    return showStock ||
+        product.purchaseLimit > 0 ||
+        product.newUserDaysLimit > 0 ||
+        product.minRegistrationDays > 0;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-
+    if (!visible(product)) {
+      return const SizedBox(height: TagChip.capsuleHeight);
+    }
+    final bool showStock = product.stock.isNotEmpty && product.stock != '无限';
     return Wrap(
       alignment: alignment,
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
-        TagChip(
-          icon: Icons.inventory_2_outlined,
-          label: L10n.t('库存{0}', <Object>[product.stock]),
-          color: product.inStock ? AppTheme.success : AppTheme.danger,
-        ),
-        if (product.isTrafficPackage)
+        if (showStock)
           TagChip(
-            icon: Icons.data_usage,
-            label: '${Format.number(product.bandwidth)} GB',
-            color: scheme.primary,
+            icon: Icons.inventory_2_outlined,
+            label: L10n.t('库存{0}', <Object>[product.stock]),
+            color: _stockChipColor(product),
+            capsule: true,
           ),
-        TagChip(
-          icon: Icons.shopping_cart_outlined,
-          label: product.purchaseLimit > 0
-              ? L10n.t('限购{0}次', <Object>[product.purchaseLimit])
-              : L10n.t('不限购'),
-        ),
+        if (product.purchaseLimit > 0)
+          TagChip(
+            icon: Icons.shopping_cart_outlined,
+            label: L10n.t('限购{0}次', <Object>[product.purchaseLimit]),
+            color: _chipPurple,
+            capsule: true,
+          ),
         if (product.newUserDaysLimit > 0)
           TagChip(
             icon: Icons.person_add_alt,
             label: L10n.t('需注册未满{0}天', <Object>[product.newUserDaysLimit]),
+            color: _chipBlue,
+            capsule: true,
           )
         else if (product.minRegistrationDays > 0)
           TagChip(
             icon: Icons.person_add_alt,
             label: L10n.t('需注册满{0}天', <Object>[product.minRegistrationDays]),
-          )
-        else if (alwaysShowRegistration)
-          TagChip(icon: Icons.person_add_alt, label: L10n.t('不限注册天数')),
-        for (final ShopCountdown countdown in product.countdowns)
-          TagChip(
-            icon: Icons.schedule,
-            label:
-                '${countdown.label} ${_countdownText(countdown.endsAt.difference(DateTime.now()))}',
-            color: AppTheme.warning,
+            color: _chipBlue,
+            capsule: true,
           ),
       ],
     );
   }
+}
 
-  static String _countdownText(Duration remaining) {
-    if (remaining.isNegative) {
-      return L10n.t('00天00时00分00秒');
+class _ProductCountdowns extends StatelessWidget {
+  const _ProductCountdowns({required this.product});
+
+  final ShopProduct product;
+
+  @override
+  Widget build(BuildContext context) {
+    if (product.countdowns.isEmpty) {
+      return const SizedBox.shrink();
     }
-    final String days = '${remaining.inDays}'.padLeft(2, '0');
-    final String hours = '${remaining.inHours % 24}'.padLeft(2, '0');
-    final String minutes = '${remaining.inMinutes % 60}'.padLeft(2, '0');
-    final String seconds = '${remaining.inSeconds % 60}'.padLeft(2, '0');
-    return L10n.t('{0}天{1}时{2}分{3}秒', <Object>[days, hours, minutes, seconds]);
+    final ThemeData theme = Theme.of(context);
+    final bool dark = theme.brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
+        children: <Widget>[
+          for (final ShopCountdown countdown in product.countdowns)
+            _countdown(theme, countdown, dark),
+        ],
+      ),
+    );
+  }
+
+  Widget _countdown(ThemeData theme, ShopCountdown countdown, bool dark) {
+    final Duration remaining = countdown.endsAt.difference(DateTime.now());
+    final bool ended = remaining.isNegative;
+    final Color labelColor = ended
+        ? _countdownEnded
+        : dark
+        ? const Color(0xFFFB923C)
+        : _countdownLabel;
+    final Color timeColor = ended
+        ? _countdownEnded
+        : dark
+        ? const Color(0xFFF87171)
+        : _countdownTime;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(Icons.schedule, size: 15, color: labelColor),
+        const SizedBox(width: 4),
+        Text(
+          countdown.label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: labelColor,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          _countdownText(remaining),
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            color: timeColor,
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -1094,7 +1235,7 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
       title: Text(L10n.t('套餐订单确认')),
       content: SizedBox(
         width: 460,
-        child: SingleChildScrollView(
+        child: OverlayScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1114,17 +1255,22 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                 _DetailBlock(
                   title: L10n.t('流量重置费用'),
                   lines: <String>[
-                    L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[quote.trafficCurrentShopName, Format.bytes(quote.trafficUsed), Format.bytes(quote.trafficTotal), quote.trafficUsagePercent.toStringAsFixed(2)]),
-                    L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[quote.name, quote.trafficBillingBasePrice]),
-                    L10n.t(
-                      '流量重置费：{0} x {1}%{2} = {3} 元',
-                      <Object>[
-                        quote.trafficBillingBasePrice,
-                        quote.trafficFeePercent.toStringAsFixed(2),
-                        quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
-                        quote.trafficResetFee,
-                      ],
-                    ),
+                    L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[
+                      quote.trafficCurrentShopName,
+                      Format.bytes(quote.trafficUsed),
+                      Format.bytes(quote.trafficTotal),
+                      quote.trafficUsagePercent.toStringAsFixed(2),
+                    ]),
+                    L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[
+                      quote.name,
+                      quote.trafficBillingBasePrice,
+                    ]),
+                    L10n.t('流量重置费：{0} x {1}%{2} = {3} 元', <Object>[
+                      quote.trafficBillingBasePrice,
+                      quote.trafficFeePercent.toStringAsFixed(2),
+                      quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
+                      quote.trafficResetFee,
+                    ]),
                     L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
                   ],
                 ),
@@ -1153,7 +1299,12 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
                   const SizedBox(width: 8),
                   OutlinedButton(
                     onPressed: _applying ? null : _applyCoupon,
-                    child: Text(L10n.t('应用')),
+                    // 「应用」在导航里是名词 App，这里是动词，不能共用那条译文
+                    child: Text(switch (L10n.current) {
+                      AppLanguage.en => 'Apply',
+                      AppLanguage.zhTW => '套用',
+                      AppLanguage.zhCN => '应用',
+                    }),
                   ),
                 ],
               ),
@@ -1235,33 +1386,38 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
 
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (widget.note.isNotEmpty) ...<Widget>[
-            Text(widget.note, style: theme.textTheme.bodySmall),
-            const SizedBox(height: 8),
-          ],
-          Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
-          const SizedBox(height: 4),
-          Text(
-            _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
-            style: theme.textTheme.titleSmall,
+      content: SizedBox(
+        width: 460,
+        child: OverlayScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (widget.note.isNotEmpty) ...<Widget>[
+                Text(widget.note, style: theme.textTheme.bodySmall),
+                const SizedBox(height: 8),
+              ],
+              Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
+              const SizedBox(height: 4),
+              Text(
+                _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
+                style: theme.textTheme.titleSmall,
+              ),
+              if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(L10n.t('库存：{0}', <Object>[quote.stock])),
+              ],
+              const SizedBox(height: 12),
+              _PaymentPicker(
+                total: quote.amount,
+                balance: widget.balance,
+                value: _method,
+                onChanged: (_PayMethod method) =>
+                    setState(() => _method = method),
+              ),
+            ],
           ),
-          if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
-            const SizedBox(height: 4),
-            Text(L10n.t('库存：{0}', <Object>[quote.stock])),
-          ],
-          const SizedBox(height: 12),
-          _PaymentPicker(
-            total: quote.amount,
-            balance: widget.balance,
-            value: _method,
-            onChanged: (_PayMethod method) =>
-                setState(() => _method = method),
-          ),
-        ],
+        ),
       ),
       actions: <Widget>[
         TextButton(
@@ -1279,7 +1435,6 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
   }
 }
 
-/// 与网页一致：0 元订单只走余额；余额不足时余额选项不可选，默认支付宝
 class _PaymentPicker extends StatelessWidget {
   const _PaymentPicker({
     required this.total,
@@ -1304,44 +1459,103 @@ class _PaymentPicker extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final bool affordable = balance >= total;
 
+    final List<ButtonSegment<_PayMethod>> segments =
+        <ButtonSegment<_PayMethod>>[
+          ButtonSegment<_PayMethod>(
+            value: _PayMethod.balance,
+            label: Text(L10n.t('余额')),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            enabled: affordable,
+          ),
+          ButtonSegment<_PayMethod>(
+            value: _PayMethod.alipay,
+            label: Text(L10n.t('支付宝')),
+            icon: const LocalIcon(
+              assets: <String>['assets/alipay.png'],
+              width: 18,
+              fallback: Icon(Icons.account_balance_wallet, size: 16),
+            ),
+          ),
+          ButtonSegment<_PayMethod>(
+            value: _PayMethod.wxpay,
+            label: Text(L10n.t('微信支付')),
+            icon: const LocalIcon(
+              assets: <String>['assets/wxpay.png'],
+              width: 18,
+              fallback: Icon(Icons.chat, size: 16),
+            ),
+          ),
+        ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(L10n.t('选择支付方式'), style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
-        SegmentedButton<_PayMethod>(
-          segments: <ButtonSegment<_PayMethod>>[
-            ButtonSegment<_PayMethod>(
-              value: _PayMethod.balance,
-              label: Text(L10n.t('余额')),
-              icon: const Icon(Icons.account_balance_wallet_outlined),
-              enabled: affordable,
-            ),
-            ButtonSegment<_PayMethod>(
-              value: _PayMethod.alipay,
-              label: Text(L10n.t('支付宝')),
-            ),
-            ButtonSegment<_PayMethod>(
-              value: _PayMethod.wxpay,
-              label: Text(L10n.t('微信支付')),
-            ),
-          ],
-          selected: <_PayMethod>{value},
-          onSelectionChanged: (Set<_PayMethod> selection) =>
-              onChanged(selection.first),
-          showSelectedIcon: false,
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool stack =
+                constraints.maxWidth.isFinite &&
+                constraints.maxWidth <
+                    _minHorizontalChip(context) * segments.length;
+            if (!stack) {
+              return SegmentedButton<_PayMethod>(
+                segments: segments,
+                selected: <_PayMethod>{value},
+                onSelectionChanged: (Set<_PayMethod> selection) =>
+                    onChanged(selection.first),
+                showSelectedIcon: false,
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (int i = 0; i < segments.length; i++) ...<Widget>[
+                  if (i > 0) const SizedBox(height: 8),
+                  _payMethodChip(segments[i]),
+                ],
+              ],
+            );
+          },
         ),
         const SizedBox(height: 6),
         Text(
           affordable
               ? L10n.t('当前余额：¥ {0}', <Object>[balance.toStringAsFixed(2)])
-              : L10n.t('当前余额：¥ {0}，余额不足，请选择在线支付', <Object>[balance.toStringAsFixed(2)]),
+              : L10n.t('当前余额：¥ {0}，余额不足，请选择在线支付', <Object>[
+                  balance.toStringAsFixed(2),
+                ]),
           style: theme.textTheme.bodySmall?.copyWith(
             color: affordable ? null : theme.colorScheme.error,
           ),
         ),
       ],
     );
+  }
+
+  static double _minHorizontalChip(BuildContext context) {
+    final TextStyle style = Theme.of(
+      context,
+    ).textTheme.labelLarge!.copyWith(fontSize: 12, fontWeight: FontWeight.w600);
+    final TextPainter painter = TextPainter(
+      text: TextSpan(text: L10n.t('微信支付'), style: style),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.width + 18 + 8 + 28;
+  }
+
+  Widget _payMethodChip(ButtonSegment<_PayMethod> segment) {
+    final VoidCallback? onPressed = segment.enabled
+        ? () => onChanged(segment.value)
+        : null;
+    final Widget icon = segment.icon!;
+    final Widget label = segment.label!;
+    if (segment.value == value) {
+      return FilledButton.icon(onPressed: onPressed, icon: icon, label: label);
+    }
+    return OutlinedButton.icon(onPressed: onPressed, icon: icon, label: label);
   }
 }
 
@@ -1387,35 +1601,35 @@ class _MessageDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(L10n.t('提示')),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            // 服务端 msg 给网页用，卡密已嵌在 HTML 里；客户端另有 card_key，去掉重复
-            RichHtmlView(
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // 服务端 msg 给网页用，卡密已嵌在 HTML 里；客户端另有 card_key，去掉重复
+          ClippedScrollBody(
+            child: RichHtmlView(
               cardKey.isEmpty
                   ? message
                   : _messageWithoutCardKey(message, cardKey),
             ),
-            if (cardKey.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 8),
-              SelectableText(
-                cardKey,
-                style: Theme.of(context).textTheme.titleSmall,
+          ),
+          if (cardKey.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            SelectableText(
+              cardKey,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => unawaited(_copy(context)),
+                icon: const Icon(Icons.copy, size: 16),
+                label: Text(L10n.t('复制卡密')),
               ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: () => unawaited(_copy(context)),
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: Text(L10n.t('复制卡密')),
-                ),
-              ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
       actions: <Widget>[
         FilledButton(
@@ -1461,3 +1675,57 @@ String _totalText(String total, String basePrice, bool hasLimitedSale) =>
         basePrice,
       ])
     : L10n.t('总金额：{0} 元', <Object>[total]);
+
+// 与网页 shop.css .shop-chip / .shop-countdown 同色
+const Color _chipGreen = Color(0xFF22AD54);
+const Color _chipOrange = Color(0xFFEA580C);
+const Color _chipGold = Color(0xFFCAA308);
+const Color _chipRed = Color(0xFFDC2626);
+const Color _chipTeal = Color(0xFF0D9488);
+const Color _chipBlue = Color(0xFF2563EB);
+const Color _chipPurple = Color(0xFF7C3AED);
+const Color _countdownLabel = Color(0xFFEA580C);
+const Color _countdownTime = Color(0xFFDC2626);
+const Color _countdownEnded = Color(0xFF999999);
+
+Color _stockChipColor(ShopProduct product) {
+  if (!product.inStock) {
+    return _chipRed;
+  }
+  switch (product.stock) {
+    case '无限':
+    case '充足':
+      return _chipGreen;
+    case '少量':
+      return _chipGold;
+    case '适中':
+      return _chipOrange;
+  }
+  final int? count = int.tryParse(
+    product.stock.replaceAll(RegExp(r'[^0-9]'), ''),
+  );
+  if (count == null) {
+    return _chipGreen;
+  }
+  if (count <= 0) {
+    return _chipRed;
+  }
+  if (count < 10) {
+    return _chipGold;
+  }
+  if (count < 20) {
+    return _chipOrange;
+  }
+  return _chipGreen;
+}
+
+String _countdownText(Duration remaining) {
+  if (remaining.isNegative) {
+    return L10n.t('00天00时00分00秒');
+  }
+  final String days = '${remaining.inDays}'.padLeft(2, '0');
+  final String hours = '${remaining.inHours % 24}'.padLeft(2, '0');
+  final String minutes = '${remaining.inMinutes % 60}'.padLeft(2, '0');
+  final String seconds = '${remaining.inSeconds % 60}'.padLeft(2, '0');
+  return L10n.t('{0}天{1}时{2}分{3}秒', <Object>[days, hours, minutes, seconds]);
+}

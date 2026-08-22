@@ -2,7 +2,7 @@ Package: ecycloud
 Version: APP_VERSION
 Architecture: APP_ARCH
 Maintainer: ECY Cloud <support@ecycloud.com>
-Depends: libgtk-3-0, libayatana-appindicator3-1, libsecret-1-0, iproute2, gsettings-desktop-schemas
+Depends: libgtk-3-0, libayatana-appindicator3-1, libsecret-1-0, iproute2, gsettings-desktop-schemas, libmpv2 | libmpv1
 Section: net
 Priority: optional
 Homepage: https://github.com/ECYCloud/ECYCloudClient

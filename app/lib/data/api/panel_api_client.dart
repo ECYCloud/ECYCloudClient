@@ -7,6 +7,7 @@ import 'package:http/io_client.dart';
 import '../../core/logger.dart';
 import '../models/account.dart';
 import '../models/announcement.dart';
+import '../models/online_device.dart';
 import '../models/shop.dart';
 import '../models/ticket.dart';
 import '../models/user_profile.dart';
@@ -43,13 +44,13 @@ class RemoteProfile {
   final Map<String, dynamic> config;
   final String revision;
 
-  /// 策略组名 => 图标地址，面板 Clash 模板的 x-sspanel.group_icons
+  /// 面板 Clash 模板 x-sspanel.group_icons
   final Map<String, String> groupIcons;
 
-  /// proxy 名（如 node-12）=> 节点显示名；内核只用名字，界面用此表展示
+  /// 内核只用 proxy 名；界面显示靠这张表
   final Map<String, String> nodeLabels;
 
-  /// 地区识别用的取词正则，面板设置项 flag_regex 的原文（PHP 形态）
+  /// 面板 flag_regex 原文（PHP 形态）
   final String flagRegex;
 }
 
@@ -58,18 +59,24 @@ class DeviceInfo {
     required this.platform,
     required this.deviceId,
     required this.deviceName,
+    required this.deviceModel,
+    required this.osVersion,
     required this.appVersion,
   });
 
   final String platform;
   final String deviceId;
   final String deviceName;
+  final String deviceModel;
+  final String osVersion;
   final String appVersion;
 
+  // platform 不上报（已含在 device_model-os_version）；字段留给 User-Agent
   Map<String, String> toJson() => <String, String>{
-    'platform': platform,
     'device_id': deviceId,
     'device_name': deviceName,
+    'device_model': deviceModel,
+    'os_version': osVersion,
     'app_version': appVersion,
   };
 }
@@ -98,47 +105,72 @@ class PanelApiClient {
     required this.baseUrl,
     required this.configBaseUrl,
     required this.device,
-    http.Client? httpClient,
-  }) : _http = httpClient ?? http.Client();
+  });
 
   static const String _source = 'api';
   static const Duration _timeout = Duration(seconds: 20);
 
+  /// TUN 会把解析劫持成 fake-ip，面板域名 A 记录缓存复用，勿每请求重解
+  static const Duration _directTtl = Duration(minutes: 5);
+
   final String baseUrl;
   final String configBaseUrl;
   final DeviceInfo device;
-  final http.Client _http;
 
-  List<InternetAddress> _configDirectAddresses = <InternetAddress>[];
-  String _configDirectHost = '';
+  int? fallbackProxyPort;
+
+  final Map<String, List<InternetAddress>> _directByHost =
+      <String, List<InternetAddress>>{};
+  DateTime? _directResolvedAt;
+
+  late final http.Client _direct = _directHttpClient(_directByHost);
+  http.Client? _proxy;
+  int? _proxyPort;
 
   String? _token;
 
-  List<String> get configDirectCidrs => <String>[
-    for (final InternetAddress address in _configDirectAddresses)
-      address.type == InternetAddressType.IPv6
-          ? '${address.address}/128'
-          : '${address.address}/32',
-  ];
+  List<String> get configDirectCidrs {
+    final Set<String> seen = <String>{};
+    final List<String> cidrs = <String>[];
+    for (final List<InternetAddress> addresses in _directByHost.values) {
+      for (final InternetAddress address in addresses) {
+        final String cidr = address.type == InternetAddressType.IPv6
+            ? '${address.address}/128'
+            : '${address.address}/32';
+        if (seen.add(cidr)) {
+          cidrs.add(cidr);
+        }
+      }
+    }
+    return cidrs;
+  }
 
-  // TUN dns-hijack 会把域名解析成 198.18/16 fake-ip；那种地址写进
-  // route-exclude-address 或拿来建连都会打空，必须丢掉。
+  // TUN dns-hijack 会给出 198.18/16 fake-ip，写进排除列表或建连都会打空，必须丢掉。
+  // 解析失败时保留上次真实地址，避免连上后被 fake-ip 清空排除列表。
   Future<void> refreshConfigDirectAddresses() async {
-    final String host = Uri.tryParse(configBaseUrl)?.host ?? '';
+    await _refreshHost(configBaseUrl);
+    await _refreshHost(baseUrl);
+    _directResolvedAt = DateTime.now();
+  }
+
+  Future<void> _ensureDirectAddresses() async {
+    final DateTime? at = _directResolvedAt;
+    if (at != null &&
+        _directByHost.isNotEmpty &&
+        DateTime.now().difference(at) < _directTtl) {
+      return;
+    }
+    await refreshConfigDirectAddresses();
+  }
+
+  Future<void> _refreshHost(String origin) async {
+    final String host = _originHost(origin);
     if (host.isEmpty) {
-      _configDirectHost = '';
-      _configDirectAddresses = <InternetAddress>[];
       return;
     }
     final List<InternetAddress> next = await _lookupRoutable(host);
     if (next.isNotEmpty) {
-      _configDirectHost = host;
-      _configDirectAddresses = next;
-      return;
-    }
-    if (_configDirectHost != host) {
-      _configDirectHost = host;
-      _configDirectAddresses = <InternetAddress>[];
+      _directByHost[host] = next;
     }
   }
 
@@ -153,26 +185,47 @@ class PanelApiClient {
       _apiUri(configBaseUrl, path, query);
 
   static Uri _apiUri(String root, String path, [Map<String, String>? query]) {
-    final Uri uri = Uri.parse(
-      '${root.replaceAll(RegExp(r'/+$'), '')}/api/client/v1$path',
-    );
+    final Uri uri = Uri.parse('${_originOf(root)}/api/client/v1$path');
     return query == null ? uri : uri.replace(queryParameters: query);
   }
+
+  // API 只认主机，不要带路径
+  static String _originOf(String root) {
+    final Uri? parsed = Uri.tryParse(root.trim());
+    if (parsed != null &&
+        (parsed.scheme == 'https' || parsed.scheme == 'http') &&
+        parsed.host.isNotEmpty) {
+      return parsed.origin;
+    }
+    return root.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  static String _originHost(String root) =>
+      Uri.tryParse(_originOf(root))?.host ?? '';
 
   Map<String, String> _headers({bool json = false}) => <String, String>{
     'Accept': 'application/json',
     'User-Agent':
         'ECYCloud/${_uaVersion(device.appVersion)} (${_uaPlatform(device.platform)})',
+    // 型号/系统/版本只在登录入库，须随请求刷新，否则升级后面板一直是旧值
+    if (device.deviceModel.isNotEmpty)
+      'X-Device-Model': _headerText(device.deviceModel),
+    if (device.osVersion.isNotEmpty)
+      'X-Device-OS': _headerText(device.osVersion),
+    if (device.appVersion.isNotEmpty)
+      'X-App-Version': _headerText(device.appVersion),
     if (json) 'Content-Type': 'application/json; charset=utf-8',
     if (_token != null) 'Authorization': 'Bearer $_token',
   };
 
-  // product/version 不能有空格，否则 `Pre 1.0.2` 会被拆成两个 token；
-  // 界面版本串仍是 `Pre 1.0.2`，UA 收成 `Pre1.0.2`
+  // HTTP 头只保证 ASCII；非 ASCII 须 encode，面板 rawurldecode 还原
+  static String _headerText(String value) => Uri.encodeComponent(value);
+
+  // product/version 不能有空格，界面 `Pre 1.0.2` 在 UA 收成 `Pre1.0.2`
   static String _uaVersion(String version) =>
       version.startsWith('Pre ') ? 'Pre${version.substring(4)}' : version;
 
-  // UA 展示用；platformId / 登录体仍保持小写标识，避免影响服务端既有匹配
+  // UA 展示用大写；platformId / 登录体仍用小写，避免打乱服务端匹配
   static String _uaPlatform(String platform) => switch (platform) {
     'android' => 'Android',
     'windows' => 'Windows',
@@ -232,18 +285,16 @@ class PanelApiClient {
     String code = '',
     String emailcode = '',
   }) async {
-    final Map<String, dynamic> data = await _post(
-      '/auth/register',
-      <String, dynamic>{
-        'name': name,
-        'email': email,
-        'passwd': passwd,
-        'repasswd': repasswd,
-        if (code.isNotEmpty) 'code': code,
-        if (emailcode.isNotEmpty) 'emailcode': emailcode,
-        ...device.toJson(),
-      },
-    );
+    final Map<String, dynamic> data =
+        await _post('/auth/register', <String, dynamic>{
+          'name': name,
+          'email': email,
+          'passwd': passwd,
+          'repasswd': repasswd,
+          if (code.isNotEmpty) 'code': code,
+          if (emailcode.isNotEmpty) 'emailcode': emailcode,
+          ...device.toJson(),
+        });
     return _loginResult(data);
   }
 
@@ -292,17 +343,12 @@ class PanelApiClient {
   Future<String> sendKillEmailCode() =>
       _postMsg('/user/send-kill-email-code', const <String, dynamic>{});
 
-  Future<AccountStatus> killAccount({
-    String? emailCode,
-    String? passwd,
-  }) async {
-    final Map<String, dynamic> envelope = await _postEnvelope(
-      '/user/kill',
-      <String, dynamic>{
-        if (emailCode != null) 'email_code': emailCode,
-        if (passwd != null) 'passwd': passwd,
-      },
-    );
+  Future<AccountStatus> killAccount({String? emailCode, String? passwd}) async {
+    final Map<String, dynamic> envelope =
+        await _postEnvelope('/user/kill', <String, dynamic>{
+          if (emailCode != null) 'email_code': emailCode,
+          if (passwd != null) 'passwd': passwd,
+        });
     final Object? data = envelope['data'];
     if (data is Map<String, dynamic>) {
       return AccountStatus.fromJson(data);
@@ -337,7 +383,6 @@ class PanelApiClient {
     try {
       await _post('/auth/logout', const <String, dynamic>{});
     } on ApiException catch (e) {
-      // 令牌本就失效时不打断登出，本地凭据照常清除
       Logger.instance.debug(_source, '登出请求未成功: $e');
     } finally {
       _token = null;
@@ -350,45 +395,52 @@ class PanelApiClient {
   Future<String> ackIpKick() =>
       _postMsg('/user/ip-kick-ack', const <String, dynamic>{});
 
-  Future<String> reclaimIp() async {
-    final http.Client client = _directHttpClient();
-    try {
-      final http.Response response = await _send(
-        () => client.post(
-          _endpoint('/user/ip-reclaim'),
-          headers: _headers(json: true),
-          body: jsonEncode(const <String, dynamic>{}),
-        ),
-      );
-      return _envelope(response)['msg'] as String? ?? '';
-    } finally {
-      client.close();
-    }
+  Future<List<OnlineDevice>> fetchOnlineDevices() async {
+    return _viaDirectThenProxy(
+      run: (http.Client client) async {
+        final http.Response response = await _send(
+          () => client.get(_endpoint('/user/online-ips'), headers: _headers()),
+        );
+        final Object? data = _envelope(response)['data'];
+        return <OnlineDevice>[
+          if (data is List)
+            for (final Object? item in data)
+              if (item is Map<String, dynamic>) OnlineDevice.fromJson(item),
+        ];
+      },
+    );
+  }
+
+  Future<String> reclaimIp({String targetIp = ''}) async {
+    return _viaDirectThenProxy(
+      repeatable: false,
+      run: (http.Client client) async {
+        final http.Response response = await _send(
+          () => client.post(
+            _endpoint('/user/ip-reclaim'),
+            headers: _headers(json: true),
+            body: jsonEncode(<String, dynamic>{'target_ip': targetIp}),
+          ),
+        );
+        return _envelope(response)['msg'] as String? ?? '';
+      },
+    );
   }
 
   Future<({String message, UserProfile profile})> checkin() async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint('/user/checkin'),
-        headers: _headers(json: true),
-        body: jsonEncode(const <String, dynamic>{}),
-      ),
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/checkin',
+      const <String, dynamic>{},
     );
-    final Map<String, dynamic> envelope = _envelope(response);
     final Object? data = envelope['data'];
     final UserProfile profile = data is Map<String, dynamic>
         ? UserProfile.fromJson(data)
         : await fetchProfile();
-    return (
-      message: envelope['msg'] as String? ?? '签到成功',
-      profile: profile,
-    );
+    return (message: envelope['msg'] as String? ?? '签到成功', profile: profile);
   }
 
-  Future<String> updateUsername(String newusername) => _postMsg(
-    '/user/username',
-    <String, dynamic>{'newusername': newusername},
-  );
+  Future<String> updateUsername(String newusername) =>
+      _postMsg('/user/username', <String, dynamic>{'newusername': newusername});
 
   Future<String> updatePassword({
     required String oldpwd,
@@ -408,8 +460,10 @@ class PanelApiClient {
     <String, dynamic>{'old_emailcode': oldEmailcode},
   );
 
-  Future<String> sendNewEmailVerify({required String email}) =>
-      _postMsg('/user/send-new-email-verify', <String, dynamic>{'email': email});
+  Future<String> sendNewEmailVerify({required String email}) => _postMsg(
+    '/user/send-new-email-verify',
+    <String, dynamic>{'email': email},
+  );
 
   Future<String> updateEmail({
     required String newemail,
@@ -487,7 +541,8 @@ class PanelApiClient {
         : <String, dynamic>{};
     return (
       message: envelope['msg'] as String? ?? '',
-      bindToken: body['bind_token'] as String? ??
+      bindToken:
+          body['bind_token'] as String? ??
           envelope['bind_token'] as String? ??
           '',
     );
@@ -495,13 +550,17 @@ class PanelApiClient {
 
   Future<({bool bound, String imValue, int telegramId})>
   telegramBindCheck() async {
-    final http.Response response = await _send(
-      () => _http.get(
-        _endpoint('/user/telegram-bind-check'),
-        headers: _headers(),
-      ),
+    final Map<String, dynamic> envelope = await _viaDirectThenProxy(
+      run: (http.Client client) async {
+        final http.Response response = await _send(
+          () => client.get(
+            _endpoint('/user/telegram-bind-check'),
+            headers: _headers(),
+          ),
+        );
+        return _envelopeAllowRetZero(response);
+      },
     );
-    final Map<String, dynamic> envelope = _envelopeAllowRetZero(response);
     final int ret = (envelope['ret'] as num?)?.toInt() ?? 0;
     final Object? data = envelope['data'];
     final Map<String, dynamic> body = data is Map<String, dynamic>
@@ -509,9 +568,8 @@ class PanelApiClient {
         : <String, dynamic>{};
     return (
       bound: ret == 1,
-      imValue: body['im_value'] as String? ??
-          envelope['im_value'] as String? ??
-          '',
+      imValue:
+          body['im_value'] as String? ?? envelope['im_value'] as String? ?? '',
       telegramId: (body['telegram_id'] as num?)?.toInt() ?? 0,
     );
   }
@@ -546,21 +604,17 @@ class PanelApiClient {
     if (saveAccount) 'save_account': true,
   });
 
-  Future<String> cancelWithdraw({required int recordId}) =>
-      _postMsg('/user/withdraw/cancel', <String, dynamic>{
-        'record_id': recordId,
-      });
+  Future<String> cancelWithdraw({required int recordId}) => _postMsg(
+    '/user/withdraw/cancel',
+    <String, dynamic>{'record_id': recordId},
+  );
 
   Future<WithdrawChannelFieldsResult> fetchWithdrawChannelFields(
     int channelId,
   ) async {
-    final http.Response response = await _send(
-      () => _http.get(
-        _endpoint('/user/withdraw/channel/$channelId/fields'),
-        headers: _headers(),
-      ),
+    return WithdrawChannelFieldsResult.fromJson(
+      await _getEnvelope('/user/withdraw/channel/$channelId/fields'),
     );
-    return WithdrawChannelFieldsResult.fromJson(_envelope(response));
   }
 
   Future<TrafficLogBundle> fetchTrafficLog() async =>
@@ -569,20 +623,40 @@ class PanelApiClient {
   Future<UsageIpListPage> fetchUsageIps({
     int page = 1,
     int length = 10,
+    String search = '',
   }) async => UsageIpListPage.fromJson(
     await _get('/user/usage-ips', <String, String>{
       'page': '$page',
       'length': '$length',
+      if (search.isNotEmpty) 'search': search,
     }),
   );
+
+  /// 与网页 POST /user/profile/kick-device 同一业务
+  Future<String> kickDevice(String ip) =>
+      _postMsg('/user/kick-device', <String, dynamic>{'ip': ip});
 
   Future<LoginLogListPage> fetchLoginLogs({
     int page = 1,
     int length = 10,
+    String search = '',
   }) async => LoginLogListPage.fromJson(
     await _get('/user/login-logs', <String, String>{
       'page': '$page',
       'length': '$length',
+      if (search.isNotEmpty) 'search': search,
+    }),
+  );
+
+  Future<OperationLogListPage> fetchOperationLogs({
+    int page = 1,
+    int length = 10,
+    String search = '',
+  }) async => OperationLogListPage.fromJson(
+    await _get('/user/operation-logs', <String, String>{
+      'page': '$page',
+      'length': '$length',
+      if (search.isNotEmpty) 'search': search,
     }),
   );
 
@@ -608,14 +682,10 @@ class PanelApiClient {
     required double price,
     required String type,
   }) async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint('/user/recharge/epay'),
-        headers: _headers(json: true),
-        body: jsonEncode(<String, dynamic>{'price': price, 'type': type}),
-      ),
-    );
-    return ShopPurchaseResult.fromEnvelope(_envelope(response));
+    return _purchase('/user/recharge/epay', <String, dynamic>{
+      'price': price,
+      'type': type,
+    });
   }
 
   Future<BalanceListPage> fetchBalanceTransactions({
@@ -651,8 +721,7 @@ class PanelApiClient {
     'action': action,
   });
 
-  /// 轻量配置戳：未变则客户端不应再打 /config/clash。走订阅域名。
-  /// 与 [fetchClashProfile] 相同：先直连，不通再经本地 mixed 代理。
+  /// 未变则不要再打 /config/clash（走订阅域名）
   Future<String> fetchConfigRevision({int? fallbackProxyPort}) async {
     return _viaDirectThenProxy(
       fallbackProxyPort: fallbackProxyPort,
@@ -669,8 +738,6 @@ class PanelApiClient {
     );
   }
 
-  /// 拉取节点与分流规则。优先直连（绕过系统代理）；直连失败且提供了
-  /// [fallbackProxyPort] 时，再经本地 mixed 代理重试。
   Future<RemoteProfile> fetchClashProfile({int? fallbackProxyPort}) async {
     return _viaDirectThenProxy(
       fallbackProxyPort: fallbackProxyPort,
@@ -678,35 +745,22 @@ class PanelApiClient {
     );
   }
 
+  /// repeatable 为 false 时只在连接未建起时换代理重发，超时可能已处理完
   Future<T> _viaDirectThenProxy<T>({
     required Future<T> Function(http.Client client) run,
     int? fallbackProxyPort,
+    bool repeatable = true,
   }) async {
-    Future<T> attempt(http.Client client) async {
-      try {
-        return await run(client);
-      } finally {
-        client.close();
-      }
-    }
-
-    await refreshConfigDirectAddresses();
+    await _ensureDirectAddresses();
+    final int? proxyPort = fallbackProxyPort ?? this.fallbackProxyPort;
     try {
-      return await attempt(
-        _directHttpClient(
-          _configDirectAddresses,
-          Uri.tryParse(configBaseUrl)?.host ?? '',
-        ),
-      );
+      return await run(_direct);
     } on Object catch (directError) {
-      if (fallbackProxyPort == null || !_isUnreachable(directError)) {
+      if (proxyPort == null || !_canRetryViaProxy(directError, repeatable)) {
         rethrow;
       }
-      Logger.instance.info(
-        _source,
-        '直连拉取面板配置失败，改经本地代理 $fallbackProxyPort：$directError',
-      );
-      return await attempt(_proxyHttpClient(fallbackProxyPort));
+      Logger.instance.info(_source, '直连面板失败，改经本地代理 $proxyPort：$directError');
+      return await run(_proxyClient(proxyPort));
     }
   }
 
@@ -735,7 +789,14 @@ class PanelApiClient {
     );
   }
 
-  /// 已拿到 HTTP 响应（含业务错误）不算「连不上」，不再改走代理。
+  static bool _canRetryViaProxy(Object error, bool repeatable) {
+    if (!repeatable) {
+      return error is ApiException && error.connectFailed;
+    }
+    return _isUnreachable(error);
+  }
+
+  /// 已拿到 HTTP 响应（含业务错误）不算连不上，不再改走代理
   static bool _isUnreachable(Object error) {
     if (error is ApiException) {
       return error.statusCode == null;
@@ -743,41 +804,52 @@ class PanelApiClient {
     return true;
   }
 
-  static http.Client _directHttpClient([
-    List<InternetAddress> bind = const <InternetAddress>[],
-    String host = '',
-  ]) {
-    final HttpClient raw = HttpClient()..findProxy = (Uri _) => 'DIRECT';
-    if (bind.isNotEmpty && host.isNotEmpty) {
-      final InternetAddress target = bind.firstWhere(
-        (InternetAddress address) => address.type == InternetAddressType.IPv4,
-        orElse: () => bind.first,
-      );
-      raw.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
-        if (proxyHost != null && proxyPort != null) {
-          return Socket.startConnect(proxyHost, proxyPort);
-        }
-        final Object connectHost = uri.host == host ? target : uri.host;
-        if (uri.scheme != 'https') {
-          return Socket.startConnect(connectHost, uri.port);
-        }
-        // HttpClient 对 connectionFactory 的明文 socket 不会再升 TLS；
-        // 直连 IP 时必须自己握手，SNI / 证书校验仍用域名。
-        if (connectHost is InternetAddress) {
-          final ConnectionTask<Socket> tcp = await Socket.startConnect(
-            connectHost,
-            uri.port,
-          );
-          return ConnectionTask.fromSocket(
-            tcp.socket.then(
-              (Socket plain) => SecureSocket.secure(plain, host: uri.host),
-            ),
-            tcp.cancel,
-          );
-        }
-        return SecureSocket.startConnect(connectHost, uri.port);
-      };
+  http.Client _proxyClient(int port) {
+    final http.Client? cached = _proxy;
+    if (cached != null && _proxyPort == port) {
+      return cached;
     }
+    cached?.close();
+    _proxyPort = port;
+    return _proxy = _proxyHttpClient(port);
+  }
+
+  static http.Client _directHttpClient(
+    Map<String, List<InternetAddress>> bindByHost,
+  ) {
+    final HttpClient raw = HttpClient()..findProxy = (Uri _) => 'DIRECT';
+    raw.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+      if (proxyHost != null && proxyPort != null) {
+        return Socket.startConnect(proxyHost, proxyPort);
+      }
+      final List<InternetAddress> bind =
+          bindByHost[uri.host] ?? const <InternetAddress>[];
+      final Object connectHost = bind.isEmpty
+          ? uri.host
+          : bind.firstWhere(
+              (InternetAddress address) =>
+                  address.type == InternetAddressType.IPv4,
+              orElse: () => bind.first,
+            );
+      if (uri.scheme != 'https') {
+        return Socket.startConnect(connectHost, uri.port);
+      }
+      // HttpClient 对 connectionFactory 的明文 socket 不会再升 TLS；
+      // 直连 IP 时必须自己握手，SNI / 证书校验仍用域名
+      if (connectHost is InternetAddress) {
+        final ConnectionTask<Socket> tcp = await Socket.startConnect(
+          connectHost,
+          uri.port,
+        );
+        return ConnectionTask.fromSocket(
+          tcp.socket.then(
+            (Socket plain) => SecureSocket.secure(plain, host: uri.host),
+          ),
+          tcp.cancel,
+        );
+      }
+      return SecureSocket.startConnect(connectHost, uri.port);
+    };
     return IOClient(raw);
   }
 
@@ -805,9 +877,8 @@ class PanelApiClient {
     return bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19);
   }
 
-  static http.Client _proxyHttpClient(int port) => IOClient(
-    HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port',
-  );
+  static http.Client _proxyHttpClient(int port) =>
+      IOClient(HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port');
 
   Future<AnnouncementBundle> fetchAnnouncements() async =>
       AnnouncementBundle.fromJson(await _get('/announcements'));
@@ -847,33 +918,45 @@ class PanelApiClient {
   }
 
   Future<TicketUploadResult> uploadTicketAttachment(String filePath) async {
-    final Uri uri = _endpoint('/tickets/upload');
-    final http.MultipartRequest request = http.MultipartRequest('POST', uri);
-    request.headers.addAll(_headers());
-    request.files.add(await http.MultipartFile.fromPath('file', filePath));
-    try {
-      final http.StreamedResponse streamed =
-          await _http.send(request).timeout(const Duration(seconds: 120));
-      final http.Response response = await http.Response.fromStream(streamed);
-      final Map<String, dynamic> data = _unwrap(response);
-      return TicketUploadResult.fromJson(data);
-    } on ApiException {
-      rethrow;
-    } on Exception catch (e) {
-      throw ApiException('上传失败：$e');
-    }
+    return _viaDirectThenProxy(
+      repeatable: false,
+      run: (http.Client client) async {
+        final Uri uri = _endpoint('/tickets/upload');
+        final http.MultipartRequest request = http.MultipartRequest(
+          'POST',
+          uri,
+        );
+        request.headers.addAll(_headers());
+        request.files.add(await http.MultipartFile.fromPath('file', filePath));
+        try {
+          final http.StreamedResponse streamed = await client
+              .send(request)
+              .timeout(const Duration(seconds: 120));
+          final http.Response response = await http.Response.fromStream(
+            streamed,
+          );
+          return TicketUploadResult.fromJson(_unwrap(response));
+        } on ApiException {
+          rethrow;
+        } on Exception catch (e) {
+          throw ApiException('上传失败：$e');
+        }
+      },
+    );
   }
 
   Future<ShopCatalog> fetchShopProducts() async =>
       ShopCatalog.fromJson(await _get('/shop/products'));
 
-  Future<PlanQuote> fetchPlanQuote({required int shop, String coupon = ''}) async =>
-      PlanQuote.fromJson(
-        await _get('/shop/order-status', <String, String>{
-          'shop': '$shop',
-          if (coupon.isNotEmpty) 'coupon': coupon,
-        }),
-      );
+  Future<PlanQuote> fetchPlanQuote({
+    required int shop,
+    String coupon = '',
+  }) async => PlanQuote.fromJson(
+    await _get('/shop/order-status', <String, String>{
+      'shop': '$shop',
+      if (coupon.isNotEmpty) 'coupon': coupon,
+    }),
+  );
 
   Future<ProductQuote> fetchTrafficPackageQuote(int shop) async =>
       ProductQuote.fromJson(
@@ -887,7 +970,6 @@ class PanelApiClient {
         await _get('/shop/card-key-status', <String, String>{'shop': '$shop'}),
       );
 
-  /// [epayType] 为空走余额支付，否则走在线支付并返回跳转链接
   Future<ShopPurchaseResult> buyPlan({
     required int shop,
     required String coupon,
@@ -940,24 +1022,28 @@ class PanelApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint(path),
-        headers: _headers(json: true),
-        body: jsonEncode(body),
-      ),
-    );
-    return ShopPurchaseResult.fromEnvelope(_envelope(response));
+    return ShopPurchaseResult.fromEnvelope(await _postEnvelope(path, body));
   }
 
   Future<Map<String, dynamic>> _get(
     String path, [
     Map<String, String>? query,
   ]) async {
-    final http.Response response = await _send(
-      () => _http.get(_endpoint(path, query), headers: _headers()),
+    return _unwrap(
+      await _sendVia(
+        (http.Client client) =>
+            client.get(_endpoint(path, query), headers: _headers()),
+      ),
     );
-    return _unwrap(response);
+  }
+
+  Future<Map<String, dynamic>> _getEnvelope(String path) async {
+    return _envelope(
+      await _sendVia(
+        (http.Client client) =>
+            client.get(_endpoint(path), headers: _headers()),
+      ),
+    );
   }
 
   static int? _retryAfterSeconds(http.Response response) {
@@ -976,28 +1062,32 @@ class PanelApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint(path),
-        headers: _headers(json: true),
-        body: jsonEncode(body),
+    return _unwrap(
+      await _sendVia(
+        (http.Client client) => client.post(
+          _endpoint(path),
+          headers: _headers(json: true),
+          body: jsonEncode(body),
+        ),
+        repeatable: false,
       ),
     );
-    return _unwrap(response);
   }
 
   Future<Map<String, dynamic>> _put(
     String path, [
     Map<String, dynamic> body = const <String, dynamic>{},
   ]) async {
-    final http.Response response = await _send(
-      () => _http.put(
-        _endpoint(path),
-        headers: _headers(json: true),
-        body: jsonEncode(body),
+    return _envelope(
+      await _sendVia(
+        (http.Client client) => client.put(
+          _endpoint(path),
+          headers: _headers(json: true),
+          body: jsonEncode(body),
+        ),
+        repeatable: false,
       ),
     );
-    return _envelope(response);
   }
 
   Future<String> _postMsg(String path, Map<String, dynamic> body) async {
@@ -1009,14 +1099,26 @@ class PanelApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final http.Response response = await _send(
-      () => _http.post(
-        _endpoint(path),
-        headers: _headers(json: true),
-        body: jsonEncode(body),
+    return _envelope(
+      await _sendVia(
+        (http.Client client) => client.post(
+          _endpoint(path),
+          headers: _headers(json: true),
+          body: jsonEncode(body),
+        ),
+        repeatable: false,
       ),
     );
-    return _envelope(response);
+  }
+
+  Future<http.Response> _sendVia(
+    Future<http.Response> Function(http.Client client) request, {
+    bool repeatable = true,
+  }) {
+    return _viaDirectThenProxy(
+      repeatable: repeatable,
+      run: (http.Client client) => _send(() => request(client)),
+    );
   }
 
   /// 绑定轮询等接口用 ret=0 表示未绑定，不当作错误。
@@ -1041,9 +1143,16 @@ class PanelApiClient {
     try {
       return await request().timeout(_timeout);
     } on Exception catch (e) {
-      throw ApiException('无法连接面板，请检查网络或面板地址：$e');
+      throw ApiException(
+        '无法连接面板，请检查网络或面板地址：$e',
+        connectFailed: _isConnectFailure(e),
+      );
     }
   }
+
+  /// 超时不算连接失败：服务端可能已处理完
+  static bool _isConnectFailure(Object error) =>
+      error is SocketException || error is HandshakeException;
 
   Map<String, dynamic> _unwrap(http.Response response) {
     final Object? data = _envelope(response)['data'];
@@ -1080,5 +1189,10 @@ class PanelApiClient {
     return payload;
   }
 
-  void close() => _http.close();
+  void close() {
+    _direct.close();
+    _proxy?.close();
+    _proxy = null;
+    _proxyPort = null;
+  }
 }

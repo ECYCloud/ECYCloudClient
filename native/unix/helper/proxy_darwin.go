@@ -27,7 +27,6 @@ var proxyBypass = []string{
 	"169.254.0.0/16",
 }
 
-// networksetup 每种代理各有一套读写子命令，只有名字不同
 var managedProxies = []struct {
 	get   string
 	set   string
@@ -148,7 +147,6 @@ type proxyState struct {
 	SnapshotPresent bool   `json:"snapshot_present"`
 }
 
-// GUI 只用它判断"系统代理此刻是否指向本机"，取第一个在用的网络服务即可
 func (p *proxyManager) state(_ int) (proxyState, error) {
 	state := proxyState{}
 
@@ -237,14 +235,14 @@ func loadSnapshot() (proxySnapshot, error) {
 }
 
 func saveSnapshot(snapshot proxySnapshot) error {
-	if err := os.MkdirAll(dataDir(), 0o755); err != nil {
+	if err := prepareRunDir(); err != nil {
 		return err
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(snapshotPath(), data, 0o644)
+	return os.WriteFile(snapshotPath(), data, 0o600)
 }
 
 // 首行是说明文字，带 * 前缀的是已停用的服务，都不该动

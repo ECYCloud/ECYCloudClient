@@ -8,8 +8,8 @@ import "sync"
 type logBuffer struct {
 	mu    sync.Mutex
 	lines []string
-	first int // lines[0] 对应的游标
-	next  int // 下一行将要使用的游标
+	first int
+	next  int
 	limit int
 }
 

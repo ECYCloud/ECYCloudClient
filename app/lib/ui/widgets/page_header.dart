@@ -3,13 +3,6 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import 'user_avatar.dart';
 
-/// 与侧栏连接状态图标垂直居中对齐。
-///
-/// NavigationRail 默认上下各约 8px 内边距，其 leading 里的状态图标为 32×32；
-/// 标题放在等高盒子内居中，右侧操作区可更高，整行按中线对齐。
-///
-/// 左右外边距同为 [edge]；操作按钮之间用 [actionGap]；头像与操作区再隔开
-/// [edge]，避免与刷新等贴死。
 class PageHeader extends StatelessWidget {
   const PageHeader({
     super.key,
@@ -24,16 +17,13 @@ class PageHeader extends StatelessWidget {
   final bool showUserAvatar;
   final bool showBackButton;
 
-  /// 与 [UserAvatarButton.edge] / AppBar `actionsPadding` 一致。
   static const double edge = UserAvatarButton.edge;
 
-  /// 标题行内操作按钮间距（余额 / 刷新 / 创建等）。
   static const double actionGap = 8;
 
   static const double _railPaddingTop = 8;
   static const double _brandSize = 32;
 
-  // 与账户页 ListTile leading / RefreshButton 默认尺寸一致。
   static const double _actionIconSize = 20;
 
   static double get _actionButtonSize => AppTheme.minTapTarget;
@@ -82,10 +72,7 @@ class PageHeader extends StatelessWidget {
               ),
               const Spacer(),
               if (actions != null)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: actions!,
-                ),
+                Row(mainAxisSize: MainAxisSize.min, children: actions!),
               if (showUserAvatar) ...<Widget>[
                 const SizedBox(width: edge),
                 const UserAvatarButton(),

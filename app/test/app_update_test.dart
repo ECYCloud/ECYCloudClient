@@ -1,8 +1,6 @@
 import 'package:ecycloud_client/domain/update/app_update.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// 规则见 AGENTS.md 的「版本通道与更新检查」。目标发布怎么选由 AppUpdate.check
-// 联网决定，这里只锁「选出来之后算不算过时」——Pre 落回 Last 那条最容易写错。
 AppUpdate at(String current, String latest) =>
     AppUpdate(current: current, latest: latest, installer: null);
 

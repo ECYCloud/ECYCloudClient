@@ -1,5 +1,5 @@
 #!/bin/sh
-# 没有 deb / rpm 的发行版用这个装，做的事与两者的安装脚本一致：铺文件后由 helper 注册服务。
+# 用法: 没有 deb / rpm 时用这个装；铺文件后由 helper 注册服务。
 set -e
 
 target='/opt/ecycloud'
@@ -55,6 +55,10 @@ fi
 # 系统代理默认开启，schema 缺失会让连接直接失败，而它不是 GTK3 的依赖
 if ! gsettings get org.gnome.system.proxy mode >/dev/null 2>&1; then
     echo "缺少 org.gnome.system.proxy schema，请补装 gsettings-desktop-schemas，否则连接时系统代理会报错" >&2
+fi
+# libmpv 由 media_kit 运行期 dlopen，不在 ECYCloud 的 NEEDED 里，ldd 查不到
+if ! ldconfig -p 2>/dev/null | grep -q 'libmpv\.so'; then
+    echo "缺少 libmpv，公告 / 商店 / 工单中的视频无法播放，请用发行版包管理器安装 libmpv 或 mpv" >&2
 fi
 
 echo "安装完成，可从桌面菜单启动 ECY Cloud，卸载执行 sudo $target/uninstall.sh"

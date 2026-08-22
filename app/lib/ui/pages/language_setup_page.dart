@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_language.dart';
 import '../../l10n/l10n.dart';
+import '../app_scope.dart';
+import '../widgets/overlay_scroll_view.dart';
 
 class LanguageSetupPage extends StatefulWidget {
   const LanguageSetupPage({
@@ -33,10 +35,10 @@ class _LanguageSetupPageState extends State<LanguageSetupPage> {
 
     return Scaffold(
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(32),
+        child: OverlayScrollView(
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -68,6 +70,7 @@ class _LanguageSetupPageState extends State<LanguageSetupPage> {
                   ),
                 const SizedBox(height: 16),
                 FilledButton(
+                  autofocus: AppScope.of(context).platform.isTelevision,
                   onPressed: () => widget.onChosen(_selected),
                   child: Text(L10n.t('确定')),
                 ),

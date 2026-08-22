@@ -7,8 +7,6 @@ import '../../domain/kernel/clash_api_client.dart';
 import '../../domain/kernel/kernel_controller.dart';
 import 'service_transport.dart';
 
-/// 内核托管在本进程之外（桌面端是特权服务，Android 是 VpnService），
-/// 本类只下指令并轮询状态。四端共用，差别只在 [transport] 与 [tunProbeCommand]。
 class ServiceKernelController implements KernelController {
   // 命名参数不能写成 this._field，只能在初始化列表里赋值
   // ignore_for_file: prefer_initializing_formals
@@ -17,10 +15,12 @@ class ServiceKernelController implements KernelController {
     String? tunProbeCommand,
     bool upgradable = true,
     bool logFromClashApi = false,
+    bool closeTunBeforeStop = false,
   }) : _service = transport,
        _tunProbeCommand = tunProbeCommand,
        _upgradable = upgradable,
-       _logFromClashApi = logFromClashApi;
+       _logFromClashApi = logFromClashApi,
+       _closeTunBeforeStop = closeTunBeforeStop;
 
   static const String _source = 'kernel';
   static const Duration _pollInterval = Duration(seconds: 1);
@@ -29,12 +29,14 @@ class ServiceKernelController implements KernelController {
   final String? _tunProbeCommand;
   final bool _upgradable;
   final bool _logFromClashApi;
+  final bool _closeTunBeforeStop;
   final StreamController<KernelStatus> _statusController =
       StreamController<KernelStatus>.broadcast();
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
 
   Timer? _poller;
+  bool _polling = false;
   ClashApiClient? _logClient;
   StreamSubscription<String>? _logSubscription;
   KernelStatus _status = const KernelStatus.stopped();
@@ -79,14 +81,15 @@ class ServiceKernelController implements KernelController {
   }
 
   @override
-  Future<String> upgrade(String version) async {
+  Future<String> upgrade(String version, {int? proxyPort}) async {
     // 服务替换文件前会停内核，轮询留着只会把这次停机报成「内核异常退出」
     _stopPolling();
+    await _closeTunIfRunning();
 
     try {
       final Map<String, dynamic> result = await _service.request(
         'kernel.upgrade',
-        <String, dynamic>{'version': version},
+        <String, dynamic>{'version': version, 'port': ?proxyPort},
       );
       _clashApi = null;
       _update(const KernelStatus.stopped());
@@ -162,7 +165,6 @@ class ServiceKernelController implements KernelController {
 
     final ClashApiOptions? clashApi = await _liveClashApi();
     if (clashApi == null) {
-      // 隧道还在但已经指挥不动，留着只会变成一条界面管不了的连接
       Logger.instance.warn(_source, '内核在跑但读不出它的控制面参数，停掉重来');
       await stop();
       return null;
@@ -207,6 +209,7 @@ class ServiceKernelController implements KernelController {
     required String configJson,
     required ClashApiOptions clashApi,
   }) async {
+    await _closeTunIfRunning();
     _clashApi = clashApi;
     _update(const KernelStatus(state: KernelState.starting));
 
@@ -241,6 +244,7 @@ class ServiceKernelController implements KernelController {
   @override
   Future<void> stop() async {
     _update(const KernelStatus(state: KernelState.stopping));
+    await _closeTunIfRunning();
 
     try {
       await _service.request('kernel.stop');
@@ -252,6 +256,26 @@ class ServiceKernelController implements KernelController {
     _clashApi = null;
     _startedAt = null;
     _update(const KernelStatus.stopped());
+  }
+
+  // Windows 只能 TerminateProcess。先让内核 Close() TUN，否则网卡被一起拽掉，
+  // NLA 会留下「ECYCloud」档案，下次连接变成「ECYCloud 2」。
+  Future<void> _closeTunIfRunning() async {
+    if (!_closeTunBeforeStop) {
+      return;
+    }
+    final ClashApiOptions? api = _clashApi;
+    if (api == null) {
+      return;
+    }
+    final ClashApiClient client = ClashApiClient(api);
+    try {
+      await client.disableTun();
+    } on Object catch (e) {
+      Logger.instance.warn(_source, '停内核前关闭 TUN 失败: $e');
+    } finally {
+      client.close();
+    }
   }
 
   @override
@@ -326,6 +350,20 @@ class ServiceKernelController implements KernelController {
   }
 
   Future<void> _poll() async {
+    // 上一轮没回来就跳过这一拍：Windows 侧每次请求都要起一个 isolate 做同步管道
+    // I/O，服务不应答时按秒叠加会把线程耗尽
+    if (_polling) {
+      return;
+    }
+    _polling = true;
+    try {
+      await _pollOnce();
+    } finally {
+      _polling = false;
+    }
+  }
+
+  Future<void> _pollOnce() async {
     late Map<String, dynamic> result;
     try {
       result = await _service.request('kernel.status', <String, dynamic>{
@@ -344,7 +382,6 @@ class ServiceKernelController implements KernelController {
       return;
     }
 
-    // 服务侧内核已不在，交由上层状态机决定是否重启
     _stopPolling();
     final bool stoppedByUser = result['stopped_by_user'] == true;
     _update(
@@ -360,7 +397,6 @@ class ServiceKernelController implements KernelController {
     );
   }
 
-  // 内核跑起来过，说明缓存目录已经建好
   void _applyRunning(Map<String, dynamic> result) {
     _cacheReady = true;
     final int startedAt = (result['started_at'] as num?)?.toInt() ?? 0;

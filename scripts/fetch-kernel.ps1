@@ -48,8 +48,7 @@ function Get-Verified {
     return $path
 }
 
-# geodata 上游只有滚动 tag，锁不住 sha256（见 kernel.lock.json 的说明），改为拦 404 页面与
-# 截断下载：体积下限 + MMDB 尾部的 MaxMind 元数据魔数。内容合法性由内核运行时自行校验。
+# 上游滚动 tag、锁不住 sha256；只拦 404 与截断（体积下限 + MaxMind 魔数）
 function Get-GeoData {
     param([string]$Url, [string]$Target, [int]$MinBytes)
 
@@ -127,7 +126,6 @@ Copy-Item $source (Join-Path $outDir 'mihomo.exe') -Force
 # mihomo 的发布包内不含 LICENSE，其内核许可证与本项目同为逐字 GPL-3.0，直接复用仓库根的副本
 Copy-Item (Join-Path $rootDir 'LICENSE') (Join-Path $outDir 'LICENSE.mihomo.txt') -Force
 
-# geodata 与内核同目录，安装后由服务播种进运行目录
 foreach ($name in @('mmdb', 'geosite')) {
     $geo = $lock.geodata.assets.$name
     $file = Get-GeoData -Url $geo.url -Target $geo.target -MinBytes $geo.minBytes

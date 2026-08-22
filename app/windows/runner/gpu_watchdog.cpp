@@ -37,12 +37,19 @@ void Relaunch() {
     }
   }
 
-  // 渲染已死，消息循环未必还转得动，走不了正常退出路径；
-  // 内核与系统代理由特权服务在本进程消失后收尾
   ::ExitProcess(EXIT_SUCCESS);
 }
 
-void Poll(ComPtr<ID3D11Device> sentinel) {
+// 哨兵必须与 ANGLE 同一适配器；不能每轮新建设备（适配器会先恢复）。建设备必须在本线程：
+// Start() 仍在 CreateWindow 内，D3D11CreateDevice 同步可达数秒，窗口会空白不响应。
+void Poll(ComPtr<IDXGIAdapter> adapter) {
+  ComPtr<ID3D11Device> sentinel;
+  if (FAILED(::D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN,
+                                 nullptr, 0, nullptr, 0, D3D11_SDK_VERSION,
+                                 &sentinel, nullptr, nullptr))) {
+    return;
+  }
+
   while (::WaitForSingleObject(g_stop_event, kPollIntervalMs) == WAIT_TIMEOUT) {
     if (sentinel->GetDeviceRemovedReason() != S_OK) {
       Relaunch();
@@ -69,20 +76,11 @@ void Start(flutter::FlutterEngine* engine) {
     return;
   }
 
-  // 哨兵与 ANGLE 的设备同源，GPU 重置后一起变成 DEVICE_REMOVED 且不再翻回来。
-  // 不能改用「每轮新建临时设备」探测：适配器百毫秒内就恢复，新设备总能建成
-  ComPtr<ID3D11Device> sentinel;
-  if (FAILED(::D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN,
-                                 nullptr, 0, nullptr, 0, D3D11_SDK_VERSION,
-                                 &sentinel, nullptr, nullptr))) {
-    return;
-  }
-
   g_stop_event = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
   if (g_stop_event == nullptr) {
     return;
   }
-  g_thread = std::thread(Poll, sentinel);
+  g_thread = std::thread(Poll, adapter);
 }
 
 void Stop() {

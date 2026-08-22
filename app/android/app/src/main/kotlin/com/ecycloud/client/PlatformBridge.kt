@@ -1,10 +1,14 @@
 package com.ecycloud.client
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract.Root
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -36,6 +40,8 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
         when (call.method) {
             "paths.data" -> result.success(context.filesDir.absolutePath)
             "device.name" -> result.success(deviceName())
+            "device.profile" -> result.success(deviceProfile())
+            "device.television" -> result.success(isTelevision())
             "autostart.get" -> result.success(Autostart.enabled(context))
             "autostart.set" -> {
                 Autostart.setEnabled(context, call.argument<Boolean>("enabled") == true)
@@ -65,9 +71,29 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
         }
     }
 
+    // 只认系统口径：UI_MODE_TYPE_TELEVISION 或 FEATURE_LEANBACK
+    private fun isTelevision(): Boolean {
+        val television = context.getSystemService(UiModeManager::class.java)
+            ?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        return television || context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+
     private fun deviceName(): String {
         val name = Settings.Global.getString(context.contentResolver, "device_name")
         return if (name.isNullOrBlank()) Build.MODEL else name
+    }
+
+    private fun deviceProfile(): Map<String, String> {
+        val brand = Build.MANUFACTURER.orEmpty().trim()
+        val model = Build.MODEL.orEmpty().trim()
+        return mapOf(
+            "model" to if (brand.isEmpty() || model.startsWith(brand, ignoreCase = true)) {
+                model
+            } else {
+                "$brand $model"
+            },
+            "os" to "Android ${Build.VERSION.RELEASE}",
+        )
     }
 
     private fun installedApps(): List<Map<String, Any>> {
@@ -122,19 +148,9 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
         if (path.isNullOrEmpty()) {
             return false
         }
-        val dir = File(path)
-        if (!dir.isDirectory) {
-            return false
-        }
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            dir,
-        )
+        val root = LogDocumentsProvider.rootUri(context, path) ?: return false
         return openIntent(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "resource/folder")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            Intent(Intent.ACTION_VIEW).setDataAndType(root, Root.MIME_TYPE_ITEM),
         )
     }
 

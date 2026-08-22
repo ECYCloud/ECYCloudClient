@@ -20,11 +20,8 @@ enum AuthStage {
 }
 
 class AuthController extends ChangeNotifier {
-  AuthController(
-    this._platform,
-    this._credentials, {
-    PanelResponseCache? cache,
-  }) : _cache = cache ?? PanelResponseCache();
+  AuthController(this._platform, this._credentials, {PanelResponseCache? cache})
+    : _cache = cache ?? PanelResponseCache();
 
   static const String _source = 'auth';
   // 与 Website ClientApiRateLimit 一致：60s 窗口；缺 Retry-After 时的退避兜底
@@ -74,7 +71,6 @@ class AuthController extends ChangeNotifier {
 
   bool get busy => _busy;
 
-  /// 当前会话账号键（邮箱）；profile 尚未拉到时用本地凭据里的邮箱
   String? get accountKey {
     final String? fromProfile = _profile?.email;
     if (fromProfile != null && fromProfile.isNotEmpty) {
@@ -423,8 +419,7 @@ class AuthController extends ChangeNotifier {
 
     try {
       final LoginResult result = await run(client);
-      final String accountEmail =
-          result.profile?.email.isNotEmpty == true
+      final String accountEmail = result.profile?.email.isNotEmpty == true
           ? result.profile!.email
           : (result.accountStatus?.email.isNotEmpty == true
                 ? result.accountStatus!.email
@@ -522,6 +517,23 @@ class AuthController extends ChangeNotifier {
     _set(AuthStage.loggedOut);
   }
 
+  /// 面板按请求来源 IP 认设备。业务接口走网站域名，TUN 开启后来源是节点出口 IP，
+  /// 面板据此认不出这台设备，在线设备与踢下线全部失配。订阅域名的地址已排除出
+  /// TUN 路由，连接期间定期打一次它上面的轻量接口，面板才能记到真实出口 IP。
+  /// 直连不通时放弃即可，面板会沿用上一次记到的真实 IP。
+  Future<void> touchPanelIdentity() async {
+    final PanelApiClient? client = _api;
+    if (client == null) {
+      return;
+    }
+
+    try {
+      await client.fetchConfigRevision();
+    } on Object catch (e) {
+      Logger.instance.debug(_source, '刷新面板出口IP标识失败: $e');
+    }
+  }
+
   Future<void> refreshProfile() async {
     final PanelApiClient? client = _api;
     if (client == null) {
@@ -547,8 +559,8 @@ class AuthController extends ChangeNotifier {
     if (client == null) {
       throw ApiException(L10n.t('未登录'));
     }
-    final ({String message, UserProfile profile}) result =
-        await client.checkin();
+    final ({String message, UserProfile profile}) result = await client
+        .checkin();
     await _applyProfile(result.profile);
     return result.message;
   }
@@ -599,8 +611,7 @@ class AuthController extends ChangeNotifier {
       return profile;
     } on ApiException catch (e) {
       if (e.rateLimited) {
-        final int seconds =
-            e.retryAfterSeconds ?? _rateLimitFallback.inSeconds;
+        final int seconds = e.retryAfterSeconds ?? _rateLimitFallback.inSeconds;
         _profileCooldownUntil = DateTime.now().add(
           Duration(seconds: seconds.clamp(1, _rateLimitWindowSeconds)),
         );
@@ -630,12 +641,17 @@ class AuthController extends ChangeNotifier {
     onConfigRevision?.call(revision);
   }
 
-  Future<DeviceInfo> _device() async => DeviceInfo(
-    platform: _platform.platformId,
-    deviceId: _credentials.deviceId(),
-    deviceName: await _platform.deviceName(),
-    appVersion: AppConfig.appVersion,
-  );
+  Future<DeviceInfo> _device() async {
+    final ({String model, String os}) profile = await _platform.deviceProfile();
+    return DeviceInfo(
+      platform: _platform.platformId,
+      deviceId: _credentials.deviceId(),
+      deviceName: await _platform.deviceName(),
+      deviceModel: profile.model,
+      osVersion: profile.os,
+      appVersion: AppConfig.appVersion,
+    );
+  }
 
   Future<PanelApiClient> _clientForRequest() async {
     final String site = siteOrigin;
@@ -657,11 +673,8 @@ class AuthController extends ChangeNotifier {
     required DeviceInfo device,
     String? token,
   }) {
-    return PanelApiClient(
-      baseUrl: site,
-      configBaseUrl: api,
-      device: device,
-    )..token = token;
+    return PanelApiClient(baseUrl: site, configBaseUrl: api, device: device)
+      ..token = token;
   }
 
   void _rebuildClient() {
@@ -698,6 +711,9 @@ class AuthController extends ChangeNotifier {
     _rebuildClient();
   }
 
+  // 只认 https：这两个 origin 会被落盘并接管此后所有面板请求（含带 token 的），
+  // 面板一旦被改成 http 就等于把会话交给链路上的任何人。Uri.origin 也只支持
+  // http / https，别的 scheme 会抛 StateError
   static String? _asOrigin(String? raw) {
     if (raw == null) {
       return null;
@@ -707,7 +723,7 @@ class AuthController extends ChangeNotifier {
       return null;
     }
     final Uri? uri = Uri.tryParse(trimmed);
-    if (uri == null || uri.host.isEmpty) {
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
       return null;
     }
     return uri.origin;

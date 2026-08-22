@@ -18,7 +18,6 @@ const socketPath = "/var/run/ecycloud/helper.sock"
 // 与 scripts/fetch-kernel.sh 落盘的名字一致
 const kernelExeName = "mihomo"
 
-// 安装脚本把内核与 helper 放在同一目录
 func installDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -56,7 +55,6 @@ func configPath() string {
 	return filepath.Join(runDir(), "config.json")
 }
 
-// 只允许读 run 目录下的相对路径；拒绝绝对路径与 `..`。
 func resolveRunFile(rel string) (string, error) {
 	rel = strings.TrimSpace(rel)
 	rel = strings.ReplaceAll(rel, `\`, `/`)
@@ -80,9 +78,7 @@ func resolveRunFile(rel string) (string, error) {
 	return full, nil
 }
 
-// 与 Dart 侧 AppPaths.kernelCacheFile 必须一致：内核把选中项与规则缓存写在这里
-// （mihomo 固定取工作目录下的 cache.db），文件存在即说明已完整跑过一轮，
-// GUI 无权读取该目录只能由 helper 代查
+// 与 Dart 侧 AppPaths.kernelCacheFile 必须一致；mihomo 固定写工作目录下的 cache.db
 func kernelCachePath() string {
 	return filepath.Join(runDir(), "cache.db")
 }
@@ -92,8 +88,9 @@ func kernelCacheReady() bool {
 	return err == nil && info.Size() > 0
 }
 
+// 快照被 helper 完全信任，必须落在已收紧的运行目录
 func snapshotPath() string {
-	return filepath.Join(dataDir(), "proxy-snapshot.json")
+	return filepath.Join(runDir(), "proxy-snapshot.json")
 }
 
 func helperLogPath() string {

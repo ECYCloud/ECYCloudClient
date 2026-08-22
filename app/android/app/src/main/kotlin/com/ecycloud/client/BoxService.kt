@@ -42,16 +42,17 @@ class BoxService : VpnService() {
         instance = this
     }
 
-    // 开机自启与系统重建服务都不带 intent，与界面点连接走同一条路：
-    // 谁拉起来的不影响内核，界面起来后自己去接管
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DISCONNECT) {
+            stopByUser("已从通知断开连接")
+            return START_NOT_STICKY
+        }
         BoxState.starting = true
         QuickToggleService.refresh()
         try {
             foreground(getString(R.string.notification_starting))
         } catch (e: Exception) {
-            // API 31+ 拒绝后台启动前台服务、API 34+ 拒绝准入条件不满足的 specialUse，
-            // 两者都在主线程抛，不接住就直接带崩进程——反复崩溃后系统连重建都会放弃
+            // API 31+ 后台起前台服务、API 34+ specialUse 准入失败都在主线程抛，不接住会带崩进程
             Thread { fail("系统拒绝前台服务（${e.message ?: e}）") }.start()
             return START_NOT_STICKY
         }
@@ -66,9 +67,17 @@ class BoxService : VpnService() {
         Thread { shutdown() }.start()
     }
 
-    // 只收内核，不调 shutdown()：其中的 stopSelf 会把 START_STICKY 取消，
-    // 系统本要重建服务时反被告知「不必再起」，隧道就此消失。
-    // instance 判等是因为重建后的新实例可能已在 onCreate 里登记过自己
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // 「始终开启的 VPN」停掉会被系统立刻拉起。API 29 以下查不到 always-on，只能照常断
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isAlwaysOn) {
+            return
+        }
+        stopByUser("应用已退出，断开连接")
+    }
+
+    // 不调 shutdown()：其中的 stopSelf 会取消 START_STICKY，系统本要重建服务时反被告知「不必再起」。
+    // instance 判等：重建后的新实例可能已在 onCreate 里登记过自己
     override fun onDestroy() {
         if (instance === this) {
             instance = null
@@ -104,13 +113,11 @@ class BoxService : VpnService() {
             ensureSetup(this)
             Mihomo.setProtector(protector)
 
-            // 换配置重启时再 establish 一次，系统就地改这张网卡的地址与路由，不掉线
             val descriptor = establish(configJson)
             tun?.let { runCatching { it.close() } }
             tun = descriptor
 
-            // 内核会把交给它的描述符包成 os.File 并在停止时关掉，给它一份独立副本，
-            // 免得与 shutdown() 里的 close 撞成对同一个号的重复关闭
+            // 内核把 fd 包成 os.File 并在停止时关掉，必须 dup 后再 detach，避免与 shutdown 重复 close
             Mihomo.start(config, descriptor.dup().detachFd())
         } catch (e: Exception) {
             fail(e.message ?: e.toString())
@@ -129,7 +136,6 @@ class BoxService : VpnService() {
         startResult.offer("")
     }
 
-    // 地址、路由、MTU 与分应用名单全部取自装配好的配置，不在 Kotlin 侧另算一份
     private fun establish(config: JSONObject): ParcelFileDescriptor {
         if (prepare(this) != null) {
             error("未授予 VPN 权限")
@@ -142,9 +148,8 @@ class BoxService : VpnService() {
             // FileDescriptor 路径上 sing-tun 不会 SetNonblock，阻塞 fd 会卡住读包
             .setBlocking(false)
 
-        // targetSdk 29 起系统默认把 VpnService 建的网络标成计费网络，Play 商店、
-        // 系统更新等按计费状态限流的应用会一直卡在「等待 WLAN」；置 false 后
-        // 计费状态跟随底层物理网卡
+        // targetSdk 29 起系统默认把 VpnService 建的网络标成计费网络，按计费状态限流的
+        // 应用会一直卡在「等待 WLAN」；置 false 后计费状态跟随底层物理网卡
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
         }
@@ -168,22 +173,14 @@ class BoxService : VpnService() {
             builder.addRoute(range.host(), range.prefixLength())
         }
 
-        // 内核把每个 TUN 地址的下一个地址当作 DNS 入口（listener/sing_tun/server.go
-        // 按 Addr().Next() 拼 dns-hijack 目标），系统 DNS 必须指到同样的地址，并且
-        // 必须单独给它补一条主机路由：这些地址落在被 route-exclude-address 排掉的私有
-        // 网段里（172.16.0.0/12、fc00::/7），而 VpnService 那张网卡的路由表只由 addRoute
-        // 决定——addAddress 带来的直连路由在主表，安全 VPN 的 UID 规则后面紧跟一条
-        // prohibit，落不到主表上。少了这条路由，全机 DNS 查询一律不可达，域名一个都解析
-        // 不出来，表现就是「显示已连接但没网」。Clash Meta for Android 的 TunService
-        // 同样显式 addRoute(TUN_DNS, 32)
+        // 内核按 Addr().Next() 把每个 TUN 地址的下一个地址当作 DNS 入口，而这些地址落在被
+        // route-exclude-address 排掉的私有网段里，不单独补一条主机路由则全机 DNS 一律不可达
         for (address in inet4 + inet6) {
             val dns = address.host().nextAddress()
             builder.addDnsServer(dns)
             builder.addRoute(dns, if (dns.contains(':')) 128 else 32)
         }
 
-        // 分应用名单仍由配置表达（内核的 include-package / exclude-package），
-        // Kotlin 侧只做 Builder 的翻译，不另存一份
         val included = options.strings("include-package")
         for (name in included) {
             runCatching { builder.addAllowedApplication(name) }
@@ -205,6 +202,12 @@ class BoxService : VpnService() {
         note(LEVEL_ERROR, "内核启动失败：$reason")
         startResult.offer(reason)
         shutdown()
+    }
+
+    private fun stopByUser(reason: String) {
+        BoxState.stoppedByUser = true
+        note(LEVEL_INFO, reason)
+        Thread { shutdown() }.start()
     }
 
     private fun shutdown() {
@@ -256,6 +259,16 @@ class BoxService : VpnService() {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 ),
             )
+            .addAction(
+                0,
+                getString(R.string.notification_disconnect),
+                PendingIntent.getService(
+                    this,
+                    1,
+                    Intent(this, BoxService::class.java).setAction(ACTION_DISCONNECT),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
             .build()
 
     // Dart 侧按内核的行内级别解析日志，级别缺失会一律当成 info
@@ -279,7 +292,6 @@ class BoxService : VpnService() {
         return InetAddress.getByAddress(bytes).hostAddress
     }
 
-    // 配置里没有这个键就是没配
     private fun JSONObject.strings(name: String): List<String> {
         val array = optJSONArray(name) ?: return emptyList()
         return (0 until array.length()).map(array::getString)
@@ -288,6 +300,7 @@ class BoxService : VpnService() {
     companion object {
         private const val CHANNEL_STATUS = "ecycloud-status"
         private const val NOTIFICATION_ID = 1
+        private const val ACTION_DISCONNECT = "com.ecycloud.client.action.DISCONNECT"
         private const val LEVEL_INFO = "INFO"
         private const val LEVEL_WARNING = "WARNING"
         private const val LEVEL_ERROR = "ERROR"
@@ -317,14 +330,8 @@ class BoxService : VpnService() {
             setupDone = true
         }
 
-        /**
-         * 把 APK 里的 geodata 铺进内核运行目录。
-         *
-         * 内核解析 GEOIP / GEOSITE 规则时会就地读这两个库，缺文件就按 geox-url 同步下载，
-         * 而面板下发的地址指向 GitHub，在目标网络里必然超时，整份配置随之校验失败、内核起不来。
-         * 已存在的不覆盖：内核 geo-auto-update 刷新过的那份比包内的新。
-         * 失败不抛：内核仍可自行下载，只是慢且依赖网络能通。
-         */
+        // 内核解析 GEOIP / GEOSITE 时就地读这两个库，缺文件就按 geox-url 同步下载，
+        // 而那个地址在目标网络里必然超时，整份配置随之校验失败、内核起不来
         private fun seedGeoData(context: Context, runDir: File) {
             for (name in GEO_DATA_FILES) {
                 val target = File(runDir, name)
@@ -347,19 +354,14 @@ class BoxService : VpnService() {
             ensureSetup(context)
             BoxState.configFile(context).writeText(config)
 
-            // 这一轮接不接管出口由配置里的 tun.enable 表达，与桌面端同一份装配逻辑。
-            // 不接管时内核只需在进程内跑起来供控制面使用：不建隧道、不弹授权、
-            // 不占通知栏，用户没按连接却看见一条 VPN 才是不对的
             if (!BoxState.takesOverExit(config)) {
                 standby(config)
                 return
             }
 
             startResult.clear()
-            // 换配置重启时服务还在前台跑着，内核就地重载即可；再过一遍
-            // startForegroundService 只会在后台被 API 31+ 的启动限制拒掉。
-            // 判据是 takeover 而不是 running：常驻内核不在 VpnService 里，此时
-            // instance 可能是一个已经 stopSelf()、只等系统回收的壳，不能拿来建隧道
+            // 服务还在前台时就地重载，再过一遍 startForegroundService 只会在后台被 API 31+ 拒掉。
+            // 判据是 takeover 而不是 running：常驻内核不在 VpnService 里，instance 可能只是等回收的壳
             val service = instance
             if (service != null && BoxState.takeover) {
                 service.launch()
@@ -377,12 +379,8 @@ class BoxService : VpnService() {
             }
         }
 
-        /**
-         * 内核常驻但不接管出口。起它不需要 VpnService。
-         *
-         * protect 回调必须摘掉：它要经 VpnService 实例才能生效，服务不在时每个出站
-         * socket 都会被判成 protect 失败，内核一条连接也拨不出去。
-         */
+        // protect 回调必须摘掉：它要经 VpnService 实例才能生效，服务不在时每个出站
+        // socket 都会被判成 protect 失败，内核一条连接也拨不出去
         private fun standby(config: String) {
             instance?.takeIf { BoxState.takeover }?.shutdown()
             Mihomo.setProtector(null)
@@ -415,7 +413,6 @@ class BoxService : VpnService() {
                 return
             }
 
-            // 常驻的内核不在 VpnService 里，服务不在也要把它停掉
             Mihomo.stop()
             BoxState.starting = false
             BoxState.running = false

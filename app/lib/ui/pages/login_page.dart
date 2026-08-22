@@ -9,6 +9,8 @@ import '../../l10n/l10n.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../widgets/field_subtext.dart';
+import '../widgets/overlay_scroll_view.dart';
 import 'register_page.dart';
 import 'reset_password_page.dart';
 
@@ -178,10 +180,7 @@ class _LoginPageState extends State<LoginPage> {
             email: _email.text.trim(),
             code: _code.text.trim(),
           )
-        : await auth.login(
-            email: _email.text.trim(),
-            password: _password.text,
-          );
+        : await auth.login(email: _email.text.trim(), password: _password.text);
     if (!mounted) {
       return;
     }
@@ -300,7 +299,7 @@ class _LoginPageState extends State<LoginPage> {
 
     return Scaffold(
       body: Center(
-        child: SingleChildScrollView(
+        child: OverlayScrollView(
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 400),
@@ -334,7 +333,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 32),
-                      TextFormField(
+                      TextField(
                         controller: _email,
                         keyboardType: TextInputType.emailAddress,
                         autocorrect: false,
@@ -344,10 +343,9 @@ class _LoginPageState extends State<LoginPage> {
                           labelText: L10n.t('邮箱'),
                           prefixIcon: const Icon(Icons.mail_outline),
                         ),
-                        validator: (String? value) =>
-                            (value == null || value.trim().isEmpty)
-                            ? L10n.t('请填写邮箱')
-                            : null,
+                      ).validated(
+                        () =>
+                            _email.text.trim().isEmpty ? L10n.t('请填写邮箱') : null,
                       ),
                       const SizedBox(height: 16),
                       if (_emailCodeMode)
@@ -357,33 +355,39 @@ class _LoginPageState extends State<LoginPage> {
                             Expanded(
                               child: EmailOtpIme(
                                 builder:
-                                    (BuildContext context, FocusNode focusNode) {
-                                  return TextFormField(
-                                    controller: _code,
-                                    focusNode: focusNode,
-                                    keyboardType: TextInputType.visiblePassword,
-                                    autocorrect: false,
-                                    enableSuggestions: false,
-                                    autofillHints: const <String>[
-                                      AutofillHints.oneTimeCode,
-                                    ],
-                                    inputFormatters: <TextInputFormatter>[
-                                      OtpCodeFormatter(),
-                                    ],
-                                    decoration: InputDecoration(
-                                      labelText: L10n.t('验证码'),
-                                      prefixIcon: const Icon(Icons.pin_outlined),
-                                    ),
-                                    validator: (String? value) =>
-                                        (value == null || value.trim().isEmpty)
-                                        ? L10n.t('请填写验证码')
-                                        : null,
-                                    onFieldSubmitted: (_) =>
-                                        auth.busy || _entering
-                                        ? null
-                                        : _submit(auth),
-                                  );
-                                },
+                                    (
+                                      BuildContext context,
+                                      FocusNode focusNode,
+                                    ) {
+                                      return TextField(
+                                        controller: _code,
+                                        focusNode: focusNode,
+                                        keyboardType:
+                                            TextInputType.visiblePassword,
+                                        autocorrect: false,
+                                        enableSuggestions: false,
+                                        autofillHints: const <String>[
+                                          AutofillHints.oneTimeCode,
+                                        ],
+                                        inputFormatters: <TextInputFormatter>[
+                                          OtpCodeFormatter(),
+                                        ],
+                                        decoration: InputDecoration(
+                                          labelText: L10n.t('验证码'),
+                                          prefixIcon: const Icon(
+                                            Icons.pin_outlined,
+                                          ),
+                                        ),
+                                        onSubmitted: (_) =>
+                                            auth.busy || _entering
+                                            ? null
+                                            : _submit(auth),
+                                      ).validated(
+                                        () => _code.text.trim().isEmpty
+                                            ? L10n.t('请填写验证码')
+                                            : null,
+                                      );
+                                    },
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -391,9 +395,7 @@ class _LoginPageState extends State<LoginPage> {
                               height: loginFieldHeight(theme),
                               child: OutlinedButton(
                                 onPressed:
-                                    auth.busy ||
-                                        _entering ||
-                                        _sendCooldown > 0
+                                    auth.busy || _entering || _sendCooldown > 0
                                     ? null
                                     : () => _sendCode(auth),
                                 child: Text(
@@ -407,9 +409,8 @@ class _LoginPageState extends State<LoginPage> {
                         )
                       else
                         EmailOtpIme(
-                          builder:
-                              (BuildContext context, FocusNode focusNode) {
-                            return TextFormField(
+                          builder: (BuildContext context, FocusNode focusNode) {
+                            return TextField(
                               controller: _password,
                               focusNode: focusNode,
                               obscureText: _obscure,
@@ -435,17 +436,16 @@ class _LoginPageState extends State<LoginPage> {
                                       setState(() => _obscure = !_obscure),
                                 ),
                               ),
-                              validator: (String? value) =>
-                                  (value == null || value.isEmpty)
+                              onSubmitted: (_) =>
+                                  auth.busy || _entering ? null : _submit(auth),
+                            ).validated(
+                              () => _password.text.isEmpty
                                   ? L10n.t('请填写密码')
                                   : null,
-                              onFieldSubmitted: (_) =>
-                                  auth.busy || _entering
-                                  ? null
-                                  : _submit(auth),
                             );
                           },
                         ),
+                      const SizedBox(height: 8),
                       Row(
                         children: <Widget>[
                           Checkbox(
@@ -457,12 +457,9 @@ class _LoginPageState extends State<LoginPage> {
                             onChanged: (bool? value) =>
                                 _setRemember(auth, value ?? false),
                           ),
-                          MouseRegion(
-                            cursor: SystemMouseCursors.basic,
-                            child: GestureDetector(
-                              onTap: () => _setRemember(auth, !_remember),
-                              child: Text(L10n.t('记住账号密码')),
-                            ),
+                          InkWell(
+                            onTap: () => _setRemember(auth, !_remember),
+                            child: Text(L10n.t('记住账号密码')),
                           ),
                           const Spacer(),
                           TextButton(
@@ -470,7 +467,9 @@ class _LoginPageState extends State<LoginPage> {
                               () => _emailCodeMode = !_emailCodeMode,
                             ),
                             child: Text(
-                              _emailCodeMode ? L10n.t('密码登录') : L10n.t('邮箱验证码登录'),
+                              _emailCodeMode
+                                  ? L10n.t('密码登录')
+                                  : L10n.t('邮箱验证码登录'),
                             ),
                           ),
                         ],
@@ -495,11 +494,12 @@ class _LoginPageState extends State<LoginPage> {
                               )
                             : Text(L10n.t('登录')),
                       ),
+                      const SizedBox(height: 8),
                       Row(
                         children: <Widget>[
                           TextButton(
                             onPressed: _openRegister,
-                            child: Text(L10n.t('注册账号')),
+                            child: Text('${L10n.t('注册账号')} ›'),
                           ),
                           const Spacer(),
                           TextButton(

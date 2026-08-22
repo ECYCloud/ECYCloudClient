@@ -11,6 +11,7 @@ import '../core/app_paths.dart';
 import '../core/logger.dart';
 import '../data/api/api_exception.dart';
 import '../data/api/panel_api_client.dart';
+import '../data/models/online_device.dart';
 import '../data/models/user_profile.dart';
 import '../data/store/json_file_store.dart';
 import '../data/store/panel_response_cache.dart';
@@ -26,7 +27,6 @@ import '../l10n/app_language.dart';
 import '../l10n/l10n.dart';
 import '../ui/node_labels.dart';
 
-/// 已落盘的 rule-provider，供只读查看页列出。
 class RuleProviderRef {
   const RuleProviderRef({
     required this.name,
@@ -61,11 +61,19 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
        _settingsStore = settingsStore,
        _settings = settingsStore.load(),
        _panelCache = panelCache ?? PanelResponseCache(),
-       _selectorCache = JsonFileStore(AppPaths.selectorCache, 'selector-cache') {
+       _selectorCache = JsonFileStore(
+         AppPaths.selectorCache,
+         'selector-cache',
+       ) {
     WidgetsBinding.instance.addObserver(this);
+    _routeMode = _settings.routeMode;
     _kernelStatusSubscription = _kernel.statusStream.listen(_onKernelStatus);
     _kernelLogSubscription = _kernel.kernelLog.listen((String line) {
-      Logger.instance.log(Logger.kernelLevel(line), 'mihomo', line);
+      Logger.instance.log(
+        Logger.kernelLevel(line),
+        'mihomo',
+        Logger.kernelMessage(line),
+      );
       _trackStartupStage(line);
     });
     // Android 没有托盘，但通知栏磁贴同样从界面之外请求连接/断开
@@ -115,9 +123,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   PanelApiClient? _api;
   ClashApiClient? _clash;
   UserProfile? Function()? _profileOf;
-  Future<bool> Function()? confirmIpLimitKick;
+
+  /// 返回用户选定要挤下线的 IP；返回 null 表示取消连接，空串表示交给节点挑最旧的
+  Future<String?> Function(List<OnlineDevice> devices)? confirmIpLimitKick;
 
   Map<String, dynamic>? _remote;
+  Map<String, String> _proxyNetwork = const <String, String>{};
+  Map<String, bool> _proxyUdp = const <String, bool>{};
+  Map<String, String> _proxyTls = const <String, String>{};
   Map<String, String> _groupIcons = const <String, String>{};
   AssembledProfile? _profile;
   ClashApiOptions? _clashApiOptions;
@@ -179,20 +192,55 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   List<String> get preflightProblems => _preflightProblems;
 
-  List<ProxyGroup> get groups => _groups;
+  List<ProxyGroup> get groups => <ProxyGroup>[
+    for (final ProxyGroup group in _groups)
+      if (group.name != ClashApiClient.globalGroupName) group,
+  ];
+
+  ProxyGroup? get globalGroup => groupByName(ClashApiClient.globalGroupName);
+
+  List<ProxyGroup> get groupsForMode {
+    if (_routeMode == 'global') {
+      final ProxyGroup? group = globalGroup;
+      return group == null ? const <ProxyGroup>[] : <ProxyGroup>[group];
+    }
+    return groups;
+  }
 
   List<ProxyNode> get nodes => _nodes;
 
-  // 延迟以叶子节点名为键：逐个探测的结果先落在这里，界面不必等整批结束
   int delayOf(String name) => _delays[name] ?? 0;
 
   String typeOf(String name) {
     for (final ProxyNode node in _nodes) {
       if (node.name == name) {
-        return node.type;
+        return _displayType(node.type);
       }
     }
     return '';
+  }
+
+  String networkOf(String name) {
+    final String network = _proxyNetwork[name] ?? '';
+    return network.isEmpty ? '' : network.toUpperCase();
+  }
+
+  String tlsOf(String name) => _proxyTls[name] ?? '';
+
+  String udpOf(String name) {
+    for (final ProxyNode node in _nodes) {
+      if (node.name != name) {
+        continue;
+      }
+      if (node.xudp == true) {
+        return 'XUDP';
+      }
+      if (node.udp == true) {
+        return 'UDP';
+      }
+      break;
+    }
+    return _proxyUdp[name] == true ? 'UDP' : '';
   }
 
   Set<String> get testingNodes => _testing;
@@ -201,10 +249,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   Set<String> get unreachableNodes => _unreachable;
 
-  // 本机从未跑过内核时远程规则集要现下载，启动明显更慢，需要向用户交代
   bool get kernelCacheReady => _kernel.cacheReady;
 
-  // 内核版本由特权服务代跑 `mihomo -v` 拿到，未连接时也问得到
   Future<String> kernelVersion() => _kernel.kernelVersion();
 
   bool get kernelUpgradeSupported => _kernel.upgradable;
@@ -212,7 +258,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<KernelUpdate> checkKernelUpdate() async =>
       KernelUpdate.check(await kernelVersion());
 
-  /// 升级内核。下载与校验期间连接不断（网络受限时只有隧道通着才取得到 GitHub），
+  /// 升级内核。下载与校验期间连接不断，GitHub 经本地 mixed 出网；
   /// 替换文件前由服务停掉内核，因此这里要先摘掉「内核意外退出就自动重启」那条路，
   /// 换完再按升级前的状态重连。
   Future<String> upgradeKernel(String version) async {
@@ -222,12 +268,15 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _restartTimer = null;
 
     try {
-      return await _kernel.upgrade(version);
+      return await _kernel.upgrade(
+        version,
+        proxyPort: wasConnected ? _settings.mixedPort : null,
+      );
     } finally {
       if (wasConnected) {
         _userStopped = false;
         _restartAttempt = 0;
-        await _restartKernel('内核已更新，正在重启');
+        await _restartKernel(L10n.t('内核已更新，正在重启'));
       }
     }
   }
@@ -235,8 +284,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<({String stage, int percent})> kernelUpgradeProgress() =>
       _kernel.upgradeProgress();
 
-  // 首次启动的绝大部分耗时花在逐个下载并编译远程规则集上，
-  // 干等一句「请稍候」看不出进度，这里把内核当前动作透出去
   String? get startupStage => _startupStage;
 
   int get remoteProviderCount => _providerTotal;
@@ -264,9 +311,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     final String? next = match != null && _providerTotal > 0
-        ? '正在准备分流规则集 ${_providerReady.length}/$_providerTotal'
+        ? L10n.t('正在准备分流规则集 {0}/{1}', <Object>[
+            _providerReady.length,
+            _providerTotal,
+          ])
         : line.contains('Start initial configuration in progress')
-        ? '内核已启动，正在加载配置'
+        ? L10n.t('内核已启动，正在加载配置')
         : null;
 
     if (next == null || next == _startupStage) {
@@ -276,11 +326,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  // MATCH 规则指向的分组才是默认出站，分组顺序不保证它在最前
+  // MATCH 规则指向的分组才是默认出站；全局模式改走内核自建的 GLOBAL
   ProxyGroup? get mainGroup {
+    if (_routeMode == 'global') {
+      return globalGroup;
+    }
     final String? target = _matchTarget();
     return (target == null ? null : groupByName(target)) ??
-        (_groups.isEmpty ? null : _groups.first);
+        (groups.isEmpty ? null : groups.first);
   }
 
   // 规则是 `TYPE,payload,target` 的逗号分隔文本，兜底规则没有 payload：`MATCH,Proxy`
@@ -314,7 +367,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   // 面板在 Clash 模板的 x-sspanel.group_icons 里维护，没配的分组返回 null
   String? groupIconOf(String tag) => _groupIcons[tag];
 
-  // 成员可能是嵌套分组，延迟一律按它解析出的叶子节点取
   String? fastestMember(ProxyGroup group) {
     String? fastest;
     int lowest = 0;
@@ -333,7 +385,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   TrafficSample get traffic => _traffic;
 
-  // 本次连接以来走代理的累计量，直连不计
   TrafficSample get trafficTotal => _trafficTotal;
 
   List<TrafficSample> get trafficHistory => _trafficHistory;
@@ -342,7 +393,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   List<Map<String, dynamic>> get connections => _connections;
 
-  // 新的在前
   List<Map<String, dynamic>> get closedConnections => _closedConnections;
 
   String get routeMode => _routeMode;
@@ -369,11 +419,18 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         nextKey.isNotEmpty &&
         nextKey.toLowerCase() != _accountKey.toLowerCase();
     _api = api;
+    api?.fallbackProxyPort = _state == ConnectionPhase.connected
+        ? _settings.mixedPort
+        : null;
+    if (api != null) {
+      unawaited(api.refreshConfigDirectAddresses());
+    }
     if (nextKey.isNotEmpty) {
       _accountKey = nextKey;
     }
     if (api == null) {
       _remote = null;
+      _indexProxyExtra();
       _remoteStale = false;
       _remoteCooldownUntil = null;
       _accountKey = '';
@@ -417,7 +474,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     _applyProfileProxies();
     notifyListeners();
-    // 面板配置到手就把内核拉起来常驻，用户点节点时控制面已经在线
     unawaited(startStandby());
   }
 
@@ -435,7 +491,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    // 内核已在跑，之后它异常退出就该自动重启
     final int generation = ++_generation;
     _userStopped = false;
     _setState(ConnectionPhase.connecting, error: null);
@@ -467,7 +522,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    // 连接时刻由托管内核的那一侧上报，拿不到就留空（首页退化成「已连接」）
     _connectedAt = _takeover ? _kernel.startedAt : null;
     _scheduleProxyRefresh();
     if (_takeover) {
@@ -480,13 +534,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  /// 内核常驻：登录后就把内核拉起来，只是不接管出口。控制面随之在线，未连接
-  /// 时选节点与测延迟才有地方问——这是标准 mihomo 客户端的行为。
   Future<void> startStandby() async {
     if (_clash != null || busy || _api == null) {
       return;
     }
-    await _switchTakeover(false, '正在准备内核');
+    await _switchTakeover(false, L10n.t('正在准备内核'));
   }
 
   Future<void> connect() async {
@@ -496,27 +548,36 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     final UserProfile? profile = _profileOf?.call();
     if (profile != null && profile.onlineIpLimitReached) {
-      final Future<bool> Function()? confirm = confirmIpLimitKick;
+      final Future<String?> Function(List<OnlineDevice>)? confirm =
+          confirmIpLimitKick;
       if (confirm == null) {
-        return;
-      }
-      if (!await confirm()) {
         return;
       }
       final PanelApiClient? api = _api;
       if (api == null) {
-        _fail('尚未登录');
+        _fail(L10n.t('尚未登录'));
+        return;
+      }
+      List<OnlineDevice> devices;
+      try {
+        devices = await api.fetchOnlineDevices();
+      } on ApiException {
+        // 列不出来时仍可连接，只是没得选，由节点挑最旧的那个
+        devices = const <OnlineDevice>[];
+      }
+      final String? targetIp = await confirm(devices);
+      if (targetIp == null) {
         return;
       }
       try {
-        await api.reclaimIp();
+        await api.reclaimIp(targetIp: targetIp);
       } on ApiException catch (e) {
         _fail(e.message);
         return;
       }
     }
 
-    await _switchTakeover(true, '正在连接');
+    await _switchTakeover(true, L10n.t('正在连接'));
   }
 
   Future<void> disconnect() async {
@@ -526,7 +587,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _setState(ConnectionPhase.disconnecting, error: null);
-    await _switchTakeover(false, '正在断开');
+    await _switchTakeover(false, L10n.t('正在断开连接'));
   }
 
   /// 登出或退出应用：内核彻底停下，出口还原。与 [disconnect] 的区别是这之后
@@ -544,13 +605,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _setState(ConnectionPhase.disconnected, error: null);
   }
 
-  /// 切换出口接管：拿新的 `tun.enable` 整份重装配置，走内核重启这一条路
-  /// （理由见 [_restartKernel]）。
   Future<void> _switchTakeover(bool takeover, String stage) async {
     final PanelApiClient? api = _api;
     if (api == null) {
       if (takeover) {
-        _fail('尚未登录');
+        _fail(L10n.t('尚未登录'));
       }
       return;
     }
@@ -584,7 +643,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       final String reason = _kernelDiedDuringConnect
-          ? '内核启动失败，请重试'
+          ? L10n.t('内核启动失败，请重试')
           : e.toString();
       await _teardown();
       // 常驻起不来不该弹成连接失败：用户没按连接，界面退回面板配置那份节点列表即可
@@ -611,7 +670,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     await syncPlatformSettings();
 
     if (needsRestart) {
-      await _restartKernel('正在应用新设置');
+      await _restartKernel(L10n.t('正在应用新设置'));
       return;
     }
 
@@ -655,7 +714,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _teardown();
         return;
       }
-      final String reason = _kernelDiedDuringConnect ? '内核启动失败' : e.toString();
+      final String reason = _kernelDiedDuringConnect
+          ? L10n.t('内核启动失败')
+          : e.toString();
       await _teardown(restarting: true);
       _scheduleRestart(reason);
     }
@@ -684,11 +745,20 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _syncTray() {
     final bool active = _state == ConnectionPhase.connected;
+    final bool proxyOn = active && _settings.systemProxyEnabled;
+    final bool tunOn = active && _settings.tunEnabled;
+    final String on = L10n.t('已开启');
+    final String off = L10n.t('已关闭');
     final TrayState next = TrayState(
       connected: active,
       busy: busy,
-      systemProxyEnabled: active && _settings.systemProxyEnabled,
-      tunEnabled: active && _settings.tunEnabled,
+      systemProxyEnabled: proxyOn,
+      tunEnabled: tunOn,
+      routeMode: _routeMode,
+      modeEnabled: controlPlaneReady,
+      statusTip:
+          '${L10n.t('系统代理：{0}', <Object>[proxyOn ? on : off])}\n'
+          '${L10n.t('TUN 模式：{0}', <Object>[tunOn ? on : off])}',
       labels: TrayLabels(
         connect: switch (L10n.current) {
           AppLanguage.en => 'Connect',
@@ -699,6 +769,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         cancel: L10n.t('取消连接'),
         systemProxy: L10n.t('系统代理'),
         tun: L10n.t('TUN 模式'),
+        rule: L10n.t('规则'),
+        global: L10n.t('全局'),
+        direct: L10n.t('直连'),
         show: L10n.t('显示主界面'),
         quit: L10n.t('退出'),
       ),
@@ -753,6 +826,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         unawaited(
           updateSettings(_settings.copyWith(tunEnabled: !_settings.tunEnabled)),
         );
+      case TrayAction.modeRule:
+        unawaited(setRouteMode('rule'));
+      case TrayAction.modeGlobal:
+        unawaited(setRouteMode('global'));
+      case TrayAction.modeDirect:
+        unawaited(setRouteMode('direct'));
     }
   }
 
@@ -851,7 +930,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    // 被顶下来的出站，连接要跟着切过去
     final Set<String> replaced = <String>{};
     for (final ProxyGroup group in _groups) {
       final String? want = snap[group.name];
@@ -876,13 +954,19 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> setRouteMode(String mode) async {
-    final ClashApiClient? clash = _clash;
-    if (clash == null) {
+    if (mode != 'rule' && mode != 'global' && mode != 'direct') {
       return;
     }
+    final ClashApiClient? clash = _clash;
+    if (clash != null) {
+      await clash.setMode(mode);
+    }
 
-    await clash.setMode(mode);
     _routeMode = mode;
+    if (_settings.routeMode != mode) {
+      _settings = _settings.copyWith(routeMode: mode);
+      _settingsStore.save(_settings);
+    }
     notifyListeners();
   }
 
@@ -912,8 +996,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  // 选节点与测延迟都要经内核的控制接口。内核是常驻的，正常情况下这里直接放行；
-  // 只有内核还没来得及起来（刚登录、上一轮起失败）才补一次常驻启动
   Future<bool> _ensureControlPlane() async {
     if (_clash != null) {
       return true;
@@ -922,11 +1004,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     return _clash != null;
   }
 
-  // 逐个探测本组成员，测完一个就回填一个。
-  //
-  // 不用内核的 /group/{name}/delay：那是一批测完才一次性返回，界面在整批结束前
-  // 看不到任何进度；而且它对 urltest 组会忽略 url 与 timeout 参数、还会静默跳过
-  // 距上次探测不足 interval 的成员，失败与跳过在返回值里都表现为缺项，分不开。
+  // 不用 /group/{name}/delay：一批才返回、urltest 会忽略 url/timeout，
+  // 且静默跳过距上次不足 interval 的成员，失败与跳过都表现为缺项。
   Future<void> testGroup(String group) async {
     if (!await _ensureControlPlane()) {
       return;
@@ -939,7 +1018,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      // 成员本身可能是分组，同一叶子只测一次
       await _testNodes(
         <String>{
           for (final String member in target.members) resolveNode(member),
@@ -983,7 +1061,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     notifyListeners();
 
-    // Dart 单线程事件循环，取任务与记结果都发生在 await 之间，不需要额外加锁
     final Iterator<String> queue = pending.iterator;
 
     Future<void> worker() async {
@@ -1050,7 +1127,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       await _waitForRemoteCooldown(until);
     }
 
-    // 已连接时本地 mixed 可用：直连面板失败再走代理；未连接则只直连
     final int? fallbackProxyPort = _state == ConnectionPhase.connected
         ? _settings.mixedPort
         : null;
@@ -1080,7 +1156,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (_useCachedRemote()) {
         return;
       }
-      // 无缓存：等到限流窗结束再拉一次，避免把「请求过于频繁」直接甩给连接按钮
       await _waitForRemoteCooldown(_remoteCooldownUntil!);
       try {
         final RemoteProfile remote = await api.fetchClashProfile(
@@ -1103,7 +1178,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// true = 面板戳与本地一致（可跳过全量）；探测失败时不阻断后续拉全量/用缓存。
   Future<bool> _remoteRevisionUnchanged(
     PanelApiClient api,
     int? fallbackProxyPort,
@@ -1132,6 +1206,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   void _applyRemoteProfile(RemoteProfile remote, {required bool persist}) {
     _configRevision = remote.revision;
     _remote = remote.config;
+    _indexProxyExtra();
     _groupIcons = remote.groupIcons;
     _remoteStale = false;
     _remoteCooldownUntil = null;
@@ -1153,7 +1228,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return false;
     }
     _applyRemoteProfile(cached, persist: false);
-    // 磁盘缓存可先展示节点；仍标过期，空闲时由 preload/connect 尝试刷新
     _remoteStale = true;
     Logger.instance.info(_source, '已载入本地面板配置缓存，待空闲时刷新');
     return true;
@@ -1178,7 +1252,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (_state == ConnectionPhase.connecting) {
       final int seconds = wait.inSeconds.clamp(1, 60);
-      _startupStage = '面板繁忙，约 ${seconds}s 后自动重试';
+      _startupStage = L10n.t('面板繁忙，约 {0}s 后自动重试', <Object>[seconds]);
       notifyListeners();
     }
     await Future<void>.delayed(wait);
@@ -1264,9 +1338,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       isCancelled: () => generation != _generation || _kernelDiedDuringConnect,
     );
 
-    // 等待内核就绪期间同样可能被取代：这次连接已经没有意义。
-    // 大多数情况下取代者（disconnect 的兜底还原，或新一轮重启）已经停过内核，
-    // 这里的 stop 只是兜底；真正要避免的是继续往下改共享状态、把界面显示改回「已连接」
     if (generation != _generation) {
       clash.close();
       await _kernel.stop();
@@ -1350,9 +1421,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  // 走势图的采样点数：每秒一个样本，60 点即最近一分钟
   static const int _trafficHistoryLength = 60;
-  // /connections 要序列化每条连接的全量字段，是后台最贵的一次开销
   static const Duration _statsInterval = Duration(seconds: 1);
   static const Duration _statsBackgroundInterval = Duration(seconds: 10);
 
@@ -1592,7 +1661,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         return running ? L10n.t('已是最新，分流规则已刷新') : L10n.t('已是最新');
       }
 
-      // 内核未起：更新内存与节点列表，下次 connect / 常驻拉起时再装配内核
       if (!running) {
         Logger.instance.info(_source, '面板配置有变更，将在下次启动内核时生效');
         _applyProfileProxies();
@@ -1604,7 +1672,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _hotReloadPanelProfile();
       } on Object catch (e) {
         Logger.instance.warn(_source, '热载面板配置失败，回退为重启内核: $e');
-        await _restartKernel('面板配置有变更，正在重启内核');
+        await _restartKernel(L10n.t('面板配置有变更，正在重启内核'));
       }
       await _refreshRuleProviders();
       return L10n.t('更新成功');
@@ -1652,7 +1720,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return L10n.t('已是最新');
     }
     Logger.instance.info(_source, 'GeoData 已更新');
-    return '更新成功';
+    return L10n.t('更新成功');
   }
 
   String _geoDataFingerprint() {
@@ -1814,6 +1882,58 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     return groups is List && groups.isNotEmpty;
   }
 
+  void _indexProxyExtra() {
+    final Map<String, String> networks = <String, String>{};
+    final Map<String, bool> udps = <String, bool>{};
+    final Map<String, String> tlsTypes = <String, String>{};
+    final Object? proxies = _remote?['proxies'];
+    if (proxies is List) {
+      for (final Object? proxy in proxies) {
+        if (proxy is! Map<String, dynamic>) {
+          continue;
+        }
+        final String name = proxy['name'] as String? ?? '';
+        if (name.isEmpty) {
+          continue;
+        }
+        final String network = (proxy['network'] as String? ?? '').trim();
+        if (network.isNotEmpty) {
+          networks[name] = network;
+        }
+        if (proxy['udp'] is bool) {
+          udps[name] = proxy['udp'] as bool;
+        }
+        final String? tlsType = _tlsTypeOf(proxy);
+        if (tlsType != null) {
+          tlsTypes[name] = tlsType;
+        }
+      }
+    }
+    _proxyNetwork = networks;
+    _proxyUdp = udps;
+    _proxyTls = tlsTypes;
+  }
+
+  // clash 段里 hysteria / tuic / anytls 不写 tls: true，但协议本身就是 TLS
+  static String? _tlsTypeOf(Map<String, dynamic> proxy) {
+    final Object? realityOpts = proxy['reality-opts'];
+    if (realityOpts is Map && realityOpts.isNotEmpty) {
+      return 'REALITY';
+    }
+    if (proxy['tls'] == true) {
+      return 'TLS';
+    }
+    switch ((proxy['type'] as String? ?? '').toLowerCase()) {
+      case 'hysteria':
+      case 'hysteria2':
+      case 'tuic':
+      case 'anytls':
+        return 'TLS';
+      default:
+        return null;
+    }
+  }
+
   void _applyProfileProxies() {
     _nodes = _remote?['proxies'] is List
         ? <ProxyNode>[
@@ -1852,35 +1972,34 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         : const <ProxyGroup>[];
   }
 
-  // 面板配置里的类型是 mihomo 的配置名（`ss` / `url-test`），Clash API 给的是内核
-  // 自己的展示名。两个来源必须归一：组类型不对齐就共用不了 ProxyGroup.selectable，
-  // 协议名不对齐则未连接时显示 ss、连上后变 Shadowsocks，同一节点看着像换了协议。
-  // 对照表照抄内核 constant.AdapterType.String()，表里没有的原样透出。
+  // 配置段是 mihomo 配置名（`ss` / `vless`），Clash API 是内核 AdapterType.String()
+  // （`Shadowsocks` / `Vless`）。两个来源必须归一，否则未连接和连上后标签会跳；键按
+  // 小写查，两种写法共用一条。表里没有的原样透出，内核展示名本身就是官方写法。
   static String _displayType(String configType) =>
-      _displayTypes[configType] ?? configType;
+      _displayTypes[configType.toLowerCase()] ?? configType;
 
   static const Map<String, String> _displayTypes = <String, String>{
     'direct': 'Direct',
     'reject': 'Reject',
     'rematch': 'Rematch',
-    'dns': 'Dns',
+    'dns': 'DNS',
     'ss': 'Shadowsocks',
     'ssr': 'ShadowsocksR',
     'snell': 'Snell',
-    'socks5': 'Socks5',
-    'http': 'Http',
-    'vmess': 'Vmess',
-    'vless': 'Vless',
+    'socks5': 'SOCKS5',
+    'http': 'HTTP',
+    'vmess': 'VMess',
+    'vless': 'VLESS',
     'trojan': 'Trojan',
     'hysteria': 'Hysteria',
     'hysteria2': 'Hysteria2',
     'wireguard': 'WireGuard',
-    'tuic': 'Tuic',
-    'ssh': 'Ssh',
+    'tuic': 'TUIC',
+    'ssh': 'SSH',
     'mieru': 'Mieru',
     'anytls': 'AnyTLS',
     'sudoku': 'Sudoku',
-    'masque': 'Masque',
+    'masque': 'MASQUE',
     'trusttunnel': 'TrustTunnel',
     'shadowquic': 'ShadowQuic',
     'openvpn': 'OpenVPN',
@@ -1916,12 +2035,15 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     // 被系统主动终止的不重启：那是用户切到了别的 VPN，重连只会反复弹授权框抢回槽位
     if (!status.retriable) {
-      _fail(status.message ?? '内核已被系统停止');
+      _fail(status.message ?? L10n.t('内核已被系统停止'));
       unawaited(_teardown());
       return;
     }
 
-    _scheduleRestart(status.message ?? '内核异常退出（退出码 ${status.exitCode}）');
+    _scheduleRestart(
+      status.message ??
+          L10n.t('内核异常退出（退出码 {0}）', <Object>[status.exitCode ?? '']),
+    );
   }
 
   void _scheduleRestart(String reason) {
@@ -1934,7 +2056,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         // 面板正常改配置：继续按最长间隔重试，直到连上或用户断开
         _restartAttempt = _backoff.length - 1;
       } else {
-        _fail('$reason；连续重启 ${_backoff.length} 次仍未成功，已停止重试');
+        _fail(
+          L10n.t('{0}；连续重启 {1} 次仍未成功，已停止重试', <Object>[reason, _backoff.length]),
+        );
         unawaited(_teardown());
         return;
       }
@@ -1947,7 +2071,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       '$reason，${delay.inSeconds} 秒后第 $_restartAttempt 次重启',
     );
     if (_persistRestart) {
-      _startupStage = '面板配置有变更，正在重启内核';
+      _startupStage = L10n.t('面板配置有变更，正在重启内核');
     }
     if (_takeover) {
       _setState(ConnectionPhase.connecting, error: reason);
@@ -1987,7 +2111,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
           await _teardown();
           return;
         }
-        _scheduleRestart('重启失败：$e');
+        _scheduleRestart(L10n.t('重启失败：{0}', <Object>[e]));
       }
     });
   }
@@ -2044,6 +2168,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _setState(ConnectionPhase state, {required String? error}) {
     _state = state;
+    _api?.fallbackProxyPort = state == ConnectionPhase.connected
+        ? _settings.mixedPort
+        : null;
     _error = error;
     if (state != ConnectionPhase.connecting) {
       _startupStage = null;
@@ -2074,7 +2201,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     ).join();
   }
 
-  /// 读取运行目录相对路径文件（经特权侧 / VpnBridge）。
   Future<String> readRunFile(String relativePath) async {
     final String path = _normalizeRunRelative(relativePath);
     final String content = await _kernel.readRunFile(path);
@@ -2084,7 +2210,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     return content;
   }
 
-  /// 优先读内核落盘的 `config.json`；失败时回退到内存中的装配结果。
   Future<String> readRuntimeConfig() async {
     try {
       return NodeLabels.annotateRuntimeConfig(await readRunFile('config.json'));
@@ -2097,7 +2222,6 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// 从当前装配配置或面板缓存列出 rule-providers。
   List<RuleProviderRef> ruleProviderRefs() {
     final Map<String, dynamic>? providers = _ruleProvidersMap();
     if (providers == null || providers.isEmpty) {
@@ -2121,9 +2245,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
             format: '${provider['format'] ?? ''}',
           ),
         );
-      } on Object {
-        // 非法 path 直接跳过
-      }
+      } on Object catch (_) {}
     });
     items.sort(
       (RuleProviderRef a, RuleProviderRef b) =>

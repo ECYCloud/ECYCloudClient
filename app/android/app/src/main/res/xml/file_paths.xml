@@ -3,7 +3,4 @@
     <files-path
         name="updates"
         path="updates/" />
-    <files-path
-        name="logs"
-        path="logs/" />
 </paths>

@@ -12,7 +12,6 @@ void main() {
 
     expect(NodeLabels.region('香港 Ⅱ · D1'), 'hk');
     expect(NodeLabels.region('us 美国 X · A1 [VLESS]'), 'us');
-    // 名字里直接写 ISO 代码时靠自动补全的自映射命中
     expect(NodeLabels.region('FR-Paris-1'), 'fr');
     expect(NodeLabels.region('巴哈姆特专线'), isNull);
   });
@@ -21,16 +20,18 @@ void main() {
     await NodeLabels.load();
 
     expect(NodeLabels.region('🇭🇰HK01'), 'hk');
-    // 取词正则认不出「Japan」，但 emoji 能认
     expect(NodeLabels.region('🇯🇵 Japan 01'), 'jp');
     expect(NodeLabels.region('Japan 01'), isNull);
   });
 
   test('展示名去掉国旗 emoji，地区只由旗帜图标表达', () {
     expect(NodeLabels.displayName('🇹🇼 台湾 Ⅱ · A1 [CF]'), '台湾 Ⅱ · A1 [CF]');
+    expect(
+      NodeLabels.originalName('🇹🇼 台湾 Ⅱ · A1 [CF]'),
+      '🇹🇼 台湾 Ⅱ · A1 [CF]',
+    );
     expect(NodeLabels.displayName('🇺🇸美国 Ⅲ · B2'), '美国 Ⅲ · B2');
     expect(NodeLabels.displayName('香港 Ⅱ · D1'), '香港 Ⅱ · D1');
-    // 整个名字只有旗帜时不能剥成空串
     expect(NodeLabels.displayName('🇯🇵'), '🇯🇵');
   });
 
@@ -44,11 +45,8 @@ void main() {
     // 内核里的身份是 ID，界面上不能露出来
     expect(NodeLabels.displayName('node-12'), '香港 01');
     expect(NodeLabels.displayName('node-34'), '日本 02');
-    // 地区也要按解析后的名字认，否则旗帜会全空
     expect(NodeLabels.region('node-12'), 'hk');
-    // 策略组名不在表里，原样返回
     expect(NodeLabels.displayName('主节点'), '主节点');
-    // 表里没有的 proxy 名（DIRECT、模板自带的额外节点）不能被吞掉
     expect(NodeLabels.displayName('DIRECT'), 'DIRECT');
 
     NodeLabels.configure(r'/[\p{L}\p{N}]+/u');
@@ -83,6 +81,29 @@ void main() {
     NodeLabels.configure(r'/[\p{L}\p{N}]+/u');
   });
 
+  test('内核日志把 node-{id} 换成节点名，不误伤更长的 id', () {
+    NodeLabels.configure(r'/[\p{L}\p{N}]+/u', <String, String>{
+      'node-120': '🇭🇰 香港 01',
+      'node-12': '备用',
+    });
+
+    expect(
+      NodeLabels.annotateText(
+        '[TCP] 198.18.0.1:23016(ECYCloud.exe) --> owo.ecycloud.com:443 '
+        'match Match using 主节点[node-120]',
+      ),
+      contains('主节点[香港 01]'),
+    );
+    expect(NodeLabels.annotateText('node-12 and node-120'), '备用 and 香港 01');
+    expect(NodeLabels.annotateText('DIRECT'), 'DIRECT');
+    expect(
+      NodeLabels.annotateText('Match using 主节点[node-120]'),
+      isNot(contains('node-120')),
+    );
+
+    NodeLabels.configure(r'/[\p{L}\p{N}]+/u');
+  });
+
   test('随包素材按文件名即标识的约定取得到', () async {
     final AssetManifest manifest = await AssetManifest.loadFromAssetBundle(
       rootBundle,
@@ -98,7 +119,6 @@ void main() {
       isNotEmpty,
     );
 
-    // 中文与含空格的资源名最容易在资源表里出问题，逐个真读一遍
     for (final String asset in assets) {
       final ByteData data = await rootBundle.load(asset);
       expect(data.lengthInBytes, greaterThan(0), reason: asset);

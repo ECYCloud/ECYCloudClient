@@ -1,14 +1,11 @@
 import 'package:flutter/widgets.dart';
 
 class ShellNavigator extends InheritedWidget {
-  const ShellNavigator({
-    required this.goTo,
-    required super.child,
-    super.key,
-  });
+  const ShellNavigator({required this.goTo, required super.child, super.key});
 
-  static const int shopTab = 1;
-  static const int nodesTab = 2;
+  static const int homeTab = 0;
+  static const int nodesTab = 1;
+  static const int shopTab = 2;
   static const int ticketsTab = 3;
   static const int unlockTab = 4;
 
@@ -57,7 +54,6 @@ class ShellNavigator extends InheritedWidget {
     _hostGoTo?.call(index);
   }
 
-  /// 对齐网站 `/user/shop?tab=traffic`：进商店并切到流量包。
   static void openShopTraffic(BuildContext context) {
     const String tab = 'traffic_package';
     go(context, shopTab);
@@ -69,9 +65,7 @@ class ShellNavigator extends InheritedWidget {
     }
   }
 
-  /// 面板文案里的 `/user/ticket` 在客户端应进工单页，而不是打开浏览器。
-  /// 若当前在 Dialog 等 PopupRoute 里，先关掉再切页，否则用户还停在遮罩上。
-  static bool openTickets(BuildContext context) {
+  static bool openTab(BuildContext context, int index) {
     final void Function(int)? goTo = maybeOf(context)?.goTo ?? _hostGoTo;
     if (goTo == null) {
       return false;
@@ -80,7 +74,7 @@ class ShellNavigator extends InheritedWidget {
     if (route is PopupRoute) {
       Navigator.of(context).pop();
     }
-    goTo(ticketsTab);
+    goTo(index);
     return true;
   }
 

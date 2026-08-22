@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Microsoft/go-winio"
 )
@@ -16,12 +17,15 @@ import (
 const (
 	pipePath       = `\\.\pipe\ECYCloudService`
 	maxRequestSize = 4 << 20
+	// 管道对交互用户开放，必须限时读完
+	requestReadTimeout   = 10 * time.Second
+	responseWriteTimeout = 10 * time.Second
+	maxConcurrentClients = 16
 )
 
 type request struct {
 	Command string `json:"command"`
-	// 调用方自己填的，不可信，仅为兼容旧版 GUI 的请求体保留；
-	// 各分支一律用 dispatch 收到的、内核给出的真实连接进程 PID
+	// 调用方自填，不可信；各分支用管道对端 PID
 	PID       int      `json:"pid"`
 	Config    string   `json:"config"`
 	Path      string   `json:"path"`
@@ -50,12 +54,18 @@ type server struct {
 	mu      sync.Mutex
 	watched int
 
+	slots chan struct{}
+
 	upgrading sync.Mutex
 	progress  upgradeProgress
 }
 
 func newServer() *server {
-	return &server{kernel: newKernelManager(), proxy: newProxyManager()}
+	return &server{
+		kernel: newKernelManager(),
+		proxy:  newProxyManager(),
+		slots:  make(chan struct{}, maxConcurrentClients),
+	}
 }
 
 func (s *server) listen() (net.Listener, error) {
@@ -73,7 +83,15 @@ func (s *server) serve(listener net.Listener) {
 		if err != nil {
 			return
 		}
-		go s.handle(conn)
+		select {
+		case s.slots <- struct{}{}:
+			go func() {
+				defer func() { <-s.slots }()
+				s.handle(conn)
+			}()
+		default:
+			conn.Close()
+		}
 	}
 }
 
@@ -81,6 +99,7 @@ func (s *server) handle(conn net.Conn) {
 	defer conn.Close()
 	defer guard("处理客户端请求")
 
+	conn.SetReadDeadline(time.Now().Add(requestReadTimeout))
 	reader := bufio.NewReaderSize(conn, 64*1024)
 	line, err := readLine(reader)
 	if err != nil {
@@ -96,6 +115,11 @@ func (s *server) handle(conn net.Conn) {
 	pid, err := pipeClientPID(conn)
 	if err != nil {
 		logf("识别管道客户端失败: %v", err)
+		writeResponse(conn, response{Error: err.Error()})
+		return
+	}
+	if err := verifyGUICaller(pid); err != nil {
+		logf("拒绝指令 %s: %v", req.Command, err)
 		writeResponse(conn, response{Error: err.Error()})
 		return
 	}
@@ -126,9 +150,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if strings.TrimSpace(req.Config) == "" {
 			return nil, fmt.Errorf("缺少配置内容")
 		}
-		if err := verifyGUICaller(pid); err != nil {
-			return nil, err
-		}
 		if err := s.kernel.start(req.Config); err != nil {
 			return nil, err
 		}
@@ -152,9 +173,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if strings.TrimSpace(req.Config) == "" {
 			return nil, fmt.Errorf("缺少配置内容")
 		}
-		if err := verifyGUICaller(pid); err != nil {
-			return nil, err
-		}
 		if err := s.kernel.write(req.Config); err != nil {
 			return nil, err
 		}
@@ -164,9 +182,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if strings.TrimSpace(req.Path) == "" {
 			return nil, fmt.Errorf("缺少路径")
 		}
-		if err := verifyGUICaller(pid); err != nil {
-			return nil, err
-		}
 		content, err := s.kernel.read(req.Path)
 		if err != nil {
 			return nil, err
@@ -174,10 +189,7 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		return map[string]any{"content": content}, nil
 
 	case "kernel.upgrade":
-		if err := verifyGUICaller(pid); err != nil {
-			return nil, err
-		}
-		version, err := s.upgradeKernel(req.Version)
+		version, err := s.upgradeKernel(req.Version, req.Port)
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +222,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 	}
 }
 
-// GUI 被强杀时没人下达停止指令，只能由服务代为收尾
 func (s *server) watchClient(pid int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -272,5 +283,6 @@ func writeResponse(conn net.Conn, resp response) {
 	if err != nil {
 		return
 	}
+	conn.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	conn.Write(append(data, '\n'))
 }

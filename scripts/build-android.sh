@@ -47,7 +47,6 @@ if [[ ! "$sub_url" =~ ^https?:// ]]; then
     exit 1
 fi
 
-# 编内核绑定要 JDK 17 + NDK，耗时以十分钟计；反复出包时可复用上一次的产物
 if [[ "$skip_kernel" -eq 1 ]]; then
     if [[ ! -f "$app_dir/android/app/libs/libmihomo.aar" ]]; then
         echo "缺少 app/android/app/libs/libmihomo.aar，不能跳过内核构建" >&2
@@ -57,8 +56,7 @@ else
     "$script_dir/build-libmihomo.sh"
 fi
 
-# geodata 进 APK assets，首次启动由 BoxService.seedGeoData 铺进内核运行目录。
-# 桌面端是随安装包放在内核旁边，Android 内核在进程内跑，只能走 assets 这条路
+# Android 内核在进程内跑，geodata 只能进 APK assets，由 BoxService.seedGeoData 播种
 "$script_dir/fetch-geodata.sh" "$app_dir/android/app/src/main/assets"
 
 cd "$app_dir"

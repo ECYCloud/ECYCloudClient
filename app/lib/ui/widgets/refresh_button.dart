@@ -4,10 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// 刷新是个瞬时动作，没有动画时用户分不清点没点上；
-/// 至少转满一圈再停，避免请求过快时只闪一下。
-/// [label] 为空时渲染成纯图标按钮，否则渲染成带文字的按钮；
-/// [RefreshButton.tile] 渲染成整行可点的设置项，右侧图标只作反馈。
 class RefreshButton extends StatefulWidget {
   const RefreshButton({
     super.key,
@@ -87,7 +83,6 @@ class _RefreshButtonState extends State<RefreshButton>
       child: Icon(Icons.refresh, size: widget.iconSize, color: widget.color),
     );
     // 不置灰：禁用态的按钮会把鼠标指针换回箭头，看着像功能坏了。
-    // 重复点击由 _run 自身挡掉
     void onPressed() => unawaited(_run());
     final Widget iconButton = IconButton(
       tooltip: widget.tooltip,

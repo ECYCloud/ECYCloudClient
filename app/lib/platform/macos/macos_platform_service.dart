@@ -14,7 +14,6 @@ class MacosPlatformService extends UnixPlatformService {
 
   static const String helperMissingHint = '后台服务未安装或未运行，请重新运行安装包';
 
-  /// 登录项写在用户自己的 LaunchAgents 下，不需要提权，登录时由 launchd 拉起
   static const String _launchAgentLabel = 'com.ecycloud.client';
 
   final HelperClient _helper;
@@ -27,6 +26,14 @@ class MacosPlatformService extends UnixPlatformService {
 
   @override
   String get tunInterfaceName => '';
+
+  @override
+  Future<({String model, String os})> deviceProfile() async => (
+    model: 'macOS',
+    os:
+        RegExp(r'\d+(\.\d+)*').stringMatch(Platform.operatingSystemVersion) ??
+        '',
+  );
 
   @override
   Future<void> setSystemProxy({
@@ -77,7 +84,7 @@ class MacosPlatformService extends UnixPlatformService {
 	<string>$_launchAgentLabel</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>${Platform.resolvedExecutable}</string>
+		<string>${_xmlText(Platform.resolvedExecutable)}</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -92,4 +99,11 @@ class MacosPlatformService extends UnixPlatformService {
   File get _launchAgent => File(
     '${Platform.environment['HOME']}/Library/LaunchAgents/$_launchAgentLabel.plist',
   );
+
+  // 用户可以把 .app 挪走或改名，路径里的 & < > 会让 plist 变成非法 XML，
+  // launchd 直接拒载，登录项就悄悄失效了
+  static String _xmlText(String value) => value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
 }

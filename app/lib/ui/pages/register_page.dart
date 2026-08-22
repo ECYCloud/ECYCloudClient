@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../data/models/account.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../widgets/field_subtext.dart';
+import '../widgets/overlay_scroll_view.dart';
 import 'login_page.dart';
 import 'tos_page.dart';
 import '../../l10n/l10n.dart';
@@ -39,7 +41,9 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_loadOptions()));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_loadOptions()),
+    );
   }
 
   @override
@@ -180,7 +184,7 @@ class _RegisterPageState extends State<RegisterPage> {
     return Scaffold(
       appBar: AppBar(title: Text(L10n.t('注册账号'))),
       body: Center(
-        child: SingleChildScrollView(
+        child: OverlayScrollView(
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 400),
@@ -213,20 +217,20 @@ class _RegisterPageState extends State<RegisterPage> {
                               style: theme.textTheme.headlineSmall,
                             ),
                             const SizedBox(height: 24),
-                            TextFormField(
+                            TextField(
                               controller: _name,
                               autocorrect: false,
                               decoration: InputDecoration(
                                 labelText: L10n.t('用户名(昵称)'),
                                 prefixIcon: Icon(Icons.person_outline),
                               ),
-                              validator: (String? value) =>
-                                  (value == null || value.trim().isEmpty)
+                            ).validated(
+                              () => _name.text.trim().isEmpty
                                   ? L10n.t('请填写用户名')
                                   : null,
                             ),
                             const SizedBox(height: 16),
-                            TextFormField(
+                            TextField(
                               controller: _email,
                               keyboardType: TextInputType.emailAddress,
                               autocorrect: false,
@@ -235,8 +239,8 @@ class _RegisterPageState extends State<RegisterPage> {
                                 labelText: L10n.t('邮箱(用于登录)'),
                                 prefixIcon: Icon(Icons.mail_outline),
                               ),
-                              validator: (String? value) =>
-                                  (value == null || value.trim().isEmpty)
+                            ).validated(
+                              () => _email.text.trim().isEmpty
                                   ? L10n.t('请填写邮箱')
                                   : null,
                             ),
@@ -244,83 +248,88 @@ class _RegisterPageState extends State<RegisterPage> {
                             EmailOtpIme(
                               builder:
                                   (BuildContext context, FocusNode focusNode) {
-                                return TextFormField(
-                                  controller: _password,
-                                  focusNode: focusNode,
-                                  obscureText: _obscure,
-                                  keyboardType: TextInputType.visiblePassword,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  inputFormatters: <TextInputFormatter>[
-                                    asciiOnlyFormatter,
-                                  ],
-                                  decoration: InputDecoration(
-                                    labelText: L10n.t('密码'),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscure
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
+                                    return TextField(
+                                      controller: _password,
+                                      focusNode: focusNode,
+                                      obscureText: _obscure,
+                                      keyboardType:
+                                          TextInputType.visiblePassword,
+                                      autocorrect: false,
+                                      enableSuggestions: false,
+                                      inputFormatters: <TextInputFormatter>[
+                                        asciiOnlyFormatter,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('密码'),
+                                        prefixIcon: const Icon(
+                                          Icons.lock_outline,
+                                        ),
+                                        suffixIcon: IconButton(
+                                          icon: Icon(
+                                            _obscure
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _obscure = !_obscure,
+                                          ),
+                                        ),
                                       ),
-                                      onPressed: () =>
-                                          setState(() => _obscure = !_obscure),
-                                    ),
-                                  ),
-                                  validator: (String? value) {
-                                    if (value == null || value.isEmpty) {
-                                      return L10n.t('请填写密码');
-                                    }
-                                    if (value.length < 8) {
-                                      return L10n.t('密码至少 8 位');
-                                    }
-                                    return null;
+                                    ).validated(() {
+                                      if (_password.text.isEmpty) {
+                                        return L10n.t('请填写密码');
+                                      }
+                                      if (_password.text.length < 8) {
+                                        return L10n.t('密码至少 8 位');
+                                      }
+                                      return null;
+                                    });
                                   },
-                                );
-                              },
                             ),
                             const SizedBox(height: 16),
                             EmailOtpIme(
                               builder:
                                   (BuildContext context, FocusNode focusNode) {
-                                return TextFormField(
-                                  controller: _repassword,
-                                  focusNode: focusNode,
-                                  obscureText: _obscureRe,
-                                  keyboardType: TextInputType.visiblePassword,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  inputFormatters: <TextInputFormatter>[
-                                    asciiOnlyFormatter,
-                                  ],
-                                  decoration: InputDecoration(
-                                    labelText: L10n.t('确认密码'),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscureRe
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
+                                    return TextField(
+                                      controller: _repassword,
+                                      focusNode: focusNode,
+                                      obscureText: _obscureRe,
+                                      keyboardType:
+                                          TextInputType.visiblePassword,
+                                      autocorrect: false,
+                                      enableSuggestions: false,
+                                      inputFormatters: <TextInputFormatter>[
+                                        asciiOnlyFormatter,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('确认密码'),
+                                        prefixIcon: const Icon(
+                                          Icons.lock_outline,
+                                        ),
+                                        suffixIcon: IconButton(
+                                          icon: Icon(
+                                            _obscureRe
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _obscureRe = !_obscureRe,
+                                          ),
+                                        ),
                                       ),
-                                      onPressed: () => setState(
-                                        () => _obscureRe = !_obscureRe,
-                                      ),
-                                    ),
-                                  ),
-                                  validator: (String? value) {
-                                    if (value == null || value.isEmpty) {
-                                      return L10n.t('请再次填写密码');
-                                    }
-                                    if (value != _password.text) {
-                                      return L10n.t('两次密码不一致');
-                                    }
-                                    return null;
+                                    ).validated(() {
+                                      if (_repassword.text.isEmpty) {
+                                        return L10n.t('请再次填写密码');
+                                      }
+                                      if (_repassword.text != _password.text) {
+                                        return L10n.t('两次密码不一致');
+                                      }
+                                      return null;
+                                    });
                                   },
-                                );
-                              },
                             ),
                             const SizedBox(height: 16),
-                            TextFormField(
+                            TextField(
                               controller: _invite,
                               autocorrect: false,
                               enableSuggestions: false,
@@ -331,15 +340,16 @@ class _RegisterPageState extends State<RegisterPage> {
                                 labelText: options.inviteRequired
                                     ? L10n.t('邀请码')
                                     : L10n.t('邀请码（可选）'),
-                                prefixIcon: const Icon(Icons.card_giftcard_outlined),
+                                prefixIcon: const Icon(
+                                  Icons.card_giftcard_outlined,
+                                ),
                               ),
-                              validator: (String? value) {
-                                if (options.inviteRequired &&
-                                    (value == null || value.trim().isEmpty)) {
-                                  return L10n.t('请填写邀请码');
-                                }
-                                return null;
-                              },
+                            ).validated(
+                              () =>
+                                  options.inviteRequired &&
+                                      _invite.text.trim().isEmpty
+                                  ? L10n.t('请填写邀请码')
+                                  : null,
                             ),
                             if (options.emailVerify) ...<Widget>[
                               const SizedBox(height: 16),
@@ -353,29 +363,30 @@ class _RegisterPageState extends State<RegisterPage> {
                                             BuildContext context,
                                             FocusNode focusNode,
                                           ) {
-                                        return TextFormField(
-                                          controller: _emailCode,
-                                          focusNode: focusNode,
-                                          keyboardType:
-                                              TextInputType.visiblePassword,
-                                          autocorrect: false,
-                                          enableSuggestions: false,
-                                          inputFormatters: <TextInputFormatter>[
-                                            OtpCodeFormatter(),
-                                          ],
-                                          decoration: InputDecoration(
-                                            labelText: L10n.t('邮箱验证码'),
-                                            prefixIcon: Icon(
-                                              Icons.pin_outlined,
-                                            ),
-                                          ),
-                                          validator: (String? value) =>
-                                              (value == null ||
-                                                  value.trim().isEmpty)
-                                              ? L10n.t('请填写验证码')
-                                              : null,
-                                        );
-                                      },
+                                            return TextField(
+                                              controller: _emailCode,
+                                              focusNode: focusNode,
+                                              keyboardType:
+                                                  TextInputType.visiblePassword,
+                                              autocorrect: false,
+                                              enableSuggestions: false,
+                                              inputFormatters:
+                                                  <TextInputFormatter>[
+                                                    OtpCodeFormatter(),
+                                                  ],
+                                              decoration: InputDecoration(
+                                                labelText: L10n.t('邮箱验证码'),
+                                                prefixIcon: Icon(
+                                                  Icons.pin_outlined,
+                                                ),
+                                              ),
+                                            ).validated(
+                                              () =>
+                                                  _emailCode.text.trim().isEmpty
+                                                  ? L10n.t('请填写验证码')
+                                                  : null,
+                                            );
+                                          },
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -420,14 +431,11 @@ class _RegisterPageState extends State<RegisterPage> {
                                     crossAxisAlignment:
                                         WrapCrossAlignment.center,
                                     children: <Widget>[
-                                      MouseRegion(
-                                        cursor: SystemMouseCursors.basic,
-                                        child: GestureDetector(
-                                          onTap: () => setState(
-                                            () => _agreedTos = !_agreedTos,
-                                          ),
-                                          child: Text(L10n.t('注册即代表同意本站')),
+                                      InkWell(
+                                        onTap: () => setState(
+                                          () => _agreedTos = !_agreedTos,
                                         ),
+                                        child: Text(L10n.t('注册即代表同意本站 ')),
                                       ),
                                       TextButton(
                                         onPressed: () =>
@@ -438,7 +446,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                                         const TosPage(),
                                               ),
                                             ),
-                                        child: Text(L10n.t('服务条款')),
+                                        child: Text('${L10n.t('服务条款')} ›'),
                                       ),
                                     ],
                                   ),

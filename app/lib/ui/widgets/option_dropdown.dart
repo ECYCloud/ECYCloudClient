@@ -2,11 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// 设置项里的下拉选择。
-///
-/// 不用 [DropdownButton]：它按 Material 2 的规则把菜单对齐到选中项，菜单会盖住按钮本身；
-/// 而且选中态与弹出项分别由 `selectedItemBuilder` 与 `items` 渲染，两处样式容易写歪。
-/// 这里用 [MenuAnchor]，菜单落在胶囊下方，收起态与选项共用同一份文本样式。
 class OptionDropdown<T> extends StatelessWidget {
   const OptionDropdown({
     super.key,
@@ -14,7 +9,7 @@ class OptionDropdown<T> extends StatelessWidget {
     required this.options,
     required this.onChanged,
     this.width = 116,
-    this.height = 30,
+    this.height = 36,
     this.enabled = true,
     this.placeholder = '',
     this.maxMenuHeight = 320,
@@ -47,6 +42,9 @@ class OptionDropdown<T> extends StatelessWidget {
         : (options[value as T] ?? placeholder);
 
     final BorderRadius menuRadius = BorderRadius.circular(AppTheme.tileRadius);
+    final double menuHeight = height * options.length > maxMenuHeight
+        ? maxMenuHeight
+        : height * options.length;
 
     return MenuAnchor(
       crossAxisUnconstrained: false,
@@ -55,8 +53,8 @@ class OptionDropdown<T> extends StatelessWidget {
         alignment: AlignmentDirectional.bottomStart,
         padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.zero),
         visualDensity: VisualDensity.standard,
-        minimumSize: WidgetStatePropertyAll<Size>(Size(width, 0)),
-        maximumSize: WidgetStatePropertyAll<Size>(Size(width, maxMenuHeight)),
+        minimumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
+        maximumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
         shape: WidgetStatePropertyAll<OutlinedBorder>(
           RoundedRectangleBorder(borderRadius: menuRadius),
         ),
@@ -73,7 +71,12 @@ class OptionDropdown<T> extends StatelessWidget {
                 minimumSize: Size(width, height),
                 fixedSize: Size(width, height),
                 maximumSize: Size(width, height),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.fromLTRB(
+                  12,
+                  0,
+                  AppTheme.overlayScrollGutter,
+                  0,
+                ),
                 alignment: Alignment.centerLeft,
                 visualDensity: VisualDensity.standard,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -135,9 +138,7 @@ class OptionDropdown<T> extends StatelessWidget {
                         leading: selectedLeading,
                         trailing: selectedTrailing,
                         style: style.copyWith(
-                          color: value == null
-                              ? scheme.onSurfaceVariant
-                              : null,
+                          color: value == null ? scheme.onSurfaceVariant : null,
                         ),
                       ),
                     ),

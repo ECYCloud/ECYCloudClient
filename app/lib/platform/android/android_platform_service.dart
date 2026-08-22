@@ -13,6 +13,8 @@ class AndroidPlatformService implements PlatformService {
 
   static const MethodChannel _channel = MethodChannel('ecycloud/platform');
 
+  bool _isTelevision = false;
+
   final StreamController<TrayAction> _trayActionController =
       StreamController<TrayAction>.broadcast();
 
@@ -22,7 +24,7 @@ class AndroidPlatformService implements PlatformService {
   @override
   bool get supportsTun => true;
 
-  /// VpnService 本身就是 TUN，关掉它等于连上也不接管任何流量
+  /// VpnService 本身就是 TUN。
   @override
   bool get requiresTun => true;
 
@@ -38,12 +40,20 @@ class AndroidPlatformService implements PlatformService {
   @override
   bool get supportsPerAppProxy => true;
 
-  // VpnService 直接把 fd 交给内核，这个名字不参与建卡
+  @override
+  bool get isTelevision => _isTelevision;
+
+  @override
+  bool get supportsPayScheme => !isTelevision;
+
   @override
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    _isTelevision =
+        await _channel.invokeMethod<bool>('device.television') ?? false;
+  }
 
   @override
   Future<void> setSystemProxy({
@@ -87,6 +97,16 @@ class AndroidPlatformService implements PlatformService {
   @override
   Future<String> deviceName() async =>
       await _channel.invokeMethod<String>('device.name') ?? 'Android';
+
+  @override
+  Future<({String model, String os})> deviceProfile() async {
+    final Map<Object?, Object?>? profile = await _channel
+        .invokeMethod<Map<Object?, Object?>>('device.profile');
+    return (
+      model: profile?['model'] as String? ?? '',
+      os: profile?['os'] as String? ?? '',
+    );
+  }
 
   @override
   Future<List<InstalledApp>> installedApps() async {
@@ -167,10 +187,9 @@ class AndroidPlatformService implements PlatformService {
   @override
   Future<void> deleteSecret(String name) async {
     try {
-      await _channel.invokeMethod<void>(
-        'secret.delete',
-        <String, dynamic>{'name': name},
-      );
+      await _channel.invokeMethod<void>('secret.delete', <String, dynamic>{
+        'name': name,
+      });
     } on PlatformException catch (e) {
       throw PlatformServiceException(e.message ?? '无法清除凭据');
     }
@@ -181,7 +200,7 @@ class AndroidPlatformService implements PlatformService {
     await _trayActionController.close();
   }
 
-  // 通知栏磁贴走与桌面端托盘同一个指令，只有 toggle 一项
+  // 磁贴与桌面托盘同一指令，只有 toggle
   Future<void> _onNativeCall(MethodCall call) async {
     if (call.method != 'tray.action' ||
         call.arguments != 'toggle' ||

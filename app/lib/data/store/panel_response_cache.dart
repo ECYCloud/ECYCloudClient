@@ -3,20 +3,18 @@ import '../api/panel_api_client.dart';
 import '../models/user_profile.dart';
 import 'json_file_store.dart';
 
-/// 按账号缓存上次成功的面板响应，供限流/短时网络失败时复用。
 class PanelResponseCache {
-  PanelResponseCache({
-    JsonFileStore? profileStore,
-    JsonFileStore? remoteStore,
-  }) : _profile = profileStore ?? JsonFileStore(AppPaths.profileCache, 'profile-cache'),
-       _remote =
-           remoteStore ?? JsonFileStore(AppPaths.remoteConfigCache, 'remote-cache');
+  PanelResponseCache({JsonFileStore? profileStore, JsonFileStore? remoteStore})
+    : _profile =
+          profileStore ?? JsonFileStore(AppPaths.profileCache, 'profile-cache'),
+      _remote =
+          remoteStore ??
+          JsonFileStore(AppPaths.remoteConfigCache, 'remote-cache');
 
   final JsonFileStore _profile;
   final JsonFileStore _remote;
 
-  // 缓存文件跨版本升级仍在原地，配置形状随内核换代会变。写入时打上内核标记、
-  // 读取时要求一致，旧形状才不会被当成有效缓存喂给装配
+  // 缓存跨版本仍在原地；写入打内核标记，旧形状不能喂给装配
   static const String _kernel = 'mihomo';
 
   void saveProfile(String accountKey, UserProfile profile) {

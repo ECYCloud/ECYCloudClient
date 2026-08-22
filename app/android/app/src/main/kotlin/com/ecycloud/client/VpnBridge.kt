@@ -5,8 +5,7 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-// 指令名、请求体与应答字段与桌面端特权服务的 JSON 协议逐字一致，见 Dart 侧 VpnChannel。
-// 内核相关的指令一律转交 :kernel 进程，只有纯文件操作留在本进程
+// 指令名、请求体与应答字段与桌面端特权服务的 JSON 协议逐字一致，见 Dart 侧 VpnChannel
 class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) :
     MethodChannel.MethodCallHandler {
 
@@ -17,7 +16,6 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            // 状态轮询必须与启停指令解耦：内核启动最久要几十秒，排在后面就取不到进度
             "kernel.status" -> Bridge.poll(result) {
                 status(call.argument<Int>("log_cursor") ?: 0)
             }
@@ -53,7 +51,6 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                         emptyMap<String, Any>()
                     }
                 }
-                // 内核常驻不建隧道，没有理由为它弹系统的 VPN 授权框
                 if (BoxState.takesOverExit(config)) {
                     activity.requestVpnConsent { denied ->
                         if (denied != null) {

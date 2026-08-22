@@ -4,6 +4,7 @@ import '../../data/store/settings_store.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/connection_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/search_field.dart';
 import '../../l10n/l10n.dart';
@@ -11,12 +12,11 @@ import '../../l10n/l10n.dart';
 class PerAppProxyPage extends StatefulWidget {
   const PerAppProxyPage({super.key});
 
-  static const Map<PerAppProxyMode, String> modes =
-      <PerAppProxyMode, String>{
-        PerAppProxyMode.off: '全部应用',
-        PerAppProxyMode.include: '仅所选应用',
-        PerAppProxyMode.exclude: '所选应用除外',
-      };
+  static const Map<PerAppProxyMode, String> modes = <PerAppProxyMode, String>{
+    PerAppProxyMode.off: '全部应用',
+    PerAppProxyMode.include: '仅所选应用',
+    PerAppProxyMode.exclude: '所选应用除外',
+  };
 
   @override
   State<PerAppProxyPage> createState() => _PerAppProxyPageState();
@@ -145,6 +145,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
     final bool enabled = settings.perAppMode != PerAppProxyMode.off;
 
     return ListView.builder(
+      padding: AppTheme.overlayScrollPadding,
       itemCount: visible.length,
       itemBuilder: (BuildContext context, int index) {
         final InstalledApp app = visible[index];

@@ -6,6 +6,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import '../../core/logger.dart';
 import '../../core/safe_url.dart';
@@ -26,6 +27,9 @@ class WindowsPlatformService implements PlatformService {
     'disconnect': TrayAction.disconnect,
     'system_proxy': TrayAction.toggleSystemProxy,
     'tun': TrayAction.toggleTun,
+    'mode_rule': TrayAction.modeRule,
+    'mode_global': TrayAction.modeGlobal,
+    'mode_direct': TrayAction.modeDirect,
   };
 
   final ServicePipe _pipe;
@@ -52,6 +56,12 @@ class WindowsPlatformService implements PlatformService {
 
   @override
   bool get supportsPerAppProxy => false;
+
+  @override
+  bool get isTelevision => false;
+
+  @override
+  bool get supportsPayScheme => false;
 
   @override
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
@@ -130,6 +140,17 @@ class WindowsPlatformService implements PlatformService {
   Future<String> deviceName() async => Platform.localHostname;
 
   @override
+  Future<({String model, String os})> deviceProfile() async {
+    String model = _currentVersionValue('ProductName');
+    // 注册表 ProductName 在 Windows 11 上仍写着 Windows 10，只能按内部版本号纠正
+    if ((int.tryParse(_currentVersionValue('CurrentBuildNumber')) ?? 0) >=
+        22000) {
+      model = model.replaceFirst('Windows 10', 'Windows 11');
+    }
+    return (model: model, os: _currentVersionValue('DisplayVersion'));
+  }
+
+  @override
   Future<List<InstalledApp>> installedApps() async => const <InstalledApp>[];
 
   @override
@@ -173,6 +194,16 @@ class WindowsPlatformService implements PlatformService {
   }
 
   Future<void> _onNativeCall(MethodCall call) async {
+    if (call.method == 'clipboard.paste') {
+      final BuildContext? context = primaryFocus?.context;
+      if (context != null && context.mounted) {
+        Actions.maybeInvoke<PasteTextIntent>(
+          context,
+          const PasteTextIntent(SelectionChangedCause.keyboard),
+        );
+      }
+      return;
+    }
     if (call.method != 'tray.action') {
       return;
     }
@@ -222,6 +253,64 @@ bool _shellOpen(String url) {
   } finally {
     malloc.free(operation);
     malloc.free(file);
+  }
+}
+
+const int _hkeyLocalMachine = 0x80000002;
+const int _rrfRtRegSz = 0x00000002;
+const String _currentVersionKey =
+    r'SOFTWARE\Microsoft\Windows NT\CurrentVersion';
+
+typedef _RegGetValueWNative =
+    Int32 Function(
+      IntPtr,
+      Pointer<Utf16>,
+      Pointer<Utf16>,
+      Uint32,
+      Pointer<Uint32>,
+      Pointer<Uint16>,
+      Pointer<Uint32>,
+    );
+typedef _RegGetValueWDart =
+    int Function(
+      int,
+      Pointer<Utf16>,
+      Pointer<Utf16>,
+      int,
+      Pointer<Uint32>,
+      Pointer<Uint16>,
+      Pointer<Uint32>,
+    );
+
+String _currentVersionValue(String name) {
+  const int capacity = 256;
+  final Pointer<Utf16> subKey = _currentVersionKey.toNativeUtf16();
+  final Pointer<Utf16> value = name.toNativeUtf16();
+  final Pointer<Uint16> buffer = calloc<Uint16>(capacity);
+  final Pointer<Uint32> size = calloc<Uint32>();
+
+  try {
+    size.value = capacity * 2;
+    final int status = DynamicLibrary.open(
+      'advapi32.dll',
+    ).lookupFunction<_RegGetValueWNative, _RegGetValueWDart>('RegGetValueW')(
+      _hkeyLocalMachine,
+      subKey,
+      value,
+      _rrfRtRegSz,
+      nullptr,
+      buffer,
+      size,
+    );
+    if (status != 0) {
+      return '';
+    }
+    return buffer.cast<Utf16>().toDartString();
+  } finally {
+    malloc.free(subKey);
+    malloc.free(value);
+    calloc.free(buffer);
+    calloc.free(size);
   }
 }
 

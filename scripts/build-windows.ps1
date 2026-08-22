@@ -72,7 +72,6 @@ if (Test-Path 'D:\') {
 
 & (Join-Path $scriptDir 'fetch-kernel.ps1') -Arch $Arch
 & (Join-Path $scriptDir 'build-service.ps1') -Arch $Arch
-# 面板才是素材的来源，本机出包前重新拷一遍，保证与面板当前内容一致
 if (-not $SkipAssetSync) {
     & (Join-Path $scriptDir 'sync-assets.ps1')
 }
@@ -105,12 +104,10 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
 Copy-Item (Join-Path $releaseDir '*') $stageDir -Recurse -Force
 
-# 内核与特权服务同目录：服务按自身所在目录定位 mihomo.exe。
-# 逐个点名而不是拷整个目录：build/deps 是增量的，换内核后旧二进制还躺在里面
+# 服务按自身目录定位 mihomo.exe。逐个点名：build/deps 是增量的，换内核后旧文件还在
 $serviceDir = Join-Path $stageDir 'service'
 New-Item -ItemType Directory -Force -Path $serviceDir | Out-Null
-# geodata 也放这里：内核校验配置时要就地读 GEOIP/GEOSITE 库，缺了就会去 geox-url 现下载，
-# 面板下发的地址在目标网络里不可达，下不到整份配置就校验失败。服务启动前播种进运行目录
+# geodata 与内核同目录：缺了内核会按 geox-url 同步下载，面板地址在目标网络不可达
 foreach ($name in @('ecycloud-service.exe', 'mihomo.exe', 'LICENSE.mihomo.txt', 'geoip.metadb', 'GeoSite.dat')) {
     $source = Join-Path $depsDir $name
     if (-not (Test-Path $source)) {

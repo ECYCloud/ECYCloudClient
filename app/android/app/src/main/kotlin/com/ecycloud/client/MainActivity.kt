@@ -13,7 +13,6 @@ import io.flutter.embedding.engine.FlutterEngine
 class MainActivity : FlutterActivity() {
     private var vpnConsent: ((String?) -> Unit)? = null
 
-    // 磁贴的转交请求从 Binder 线程读它
     @Volatile
     private var platform: PlatformBridge? = null
 
@@ -47,10 +46,7 @@ class MainActivity : FlutterActivity() {
         super.onPause()
     }
 
-    // VpnService.prepare 不是只读查询：本应用已获授权时系统会就地把 VPN 槽位切过来，
-    // 顺带断掉别的应用正在跑的隧道（AOSP Vpn.prepare → prepareInternal），
-    // 因此只能在真的要建立隧道前调用，不得用于探测权限。
-    // callback 收到 null 表示已授权，否则是失败原因
+    // VpnService.prepare 不是只读查询：已授权时系统会抢走 VPN 槽位并断掉其它隧道，不得用来探测权限
     fun requestVpnConsent(callback: (String?) -> Unit) {
         val intent = VpnService.prepare(this)
         if (intent == null) {
@@ -84,9 +80,7 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_VPN = 0x5650
         private const val REQUEST_NOTIFICATION = 0x4e54
 
-        // 界面不在前台时不交给 Dart：连接要过 requestVpnConsent，而后台弹不出授权框，
-        // 那条路只能直接失败。返回 false 时由磁贴自己启停 BoxService。
-        // 磁贴在 :kernel 进程里，调用从 Binder 线程进来，而 MethodChannel 只能在主线程用
+        // 后台弹不出 VpnService 授权框；MethodChannel 只能在主线程调用
         fun requestToggle(): Boolean {
             val activity = foreground ?: return false
             val bridge = activity.platform ?: return false

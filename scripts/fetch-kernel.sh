@@ -48,7 +48,6 @@ chmod 0755 "$out_dir/mihomo"
 # 发布包内不含 LICENSE，内核许可证与本项目同为逐字 GPL-3.0，直接复用仓库根的副本
 install -m 0644 "$root_dir/LICENSE" "$out_dir/LICENSE.mihomo.txt"
 
-# geodata 与内核同目录，安装后由 helper 播种进运行目录
 "$script_dir/fetch-geodata.sh" "$out_dir"
 
 echo "mihomo $(jq -r '.mihomo.version' "$lock") 已就绪：$out_dir"

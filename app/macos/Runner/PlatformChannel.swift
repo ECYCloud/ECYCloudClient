@@ -1,16 +1,17 @@
 import Cocoa
+import CoreImage
 import FlutterMacOS
 import Security
 
-/// 与 Windows 的 platform_channel.cpp 同协议：托盘只上报动作，
-/// 连不连、开不开由 Dart 侧状态机决定。
-/// macOS 其余平台能力（登录项、打开链接、安装包）在 Dart 侧就能完成，不下沉到这里。
 final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private enum MenuTag: Int {
     case connect = 1
     case disconnect
     case systemProxy
     case tun
+    case modeRule
+    case modeGlobal
+    case modeDirect
     case show
     case quit
   }
@@ -24,13 +25,20 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var busy = false
   private var systemProxy = false
   private var tun = false
+  private var modeEnabled = false
+  private var routeMode = "rule"
   private var labelConnect = "连接"
   private var labelDisconnect = "断开连接"
   private var labelCancel = "取消连接"
   private var labelSystemProxy = "系统代理"
   private var labelTun = "TUN 模式"
+  private var labelRule = "规则"
+  private var labelGlobal = "全局"
+  private var labelDirect = "直连"
   private var labelShow = "显示主界面"
   private var labelQuit = "退出"
+  private var statusTip = ""
+  private var defaultDockIcon: NSImage?
 
   init(messenger: FlutterBinaryMessenger, window: NSWindow) {
     channel = FlutterMethodChannel(
@@ -70,6 +78,10 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       busy = arguments["busy"] as? Bool ?? false
       systemProxy = arguments["system_proxy"] as? Bool ?? false
       tun = arguments["tun"] as? Bool ?? false
+      modeEnabled = arguments["mode_enabled"] as? Bool ?? false
+      if let value = arguments["route_mode"] as? String, !value.isEmpty {
+        routeMode = value
+      }
       if let value = arguments["label_connect"] as? String, !value.isEmpty {
         labelConnect = value
       }
@@ -85,12 +97,23 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       if let value = arguments["label_tun"] as? String, !value.isEmpty {
         labelTun = value
       }
+      if let value = arguments["label_rule"] as? String, !value.isEmpty {
+        labelRule = value
+      }
+      if let value = arguments["label_global"] as? String, !value.isEmpty {
+        labelGlobal = value
+      }
+      if let value = arguments["label_direct"] as? String, !value.isEmpty {
+        labelDirect = value
+      }
       if let value = arguments["label_show"] as? String, !value.isEmpty {
         labelShow = value
       }
       if let value = arguments["label_quit"] as? String, !value.isEmpty {
         labelQuit = value
       }
+      statusTip = arguments["status_tip"] as? String ?? ""
+      applyStatusIcons()
       result(nil)
     case "secret.protect":
       guard let arguments = call.arguments as? [String: Any],
@@ -136,8 +159,6 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
   }
 
-  // MARK: - 托盘
-
   private func installTray() {
     guard statusItem == nil else { return }
 
@@ -146,20 +167,20 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       systemSymbolName: "network", accessibilityDescription: appDisplayName)
     // 状态栏图标必须是模板图，否则深色菜单栏下会糊成一团
     item.button?.image?.isTemplate = true
-    item.button?.toolTip = appDisplayName
     item.button?.target = self
     item.button?.action = #selector(onStatusItemClick)
     item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     statusItem = item
+    applyStatusIcons()
   }
 
   private func removeTray() {
     guard let item = statusItem else { return }
     NSStatusBar.system.removeStatusItem(item)
     statusItem = nil
+    NSApp.applicationIconImage = defaultDockIcon
   }
 
-  /// 左键还原窗口、右键弹菜单，与 Windows 托盘一致
   @objc private func onStatusItemClick() {
     guard let button = statusItem?.button else { return }
 
@@ -187,7 +208,6 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
     menu.addItem(.separator())
 
-    // 未连接时不得占用系统代理 / TUN，菜单项禁用且不勾选
     let proxyItem = makeItem(labelSystemProxy, .systemProxy)
     proxyItem.isEnabled = connected
     proxyItem.state = systemProxy ? .on : .off
@@ -197,6 +217,21 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     tunItem.isEnabled = connected
     tunItem.state = tun ? .on : .off
     menu.addItem(tunItem)
+
+    menu.addItem(.separator())
+    let mode = (routeMode == "global" || routeMode == "direct") ? routeMode : "rule"
+    let ruleItem = makeItem(labelRule, .modeRule)
+    ruleItem.isEnabled = modeEnabled
+    ruleItem.state = mode == "rule" ? .on : .off
+    menu.addItem(ruleItem)
+    let globalItem = makeItem(labelGlobal, .modeGlobal)
+    globalItem.isEnabled = modeEnabled
+    globalItem.state = mode == "global" ? .on : .off
+    menu.addItem(globalItem)
+    let directItem = makeItem(labelDirect, .modeDirect)
+    directItem.isEnabled = modeEnabled
+    directItem.state = mode == "direct" ? .on : .off
+    menu.addItem(directItem)
 
     menu.addItem(.separator())
     menu.addItem(makeItem(labelShow, .show))
@@ -223,10 +258,15 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       emitTrayAction("system_proxy")
     case .tun:
       emitTrayAction("tun")
+    case .modeRule:
+      emitTrayAction("mode_rule")
+    case .modeGlobal:
+      emitTrayAction("mode_global")
+    case .modeDirect:
+      emitTrayAction("mode_direct")
     case .show:
       restoreMainWindow()
     case .quit:
-      // 内核与系统代理由 helper 在察觉 GUI 退出后收尾
       removeTray()
       NSApp.terminate(nil)
     case .none:
@@ -238,7 +278,48 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     channel.invokeMethod("tray.action", arguments: action)
   }
 
-  // MARK: - 窗口
+  private func applyStatusIcons() {
+    if defaultDockIcon == nil {
+      defaultDockIcon = NSApp.applicationIconImage
+    }
+    let tint: NSColor?
+    let hue: CGFloat?
+    if tun {
+      tint = NSColor(srgbRed: 0.18, green: 0.75, blue: 0.44, alpha: 1)
+      hue = 145
+    } else if systemProxy {
+      tint = NSColor(srgbRed: 0.88, green: 0.45, blue: 0.08, alpha: 1)
+      hue = 28
+    } else {
+      tint = nil
+      hue = nil
+    }
+    statusItem?.button?.contentTintColor = tint
+    statusItem?.button?.toolTip =
+      statusTip.isEmpty ? appDisplayName : "\(appDisplayName)\n\(statusTip)"
+    if let hue = hue, let source = defaultDockIcon {
+      NSApp.applicationIconImage = hueShiftedDockIcon(source, targetHue: hue)
+    } else {
+      NSApp.applicationIconImage = defaultDockIcon
+    }
+  }
+
+  private func hueShiftedDockIcon(_ source: NSImage, targetHue: CGFloat) -> NSImage {
+    guard let tiff = source.tiffRepresentation,
+      let input = CIImage(data: tiff),
+      let filter = CIFilter(name: "CIHueAdjust")
+    else {
+      return source
+    }
+    filter.setValue(input, forKey: kCIInputImageKey)
+    filter.setValue((targetHue - 210) * .pi / 180, forKey: kCIInputAngleKey)
+    guard let output = filter.outputImage else { return source }
+    let context = CIContext()
+    guard let cg = context.createCGImage(output, from: output.extent) else {
+      return source
+    }
+    return NSImage(cgImage: cg, size: source.size)
+  }
 
   func restoreMainWindow() {
     NSApp.activate(ignoringOtherApps: true)

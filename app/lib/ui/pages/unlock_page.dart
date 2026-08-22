@@ -11,7 +11,7 @@ import '../widgets/list_toolbar.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
-import '../widgets/tag_chip.dart';
+import '../widgets/simple_data_table.dart';
 import '../../l10n/l10n.dart';
 
 class UnlockPage extends StatefulWidget {
@@ -83,7 +83,9 @@ class _UnlockPageState extends State<UnlockPage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -100,17 +102,32 @@ class _UnlockPageState extends State<UnlockPage> {
 
   Color? _statusColor(String status) {
     final String lower = status.toLowerCase();
-    if (status.contains('解锁') ||
+    if (status.startsWith('Yes') ||
+        status.contains('解锁') ||
         lower.contains('yes') ||
         lower.contains('unlock')) {
       return AppTheme.success;
     }
-    if (status.contains('失败') ||
+    if (status.startsWith('Unknow') || lower.startsWith('unknow')) {
+      return AppTheme.warning;
+    }
+    if (status.startsWith('No') ||
+        status.contains('失败') ||
         status.contains('屏蔽') ||
-        lower.contains('no')) {
+        lower.startsWith('no')) {
       return AppTheme.danger;
     }
+    if (status.startsWith('仅限自制') ||
+        status.startsWith('仅限网页') ||
+        status.startsWith('仅限App')) {
+      return const Color(0xFF9C27B0);
+    }
     return null;
+  }
+
+  Widget _statusText(UnlockResult item, String key) {
+    final String value = item.unlockItem[key] ?? '';
+    return TableText(value, color: _statusColor(value));
   }
 
   @override
@@ -150,86 +167,100 @@ class _UnlockPageState extends State<UnlockPage> {
               ? Center(child: Text(_error!))
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(14),
-                    itemCount: _results.isEmpty ? 2 : _results.length + 1,
-                    itemBuilder: (BuildContext context, int index) {
-                      if (index == 0) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: SectionCard(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  L10n.t('您可以在这里查看节点的流媒体和各大AI平台解锁情况。'),
-                                ),
-                                if (_unlockCheckInterval > 0) ...<Widget>[
+                  notificationPredicate: (ScrollNotification n) =>
+                      n.metrics.axis == Axis.vertical,
+                  child: NestedScrollView(
+                    headerSliverBuilder: (BuildContext context, bool _) {
+                      return <Widget>[
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: AppTheme.pageScrollPadding.copyWith(
+                              bottom: 0,
+                            ),
+                            child: SectionCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    L10n.t(
+                                      '您可以在这里查看节点的流媒体和各大AI平台解锁情况。',
+                                    ),
+                                  ),
+                                  if (_unlockCheckInterval > 0) ...<Widget>[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      L10n.t(
+                                        '每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。',
+                                        <Object>[_unlockCheckInterval],
+                                      ),
+                                    ),
+                                  ],
                                   const SizedBox(height: 8),
                                   Text(
-                                    L10n.t('每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。', <Object>[_unlockCheckInterval]),
+                                    L10n.t(
+                                      '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)',
+                                    ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
                                   ),
                                 ],
-                                const SizedBox(height: 8),
-                                Text(
-                                  L10n.t('(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)'),
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                        );
-                      }
-                      if (_results.isEmpty) {
-                        return Padding(
-                          padding: EdgeInsets.only(top: 80),
-                          child: Center(child: Text(L10n.t('暂无解锁检测结果'))),
-                        );
-                      }
-                      final UnlockResult item = _results[index - 1];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                item.nodeName,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(color: scheme.onSurface),
-                              ),
-                              if (item.createdAt.isNotEmpty) ...<Widget>[
-                                const SizedBox(height: 2),
-                                Text(
-                                  item.createdAt,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 6,
-                                children: <Widget>[
-                                  for (final MapEntry<String, String> entry
-                                      in item.unlockItem.entries)
-                                    TagChip(
-                                      label: '${entry.key}: ${entry.value}',
-                                      color: _statusColor(entry.value),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
                         ),
-                      );
+                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                      ];
                     },
+                    body: Padding(
+                      padding: AppTheme.pageScrollPadding.copyWith(top: 0),
+                      child: SimpleDataTable(
+                        stickyHeader: true,
+                        minWidth: 1280,
+                        columnWidths: const <int, TableColumnWidth>{
+                          0: IntrinsicColumnWidth(),
+                        },
+                        columns: <String>[
+                          L10n.t('节点'),
+                          L10n.t('YouTube Premium'),
+                          L10n.t('Netflix'),
+                          L10n.t('Prime Video'),
+                          L10n.t('Disney Plus'),
+                          L10n.t('TikTok'),
+                          L10n.t('HBO Max'),
+                          L10n.t('OpenAI'),
+                          L10n.t('Gemini'),
+                          L10n.t('Claude'),
+                          L10n.t('更新时间'),
+                        ],
+                        emptyText: _search.isEmpty
+                            ? L10n.t('暂无解锁检测结果')
+                            : L10n.t('没有匹配结果'),
+                        rows: <List<Widget>>[
+                          for (final UnlockResult item in _results)
+                            <Widget>[
+                              TableText(
+                                item.nodeName,
+                                bold: true,
+                                maxLines: 1,
+                              ),
+                              _statusText(item, 'YouTube_Premium'),
+                              _statusText(item, 'Netflix'),
+                              _statusText(item, 'AmazonPrime'),
+                              _statusText(item, 'DisneyPlus'),
+                              _statusText(item, 'TikTok'),
+                              _statusText(item, 'HBOMax'),
+                              _statusText(item, 'OpenAI'),
+                              _statusText(item, 'Gemini'),
+                              _statusText(item, 'Claude'),
+                              TableText(item.createdAt, muted: true),
+                            ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
         ),

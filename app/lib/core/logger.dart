@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'app_paths.dart';
 
@@ -46,6 +47,7 @@ class Logger {
   final List<void Function(LogEntry)> _listeners = <void Function(LogEntry)>[];
 
   LogLevel level = LogLevel.warn;
+  LogFileSink? _sink;
   String? _sinkDate;
 
   List<LogEntry> get entries => List<LogEntry>.unmodifiable(_ring);
@@ -68,10 +70,9 @@ class Logger {
   void error(String source, String message, [Object? cause]) =>
       log(LogLevel.error, source, cause == null ? message : '$message: $cause');
 
-  // 内核的级别写在行内，必须解析出来，否则错误行会被当成 info：日志页按级别过滤
-  // 翻不出来，级别门槛也会把它挡在日志文件外。两种来源的排版不同，都要认：
-  //   进程标准输出是 logrus 的 key=value：`time="..." level=warning msg="..."`
-  //   Clash API 的 /logs 只给类型与正文，由 logStream 拼成：`WARNING <正文>`
+  // 内核级别写在行内，两种排版都要认，否则错误行会被当成 info：
+  //   进程 stdout：`time="..." level=warning msg="..."`
+  //   /logs 流：`WARNING <正文>`
   static LogLevel kernelLevel(String line) {
     // 只在 msg= 之前找，避免正文里出现的 level= 字样被当成级别
     final int body = line.indexOf(' msg=');
@@ -90,10 +91,53 @@ class Logger {
     };
   }
 
+  static String kernelMessage(String line) {
+    final int body = line.indexOf(' msg=');
+    if (body >= 0) {
+      return _logfmtValue(line.substring(body + 5));
+    }
+    final Match? prefix = _prefixLevel.firstMatch(line);
+    if (prefix != null &&
+        prefix.end < line.length &&
+        line.codeUnitAt(prefix.end) == 0x20) {
+      return line.substring(prefix.end + 1);
+    }
+    return line;
+  }
+
   static final RegExp _logfmtLevel = RegExp(r'(?:^|\s)level=([a-z]+)');
   static final RegExp _prefixLevel = RegExp(
     r'^(DEBUG|INFO|WARNING|ERROR|FATAL|PANIC)\b',
   );
+
+  static String _logfmtValue(String raw) {
+    if (raw.isEmpty) {
+      return '';
+    }
+    if (raw.codeUnitAt(0) != 0x22) {
+      final int end = raw.indexOf(' ');
+      return end < 0 ? raw : raw.substring(0, end);
+    }
+    final StringBuffer out = StringBuffer();
+    for (int i = 1; i < raw.length; i++) {
+      final int unit = raw.codeUnitAt(i);
+      if (unit == 0x5C && i + 1 < raw.length) {
+        final int next = raw.codeUnitAt(++i);
+        out.writeCharCode(switch (next) {
+          0x6E => 0x0A,
+          0x74 => 0x09,
+          0x72 => 0x0D,
+          _ => next,
+        });
+        continue;
+      }
+      if (unit == 0x22) {
+        break;
+      }
+      out.writeCharCode(unit);
+    }
+    return out.toString();
+  }
 
   // 环形缓冲不做级别过滤，否则日志页调高级别后看不到已发生的记录；
   // level 只决定哪些条目落盘，避免调试级别把磁盘写满
@@ -133,22 +177,7 @@ class Logger {
       pruneExpired(AppPaths.logs, entry.time);
     }
 
-    appendCapped(
-      File('${AppPaths.logs.path}${Platform.pathSeparator}app-$date.log'),
-      '${entry.toString()}\n',
-    );
-  }
-
-  // 裁到上限以下留出续写空间，否则触顶后每行都要重写整份文件
-  static void appendCapped(File file, String line) {
-    final int incoming = utf8.encode(line).length;
-    final int current = file.existsSync() ? file.lengthSync() : 0;
-    if (current + incoming > _maxFileBytes) {
-      trimToLastBytes(file, _maxFileBytes * 4 ~/ 5);
-    }
-    try {
-      file.writeAsStringSync(line, mode: FileMode.append);
-    } on FileSystemException {}
+    (_sink ??= LogFileSink(AppPaths.logs)).write(date, '${entry.toString()}\n');
   }
 
   static void trimToLastBytes(File file, int maxBytes) {
@@ -188,15 +217,95 @@ class Logger {
       }
       try {
         entity.deleteSync();
-      } on FileSystemException {
-        // 文件可能正被外部程序占用，下次轮转再试
-      }
+      } on FileSystemException catch (_) {}
     }
   }
 
-  Future<void> flush() async {}
+  Future<void> flush() async {
+    _sink?.flush();
+  }
 
   Future<void> dispose() async {
+    _sink?.close();
+    _sink = null;
     _sinkDate = null;
+  }
+}
+
+// 句柄必须常开、字节数记在内存：内核峰值 800 行/秒，逐行开-写-关实测 7.7ms/行，
+// log() 在 UI isolate 上会卡死。常开句柄 0.0125ms/行，只有触顶裁切才碰文件长度。
+class LogFileSink {
+  LogFileSink(this.directory, {this.maxBytes = Logger._maxFileBytes});
+
+  final Directory directory;
+  final int maxBytes;
+
+  RandomAccessFile? _handle;
+  String? _date;
+  int _bytes = 0;
+
+  File fileFor(String date) =>
+      File('${directory.path}${Platform.pathSeparator}app-$date.log');
+
+  void write(String date, String line) {
+    if (_date != date) {
+      _open(date);
+    }
+    final Uint8List bytes = utf8.encode(line);
+    if (_handle != null && _bytes + bytes.length > maxBytes) {
+      _rotate(date);
+    }
+    final RandomAccessFile? handle = _handle;
+    if (handle == null) {
+      return;
+    }
+    try {
+      handle.writeFromSync(bytes);
+      _bytes += bytes.length;
+    } on FileSystemException {
+      close();
+    }
+  }
+
+  void flush() {
+    try {
+      _handle?.flushSync();
+    } on FileSystemException {
+      close();
+    }
+  }
+
+  void close() {
+    try {
+      _handle?.closeSync();
+    } on FileSystemException catch (_) {}
+    _handle = null;
+    _date = null;
+  }
+
+  void _open(String date) {
+    close();
+    try {
+      // 追加句柄的写入位置固定在末尾，长度只需在开的时候读一次
+      final RandomAccessFile handle = fileFor(
+        date,
+      ).openSync(mode: FileMode.append);
+      _handle = handle;
+      _bytes = handle.lengthSync();
+      _date = date;
+    } on FileSystemException {
+      _handle = null;
+      _date = null;
+    }
+  }
+
+  // 裁到上限的 4/5 留出续写空间，否则触顶后每行都要重写整份文件。
+  // 裁切要独占文件，先放掉句柄再重开。
+  void _rotate(String date) {
+    close();
+    try {
+      Logger.trimToLastBytes(fileFor(date), maxBytes * 4 ~/ 5);
+    } on FileSystemException catch (_) {}
+    _open(date);
   }
 }

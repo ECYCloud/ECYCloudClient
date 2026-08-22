@@ -3,12 +3,7 @@ import '../service/service_transport.dart';
 import 'named_pipe_client.dart';
 import 'service_control.dart';
 
-/// 命名管道 + 服务自恢复。
-///
-/// 服务进程若异常退出，SCM 要等失败恢复计时（首次 5 秒）才把它拉起来，这段窗口里
-/// `\\.\pipe\ECYCloudService` 根本不存在，CreateFileW 返回 ERROR_FILE_NOT_FOUND。
-/// 此时先查 SCM 状态、必要时直接把服务启动起来再重试，只有确实未安装或无权限
-/// 才向上抛错，不把「请重新安装客户端」这种死路甩给用户。
+/// SCM 失败恢复首次约 5 秒，窗口内管道不存在（ERROR_FILE_NOT_FOUND），须查 SCM / 拉起后再重试。
 class ServicePipe implements ServiceTransport {
   const ServicePipe(this._pipe, this._service);
 

@@ -27,10 +27,29 @@ import 'ui/shell.dart';
 import 'ui/theme.dart';
 import 'ui/widgets/zoom_cursors.dart';
 
+final Stopwatch _boot = Stopwatch();
+bool _framed = false;
+
+// 埋点走 warn 级：默认日志级别就是 warning，info 不落盘，卡死复发时查不到
+void _mark(String step) =>
+    Logger.instance.warn('boot', '$step +${_boot.elapsedMilliseconds}ms');
+
+// 首帧真正画出来的时刻只有 timings 回调知道。addPostFrameCallback 在 UI 线程构建完
+// 就回，平台线程或光栅线程被显卡驱动堵住时它照样立刻触发，量不到白屏那段。
+void _traceFirstFrame() {
+  WidgetsBinding.instance.addTimingsCallback((_) {
+    if (_framed) {
+      return;
+    }
+    _framed = true;
+    _mark('firstFrame');
+  });
+}
+
 Future<void> main() async {
+  _boot.start();
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.bootstrap();
-  await ZoomCursors.ensureReady();
   ErrorLogger.init();
 
   if (!AppConfig.configured) {
@@ -46,8 +65,10 @@ Future<void> main() async {
   L10n.current = AppLanguage.resolve(stored: seeded.locale);
   Logger.instance.level = seeded.logLevel;
   Logger.instance.info('app', '客户端启动');
+  _mark('main');
 
   await NodeLabels.load();
+  _mark('assets');
 
   final PlatformService platform = PlatformFactory.createPlatformService();
   final KernelController kernel = PlatformFactory.createKernelController();
@@ -64,6 +85,7 @@ Future<void> main() async {
     platform: platform,
   );
 
+  _traceFirstFrame();
   runApp(
     AppScope(
       auth: auth,
@@ -75,6 +97,10 @@ Future<void> main() async {
       child: const EcyCloudApp(),
     ),
   );
+  _mark('runApp');
+
+  // 必须在 runApp 之后且不能 await：Windows runner 等第一帧才 Show()，造指针要走 GPU 与平台通道
+  unawaited(ZoomCursors.ensureReady());
 }
 
 class EcyCloudApp extends StatefulWidget {
@@ -86,6 +112,7 @@ class EcyCloudApp extends StatefulWidget {
 
 class _EcyCloudAppState extends State<EcyCloudApp> {
   bool _bootstrapped = false;
+  bool _platformReady = false;
   ThemeMode _themeMode = ThemeMode.system;
   Locale _locale = L10n.current.flutterLocale;
   AuthController? _auth;
@@ -135,16 +162,21 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
 
     try {
       await platform.initialize();
+      _mark('platform');
       await connection.syncPlatformSettings();
     } on Object catch (e) {
       Logger.instance.error('app', '平台初始化失败', e);
     }
+    if (mounted) {
+      setState(() => _platformReady = true);
+    }
 
-    // 预检只是给设置页攒一份问题清单，慢的话不该一直挡着启动图
     unawaited(connection.runPreflight());
     // 界面可能是被系统重建的，隧道还在后台跑着，要在拉起常驻内核之前认回来
     await connection.adoptRunningKernel();
+    _mark('adopt');
     await auth.restore();
+    _mark('auth');
 
     update.start();
   }
@@ -182,7 +214,8 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       return;
     }
     final AuthStage previous = _authStage;
-    final bool leftRestricted = auth.stage == AuthStage.loggedIn &&
+    final bool leftRestricted =
+        auth.stage == AuthStage.loggedIn &&
         previous == AuthStage.accountRestricted;
     _authStage = auth.stage;
 
@@ -190,7 +223,6 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     connection.attachProfileLookup(() => auth.profile);
     announcements.attachApi(auth.api);
 
-    // attachApi 仅在 API 实例变化时 preload；受限恢复仍是同一实例
     if (leftRestricted) {
       unawaited(connection.preloadProxies());
     }
@@ -225,7 +257,25 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: _themeMode,
-      home: scope.connection.settings.locale.isEmpty
+      builder: (BuildContext context, Widget? child) {
+        final Widget content = child ?? const SizedBox.shrink();
+        if (!scope.platform.isTelevision) {
+          return content;
+        }
+        final MediaQueryData media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            padding: AppTheme.televisionPadding(media.padding),
+          ),
+          child: Theme(
+            data: AppTheme.withTelevisionFocus(Theme.of(context)),
+            child: SafeArea(child: content),
+          ),
+        );
+      },
+      home: !_platformReady
+          ? const _Splash()
+          : scope.connection.settings.locale.isEmpty
           ? LanguageSetupPage(
               initial: AppLanguage.resolve(stored: ''),
               onChosen: (AppLanguage language) {

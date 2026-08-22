@@ -17,6 +17,7 @@ import '../format.dart';
 import '../node_labels.dart';
 import '../shell_navigator.dart';
 import '../theme.dart';
+import '../widgets/overlay_scroll_view.dart';
 import '../widgets/announcement_dialog.dart';
 import '../widgets/connection_status_badge.dart';
 import '../widgets/delay_badge.dart';
@@ -30,6 +31,7 @@ import '../widgets/section_card.dart';
 import '../widgets/sparkline.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
+import 'network_segments_page.dart';
 import 'traffic_log_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -42,6 +44,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   Timer? _ticker;
   Timer? _profileTicker;
+  final FocusNode _connectFocus = FocusNode();
+  bool _requestedConnectFocus = false;
 
   @override
   void initState() {
@@ -59,14 +63,20 @@ class _HomePageState extends State<HomePage> {
       final AppScope scope = AppScope.of(context);
       // 账号与公告均 60s 轮询（与面板限流窗口一致）；点铃铛也可再拉公告。
       // 首帧不打 /user/profile：restore() 刚拉过；面板配额为每路径 60s/10 次。
-      _profileTicker = Timer.periodic(
-        const Duration(seconds: 60),
-        (_) {
-          unawaited(scope.auth.refreshProfile());
-          unawaited(scope.announcements.refresh());
-        },
-      );
+      _profileTicker = Timer.periodic(const Duration(seconds: 60), (_) {
+        unawaited(scope.auth.refreshProfile());
+        unawaited(scope.announcements.refresh());
+      });
       unawaited(scope.announcements.refresh());
+    }
+    if (!_requestedConnectFocus &&
+        AppScope.of(context).platform.isTelevision) {
+      _requestedConnectFocus = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _connectFocus.requestFocus();
+        }
+      });
     }
   }
 
@@ -74,6 +84,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _ticker?.cancel();
     _profileTicker?.cancel();
+    _connectFocus.dispose();
     super.dispose();
   }
 
@@ -93,13 +104,10 @@ class _HomePageState extends State<HomePage> {
 
         return Column(
           children: <Widget>[
-            PageHeader(
-              title: L10n.t('首页'),
-              showUserAvatar: true,
-            ),
+            PageHeader(title: L10n.t('首页'), showUserAvatar: true),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(14),
+              child: OverlayScrollView(
+                padding: AppTheme.pageScrollPadding,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
@@ -110,8 +118,9 @@ class _HomePageState extends State<HomePage> {
                     _ConnectionCard(
                       connection: connection,
                       announcements: scope.announcements,
+                      connectFocus: _connectFocus,
                     ),
-                    if (connection.groups.isNotEmpty) ...<Widget>[
+                    if (connection.groupsForMode.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 10),
                       _CurrentNodeCard(connection: connection),
                     ],
@@ -140,7 +149,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 两张同构卡片并排，窄窗口自动改为上下堆叠
 class _Pair extends StatelessWidget {
   const _Pair({required this.left, required this.right});
 
@@ -169,12 +177,8 @@ class _Pair extends StatelessWidget {
   );
 }
 
-/// 卡片内的等宽栅格：一行放 [columns] 个，放不下就换行
 class _Grid extends StatelessWidget {
-  const _Grid({
-    required this.children,
-    required this.columns,
-  });
+  const _Grid({required this.children, required this.columns});
 
   final List<Widget> children;
   final int columns;
@@ -220,10 +224,12 @@ class _ConnectionCard extends StatelessWidget {
   const _ConnectionCard({
     required this.connection,
     required this.announcements,
+    required this.connectFocus,
   });
 
   final ConnectionController connection;
   final AnnouncementController announcements;
+  final FocusNode connectFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -296,12 +302,6 @@ class _ConnectionCard extends StatelessWidget {
               ],
             );
 
-            // 不用 IntrinsicHeight+stretch：会把连接按钮硬拉成与分段控件同高，
-            // 破坏主题 filledButton 的正常内边距与胶囊比例。
-            //
-            // 用 Wrap 而不是 Row：移动端密度下这一排自然宽 336（断开中态 349），
-            // 已经超过 390 屏能给的 330，Row 会让排在最后的公告铃铛溢出到屏幕外。
-            // 连接键与铃铛捆成一个整体换行，避免铃铛自己孤零零掉到第二行。
             final Widget actions = Wrap(
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -313,6 +313,7 @@ class _ConnectionCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     FilledButton.icon(
+                      focusNode: connectFocus,
                       onPressed: disconnecting
                           ? null
                           : () {
@@ -364,10 +365,10 @@ class _ConnectionCard extends StatelessWidget {
                           Icons.notifications_outlined,
                           size: 20,
                         ),
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 32,
+                        visualDensity: VisualDensity.standard,
+                        constraints: BoxConstraints.tightFor(
+                          width: AppTheme.minTapTarget,
+                          height: AppTheme.minTapTarget,
                         ),
                         padding: EdgeInsets.zero,
                       ),
@@ -413,7 +414,6 @@ class _ModeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 模式是内核的运行时配置，改它走控制面，与出口有没有接管无关
     final bool enabled = connection.controlPlaneReady;
 
     return SegmentedButton<String>(
@@ -465,6 +465,8 @@ class _ProxyToggles extends StatelessWidget {
                 onChanged: (bool value) => connection.updateSettings(
                   settings.copyWith(systemProxyEnabled: value),
                 ),
+                settingsTooltip: L10n.t('系统代理绕过'),
+                onSettings: () => unawaited(openSystemProxyBypass(context)),
               ),
             ),
             const SizedBox(
@@ -487,6 +489,8 @@ class _ProxyToggles extends StatelessWidget {
                   : (bool value) => connection.updateSettings(
                       settings.copyWith(tunEnabled: value),
                     ),
+              settingsTooltip: L10n.t('TUN 排除自定义网段'),
+              onSettings: () => unawaited(openTunExcludeAddresses(context)),
             ),
           ),
         ],
@@ -584,7 +588,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
                 builder: (BuildContext context) => const TrafficLogPage(),
               ),
             ),
-            child: Text(L10n.t('流量明细 ›')),
+            child: Text('${L10n.t('流量明细')} ›'),
           ),
         ],
       ),
@@ -641,7 +645,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
               ),
               TextButton(
                 onPressed: () => ShellNavigator.openShopTraffic(context),
-                child: Text(L10n.t('商店')),
+                child: Text('${L10n.t('商店')} ›'),
               ),
               Text(
                 L10n.t(' 选购流量包'),
@@ -671,7 +675,10 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           if (user.enableCheckin) ...<Widget>[
             const SizedBox(height: 12),
             Text(
-              L10n.t('签到可随机获得 {0}~{1} MB 流量', <Object>[user.checkinMin, user.checkinMax]),
+              L10n.t('签到可随机获得 {0}~{1} MB 流量', <Object>[
+                user.checkinMin,
+                user.checkinMax,
+              ]),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -679,9 +686,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
-              onPressed: !user.ableToCheckin || _checkingIn
-                  ? null
-                  : _checkin,
+              onPressed: !user.ableToCheckin || _checkingIn ? null : _checkin,
               icon: _checkingIn
                   ? const SizedBox(
                       width: 16,
@@ -940,8 +945,11 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
 
   ProxyGroup? get _group {
     final ConnectionController connection = widget.connection;
+    if (connection.routeMode == 'global') {
+      return connection.globalGroup;
+    }
     final String? name = _groupName;
-    if (name != null) {
+    if (name != null && name != ClashApiClient.globalGroupName) {
       final ProxyGroup? picked = connection.groupByName(name);
       if (picked != null) {
         return picked;
@@ -958,7 +966,6 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
       return const SizedBox.shrink();
     }
 
-    // 内核常驻，控制面在线就有真实的选中项，不必等到接管出口
     final bool live = connection.controlPlaneReady;
     final bool testing = connection.testingGroups.contains(group.name);
     final String now = group.now;
@@ -967,7 +974,6 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
         ? (live ? L10n.t('未选择节点') : L10n.t('正在准备内核'))
         : NodeLabels.displayName(leaf);
     final String? region = leaf.isEmpty ? null : NodeLabels.region(leaf);
-    final String protocol = leaf.isEmpty ? '' : connection.typeOf(leaf);
     final int delay = leaf.isEmpty ? 0 : connection.delayOf(leaf);
 
     return SectionCard(
@@ -983,7 +989,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
           TextButton(
             onPressed: () =>
                 ShellNavigator.go(context, ShellNavigator.nodesTab),
-            child: Text(L10n.t('节点 ›')),
+            child: Text('${L10n.t('节点')} ›'),
           ),
         ],
       ),
@@ -1005,23 +1011,34 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
             ),
             child: Row(
               children: <Widget>[
-                if (region != null) ...<Widget>[
-                  FlagIcon(code: region),
-                  const SizedBox(width: 8),
-                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        display,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall,
+                      Row(
+                        children: <Widget>[
+                          if (region != null) ...<Widget>[
+                            FlagIcon(code: region),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: Text(
+                              display,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                        ],
                       ),
-                      if (protocol.isNotEmpty) ...<Widget>[
+                      if (leaf.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 4),
-                        TagChip(label: protocol),
+                        TagChip.wrap(
+                          protocol: connection.typeOf(leaf),
+                          network: connection.networkOf(leaf),
+                          tls: connection.tlsOf(leaf),
+                          udp: connection.udpOf(leaf),
+                        ),
                       ],
                     ],
                   ),
@@ -1044,8 +1061,9 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
                 width: width,
                 height: 36,
                 value: group.name,
+                enabled: connection.routeMode != 'global',
                 options: <String, String>{
-                  for (final ProxyGroup item in connection.groups)
+                  for (final ProxyGroup item in connection.groupsForMode)
                     item.name: item.name,
                 },
                 selectedLeading: GroupIcon(

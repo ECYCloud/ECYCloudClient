@@ -7,12 +7,11 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/shop.dart';
 import '../../l10n/l10n.dart';
 import '../app_scope.dart';
+import 'overlay_scroll_view.dart';
 import 'qr_card.dart';
 
 enum _PayMode { scheme, qrcode, browser }
 
-/// 在线支付等待窗。付款尽量在应用内完成：移动端唤起支付 App，桌面端扫收款码，
-/// 面板给不出应用内凭据时才回落系统浏览器。到账由面板回调写入，这里只轮询状态。
 class PaymentWaitDialog extends StatefulWidget {
   const PaymentWaitDialog({
     super.key,
@@ -25,10 +24,8 @@ class PaymentWaitDialog extends StatefulWidget {
   final PanelApiClient api;
   final ShopPurchaseResult result;
 
-  /// 支付宝 / 微信，用于扫码与唤起的提示文案
   final String methodLabel;
 
-  /// 长时间未到账时引导用户去哪里核对
   final String timeoutHint;
 
   @override
@@ -59,11 +56,13 @@ class _PaymentWaitDialogState extends State<PaymentWaitDialog> {
       return;
     }
     _started = true;
-    // 自己的屏幕没法用自己的手机扫，移动端只走唤起或浏览器
-    final bool mobile = AppScope.of(context).platform.platformId == 'android';
-    _mode = mobile
-        ? (widget.result.appScheme.isEmpty ? _PayMode.browser : _PayMode.scheme)
-        : (widget.result.payQrcode.isEmpty ? _PayMode.browser : _PayMode.qrcode);
+    _mode = switch (widget.result.payLaunch(
+      supportsPayScheme: AppScope.of(context).platform.supportsPayScheme,
+    )) {
+      ShopPayLaunch.scheme => _PayMode.scheme,
+      ShopPayLaunch.qrcode => _PayMode.qrcode,
+      ShopPayLaunch.browser => _PayMode.browser,
+    };
     if (_mode != _PayMode.qrcode) {
       unawaited(_launch());
     }
@@ -87,9 +86,7 @@ class _PaymentWaitDialogState extends State<PaymentWaitDialog> {
     setState(() {
       if (_mode == _PayMode.scheme && widget.result.paymentUrl.isNotEmpty) {
         _mode = _PayMode.browser;
-        _status = L10n.t('未检测到已安装的{0}，可改用浏览器支付。', <Object>[
-          widget.methodLabel,
-        ]);
+        _status = L10n.t('未检测到已安装的{0}，可改用浏览器支付。', <Object>[widget.methodLabel]);
         return;
       }
       _status = L10n.t('无法打开支付页面，请稍后重试。');
@@ -143,7 +140,7 @@ class _PaymentWaitDialogState extends State<PaymentWaitDialog> {
 
     return AlertDialog(
       title: Text(L10n.t('等待支付')),
-      content: SingleChildScrollView(
+      content: OverlayScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

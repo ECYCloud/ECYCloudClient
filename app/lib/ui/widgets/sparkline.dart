@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// 速率走势图：折线 + 填充。纵向按窗口内最大值自适应，
-/// 全零时画一条贴底的直线，而不是把噪声放大成锯齿。
 class Sparkline extends StatelessWidget {
   const Sparkline({
     super.key,
@@ -14,7 +12,6 @@ class Sparkline extends StatelessWidget {
   final List<int> values;
   final Color color;
 
-  /// 采样点不足时右对齐留白，图形不会随点数增加而横向拉伸
   final int capacity;
   final double height;
 

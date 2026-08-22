@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -21,24 +22,19 @@ import (
 const (
 	kernelLogLines = 800
 
-	// geodata 由 seedGeoData 播种到位后，校验是纯本地动作：实测面板那份配置
-	// （25 个 rule-providers + 3 条 geo 规则）耗时 0.4 秒左右，-t 不会去拉 providers。
-	// 留 30 秒是给慢盘的余量；万一 geodata 缺失、内核转去 geox-url 现下载，
-	// 也该在这里快速失败并把原因报给用户，而不是干等两个 90 秒的下载超时。
+	// 不得为容纳 geox-url 现下载而抬高：缺 geodata 时内核每文件 90 秒同步下载
 	kernelCheckTimout = 30 * time.Second
 )
 
-// 内核认的 geodata 本地文件名（mihomo constant/path.go：MMDB() 认 Country.mmdb /
-// geoip.db / geoip.metadb，GeoSite 认 GeoSite.dat）。安装包把它们放在内核旁边。
+// mihomo MMDB() 认 Country.mmdb / geoip.db / geoip.metadb，GeoSite 认 GeoSite.dat
 var geoDataFileNames = []string{"geoip.metadb", "GeoSite.dat"}
 
-// 收紧运行目录权限并补齐 geodata，启动与校验共用。
-//
-// 内核解析 GEOIP / GEOSITE 规则时会就地读 geodata，缺文件就按 geox-url 同步下载
-// （mihomo component/geodata/init.go 的 InitGeoIP / InitGeoSite，每文件 90 秒超时）。
-// 面板下发的 geox-url 指向 GitHub，在目标网络里必然超时，整份配置随之校验失败、
-// 内核起不来。安装包已随内核分发这两个库，补到运行目录即可让首次启动完全离线。
+var dataDirReady atomic.Bool
+
 func prepareRunDir() error {
+	if err := prepareDataDir(); err != nil {
+		return err
+	}
 	if err := ensureRestrictedDir(runDir()); err != nil {
 		return fmt.Errorf("准备运行目录失败: %w", err)
 	}
@@ -46,8 +42,19 @@ func prepareRunDir() error {
 	return nil
 }
 
-// 已存在的不覆盖：内核 geo-auto-update 刷新过的那份比包内的新。
-// 播种失败不阻断启动，内核仍可自行下载，只是慢且依赖网络能通。
+// %ProgramData% 默认 ACL 允许普通用户造文件
+func prepareDataDir() error {
+	if dataDirReady.Load() {
+		return nil
+	}
+	if err := ensureRestrictedDir(dataDir()); err != nil {
+		return fmt.Errorf("准备数据目录失败: %w", err)
+	}
+	dataDirReady.Store(true)
+	return nil
+}
+
+// 已存在的不覆盖：内核 geo-auto-update 刷新过的那份比包内的新
 func seedGeoData() {
 	for _, name := range geoDataFileNames {
 		target := filepath.Join(runDir(), name)
@@ -83,7 +90,6 @@ func newKernelManager() *kernelManager {
 	return &kernelManager{logs: newLogBuffer(kernelLogLines), exitCode: -1}
 }
 
-// write 只落盘运行配置，不碰进程。热载路径：GUI 写盘后对控制面 PUT /configs。
 func (k *kernelManager) write(config string) error {
 	if err := prepareRunDir(); err != nil {
 		return err
@@ -96,7 +102,7 @@ func (k *kernelManager) write(config string) error {
 
 const maxRunFileBytes = 8 << 20
 
-// read 代读 run 目录下文件；GUI 无权直接打开该目录（DACL 仅 SYSTEM/管理员）。
+// run 目录 DACL 仅 SYSTEM/管理员，GUI 只能由服务代读
 func (k *kernelManager) read(rel string) (string, error) {
 	path, err := resolveRunFile(rel)
 	if err != nil {
@@ -198,8 +204,7 @@ func (k *kernelManager) pump(r io.ReadCloser, wg *sync.WaitGroup) {
 	}
 }
 
-// Windows 无法向子进程投递 SIGINT，只能 TerminateProcess。wintun 网卡随创建进程的
-// 句柄一并销毁，内核走不到自身清理流程也不会留下残留网卡。
+// Windows 无法向子进程投递 SIGINT，只能 TerminateProcess；wintun 网卡随进程句柄销毁
 func (k *kernelManager) stop() {
 	k.mu.Lock()
 	if !k.running || k.cmd == nil || k.cmd.Process == nil {
@@ -276,8 +281,7 @@ func (k *kernelManager) check(config string) error {
 	return err
 }
 
-// mihomo 校验失败时会先刷一堆 level=info 的初始化日志，真正的原因在最后一条
-// level=error 上；取不到就退回整段输出，不能只给用户末行的“test failed”。
+// mihomo 校验失败时真正原因在最后一条 level=error，末行只是 “test failed”
 func kernelCheckFailure(out string) string {
 	reason := ""
 	for _, line := range strings.Split(out, "\n") {
@@ -335,7 +339,6 @@ func (k *kernelManager) kernelVersion() string {
 	return kernelVersionOf(kernelPath())
 }
 
-// 升级前也要用它验一遍待安装的内核，因此按可执行文件取而不是固定问安装目录那份
 func kernelVersionOf(exe string) string {
 	cmd := exec.Command(exe, "-v")
 	cmd.SysProcAttr = &windows.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}

@@ -58,6 +58,11 @@ func (w *winService) Execute(_ []string, requests <-chan svc.ChangeRequest, chan
 	changes <- svc.Status{State: svc.StartPending}
 
 	srv := newServer()
+	// 快照与配置都被服务完全信任，收紧目录必须早于第一次读它们
+	if err := prepareRunDir(); err != nil {
+		logf("服务无法启动: %v", err)
+		return true, 1
+	}
 	// 掉电或强杀会留下快照，必须早于任何 GUI 连接就还原
 	if err := srv.proxy.restore(); err != nil {
 		logf("启动自检还原系统代理失败: %v", err)
@@ -90,6 +95,9 @@ func (w *winService) Execute(_ []string, requests <-chan svc.ChangeRequest, chan
 
 func runConsole() error {
 	srv := newServer()
+	if err := prepareRunDir(); err != nil {
+		return err
+	}
 	if err := srv.proxy.restore(); err != nil {
 		logf("启动自检还原系统代理失败: %v", err)
 	}

@@ -112,12 +112,14 @@ class ShopCatalog {
     required this.money,
     required this.planCooldownRemaining,
     required this.defaultDuration,
+    required this.notice,
     required this.products,
   });
 
   final double money;
   final int planCooldownRemaining;
   final int defaultDuration;
+  final String notice;
   final List<ShopProduct> products;
 
   List<ShopProduct> ofType(String type) => <ShopProduct>[
@@ -133,6 +135,7 @@ class ShopCatalog {
       planCooldownRemaining:
           (json['plan_cooldown_remaining'] as num?)?.toInt() ?? 0,
       defaultDuration: (json['default_duration'] as num?)?.toInt() ?? 0,
+      notice: json['notice'] as String? ?? '',
       products: <ShopProduct>[
         if (products is List)
           for (final Object? item in products)
@@ -142,7 +145,7 @@ class ShopCatalog {
   }
 }
 
-/// 套餐下单预算，字段与网页 `getOrderStatus` 一一对应
+/// 字段与网页 `getOrderStatus` 一一对应
 class PlanQuote {
   const PlanQuote({
     required this.cooldown,
@@ -225,7 +228,6 @@ class PlanQuote {
   );
 }
 
-/// 流量包 / 卡密下单前的商品状态
 class ProductQuote {
   const ProductQuote({
     required this.name,
@@ -255,6 +257,8 @@ class ProductQuote {
   );
 }
 
+enum ShopPayLaunch { scheme, qrcode, browser }
+
 class ShopPurchaseResult {
   const ShopPurchaseResult({
     required this.message,
@@ -269,17 +273,20 @@ class ShopPurchaseResult {
   final String cardKey;
   final String tradeNo;
   final String paymentUrl;
-
-  /// 收款码内容，画成二维码给支付宝 / 微信扫
   final String payQrcode;
-
-  /// 唤起支付 App 的链接
   final String payScheme;
 
   bool get needsOnlinePayment =>
       paymentUrl.isNotEmpty || payQrcode.isNotEmpty || payScheme.isNotEmpty;
 
-  /// 能交给系统唤起支付 App 的链接。收款码本身是 weixin:// 这类 scheme 时同样可以唤起
+  ShopPayLaunch payLaunch({required bool supportsPayScheme}) {
+    if (supportsPayScheme) {
+      return appScheme.isEmpty ? ShopPayLaunch.browser : ShopPayLaunch.scheme;
+    }
+    return payQrcode.isEmpty ? ShopPayLaunch.browser : ShopPayLaunch.qrcode;
+  }
+
+  /// 收款码本身是 weixin:// 这类 scheme 时同样可以唤起
   String get appScheme {
     for (final String candidate in <String>[payScheme, payQrcode]) {
       final Uri? uri = Uri.tryParse(candidate.trim());

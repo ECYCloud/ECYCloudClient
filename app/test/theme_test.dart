@@ -37,21 +37,47 @@ void main() {
     );
 
     for (final String label in <String>['直连', '立即连接', '取消']) {
-      expect(familyOf(tester, label), 'Microsoft YaHei UI', reason: label);
+      expect(familyOf(tester, label), 'Microsoft YaHei', reason: label);
     }
   });
 
   test('导航栏与 Tooltip 的文字样式同样带字族', () {
     final ThemeData theme = AppTheme.dark();
 
-    expect(theme.tooltipTheme.textStyle?.fontFamily, 'Microsoft YaHei UI');
+    expect(theme.tooltipTheme.textStyle?.fontFamily, 'Microsoft YaHei');
     expect(
       theme.navigationRailTheme.selectedLabelTextStyle?.fontFamily,
-      'Microsoft YaHei UI',
+      'Microsoft YaHei',
     );
     expect(
       theme.navigationRailTheme.unselectedLabelTextStyle?.fontFamily,
-      'Microsoft YaHei UI',
+      'Microsoft YaHei',
     );
+  });
+
+  test('电视安全区只补不足 48 的边，已有的不叠加', () {
+    expect(
+      AppTheme.televisionPadding(EdgeInsets.zero),
+      const EdgeInsets.all(48),
+    );
+    expect(
+      AppTheme.televisionPadding(const EdgeInsets.fromLTRB(10, 60, 0, 48)),
+      const EdgeInsets.fromLTRB(48, 60, 48, 48),
+    );
+  });
+
+  test('电视焦点主题不改密度与触控盒', () {
+    final ThemeData base = AppTheme.light();
+    final ThemeData tv = AppTheme.withTelevisionFocus(base);
+    expect(tv.visualDensity, base.visualDensity);
+    expect(tv.focusColor, isNot(base.focusColor));
+  });
+
+  test('滚动条主题沿用公告的轴边距', () {
+    final ScrollbarThemeData bar = AppTheme.light().scrollbarTheme;
+    expect(bar.mainAxisMargin, 4);
+    expect(bar.crossAxisMargin, 2);
+    expect(AppTheme.overlayScrollPadding, const EdgeInsets.only(right: 16));
+    expect(bar.interactive, isTrue);
   });
 }

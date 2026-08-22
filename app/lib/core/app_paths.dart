@@ -25,7 +25,9 @@ class AppPaths {
     _androidBase = base;
   }
 
-  static final Directory userData = _ensure(Directory(_resolveUserData()));
+  static final Directory userData = _restrictToOwner(
+    _ensure(Directory(_resolveUserData())),
+  );
 
   static final Directory machineData = Directory(_resolveMachineData());
 
@@ -46,30 +48,25 @@ class AppPaths {
   static File get remoteConfigCache =>
       File(_join(userData.path, 'remote-config-cache.json'));
 
-  // Windows 停内核是 TerminateProcess，mihomo 来不及关 bbolt；下次打开若
-  // cache.db 校验失败会被内核整份删掉。用户选择另落 userData，装配时写入
-  // default-selected，TUN 起来时出口已是上次节点。
+  // Windows 停内核是 TerminateProcess，mihomo 来不及关 bbolt；cache.db 校验失败会被整份删掉，选择另落 userData
   static File get selectorCache =>
       File(_join(userData.path, 'selector-cache.json'));
 
   static Directory get logs => _ensure(Directory(_join(userData.path, 'logs')));
 
-  // 面板下发地址的图标缓存，删掉只会让客户端下次显示时重新取一遍
   static Directory get iconCache =>
       _ensure(Directory(_join(userData.path, 'icons')));
 
-  // 下载回来的客户端安装包，装完由用户或下次安装覆盖，删掉不影响任何功能
+  static Directory get videoCache =>
+      _ensure(Directory(_join(userData.path, 'videos')));
+
   static Directory get updates =>
       _ensure(Directory(_join(userData.path, 'updates')));
 
-  // Windows 服务与 macOS helper 以特权身份改系统代理，快照跟着落在 machineData；
-  // Linux 的代理设置属用户会话（GSettings 走会话 D-Bus），root 改不到，由 GUI 自己快照
-  static File get proxySnapshot => File(
-    _join(
-      Platform.isLinux ? userData.path : machineData.path,
-      'proxy-snapshot.json',
-    ),
-  );
+  // Linux 的代理设置属用户会话（GSettings 走会话 D-Bus），root 改不到，由 GUI 自己
+  // 快照；Windows 服务与 macOS helper 的快照归特权侧，落在 GUI 读不到的运行目录里
+  static File get proxySnapshot =>
+      File(_join(userData.path, 'proxy-snapshot.json'));
 
   // 必须与特权侧 runDir() / Android BoxState.runDir() 逐字一致
   static String get kernelRunDir => _join(machineData.path, 'run');
@@ -117,6 +114,14 @@ class AppPaths {
   static Directory _ensure(Directory directory) {
     if (!directory.existsSync()) {
       directory.createSync(recursive: true);
+    }
+    return directory;
+  }
+
+  // Unix umask 默认 0755，Dart 没有 chmod，只能借外部命令把目录收成 700；Android / Windows 靠系统隔离
+  static Directory _restrictToOwner(Directory directory) {
+    if (Platform.isLinux || Platform.isMacOS) {
+      Process.runSync('chmod', <String>['700', directory.path]);
     }
     return directory;
   }

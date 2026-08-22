@@ -36,7 +36,11 @@ class GroupIcon extends StatelessWidget {
       origin: AppScope.of(context).auth.siteOrigin,
     );
     if (resolved == null) {
-      return SizedBox(height: size, width: size, child: Center(child: builtin));
+      return SizedBox(
+        height: size,
+        width: size,
+        child: Center(child: builtin),
+      );
     }
 
     // 面板下发的品牌图标都是按浅色背景做的，深色主题下纯黑那几个（Apple、Anthropic、

@@ -7,6 +7,7 @@ import '../../data/api/api_exception.dart';
 import '../../data/api/panel_api_client.dart';
 import '../../data/models/account.dart';
 import '../app_scope.dart';
+import '../widgets/field_subtext.dart';
 import '../widgets/list_toolbar.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
@@ -14,6 +15,8 @@ import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import '../widgets/simple_data_table.dart';
 import '../../l10n/l10n.dart';
+import '../theme.dart';
+import '../widgets/overlay_scroll_view.dart';
 
 class InvitePage extends StatefulWidget {
   const InvitePage({super.key});
@@ -98,7 +101,9 @@ class _InvitePageState extends State<InvitePage> {
         return;
       }
       setState(() {
-        _error = e is ApiException ? e.message : L10n.t('加载失败：{0}', <Object>[e]);
+        _error = e is ApiException
+            ? e.message
+            : L10n.t('加载失败：{0}', <Object>[e]);
         _busy = false;
       });
     }
@@ -302,271 +307,281 @@ class _InvitePageState extends State<InvitePage> {
                 : summary == null
                 ? const SizedBox.shrink()
                 : ListView(
-              padding: const EdgeInsets.all(14),
-              children: <Widget>[
-                SectionCard(
-                  icon: Icons.link,
-                  title: L10n.t('邀请信息'),
-                  action: TextButton(
-                    onPressed: _busy ? null : () => unawaited(_confirmReset()),
-                    child: Text(L10n.t('重置链接 / 邀请码')),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    padding: AppTheme.pageScrollPadding,
                     children: <Widget>[
-                      Text(
-                        L10n.t('邀请他人注册时，请将以下链接发送给被邀请者'),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      _InviteCopyRow(
-                        label: L10n.t('邀请链接'),
-                        value: summary.inviteUrl,
-                        onCopy: () => unawaited(_copy(L10n.t('邀请链接'), summary.inviteUrl)),
-                      ),
-                      const SizedBox(height: 8),
-                      _InviteCopyRow(
-                        label: L10n.t('邀请码'),
-                        value: summary.code,
-                        onCopy: () => unawaited(_copy(L10n.t('邀请码'), summary.code)),
-                      ),
-                      const Divider(height: 20),
-                      InfoRow(
-                        label: L10n.t('邀请人数'),
-                        value: '${summary.invitedUsersCount}',
-                      ),
-                      InfoRow(
-                        label: L10n.t('返利人数'),
-                        value: '${summary.rebateUsersCount}',
-                      ),
-                      InfoRow(
-                        label: L10n.t('累计返利'),
-                        value: '¥ ${summary.paybacksSum.toStringAsFixed(2)}',
-                      ),
-                      InfoRow(
-                        label: L10n.t('返利比例'),
-                        value:
-                            '${(summary.codePayback * 100).toStringAsFixed(0)}%',
-                      ),
-                      InfoRow(
-                        label: L10n.t('每位受邀用户返利次数上限'),
-                        value: '${summary.rebateFrequencyLimit}',
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SectionCard(
-                  icon: Icons.account_balance_wallet_outlined,
-                  title: L10n.t('提现'),
-                  action: TextButton(
-                    onPressed: _applyWithdraw,
-                    child: Text(
-                      summary.withdrawChannels.isEmpty ? L10n.t('提现到余额') : L10n.t('申请提现'),
-                    ),
-                  ),
-                  child: Column(
-                    children: <Widget>[
-                      InfoRow(
-                        label: L10n.t('可提现'),
-                        value:
-                            '¥ ${summary.withdrawBalance.toStringAsFixed(2)}',
-                      ),
-                      if (summary.enableWithdraw)
-                        InfoRow(
-                          label: L10n.t('提现中'),
-                          value:
-                              '¥ ${summary.pendingWithdraw.toStringAsFixed(2)}',
+                      SectionCard(
+                        icon: Icons.link,
+                        title: L10n.t('邀请信息'),
+                        action: TextButton(
+                          onPressed: _busy
+                              ? null
+                              : () => unawaited(_confirmReset()),
+                          child: Text(L10n.t('重置链接 / 邀请码')),
                         ),
-                      InfoRow(
-                        label: L10n.t('账户余额'),
-                        value: '¥ ${summary.money.toStringAsFixed(2)}',
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SectionCard(
-                  icon: Icons.people_outline,
-                  title: L10n.t('邀请用户'),
-                  child: Column(
-                    children: <Widget>[
-                      ListToolbar(
-                        currentPage: summary.invitedCurrentPage,
-                        lastPage: summary.invitedLastPage,
-                        total: summary.invitedTotal,
-                        perPage: _invitedPerPage,
-                        searchHint: L10n.t('用户名 / 邮箱'),
-                        onSearchChanged: (String value) {
-                          _invitedDebounce?.cancel();
-                          _invitedDebounce = Timer(
-                            const Duration(milliseconds: 300),
-                            () {
-                              _invitedSearch = value.trim();
-                              _invitedPage = 1;
-                              unawaited(_load());
-                            },
-                          );
-                        },
-                        onPerPageChanged: (int value) {
-                          _invitedPerPage = value;
-                          _invitedPage = 1;
-                          unawaited(_load());
-                        },
-                        onPageChanged: (int page) {
-                          _invitedPage = page;
-                          unawaited(_load());
-                        },
-                      ),
-                      SimpleDataTable(
-                        framed: false,
-                        minWidth: 560,
-                        columns: <String>[
-                          L10n.t('用户ID'),
-                          L10n.t('用户名'),
-                          L10n.t('邮箱'),
-                          L10n.t('注册时间'),
-                        ],
-                        emptyText: L10n.t('暂无邀请用户'),
-                        rows: <List<Widget>>[
-                          for (final InvitedUserItem user
-                              in summary.invitedUsers)
-                            <Widget>[
-                              TableText('${user.id}'),
-                              TableText(
-                                user.userName.isEmpty ? '—' : user.userName,
-                                bold: true,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            Text(
+                              L10n.t('邀请他人注册时，请将以下链接发送给被邀请者'),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 8),
+                            _InviteCopyRow(
+                              label: L10n.t('邀请链接'),
+                              value: summary.inviteUrl,
+                              onCopy: () => unawaited(
+                                _copy(L10n.t('邀请链接'), summary.inviteUrl),
                               ),
-                              TableText(user.email),
-                              TableText(user.regDate, muted: true),
-                            ],
-                        ],
+                            ),
+                            const SizedBox(height: 8),
+                            _InviteCopyRow(
+                              label: L10n.t('邀请码'),
+                              value: summary.code,
+                              onCopy: () =>
+                                  unawaited(_copy(L10n.t('邀请码'), summary.code)),
+                            ),
+                            const Divider(height: 20),
+                            InfoRow(
+                              label: L10n.t('邀请人数'),
+                              value: '${summary.invitedUsersCount}',
+                            ),
+                            InfoRow(
+                              label: L10n.t('返利人数'),
+                              value: '${summary.rebateUsersCount}',
+                            ),
+                            InfoRow(
+                              label: L10n.t('累计返利'),
+                              value:
+                                  '¥ ${summary.paybacksSum.toStringAsFixed(2)}',
+                            ),
+                            InfoRow(
+                              label: L10n.t('返利比例'),
+                              value:
+                                  '${(summary.codePayback * 100).toStringAsFixed(0)}%',
+                            ),
+                            InfoRow(
+                              label: L10n.t('每位受邀用户返利次数上限'),
+                              value: '${summary.rebateFrequencyLimit}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SectionCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: L10n.t('提现'),
+                        action: TextButton(
+                          onPressed: _applyWithdraw,
+                          child: Text(
+                            summary.withdrawChannels.isEmpty
+                                ? L10n.t('提现到余额')
+                                : L10n.t('申请提现'),
+                          ),
+                        ),
+                        child: Column(
+                          children: <Widget>[
+                            InfoRow(
+                              label: L10n.t('可提现'),
+                              value:
+                                  '¥ ${summary.withdrawBalance.toStringAsFixed(2)}',
+                            ),
+                            if (summary.enableWithdraw)
+                              InfoRow(
+                                label: L10n.t('提现中'),
+                                value:
+                                    '¥ ${summary.pendingWithdraw.toStringAsFixed(2)}',
+                              ),
+                            InfoRow(
+                              label: L10n.t('账户余额'),
+                              value: '¥ ${summary.money.toStringAsFixed(2)}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SectionCard(
+                        icon: Icons.people_outline,
+                        title: L10n.t('邀请用户'),
+                        child: Column(
+                          children: <Widget>[
+                            ListToolbar(
+                              currentPage: summary.invitedCurrentPage,
+                              lastPage: summary.invitedLastPage,
+                              total: summary.invitedTotal,
+                              perPage: _invitedPerPage,
+                              searchHint: L10n.t('用户名 / 邮箱'),
+                              onSearchChanged: (String value) {
+                                _invitedDebounce?.cancel();
+                                _invitedDebounce = Timer(
+                                  const Duration(milliseconds: 300),
+                                  () {
+                                    _invitedSearch = value.trim();
+                                    _invitedPage = 1;
+                                    unawaited(_load());
+                                  },
+                                );
+                              },
+                              onPerPageChanged: (int value) {
+                                _invitedPerPage = value;
+                                _invitedPage = 1;
+                                unawaited(_load());
+                              },
+                              onPageChanged: (int page) {
+                                _invitedPage = page;
+                                unawaited(_load());
+                              },
+                            ),
+                            SimpleDataTable(
+                              framed: false,
+                              minWidth: 560,
+                              columns: <String>[
+                                L10n.t('用户ID'),
+                                L10n.t('用户名'),
+                                L10n.t('邮箱'),
+                                L10n.t('注册时间'),
+                              ],
+                              emptyText: L10n.t('暂无邀请用户'),
+                              rows: <List<Widget>>[
+                                for (final InvitedUserItem user
+                                    in summary.invitedUsers)
+                                  <Widget>[
+                                    TableText('${user.id}'),
+                                    TableText(
+                                      user.userName.isEmpty
+                                          ? '—'
+                                          : user.userName,
+                                      bold: true,
+                                    ),
+                                    TableText(user.email),
+                                    TableText(user.regDate, muted: true),
+                                  ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SectionCard(
+                        icon: Icons.payments_outlined,
+                        title: L10n.t('返利记录'),
+                        child: Column(
+                          children: <Widget>[
+                            ListToolbar(
+                              currentPage: summary.paybackCurrentPage,
+                              lastPage: summary.paybackLastPage,
+                              total: summary.paybackTotal,
+                              perPage: _paybackPerPage,
+                              searchHint: L10n.t('用户 ID'),
+                              onSearchChanged: (String value) {
+                                _paybackDebounce?.cancel();
+                                _paybackDebounce = Timer(
+                                  const Duration(milliseconds: 300),
+                                  () {
+                                    _paybackSearch = value.trim();
+                                    _paybackPage = 1;
+                                    unawaited(_load());
+                                  },
+                                );
+                              },
+                              onPerPageChanged: (int value) {
+                                _paybackPerPage = value;
+                                _paybackPage = 1;
+                                unawaited(_load());
+                              },
+                              onPageChanged: (int page) {
+                                _paybackPage = page;
+                                unawaited(_load());
+                              },
+                            ),
+                            SimpleDataTable(
+                              framed: false,
+                              minWidth: 480,
+                              columns: <String>[
+                                L10n.t('返利用户ID'),
+                                L10n.t('返利金额'),
+                                L10n.t('返利时间'),
+                              ],
+                              emptyText: L10n.t('暂无返利记录'),
+                              rows: <List<Widget>>[
+                                for (final PaybackItem item in summary.paybacks)
+                                  <Widget>[
+                                    TableText('${item.userId}'),
+                                    TableMoney(item.refGet),
+                                    TableText(item.datetime, muted: true),
+                                  ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SectionCard(
+                        icon: Icons.history,
+                        title: L10n.t('提现记录'),
+                        child: Column(
+                          children: <Widget>[
+                            ListToolbar(
+                              currentPage: summary.withdrawCurrentPage,
+                              lastPage: summary.withdrawLastPage,
+                              total: summary.withdrawTotal,
+                              perPage: _withdrawPerPage,
+                              searchHint: L10n.t('渠道 / 金额'),
+                              onSearchChanged: (String value) {
+                                _withdrawDebounce?.cancel();
+                                _withdrawDebounce = Timer(
+                                  const Duration(milliseconds: 300),
+                                  () {
+                                    _withdrawSearch = value.trim();
+                                    _withdrawPage = 1;
+                                    unawaited(_load());
+                                  },
+                                );
+                              },
+                              onPerPageChanged: (int value) {
+                                _withdrawPerPage = value;
+                                _withdrawPage = 1;
+                                unawaited(_load());
+                              },
+                              onPageChanged: (int page) {
+                                _withdrawPage = page;
+                                unawaited(_load());
+                              },
+                            ),
+                            SimpleDataTable(
+                              framed: false,
+                              minWidth: 640,
+                              columns: <String>[
+                                L10n.t('金额'),
+                                L10n.t('提现方式'),
+                                L10n.t('状态'),
+                                L10n.t('申请时间'),
+                                L10n.t('操作'),
+                              ],
+                              emptyText: L10n.t('暂无提现记录'),
+                              rows: <List<Widget>>[
+                                for (final WithdrawRecordItem item
+                                    in summary.withdrawRecords)
+                                  <Widget>[
+                                    TableMoney(item.amount),
+                                    TableText(item.channel),
+                                    TableText(item.statusText),
+                                    TableText(item.createdAt, muted: true),
+                                    item.isPending
+                                        ? TextButton(
+                                            onPressed: () => unawaited(
+                                              _cancelWithdraw(item.id),
+                                            ),
+                                            child: Text(L10n.t('取消')),
+                                          )
+                                        : const TableText('-', muted: true),
+                                  ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                SectionCard(
-                  icon: Icons.payments_outlined,
-                  title: L10n.t('返利记录'),
-                  child: Column(
-                    children: <Widget>[
-                      ListToolbar(
-                        currentPage: summary.paybackCurrentPage,
-                        lastPage: summary.paybackLastPage,
-                        total: summary.paybackTotal,
-                        perPage: _paybackPerPage,
-                        searchHint: L10n.t('用户 ID'),
-                        onSearchChanged: (String value) {
-                          _paybackDebounce?.cancel();
-                          _paybackDebounce = Timer(
-                            const Duration(milliseconds: 300),
-                            () {
-                              _paybackSearch = value.trim();
-                              _paybackPage = 1;
-                              unawaited(_load());
-                            },
-                          );
-                        },
-                        onPerPageChanged: (int value) {
-                          _paybackPerPage = value;
-                          _paybackPage = 1;
-                          unawaited(_load());
-                        },
-                        onPageChanged: (int page) {
-                          _paybackPage = page;
-                          unawaited(_load());
-                        },
-                      ),
-                      SimpleDataTable(
-                        framed: false,
-                        minWidth: 480,
-                        columns: <String>[
-                          L10n.t('返利用户ID'),
-                          L10n.t('返利金额'),
-                          L10n.t('返利时间'),
-                        ],
-                        emptyText: L10n.t('暂无返利记录'),
-                        rows: <List<Widget>>[
-                          for (final PaybackItem item in summary.paybacks)
-                            <Widget>[
-                              TableText('${item.userId}'),
-                              TableMoney(item.refGet),
-                              TableText(item.datetime, muted: true),
-                            ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SectionCard(
-                  icon: Icons.history,
-                  title: L10n.t('提现记录'),
-                  child: Column(
-                    children: <Widget>[
-                      ListToolbar(
-                        currentPage: summary.withdrawCurrentPage,
-                        lastPage: summary.withdrawLastPage,
-                        total: summary.withdrawTotal,
-                        perPage: _withdrawPerPage,
-                        searchHint: L10n.t('渠道 / 金额'),
-                        onSearchChanged: (String value) {
-                          _withdrawDebounce?.cancel();
-                          _withdrawDebounce = Timer(
-                            const Duration(milliseconds: 300),
-                            () {
-                              _withdrawSearch = value.trim();
-                              _withdrawPage = 1;
-                              unawaited(_load());
-                            },
-                          );
-                        },
-                        onPerPageChanged: (int value) {
-                          _withdrawPerPage = value;
-                          _withdrawPage = 1;
-                          unawaited(_load());
-                        },
-                        onPageChanged: (int page) {
-                          _withdrawPage = page;
-                          unawaited(_load());
-                        },
-                      ),
-                      SimpleDataTable(
-                        framed: false,
-                        minWidth: 640,
-                        columns: <String>[
-                          L10n.t('金额'),
-                          L10n.t('提现方式'),
-                          L10n.t('状态'),
-                          L10n.t('申请时间'),
-                          L10n.t('操作'),
-                        ],
-                        emptyText: L10n.t('暂无提现记录'),
-                        rows: <List<Widget>>[
-                          for (final WithdrawRecordItem item
-                              in summary.withdrawRecords)
-                            <Widget>[
-                              TableMoney(item.amount),
-                              TableText(item.channel),
-                              TableText(item.statusText),
-                              TableText(item.createdAt, muted: true),
-                              item.isPending
-                                  ? TextButton(
-                                      onPressed: () => unawaited(
-                                        _cancelWithdraw(item.id),
-                                      ),
-                                      child: Text(L10n.t('取消')),
-                                    )
-                                  : const TableText('-', muted: true),
-                            ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -670,13 +685,16 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
   }
 
   String _helperText() {
-    final bool needMin = _toBalance
-        ? _summary.balanceWithdrawRequireMin
-        : true;
+    final bool needMin = _toBalance ? _summary.balanceWithdrawRequireMin : true;
     final String min = needMin
-        ? L10n.t('，最低 ¥ {0}', <Object>[_summary.minWithdrawAmount.toStringAsFixed(2)])
+        ? L10n.t('，最低 ¥ {0}', <Object>[
+            _summary.minWithdrawAmount.toStringAsFixed(2),
+          ])
         : '';
-    return L10n.t('可提现 ¥ {0}{1}', <Object>[_summary.withdrawBalance.toStringAsFixed(2), min]);
+    return L10n.t('可提现 ¥ {0}{1}', <Object>[
+      _summary.withdrawBalance.toStringAsFixed(2),
+      min,
+    ]);
   }
 
   Future<void> _selectChannel(String channelId) async {
@@ -771,15 +789,16 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
     final Map<String, String> savedOptions = <String, String>{
       '': L10n.t('手动输入'),
       for (final WithdrawSavedAccount account in _savedAccounts)
-        '${account.id}':
-            account.isDefault ? L10n.t('{0}（默认）', <Object>[account.summary]) : account.summary,
+        '${account.id}': account.isDefault
+            ? L10n.t('{0}（默认）', <Object>[account.summary])
+            : account.summary,
     };
 
     return AlertDialog(
       title: Text(channels.isEmpty ? L10n.t('提现到余额') : L10n.t('申请提现')),
       content: SizedBox(
         width: 460,
-        child: SingleChildScrollView(
+        child: OverlayScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -789,16 +808,16 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: InputDecoration(
-                  labelText: L10n.t('金额'),
-                  helperText: _helperText(),
-                  errorText: _amountError,
-                ),
+                decoration: InputDecoration(labelText: L10n.t('金额')),
                 onChanged: (_) {
                   if (_amountError != null) {
                     setState(() => _amountError = null);
                   }
                 },
+              ),
+              FieldSubtext(
+                _amountError ?? _helperText(),
+                isError: _amountError != null,
               ),
               if (channels.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
@@ -854,7 +873,9 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                     TextField(
                       controller: _fieldControllers[field.name],
                       decoration: InputDecoration(
-                        labelText: field.required ? '${field.name} *' : field.name,
+                        labelText: field.required
+                            ? '${field.name} *'
+                            : field.name,
                       ),
                     ),
                   ],

@@ -4,4 +4,6 @@
     <string name="notification_channel_status">连接状态</string>
     <string name="notification_starting">正在启动内核</string>
     <string name="notification_running">已连接</string>
+    <string name="notification_disconnect">断开连接</string>
+    <string name="documents_root_logs">日志</string>
 </resources>

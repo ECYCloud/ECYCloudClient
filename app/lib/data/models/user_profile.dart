@@ -96,7 +96,7 @@ class UserProfile {
     lastCheckInTime: _checkInTimeText(json['last_check_in_time']),
     lastSsTime: json['last_ss_time'] as String? ?? '从未使用喵',
     ableToCheckin: json['able_to_checkin'] == true,
-    // 旧缓存无此字段时默认展示；服务端显式 false 则隐藏
+    // 缺字段默认展示；仅服务端 false 才隐藏
     enableCheckin: json['enable_checkin'] != false,
     checkinMin: (json['checkin_min'] as num?)?.toInt() ?? 1,
     checkinMax: (json['checkin_max'] as num?)?.toInt() ?? 300,
@@ -165,7 +165,7 @@ class UserProfile {
   bool get expired =>
       classExpire != null && classExpire!.isBefore(DateTime.now());
 
-  /// 有上限、名额已满且本机出口 IP 不在在线集合中；确认后才踢最旧在线 IP
+  /// 名额已满且本机 IP 不在在线集合；须用户确认后再踢最旧 IP
   bool get onlineIpLimitReached =>
       connectorLimit > 0 && onlineIpCount >= connectorLimit && !onlineIpSelf;
 
@@ -208,7 +208,6 @@ class UserProfile {
     return DateTime.tryParse(raw.replaceFirst(' ', 'T'));
   }
 
-  /// 兼容旧缓存里可能是 ISO 字符串 / null
   static String _checkInTimeText(Object? raw) {
     if (raw == null) {
       return '从未签到';

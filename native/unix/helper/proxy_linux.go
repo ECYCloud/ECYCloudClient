@@ -4,8 +4,7 @@ package main
 
 import "fmt"
 
-// Linux 的系统代理落在 gsettings 的用户级配置里，客户端自己就能读写，
-// 不必经过特权 helper；快照与还原同样由客户端负责。
+// Linux 系统代理在 gsettings 用户配置里，由客户端读写，不经 helper
 type proxyManager struct{}
 
 func newProxyManager() *proxyManager { return &proxyManager{} }

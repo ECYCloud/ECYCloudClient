@@ -39,7 +39,7 @@ type proxyManager struct {
 
 func newProxyManager() *proxyManager { return &proxyManager{} }
 
-// 服务以 LocalSystem 运行，HKCU 是 SYSTEM 自己的 hive，必须按 SID 定位用户 hive。
+// 服务以 LocalSystem 运行，HKCU 是 SYSTEM 自己的 hive，必须按 SID 定位用户 hive
 func openInternetSettings(sid string, access uint32) (registry.Key, error) {
 	return registry.OpenKey(registry.USERS, sid+`\`+internetSettingsKey, access)
 }
@@ -199,14 +199,14 @@ func loadSnapshot() (proxySnapshot, error) {
 }
 
 func saveSnapshot(snapshot proxySnapshot) error {
-	if err := os.MkdirAll(dataDir(), 0o755); err != nil {
+	if err := prepareRunDir(); err != nil {
 		return err
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(snapshotPath(), data, 0o644)
+	return os.WriteFile(snapshotPath(), data, 0o600)
 }
 
 func restoreDWord(key registry.Key, name string, value *uint32) {

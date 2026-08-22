@@ -7,8 +7,9 @@
 #include <windows.h>
 
 #include <memory>
+#include <string>
 
-// 单实例逻辑靠标题查找已有窗口，改标题会同时影响 main.cpp 与安装器
+// 只作窗口标题与托盘提示；标题含版本号，任何跨版本查找都不能靠它匹配
 extern const wchar_t kWindowTitle[];
 
 UINT ShowWindowMessageId();
@@ -22,13 +23,19 @@ class PlatformChannel {
   PlatformChannel(const PlatformChannel&) = delete;
   PlatformChannel& operator=(const PlatformChannel&) = delete;
 
-  // 返回 true 表示消息已处理，调用方不应再走默认处理
   bool HandleWindowMessage(UINT message,
                            WPARAM wparam,
                            LPARAM lparam,
                            LRESULT* result);
 
  private:
+  static LRESULT CALLBACK ViewSubclassProc(HWND hwnd,
+                                           UINT message,
+                                           WPARAM wparam,
+                                           LPARAM lparam,
+                                           UINT_PTR subclass_id,
+                                           DWORD_PTR ref_data);
+  bool HandleViewMessage(UINT message, WPARAM wparam, LPARAM lparam);
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
@@ -40,6 +47,11 @@ class PlatformChannel {
   void RestoreMainWindow();
   void EmitTrayAction(const char* action);
   void SetImeEnabled(bool enabled);
+  std::wstring TrayTip() const;
+  void ApplyStatusIcons();
+  void EnsureStatusIcons();
+  void DestroyTintedIcons();
+  HICON DefaultIcon();
 
   HWND window_ = nullptr;
   HWND view_ = nullptr;
@@ -49,6 +61,13 @@ class PlatformChannel {
   bool busy_ = false;
   bool system_proxy_ = false;
   bool tun_ = false;
+  bool mode_enabled_ = false;
+  std::string route_mode_ = "rule";
+  std::wstring status_tip_;
+  HICON default_icon_ = nullptr;
+  HICON small_icon_ = nullptr;
+  HICON big_icon_ = nullptr;
+  int icon_tint_ = -1;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
 };
 

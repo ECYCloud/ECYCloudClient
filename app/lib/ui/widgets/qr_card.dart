@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-/// 二维码卡片。码面固定黑白：深色主题下跟随前景色会让对比度不足，扫不出来。
+/// 码面固定黑白：深色主题下跟随前景色会让对比度不足，扫不出来。
 class QrCard extends StatelessWidget {
   const QrCard({super.key, required this.data, this.size = 180});
 

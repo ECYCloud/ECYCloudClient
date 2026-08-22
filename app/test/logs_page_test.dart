@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:ecycloud_client/core/logger.dart';
+import 'package:ecycloud_client/ui/node_labels.dart';
 import 'package:ecycloud_client/ui/pages/logs_page.dart';
 import 'package:ecycloud_client/ui/widgets/search_field.dart';
 import 'package:flutter/material.dart';
@@ -24,7 +25,6 @@ void main() {
     Logger.instance.debug('测试', '一条 debug');
     await tester.pump(const Duration(milliseconds: 500));
 
-    // 列表行里的级别角标也叫 debug，只点工具条上的那个
     await tester.tap(_segment('debug'));
     await tester.pumpAndSettle();
 
@@ -50,7 +50,6 @@ void main() {
     expect(find.byType(SearchField), findsOneWidget);
     expect(find.byIcon(Icons.copy_all_outlined), findsOneWidget);
 
-    // 级别条整条都要在视口内：塞进横向滚动条时它按自然宽度排版，末尾几档会被裁在屏幕外
     final Rect bar = tester.getRect(find.byType(SegmentedButton<LogLevel?>));
     expect(bar.left, greaterThanOrEqualTo(0));
     expect(bar.right, lessThanOrEqualTo(390));
@@ -75,12 +74,33 @@ void main() {
   testWidgets('silent 不出现在筛选里', (WidgetTester tester) async {
     await _pumpPage(tester);
 
-    // 它只是内核的落盘门槛，没有条目会记在这一级，选中只会得到空列表
     expect(_segment('silent'), findsNothing);
+  });
+
+  testWidgets('内核日志把 node-{id} 显示成节点名', (WidgetTester tester) async {
+    NodeLabels.configure(r'/[\p{L}\p{N}]+/u', <String, String>{
+      'node-120': '🇭🇰 香港 01',
+    });
+    addTearDown(() => NodeLabels.configure(r'/[\p{L}\p{N}]+/u'));
+
+    await _pumpPage(tester);
+
+    Logger.instance.info(
+      'mihomo',
+      Logger.kernelMessage(
+        'time="2026-08-20T18:38:55+08:00" level=info '
+        'msg="[TCP] 198.18.0.1:23016(ECYCloud.exe) --> owo.ecycloud.com:443 '
+        'match Match using 主节点[node-120]"',
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.textContaining('主节点[香港 01]'), findsOneWidget);
+    expect(find.textContaining('node-120'), findsNothing);
   });
 }
 
-// 默认 800x600 的测试画布比实际窗口窄，工具条挤不开会盖掉要验的行为
+// 默认 800x600 测试画布比实际窗口窄，会盖掉要验的行为
 Future<void> _pumpPage(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1400, 900);
   tester.view.devicePixelRatio = 1;

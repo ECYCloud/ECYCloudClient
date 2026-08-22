@@ -12,16 +12,12 @@
 
 namespace {
 
-// 会话级互斥体：普通用户无 SeCreateGlobalPrivilege，不能用 Global\ 前缀；
-// 单实例本来也只需要在当前登录会话内唯一。
+// 普通用户无 SeCreateGlobalPrivilege，不能用 Global\ 前缀
 constexpr const wchar_t kInstanceMutexName[] = L"Local\\ECYCloud.SingleInstance";
 
-// 已有实例可能正缩在托盘里，窗口隐藏但仍可被 FindWindow 找到
+// 不能按窗口标题 FindWindow：标题含版本号，覆盖安装后新旧实例标题不一致
 void ActivateExistingInstance() {
-  HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", kWindowTitle);
-  if (existing != nullptr) {
-    ::PostMessageW(existing, ShowWindowMessageId(), 0, 0);
-  }
+  ::PostMessageW(HWND_BROADCAST, ShowWindowMessageId(), 0, 0);
 }
 
 Win32Window::Point CenteredOrigin(const Win32Window::Size& size) {
@@ -53,7 +49,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::CloseHandle(instance_mutex);
     return EXIT_SUCCESS;
   }
-  // 显卡设备丢失后由看门狗重启进程，它需要在拉起新进程前先关掉这个互斥体
   gpu_watchdog::HoldInstanceMutex(instance_mutex);
 
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -74,7 +69,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
-  // 界面按窄窗排版：节点卡最小 210 逻辑像素，这个宽度正好排四列，再宽只会留白
   Win32Window::Size size(1000, 720);
   Win32Window::Point origin = CenteredOrigin(size);
   if (!window.Create(kWindowTitle, origin, size)) {

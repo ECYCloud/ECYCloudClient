@@ -7,11 +7,13 @@ import '../domain/kernel/kernel_update.dart';
 import '../l10n/l10n.dart';
 import '../domain/update/app_update.dart';
 import '../data/models/announcement.dart';
+import '../data/models/online_device.dart';
 import '../state/announcement_controller.dart';
 import '../state/auth_controller.dart';
 import '../state/connection_controller.dart';
 import '../state/update_controller.dart';
 import 'app_scope.dart';
+import 'widgets/overlay_scroll_view.dart';
 import 'pages/connections_page.dart';
 import 'pages/home_page.dart';
 import 'pages/logs_page.dart';
@@ -22,6 +24,7 @@ import 'pages/tickets_page.dart';
 import 'pages/unlock_page.dart';
 import 'shell_navigator.dart';
 import 'widgets/announcement_dialog.dart';
+import 'widgets/clipped_scroll_body.dart';
 import 'widgets/connection_status_badge.dart';
 import 'widgets/update_progress_bar.dart';
 
@@ -44,25 +47,20 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   static const List<_Destination> _destinations = <_Destination>[
     _Destination(Icons.home_outlined, Icons.home, '首页', HomePage()),
+    _Destination(Icons.dns_outlined, Icons.dns, '节点', NodesPage()),
     _Destination(
       Icons.shopping_bag_outlined,
       Icons.shopping_bag,
       '商店',
       ShopPage(),
     ),
-    _Destination(Icons.dns_outlined, Icons.dns, '节点', NodesPage()),
     _Destination(
       Icons.confirmation_number_outlined,
       Icons.confirmation_number,
       '工单',
       TicketsPage(),
     ),
-    _Destination(
-      Icons.lock_open_outlined,
-      Icons.lock_open,
-      '解锁',
-      UnlockPage(),
-    ),
+    _Destination(Icons.lock_open_outlined, Icons.lock_open, '解锁', UnlockPage()),
     _Destination(
       Icons.swap_horiz_outlined,
       Icons.swap_horiz,
@@ -133,30 +131,78 @@ class _ShellState extends State<Shell> {
     final bool connected =
         connection != null && connection.state == ConnectionPhase.connected;
     if (connected) {
-      _ipKickPollTimer ??= Timer.periodic(
-        const Duration(seconds: 60),
-        (_) {
-          final AuthController? auth = _auth;
-          if (auth != null) {
-            unawaited(auth.refreshProfile());
+      if (_ipKickPollTimer == null) {
+        // 刚连上就刷一次，别让面板拿着连接前的旧出口 IP 等满一个轮询周期
+        final AuthController? auth = _auth;
+        if (auth != null) {
+          unawaited(auth.touchPanelIdentity());
+        }
+        _ipKickPollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+          final AuthController? polled = _auth;
+          if (polled != null) {
+            unawaited(polled.touchPanelIdentity());
+            unawaited(polled.refreshProfile());
           }
-        },
-      );
+        });
+      }
       return;
     }
     _ipKickPollTimer?.cancel();
     _ipKickPollTimer = null;
   }
 
-  Future<bool> _confirmIpLimitKick() async {
+  /// 返回用户选定要踢下线的 IP；取消返回 null，列不出在线设备时返回空串交给节点挑最旧的
+  Future<String?> _confirmIpLimitKick(List<OnlineDevice> devices) async {
     if (!mounted) {
-      return false;
+      return null;
     }
+    String selected = devices.isEmpty ? '' : devices.first.ip;
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
         title: Text(L10n.t('在线 IP 已达上限')),
-        content: Text(L10n.t('当前已超出在线IP限制，是否将其中一个在线IP踢下线，以挪出位置？')),
+        content: devices.isEmpty
+            ? Text(L10n.t('当前已超出在线IP限制，是否将其中一个在线IP踢下线，以挪出位置？'))
+            : StatefulBuilder(
+                builder: (BuildContext context, StateSetter setDialogState) =>
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Text(L10n.t('当前已超出在线IP限制，请选择一个要踢下线的设备，以挪出位置：')),
+                        const SizedBox(height: 8),
+                        ClippedScrollBody(
+                          filled: false,
+                          child: RadioGroup<String>(
+                            groupValue: selected,
+                            onChanged: (String? value) => setDialogState(
+                              () => selected = value ?? selected,
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                for (final OnlineDevice device in devices)
+                                  RadioListTile<String>(
+                                    value: device.ip,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      device.device.isEmpty
+                                          ? L10n.t('第三方客户端')
+                                          : device.device,
+                                    ),
+                                    subtitle: Text(
+                                      device.location.isEmpty
+                                          ? device.ip
+                                          : '${device.ip} · ${device.location}',
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+              ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -169,7 +215,7 @@ class _ShellState extends State<Shell> {
         ],
       ),
     );
-    return ok == true;
+    return ok == true ? selected : null;
   }
 
   void _onIpKickNotice() {
@@ -198,9 +244,7 @@ class _ShellState extends State<Shell> {
         barrierDismissible: false,
         builder: (BuildContext context) => AlertDialog(
           title: Text(L10n.t('设备已下线')),
-          content: Text(
-            L10n.t('由于超出在线 IP 限制，有新 IP 请求连接，已将您的设备踢下线。'),
-          ),
+          content: Text(L10n.t('由于超出在线 IP 限制，有新 IP 请求连接，已将您的设备踢下线。')),
           actions: <Widget>[
             FilledButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -213,9 +257,7 @@ class _ShellState extends State<Shell> {
       if (api != null) {
         try {
           await api.ackIpKick();
-        } on Object {
-          // 清除失败不阻断；下次 profile 仍可能再提示
-        }
+        } on Object catch (_) {}
       }
     } finally {
       _handlingIpKick = false;
@@ -333,7 +375,7 @@ class _ShellState extends State<Shell> {
                               (
                                 BuildContext context,
                                 BoxConstraints railConstraints,
-                              ) => SingleChildScrollView(
+                              ) => OverlayScrollView(
                                 child: ConstrainedBox(
                                   constraints: BoxConstraints(
                                     minHeight: railConstraints.maxHeight,
@@ -342,7 +384,6 @@ class _ShellState extends State<Shell> {
                                     child: NavigationRail(
                                       selectedIndex: _index,
                                       onDestinationSelected: _goToTab,
-                                      // 顶距交给 NavigationRail 默认 padding（约 8），与 PageHeader 对齐
                                       leading: const Padding(
                                         padding: EdgeInsets.only(bottom: 18),
                                         child: _Brand(),
@@ -355,7 +396,9 @@ class _ShellState extends State<Shell> {
                                             selectedIcon: Icon(
                                               destination.selectedIcon,
                                             ),
-                                            label: Text(L10n.t(destination.label)),
+                                            label: Text(
+                                              L10n.t(destination.label),
+                                            ),
                                           ),
                                       ],
                                     ),
@@ -428,7 +471,8 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     final UpdateController update = widget.update;
     final AppUpdate? app = update.appUpdate;
     final KernelUpdate? kernel = update.kernelUpdate;
-    final bool appOutdated = app != null && app.outdated && app.installer != null;
+    final bool appOutdated =
+        app != null && app.outdated && app.installer != null;
     final bool kernelOutdated = kernel != null && kernel.outdated;
     final bool busy = update.appBusy || update.kernelUpgrading;
     final bool appFailed = update.appStatus.startsWith(L10n.t('更新失败'));
@@ -438,54 +482,52 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     return AlertDialog(
       icon: const Icon(Icons.system_update_alt),
       title: Text(L10n.t('必须更新')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 6,
-        children: <Widget>[
-          Text(
-            L10n.t(
-              '强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。',
-            ),
-          ),
-          if (appOutdated)
-            Text(L10n.t('客户端 {0} → {1}', <Object>[app.current, app.latest])),
-          if (kernelOutdated)
-            Text(
-              L10n.t('mihomo 内核 {0} → {1}', <Object>[
-                kernel.current,
-                kernel.latest,
-              ]),
-            ),
-          if (update.appBusy || appFailed)
-            Text(
-              update.appStatus,
-              style: appFailed
-                  ? Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: errorColor)
-                  : null,
-            ),
-          if (update.appBusy)
-            UpdateProgressBar(
-              percent: update.appPercent,
-              padding: EdgeInsets.zero,
-            ),
-          if (update.kernelUpgrading || kernelFailed)
-            Text(
-              update.kernelStatus,
-              style: kernelFailed
-                  ? Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: errorColor)
-                  : null,
-            ),
-          if (update.kernelUpgrading)
-            UpdateProgressBar(
-              percent: update.kernelPercent,
-              padding: EdgeInsets.zero,
-            ),
-        ],
+      content: OverlayScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 6,
+          children: <Widget>[
+            Text(L10n.t('强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。')),
+            if (appOutdated)
+              Text(L10n.t('客户端 {0} → {1}', <Object>[app.current, app.latest])),
+            if (kernelOutdated)
+              Text(
+                L10n.t('mihomo 内核 {0} → {1}', <Object>[
+                  kernel.current,
+                  kernel.latest,
+                ]),
+              ),
+            if (update.appBusy || appFailed)
+              Text(
+                update.appStatus,
+                style: appFailed
+                    ? Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: errorColor)
+                    : null,
+              ),
+            if (update.appBusy)
+              UpdateProgressBar(
+                percent: update.appPercent,
+                padding: EdgeInsets.zero,
+              ),
+            if (update.kernelUpgrading || kernelFailed)
+              Text(
+                update.kernelStatus,
+                style: kernelFailed
+                    ? Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: errorColor)
+                    : null,
+              ),
+            if (update.kernelUpgrading)
+              UpdateProgressBar(
+                percent: update.kernelPercent,
+                padding: EdgeInsets.zero,
+              ),
+          ],
+        ),
       ),
       actions: <Widget>[
         TextButton(
@@ -515,9 +557,7 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
               update.appBusy
                   ? (update.appPercent == null
                         ? L10n.t('正在更新客户端…')
-                        : L10n.t('正在更新客户端 {0}%', <Object>[
-                            update.appPercent!,
-                          ]))
+                        : L10n.t('正在更新客户端 {0}%', <Object>[update.appPercent!]))
                   : L10n.t('更新客户端'),
             ),
           ),

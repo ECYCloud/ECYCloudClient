@@ -94,7 +94,6 @@ class KernelService : Service() {
         @Volatile
         private var ui: IUiCallback? = null
 
-        /** 界面在前台时把磁贴的点击交给 Dart 状态机，返回 false 表示界面接不了 */
         fun requestToggle(): Boolean {
             val callback = ui ?: return false
             return try {

@@ -50,17 +50,15 @@ class _WindowsZoomCursor extends MouseCursor {
     required int size,
   }) async {
     final Uint8List buffer = await _paintBgra(icon, size);
-    await SystemChannels.mouseCursor.invokeMethod<String>(
-      'createCustomCursor/windows',
-      <String, dynamic>{
-        'name': name,
-        'buffer': buffer,
-        'width': size,
-        'height': size,
-        'hotX': size * 0.35,
-        'hotY': size * 0.35,
-      },
-    );
+    await SystemChannels.mouseCursor
+        .invokeMethod<String>('createCustomCursor/windows', <String, dynamic>{
+          'name': name,
+          'buffer': buffer,
+          'width': size,
+          'height': size,
+          'hotX': size * 0.35,
+          'hotY': size * 0.35,
+        });
     return _WindowsZoomCursor._(name);
   }
 

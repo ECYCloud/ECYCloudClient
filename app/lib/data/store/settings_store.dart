@@ -18,6 +18,7 @@ class AppSettings {
     required this.allowLan,
     required this.ipv6Enabled,
     required this.logLevel,
+    required this.routeMode,
     required this.autoConnect,
     required this.launchAtLogin,
     required this.closeToTray,
@@ -31,15 +32,14 @@ class AppSettings {
 
   const AppSettings.defaults()
     : tunEnabled = false,
-      // 与内核保持一致的关闭默认值：strict-route 在 Windows 上是靠 WFP 粗暴拦 53
-      // 端口并让「不支持的网络」不可达实现的（内核的 TUN 走 metacubex/sing-tun），
-      // 会连带打断走回环与 IPv6 的本机 IPC，代价远大于它防的那点 DNS 泄露
+      // 默认关：Windows 上 strict-route 靠 WFP 拦 53 并让不支持的网络不可达，会打断回环/IPv6 IPC
       tunStrictRoute = false,
       systemProxyEnabled = true,
       mixedPort = 10203,
       allowLan = false,
       ipv6Enabled = true,
       logLevel = LogLevel.warn,
+      routeMode = 'rule',
       autoConnect = false,
       launchAtLogin = false,
       closeToTray = true,
@@ -57,6 +57,7 @@ class AppSettings {
   final bool allowLan;
   final bool ipv6Enabled;
   final LogLevel logLevel;
+  final String routeMode;
   final bool autoConnect;
   final bool launchAtLogin;
   final bool closeToTray;
@@ -75,6 +76,7 @@ class AppSettings {
     bool? allowLan,
     bool? ipv6Enabled,
     LogLevel? logLevel,
+    String? routeMode,
     bool? autoConnect,
     bool? launchAtLogin,
     bool? closeToTray,
@@ -92,6 +94,7 @@ class AppSettings {
     allowLan: allowLan ?? this.allowLan,
     ipv6Enabled: ipv6Enabled ?? this.ipv6Enabled,
     logLevel: logLevel ?? this.logLevel,
+    routeMode: routeMode ?? this.routeMode,
     autoConnect: autoConnect ?? this.autoConnect,
     launchAtLogin: launchAtLogin ?? this.launchAtLogin,
     closeToTray: closeToTray ?? this.closeToTray,
@@ -114,14 +117,11 @@ class AppSettings {
       !listEquals(perAppPackages, other.perAppPackages) ||
       !listEquals(tunExcludeAddresses, other.tunExcludeAddresses);
 
-  // 内核至少按 info 输出，[logLevel] 只作为落盘门槛：内核在 warning 级几乎只在出错时
-  // 说话，日志页会退化成一堵错误噪声墙，首次连接时的规则集下载进度也只有
-  // info 级才有。日志页读的是内存环形缓冲，全量显示不额外占磁盘。
-  // 想让内核更啰嗦就把设置调到 debug，那时落盘门槛一并降低。
+  // 内核至少按 info 输出；logLevel 只作落盘门槛，warning 级看不到规则集下载进度
   String get kernelLogLevel =>
       (logLevel.index < LogLevel.info.index ? logLevel : LogLevel.info).label;
 
-  /// [takeover] 为假即内核常驻但不接管出口：TUN 关掉，只留控制面与 mixed 口。
+  /// takeover 为假时内核常驻但不接管出口：关掉 TUN，只留控制面与 mixed 口
   LocalTemplateOptions toTemplateOptions({
     required String tunInterfaceName,
     required bool takeover,
@@ -133,6 +133,7 @@ class AppSettings {
     allowLan: allowLan,
     ipv6Enabled: ipv6Enabled,
     logLevel: kernelLogLevel,
+    routeMode: routeMode,
     tunInterfaceName: tunInterfaceName,
     tunIncludePackages: perAppMode == PerAppProxyMode.include
         ? perAppPackages
@@ -155,6 +156,7 @@ class AppSettings {
     'allow_lan': allowLan,
     'ipv6_enabled': ipv6Enabled,
     'log_level': logLevel.label,
+    'route_mode': routeMode,
     'auto_connect': autoConnect,
     'launch_at_login': launchAtLogin,
     'close_to_tray': closeToTray,
@@ -181,6 +183,7 @@ class AppSettings {
         (LogLevel level) => level.label == json['log_level'],
         orElse: () => fallback.logLevel,
       ),
+      routeMode: _routeMode(json['route_mode'], fallback.routeMode),
       autoConnect: json['auto_connect'] as bool? ?? fallback.autoConnect,
       launchAtLogin: json['launch_at_login'] as bool? ?? fallback.launchAtLogin,
       closeToTray: json['close_to_tray'] as bool? ?? fallback.closeToTray,
@@ -204,6 +207,15 @@ class AppSettings {
           fallback.tunExcludeAddresses,
     );
   }
+
+  static const Set<String> _routeModes = <String>{'rule', 'global', 'direct'};
+
+  static String _routeMode(Object? raw, String fallback) {
+    if (raw is String && _routeModes.contains(raw)) {
+      return raw;
+    }
+    return fallback;
+  }
 }
 
 class SettingsStore {
@@ -225,12 +237,11 @@ class SettingsStore {
     if (version == schema) {
       return AppSettings.fromJson(data);
     }
-    // schema 1 把 tun_strict_route 默认成了开，这个默认值本身定错了，
-    // 迁移时只丢这一个键让它回落到新默认值，其余设置照旧保留
+    // schema 1 把 tun_strict_route 默认成开，迁移只丢这一键回落新默认
     if (version == 1) {
       return AppSettings.fromJson(data..remove('tun_strict_route'));
     }
-    // 无 schema 的文件出自尚未定型的预发布版本，整份丢弃
+    // 无 schema 的预发布文件整份丢弃
     return const AppSettings.defaults();
   }
 

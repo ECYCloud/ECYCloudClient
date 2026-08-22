@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-// utun 由系统内建，无需安装驱动；能不能建网卡只取决于 helper 是不是 root
+// utun 由系统内建，只需 helper 是 root
 func ensureTunReady() (bool, string) {
 	if _, err := os.Stat(kernelPath()); err != nil {
 		return false, fmt.Sprintf("内核程序缺失: %s", kernelPath())

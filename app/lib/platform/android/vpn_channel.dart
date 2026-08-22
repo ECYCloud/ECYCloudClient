@@ -2,8 +2,7 @@ import 'package:flutter/services.dart';
 
 import '../service/service_transport.dart';
 
-/// VpnService 与内核都在同一个进程里，指令走 Platform Channel 而不是套接字，
-/// 指令名、请求体与应答字段与桌面端特权服务完全一致。
+/// 指令与桌面特权服务一致。
 class VpnChannel implements ServiceTransport {
   const VpnChannel();
 

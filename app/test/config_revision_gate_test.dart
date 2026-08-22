@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 
-/// 与 connection_controller 中「本地有配置时先比 revision」的判定一致。
 bool shouldSkipProfileFetch({
   required String localRevision,
   required String remoteRevision,
@@ -14,10 +13,7 @@ bool shouldSkipProfileFetch({
 void main() {
   test('revision 未变时应跳过 /config/clash', () {
     expect(
-      shouldSkipProfileFetch(
-        localRevision: 'abc',
-        remoteRevision: 'abc',
-      ),
+      shouldSkipProfileFetch(localRevision: 'abc', remoteRevision: 'abc'),
       isTrue,
     );
   });

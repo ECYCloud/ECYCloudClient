@@ -6,6 +6,7 @@ import '../../data/api/api_exception.dart';
 import '../../data/models/account.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'tickets_page.dart';
@@ -90,14 +91,11 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             children: <Widget>[
               SafeArea(
                 bottom: false,
-                child: PageHeader(
-                  title: L10n.t('账户状态'),
-                  showBackButton: false,
-                ),
+                child: PageHeader(title: L10n.t('账户状态'), showBackButton: false),
               ),
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.all(14),
+                  padding: AppTheme.pageScrollPadding,
                   children: <Widget>[
                     if (status == null)
                       SectionCard(
@@ -170,14 +168,10 @@ class _PendingDeletionCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            L10n.t('预计删除时间：{0}', <Object>[
-              status.deletionTime ?? L10n.t('未知'),
-            ]),
+            L10n.t('预计删除时间：{0}', <Object>[status.deletionTime ?? L10n.t('未知')]),
           ),
           const SizedBox(height: 6),
-          Text(
-            L10n.t('状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。'),
-          ),
+          Text(L10n.t('状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。')),
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
@@ -208,9 +202,7 @@ class _BannedCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Text(
-            L10n.t('封禁原因：{0}', <Object>[
-              status.banReason ?? L10n.t('特殊原因被封禁'),
-            ]),
+            L10n.t('封禁原因：{0}', <Object>[status.banReason ?? L10n.t('特殊原因被封禁')]),
           ),
           const SizedBox(height: 6),
           if (status.banPermanent ||
@@ -226,9 +218,7 @@ class _BannedCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              L10n.t('封禁结束时间：{0}', <Object>[
-                status.banEndTime ?? L10n.t('未知'),
-              ]),
+              L10n.t('封禁结束时间：{0}', <Object>[status.banEndTime ?? L10n.t('未知')]),
             ),
           ],
           const SizedBox(height: 12),
@@ -249,12 +239,9 @@ class _BannedCard extends StatelessWidget {
                       ),
                     );
                   },
-                  child: Text(L10n.t('发送工单')),
+                  child: Text('${L10n.t('发送工单')} ›'),
                 ),
-                Text(
-                  L10n.t(' 与我们联系。'),
-                  style: theme.textTheme.bodySmall,
-                ),
+                Text(L10n.t(' 与我们联系。'), style: theme.textTheme.bodySmall),
               ],
             )
           else if (status.supportEmail.isNotEmpty)
@@ -267,16 +254,13 @@ class _BannedCard extends StatelessWidget {
                 ),
                 TextButton(
                   onPressed: () => unawaited(
-                    AppScope.of(context).platform.openUrl(
-                      'mailto:${status.supportEmail}',
-                    ),
+                    AppScope.of(
+                      context,
+                    ).platform.openUrl('mailto:${status.supportEmail}'),
                   ),
                   child: Text(status.supportEmail),
                 ),
-                Text(
-                  L10n.t(' 与我们联系。'),
-                  style: theme.textTheme.bodySmall,
-                ),
+                Text(L10n.t(' 与我们联系。'), style: theme.textTheme.bodySmall),
               ],
             ),
         ],

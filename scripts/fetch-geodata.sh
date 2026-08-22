@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# 按 kernel.lock.json 取 geodata 并落到指定目录（桌面端随内核分发，Android 进 APK assets）。
+# 按 kernel.lock.json 取 geodata 并落到指定目录。
 # 用法: fetch-geodata.sh <输出目录>
-#
-# 内核解析 GEOIP / GEOSITE 规则时会就地读这两个库，缺文件就按 geox-url 同步下载
-# （mihomo component/geodata/init.go 的 InitGeoIP / InitGeoSite，每文件 90 秒超时），
-# 面板下发的地址指向 GitHub，在目标网络里必然超时，整份配置随之校验失败、内核起不来。
+# 缺文件时内核按 geox-url 同步下载（每文件 90 秒），面板地址在目标网络不可达。
 set -euo pipefail
 
 out_dir="${1:?用法: fetch-geodata.sh <输出目录>}"
@@ -15,9 +12,7 @@ lock="$script_dir/kernel.lock.json"
 cache_dir="$root_dir/build/cache"
 mkdir -p "$cache_dir" "$out_dir"
 
-# 上游只有滚动的 latest tag、每天重发，锁不住 sha256（见 kernel.lock.json 的说明）。
-# 这里只拦 404 页面与截断下载：体积下限 + MMDB 尾部的 MaxMind 元数据魔数；
-# 内容合法性由内核运行时的 mmdb.Verify / geodata.Verify 兜底。
+# 上游滚动 latest、锁不住 sha256；只拦 404 与截断（体积下限 + MaxMind 魔数）
 for name in mmdb geosite; do
     url="$(jq -er --arg n "$name" '.geodata.assets[$n].url' "$lock")"
     target="$(jq -er --arg n "$name" '.geodata.assets[$n].target' "$lock")"

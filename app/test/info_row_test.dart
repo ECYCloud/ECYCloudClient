@@ -38,7 +38,6 @@ void main() {
       ),
     );
 
-    // 取值一律靠列右边缘，与标签宽度、取值长短无关
     expect(
       tester.getRect(find.text('不限速')).right,
       tester.getRect(find.text('2027-04-07')).right,

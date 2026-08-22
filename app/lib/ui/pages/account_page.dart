@@ -8,6 +8,7 @@ import '../../data/models/account.dart';
 import '../../data/models/user_profile.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../theme.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
@@ -19,6 +20,7 @@ import 'delete_account_page.dart';
 import 'edit_account_page.dart';
 import 'invite_page.dart';
 import 'login_logs_page.dart';
+import 'operation_logs_page.dart';
 import 'purchases_page.dart';
 import 'recharge_page.dart';
 import 'subscription_strategy_page.dart';
@@ -36,7 +38,9 @@ Future<void> togglePurchaseAutoRenewDialog(
     context: context,
     builder: (BuildContext context) => AlertDialog(
       title: Text(enable ? L10n.t('确认开启自动续费？') : L10n.t('确认关闭自动续费？')),
-      content: Text(enable ? L10n.t('开启后将在套餐到期时自动续费。') : L10n.t('关闭后，您可以随时重新开启自动续费。')),
+      content: Text(
+        enable ? L10n.t('开启后将在套餐到期时自动续费。') : L10n.t('关闭后，您可以随时重新开启自动续费。'),
+      ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
@@ -70,7 +74,9 @@ Future<void> togglePurchaseAutoRenewDialog(
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          message.isEmpty ? (enable ? L10n.t('自动续费开启成功') : L10n.t('自动续费关闭成功')) : message,
+          message.isEmpty
+              ? (enable ? L10n.t('自动续费开启成功') : L10n.t('自动续费关闭成功'))
+              : message,
         ),
         behavior: SnackBarBehavior.floating,
       ),
@@ -104,8 +110,9 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   Future<void> _loadKillFlag() async {
-    final AuthOptions? options =
-        await AppScope.of(context).auth.fetchAuthOptions();
+    final AuthOptions? options = await AppScope.of(
+      context,
+    ).auth.fetchAuthOptions();
     if (!mounted || options == null) {
       return;
     }
@@ -140,7 +147,7 @@ class _AccountPageState extends State<AccountPage> {
               builder: (BuildContext context, _) {
                 final UserProfile? profile = auth.profile;
                 return ListView(
-                  padding: const EdgeInsets.all(14),
+                  padding: AppTheme.pageScrollPadding,
                   children: <Widget>[
                     _UserCard(
                       profile: profile,
@@ -179,8 +186,10 @@ class _AccountPageState extends State<AccountPage> {
                           ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading:
-                                const Icon(Icons.card_giftcard_outlined, size: 20),
+                            leading: const Icon(
+                              Icons.card_giftcard_outlined,
+                              size: 20,
+                            ),
                             title: Text(L10n.t('邀请返利')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
@@ -228,6 +237,18 @@ class _AccountPageState extends State<AccountPage> {
                           ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.manage_history, size: 20),
+                            title: Text(L10n.t('操作记录')),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (BuildContext context) =>
+                                    const OperationLogsPage(),
+                              ),
+                            ),
+                          ),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
                             leading: const Icon(
                               Icons.account_balance_wallet_outlined,
                               size: 20,
@@ -243,8 +264,10 @@ class _AccountPageState extends State<AccountPage> {
                           ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading:
-                                const Icon(Icons.receipt_long_outlined, size: 20),
+                            leading: const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 20,
+                            ),
                             title: Text(L10n.t('余额记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
@@ -256,8 +279,10 @@ class _AccountPageState extends State<AccountPage> {
                           ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading:
-                                const Icon(Icons.shopping_bag_outlined, size: 20),
+                            leading: const Icon(
+                              Icons.shopping_bag_outlined,
+                              size: 20,
+                            ),
                             title: Text(L10n.t('购买记录')),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push(
@@ -379,8 +404,14 @@ class _UserCard extends StatelessWidget {
           ),
           if (plan != null) ...<Widget>[
             InfoRow(label: L10n.t('到期'), value: plan.expireAt),
-            InfoRow(label: L10n.t('剩余天数'), value: L10n.t('{0} 天', <Object>[plan.remainingDays])),
-            InfoRow(label: L10n.t('自动续费'), value: plan.autoRenew ? plan.renewAt : '-'),
+            InfoRow(
+              label: L10n.t('剩余天数'),
+              value: L10n.t('{0} 天', <Object>[plan.remainingDays]),
+            ),
+            InfoRow(
+              label: L10n.t('自动续费'),
+              value: plan.autoRenew ? plan.renewAt : '-',
+            ),
           ],
           InfoRow(
             label: L10n.t('限速'),

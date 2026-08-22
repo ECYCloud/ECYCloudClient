@@ -8,8 +8,7 @@ import (
 	"os/exec"
 )
 
-// LaunchDaemon 由 root 常驻，GUI 每次连接都不再弹密码；
-// 装包时装一次，之后升级客户端不需要重新授权。
+// LaunchDaemon 由 root 常驻，装一次后 GUI 不再弹密码
 const (
 	daemonLabel = "com.ecycloud.helper"
 	daemonPlist = "/Library/LaunchDaemons/" + daemonLabel + ".plist"

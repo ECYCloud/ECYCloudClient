@@ -1,5 +1,4 @@
 #!/bin/sh
-# helper 自己会建系统用户、写 systemd 单元并 enable --now，覆盖安装无需额外处理
 set -e
 /opt/ecycloud/ecycloud-helper install
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then

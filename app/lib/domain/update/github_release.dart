@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-/// GitHub Releases 的一条发布。`version` 只保留 `X.Y.Z` 号段，
-/// 通道由 `prerelease` 表达，tag 上的 `-pre` 之类后缀不进版本号。
+/// version 只保留 X.Y.Z；通道由 prerelease 表达，tag 后缀不进版本号
 class GithubRelease {
   const GithubRelease({
     required this.version,
@@ -96,7 +95,6 @@ class GithubRelease {
     }
   }
 
-  /// 时间线上最新的正式版；全是 Pre-release 时为空
   static GithubRelease? newestStable(List<GithubRelease> releases) {
     for (final GithubRelease release in releases) {
       if (!release.prerelease) {

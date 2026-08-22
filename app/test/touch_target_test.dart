@@ -1,15 +1,16 @@
+import 'dart:io';
+
 import 'package:ecycloud_client/ui/theme.dart';
+import 'package:ecycloud_client/ui/widgets/delay_badge.dart';
+import 'package:ecycloud_client/ui/widgets/group_delay_test_button.dart';
 import 'package:ecycloud_client/ui/widgets/page_header.dart';
 import 'package:ecycloud_client/ui/widgets/refresh_button.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// 小图标键在触控端（Android/iOS）要有 48dp 触控盒，桌面用鼠标保持紧凑。
-// 渲染类断言只在测试环境的默认平台（android）下做：AppTheme.light() 是
-// static final，第一次访问就冻结 ThemeData.platform（materialTapTargetSize 由它
-// 推出），同进程内改 debugDefaultTargetPlatformOverride 也不会重建，换平台再渲染
-// 量到的是上一个平台的主题。桌面端因此只断言取值，不重复渲染。
+// AppTheme.light() 是 static final，第一次访问就冻结 ThemeData.platform；
+// 渲染断言只在默认 android 下做，桌面端只断言取值。
 void main() {
   testWidgets('触控端小图标键触控盒恰好 48', (WidgetTester tester) async {
     expect(AppTheme.isTouch, isTrue, reason: '测试默认平台应为 android');
@@ -27,8 +28,7 @@ void main() {
       ),
     );
 
-    // 返回键与刷新键。断言「恰好等于」而非下限：visualDensity 会把紧约束的 min
-    // 减 8 使其退化成松约束，盒子随内容缩小，图标就偏出右侧那一列
+    // 须恰好等于 48：visualDensity 会把紧约束退化成松约束，只查下限漏不掉
     final Finder iconButtons = find.byType(IconButton);
     expect(iconButtons, findsNWidgets(2));
     expect(AppTheme.minTapTarget, 48);
@@ -49,5 +49,46 @@ void main() {
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
+  });
+
+  testWidgets('延迟测试键触控盒恰好 minTapTarget', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Row(
+            children: <Widget>[
+              DelayBadge(
+                delay: 0,
+                testing: false,
+                unreachable: false,
+                onTest: () {},
+              ),
+              GroupDelayTestButton(testing: false, onPressed: () {}),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.getSize(find.byType(DelayBadge)),
+      Size.square(AppTheme.minTapTarget),
+    );
+    expect(
+      tester.getSize(find.byType(GroupDelayTestButton)),
+      Size.square(AppTheme.minTapTarget),
+    );
+  });
+
+  test('登录记住密码用可聚焦 InkWell，不用 GestureDetector', () {
+    final String login = File('lib/ui/pages/login_page.dart').readAsStringSync();
+    expect(login.contains('GestureDetector('), isFalse);
+    expect(login.contains('InkWell('), isTrue);
+  });
+
+  test('首页公告键取同一份触控盒', () {
+    final String home = File('lib/ui/pages/home_page.dart').readAsStringSync();
+    expect(home.contains('AppTheme.minTapTarget'), isTrue);
   });
 }

@@ -7,9 +7,6 @@ import 'package:ecycloud_client/ui/widgets/switch_tile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// 卡片里每行右侧的控件要落在同一条右边缘上：ListTile 自己会把 trailing 靠到内边距
-// 上，而 IconButton 的图标会被触摸盒居中而内缩，缩放后的开关也会内缩，这些偏移只
-// 在渲染后才看得出来，改动很容易把某一行挪出这一列。
 void main() {
   testWidgets('卡片内各行右侧控件共用一条右边缘', (WidgetTester tester) async {
     await tester.pumpWidget(
@@ -25,6 +22,12 @@ void main() {
                   trailing: Icon(Icons.chevron_right),
                 ),
                 SwitchTile(title: '开关', value: true, onChanged: (_) {}),
+                SwitchTile(
+                  title: '带设置',
+                  value: true,
+                  onChanged: (_) {},
+                  onSettings: () {},
+                ),
                 ListTile(
                   title: const Text('下拉选择'),
                   trailing: OptionDropdown<int>(
@@ -34,7 +37,6 @@ void main() {
                   ),
                 ),
                 RefreshButton.tile(title: '检查更新', onRefresh: () async {}),
-                // 设置页「储存路径」那行的等价搭法
                 Padding(
                   padding: EdgeInsets.fromLTRB(
                     16,
@@ -68,12 +70,16 @@ void main() {
     final Rect card = tester.getRect(find.byType(Card));
     double rightOf(Finder finder) => card.right - tester.getRect(finder).right;
 
-    // 开关按 centerRight 缩放，绘制后的右边缘即布局盒子的右边缘
     final double column = rightOf(find.byIcon(Icons.chevron_right));
     expect(
-      rightOf(find.byType(Switch)),
+      rightOf(find.byType(Switch).first),
       moreOrLessEquals(column),
       reason: '开关',
+    );
+    expect(
+      rightOf(find.byType(Switch).last),
+      moreOrLessEquals(column),
+      reason: '带齿轮的开关',
     );
     expect(
       rightOf(find.byType(OptionDropdown<int>)),
@@ -91,7 +97,6 @@ void main() {
       reason: '日志目录',
     );
 
-    // 同一列的尾部图标必须一样大，否则小的那个看着就是没对齐
     final Size iconSize = tester.getSize(find.byIcon(Icons.chevron_right));
     expect(
       tester.getSize(find.byIcon(Icons.refresh)),
@@ -104,9 +109,7 @@ void main() {
       reason: '日志目录图标',
     );
 
-    // 图标尺寸不等于可点范围：对齐是靠挪内边距，不是靠削触摸盒。
-    // 必须断言「恰好等于 minTapTarget」——只查下限会漏掉 visualDensity 把紧约束
-    // 退化成松约束的情况（盒子变小，图标随之偏出右列，见 AppTheme.minTapTarget）
+    // 须恰好等于 minTapTarget：visualDensity 会把紧约束退化成松约束，只查下限漏不掉
     final Finder buttons = find.byType(IconButton);
     for (int i = 0; i < buttons.evaluate().length; i++) {
       final Size box = tester.getSize(buttons.at(i));
@@ -115,13 +118,28 @@ void main() {
     }
   });
 
-  // 上面那行是设置页「储存路径」的等价搭法；那行的右内边距若不再取同一个算法，
-  // 这里测得再准也管不到它
   test('设置页的日志目录按钮取同一份内边距算法', () {
     final String settings = File(
       'lib/ui/pages/settings_page.dart',
     ).readAsStringSync();
 
     expect(settings.contains('AppTheme.trailingIconButtonInset('), isTrue);
+  });
+
+  test('系统代理与 TUN 的绕过入口在开关行齿轮上，不再单独占一行', () {
+    final String settings = File(
+      'lib/ui/pages/settings_page.dart',
+    ).readAsStringSync();
+    final String home = File('lib/ui/pages/home_page.dart').readAsStringSync();
+    final String tile = File(
+      'lib/ui/widgets/switch_tile.dart',
+    ).readAsStringSync();
+
+    expect(settings.contains("title: Text(L10n.t('系统代理绕过'))"), isFalse);
+    expect(settings.contains("title: Text(L10n.t('TUN 排除自定义网段'))"), isFalse);
+    expect(settings.contains('openSystemProxyBypass'), isTrue);
+    expect(home.contains('openSystemProxyBypass'), isTrue);
+    expect(home.contains('openTunExcludeAddresses'), isTrue);
+    expect(tile.contains('Icons.settings_outlined'), isTrue);
   });
 }

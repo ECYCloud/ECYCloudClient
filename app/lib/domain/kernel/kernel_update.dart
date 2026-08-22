@@ -2,14 +2,11 @@ import 'package:http/http.dart' as http;
 
 import '../update/github_release.dart';
 
-/// mihomo 内核版本检查：比对本机版本与 GitHub 最新正式版。
-/// 真正的下载、校验与替换由特权服务做（IPC `kernel.upgrade`），这里只出版本号。
 class KernelUpdate {
   const KernelUpdate({required this.current, required this.latest});
 
   static const String repo = 'MetaCubeX/mihomo';
 
-  /// 本机内核自报版本，空表示没问到（特权服务未运行）
   final String current;
   final String latest;
 

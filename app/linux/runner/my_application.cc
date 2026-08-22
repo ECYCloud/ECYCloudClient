@@ -68,7 +68,6 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, kWindowTitle);
   }
 
-  // 界面按窄窗排版：节点卡最小 210 逻辑像素，这个宽度正好排四列，再宽只会留白
   gtk_window_set_default_size(window, 1000, 720);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

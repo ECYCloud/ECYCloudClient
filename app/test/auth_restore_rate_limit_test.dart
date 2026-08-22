@@ -20,7 +20,6 @@ void main() {
   });
 
   test('鉴权失败与限流不得混用同一处理分支', () {
-    // restore：unauthorized → 清凭据进登录页；rateLimited → 保留会话
     const List<int> statuses = <int>[401, 429];
     final Map<int, bool> keepSession = <int, bool>{
       for (final int code in statuses)

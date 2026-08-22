@@ -18,6 +18,9 @@ dependencies:
   flutter_svg: ^2.3.0
   http: ^1.6.0
   intl: any
+  media_kit: ^1.2.6
+  media_kit_libs_video: ^1.0.7
+  media_kit_video: ^2.0.1
   qr_flutter: ^4.1.0
 
 dev_dependencies:
@@ -31,3 +34,5 @@ flutter:
     # 由 scripts/sync-assets.ps1 从面板目录刷新后入库；策略组图标不在这里，由面板下发地址后运行期缓存
     - assets/flags/
     - assets/regions.json
+    - assets/alipay.png
+    - assets/wxpay.png

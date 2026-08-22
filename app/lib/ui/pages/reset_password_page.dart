@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
+import '../widgets/field_subtext.dart';
+import '../widgets/overlay_scroll_view.dart';
 import 'login_page.dart';
 import '../../l10n/l10n.dart';
 
@@ -39,9 +41,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     if (!_emailFormKey.currentState!.validate()) {
       return;
     }
-    final bool ok = await auth.requestPasswordReset(
-      email: _email.text.trim(),
-    );
+    final bool ok = await auth.requestPasswordReset(email: _email.text.trim());
     if (!mounted || !ok) {
       return;
     }
@@ -102,7 +102,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     return Scaffold(
       appBar: AppBar(title: Text(L10n.t('重置密码'))),
       body: Center(
-        child: SingleChildScrollView(
+        child: OverlayScrollView(
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 400),
@@ -129,7 +129,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                               ),
                             ),
                             const SizedBox(height: 24),
-                            TextFormField(
+                            TextField(
                               controller: _token,
                               autocorrect: false,
                               enableSuggestions: false,
@@ -140,8 +140,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                                 labelText: L10n.t('重置链接或 Token'),
                                 prefixIcon: Icon(Icons.key_outlined),
                               ),
-                              validator: (String? value) =>
-                                  (value == null || value.trim().isEmpty)
+                            ).validated(
+                              () => _token.text.trim().isEmpty
                                   ? L10n.t('请填写重置链接或 token')
                                   : null,
                             ),
@@ -149,80 +149,85 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                             EmailOtpIme(
                               builder:
                                   (BuildContext context, FocusNode focusNode) {
-                                return TextFormField(
-                                  controller: _password,
-                                  focusNode: focusNode,
-                                  obscureText: _obscure,
-                                  keyboardType: TextInputType.visiblePassword,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  inputFormatters: <TextInputFormatter>[
-                                    asciiOnlyFormatter,
-                                  ],
-                                  decoration: InputDecoration(
-                                    labelText: L10n.t('新密码'),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscure
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
+                                    return TextField(
+                                      controller: _password,
+                                      focusNode: focusNode,
+                                      obscureText: _obscure,
+                                      keyboardType:
+                                          TextInputType.visiblePassword,
+                                      autocorrect: false,
+                                      enableSuggestions: false,
+                                      inputFormatters: <TextInputFormatter>[
+                                        asciiOnlyFormatter,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('新密码'),
+                                        prefixIcon: const Icon(
+                                          Icons.lock_outline,
+                                        ),
+                                        suffixIcon: IconButton(
+                                          icon: Icon(
+                                            _obscure
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _obscure = !_obscure,
+                                          ),
+                                        ),
                                       ),
-                                      onPressed: () =>
-                                          setState(() => _obscure = !_obscure),
-                                    ),
-                                  ),
-                                  validator: (String? value) {
-                                    if (value == null || value.isEmpty) {
-                                      return L10n.t('请填写密码');
-                                    }
-                                    if (value.length < 8) {
-                                      return L10n.t('密码至少 8 位');
-                                    }
-                                    return null;
+                                    ).validated(() {
+                                      if (_password.text.isEmpty) {
+                                        return L10n.t('请填写密码');
+                                      }
+                                      if (_password.text.length < 8) {
+                                        return L10n.t('密码至少 8 位');
+                                      }
+                                      return null;
+                                    });
                                   },
-                                );
-                              },
                             ),
                             const SizedBox(height: 16),
                             EmailOtpIme(
                               builder:
                                   (BuildContext context, FocusNode focusNode) {
-                                return TextFormField(
-                                  controller: _repassword,
-                                  focusNode: focusNode,
-                                  obscureText: _obscureRe,
-                                  keyboardType: TextInputType.visiblePassword,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  inputFormatters: <TextInputFormatter>[
-                                    asciiOnlyFormatter,
-                                  ],
-                                  decoration: InputDecoration(
-                                    labelText: L10n.t('确认密码'),
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscureRe
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
+                                    return TextField(
+                                      controller: _repassword,
+                                      focusNode: focusNode,
+                                      obscureText: _obscureRe,
+                                      keyboardType:
+                                          TextInputType.visiblePassword,
+                                      autocorrect: false,
+                                      enableSuggestions: false,
+                                      inputFormatters: <TextInputFormatter>[
+                                        asciiOnlyFormatter,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: L10n.t('确认密码'),
+                                        prefixIcon: const Icon(
+                                          Icons.lock_outline,
+                                        ),
+                                        suffixIcon: IconButton(
+                                          icon: Icon(
+                                            _obscureRe
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _obscureRe = !_obscureRe,
+                                          ),
+                                        ),
                                       ),
-                                      onPressed: () => setState(
-                                        () => _obscureRe = !_obscureRe,
-                                      ),
-                                    ),
-                                  ),
-                                  validator: (String? value) {
-                                    if (value == null || value.isEmpty) {
-                                      return L10n.t('请再次填写密码');
-                                    }
-                                    if (value != _password.text) {
-                                      return L10n.t('两次密码不一致');
-                                    }
-                                    return null;
+                                    ).validated(() {
+                                      if (_repassword.text.isEmpty) {
+                                        return L10n.t('请再次填写密码');
+                                      }
+                                      if (_repassword.text != _password.text) {
+                                        return L10n.t('两次密码不一致');
+                                      }
+                                      return null;
+                                    });
                                   },
-                                );
-                              },
                             ),
                             if (auth.error != null) ...<Widget>[
                               const SizedBox(height: 8),
@@ -243,6 +248,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                                     )
                                   : Text(L10n.t('确认重置')),
                             ),
+                            const SizedBox(height: 8),
                             TextButton(
                               onPressed: _entering
                                   ? null
@@ -271,7 +277,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                               ),
                             ),
                             const SizedBox(height: 24),
-                            TextFormField(
+                            TextField(
                               controller: _email,
                               keyboardType: TextInputType.emailAddress,
                               autocorrect: false,
@@ -280,8 +286,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                                 labelText: L10n.t('邮箱'),
                                 prefixIcon: Icon(Icons.mail_outline),
                               ),
-                              validator: (String? value) =>
-                                  (value == null || value.trim().isEmpty)
+                            ).validated(
+                              () => _email.text.trim().isEmpty
                                   ? L10n.t('请填写邮箱')
                                   : null,
                             ),
@@ -304,8 +310,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                                     )
                                   : Text(L10n.t('发送重置邮件')),
                             ),
+                            const SizedBox(height: 8),
                             TextButton(
-                              onPressed: () => setState(() => _stepConfirm = true),
+                              onPressed: () =>
+                                  setState(() => _stepConfirm = true),
                               child: Text(L10n.t('已有重置 token？')),
                             ),
                           ],

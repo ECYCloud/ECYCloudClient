@@ -38,6 +38,7 @@ class PlatformFactory {
       return ServiceKernelController(
         transport: ServicePipe.production(),
         tunProbeCommand: 'tun.ensure',
+        closeTunBeforeStop: true,
       );
     }
     if (Platform.isMacOS) {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
 import '../app_scope.dart';
+import '../theme.dart';
+import '../widgets/overlay_scroll_view.dart';
 import '../widgets/rich_html_view.dart';
 
 class TosPage extends StatefulWidget {
@@ -71,14 +73,10 @@ class _TosPageState extends State<TosPage> {
               child: Text(L10n.t('暂无服务条款'), style: theme.textTheme.bodyLarge),
             );
           }
-          return Scrollbar(
+          return OverlayScrollView(
             controller: _scroll,
-            thumbVisibility: true,
-            child: SingleChildScrollView(
-              controller: _scroll,
-              padding: const EdgeInsets.all(16),
-              child: RichHtmlView(html),
-            ),
+            padding: const EdgeInsets.all(AppTheme.overlayScrollGutter),
+            child: RichHtmlView(html),
           );
         },
       ),

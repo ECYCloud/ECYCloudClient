@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// 全站统一的卡片：标题行（图标 + 标题 + 右侧操作）+ 内容区。
-/// 各页面自己拼 Card + Padding + Row 时高度和留白永远对不齐，统一收在这里。
 class SectionCard extends StatelessWidget {
   const SectionCard({
     super.key,
@@ -30,7 +28,6 @@ class SectionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             if (title != null) ...<Widget>[
-              // 只保底高度：右侧动作是按钮时比标题文字高，写死高度会把按钮压扁
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 22),
                 child: Row(
@@ -59,7 +56,6 @@ class SectionCard extends StatelessWidget {
   }
 }
 
-/// 「标签 + 数值」两行式指标，卡片内的通用信息单元
 class MetricTile extends StatelessWidget {
   const MetricTile({
     super.key,
@@ -120,7 +116,6 @@ class MetricTile extends StatelessWidget {
   }
 }
 
-/// 「左标签 右取值」单行式信息，用于账号等纵向罗列的字段
 class InfoRow extends StatelessWidget {
   const InfoRow({super.key, required this.label, required this.value});
 
