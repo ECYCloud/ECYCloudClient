@@ -6,6 +6,12 @@ project(runner LANGUAGES CXX)
 # work.
 #
 # Any new source files that you add to the application should be added here.
+if(ECYCLOUD_WINDOWS_ARM64)
+  set(PLUGIN_REGISTRANT "plugin_registrant_stub.cc")
+else()
+  set(PLUGIN_REGISTRANT "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc")
+endif()
+
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "gpu_watchdog.cpp"
@@ -13,7 +19,7 @@ add_executable(${BINARY_NAME} WIN32
   "platform_channel.cpp"
   "utils.cpp"
   "win32_window.cpp"
-  "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+  "${PLUGIN_REGISTRANT}"
   "Runner.rc"
   "runner.exe.manifest"
 )

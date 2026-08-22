@@ -49,13 +49,20 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# media_kit_libs_windows_video 1.0.11 只带 x64 的 libmpv / ANGLE，ARM64 会 LNK2019
+set(ECYCLOUD_WINDOWS_ARM64 FALSE)
+if(CMAKE_GENERATOR_PLATFORM MATCHES "[Aa][Rr][Mm]64" OR (NOT CMAKE_GENERATOR_PLATFORM AND CMAKE_SYSTEM_PROCESSOR MATCHES "[Aa][Rr][Mm]64"))
+  set(ECYCLOUD_WINDOWS_ARM64 TRUE)
+endif()
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
-
-# Generated plugin build rules, which manage building the plugins and adding
-# them to the application.
-include(flutter/generated_plugins.cmake)
+if(ECYCLOUD_WINDOWS_ARM64)
+  set(PLUGIN_BUNDLED_LIBRARIES)
+else()
+  include(flutter/generated_plugins.cmake)
+endif()
 
 
 # === Installation ===
