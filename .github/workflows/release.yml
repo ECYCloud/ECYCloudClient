@@ -28,6 +28,7 @@ jobs:
       channel: ${{ steps.resolve.outputs.channel }}
       tag: ${{ steps.resolve.outputs.tag }}
       publish: ${{ steps.resolve.outputs.publish }}
+      has_android: ${{ steps.resolve.outputs.has_android }}
     steps:
       - uses: actions/checkout@v5
       - id: resolve
@@ -35,6 +36,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_CHANNEL: ${{ inputs.channel }}
           REF_TYPE: ${{ github.ref_type }}
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
         run: |
           publish=false
           if [ -n "$INPUT_VERSION" ]; then
@@ -61,11 +63,17 @@ jobs:
           else
             tag="v$version"
           fi
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            has_android=true
+          else
+            has_android=false
+          fi
           {
             echo "version=$version"
             echo "channel=$channel"
             echo "tag=$tag"
             echo "publish=$publish"
+            echo "has_android=$has_android"
           } >> "$GITHUB_OUTPUT"
 
   windows:
@@ -202,7 +210,7 @@ jobs:
 
   android:
     needs: prepare
-    if: needs.prepare.outputs.publish == 'true' || secrets.ANDROID_KEYSTORE != ''
+    if: needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.has_android == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
