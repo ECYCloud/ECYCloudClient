@@ -195,9 +195,7 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
                       padding: AppTheme.pageScrollPadding,
                       children: <Widget>[
                         SimpleDataTable(
-                          columnWidths: const <int, TableColumnWidth>{
-                            3: IntrinsicColumnWidth(),
-                          },
+                          minWidth: 1080,
                           columns: <String>[
                             'IP',
                             L10n.t('归属地'),
@@ -216,11 +214,9 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
                                 TableText(item.location),
                                 TableText(item.datetime, muted: true),
                                 TableText(
-                                  item.online && item.device.isEmpty
+                                  item.device.isEmpty
                                       ? L10n.t('第三方客户端')
                                       : item.device,
-                                  maxLines: 1,
-                                  softWrap: false,
                                 ),
                                 TableText(item.appVersion, muted: true),
                                 item.online && item.device.isNotEmpty
@@ -230,7 +226,9 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
                                         child: Text(L10n.t('移除')),
                                       )
                                     : TableText(
-                                        item.online ? L10n.t('不支持') : '',
+                                        item.device.isEmpty
+                                            ? L10n.t('不支持')
+                                            : '',
                                         muted: true,
                                       ),
                               ],

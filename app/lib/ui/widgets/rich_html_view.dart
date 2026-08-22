@@ -354,7 +354,7 @@ class _TicketImageState extends State<_TicketImage> {
               ? _placeholder(theme)
               : MouseRegion(
                   cursor: ZoomCursors.zoomIn,
-                  child: InkWell(
+                  child: GestureDetector(
                     onTap: () {
                       final List<String> album = widget.album();
                       if (album.isEmpty) {

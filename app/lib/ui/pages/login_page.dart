@@ -311,10 +311,14 @@ class _LoginPageState extends State<LoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      Icon(
-                        Icons.shield_outlined,
-                        size: 56,
-                        color: theme.colorScheme.primary,
+                      const Center(
+                        child: Image(
+                          image: AssetImage('assets/app_icon.png'),
+                          width: 56,
+                          height: 56,
+                          filterQuality: FilterQuality.medium,
+                          excludeFromSemantics: true,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -616,7 +620,6 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: theme.colorScheme.error,
-                fontSize: 13,
               ),
             ),
           ],
@@ -657,7 +660,6 @@ class AuthErrorBanner extends StatelessWidget {
               message,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: scheme.onErrorContainer,
-                fontSize: 13,
               ),
             ),
           ),

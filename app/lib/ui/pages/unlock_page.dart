@@ -245,7 +245,6 @@ class _UnlockPageState extends State<UnlockPage> {
                               TableText(
                                 item.nodeName,
                                 bold: true,
-                                maxLines: 1,
                               ),
                               _statusText(item, 'YouTube_Premium'),
                               _statusText(item, 'Netflix'),

@@ -6,11 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 abstract final class ZoomCursors {
-  static MouseCursor _zoomIn = SystemMouseCursors.zoomIn;
-  static MouseCursor _zoomOut = SystemMouseCursors.zoomOut;
+  static MouseCursor _zoomInImpl = SystemMouseCursors.zoomIn;
+  static MouseCursor _zoomOutImpl = SystemMouseCursors.zoomOut;
 
-  static MouseCursor get zoomIn => _zoomIn;
-  static MouseCursor get zoomOut => _zoomOut;
+  // 进入时再取当前光标：Win 自定义放大镜在首帧后才造好
+  static final MouseCursor zoomIn = _ResolvingCursor(() => _zoomInImpl);
+  static final MouseCursor zoomOut = _ResolvingCursor(() => _zoomOutImpl);
 
   static Future<void> ensureReady() async {
     // Win 引擎未映射 SystemMouseCursors.zoomIn/Out（回退成箭头），须 createCustomCursor
@@ -22,21 +23,35 @@ abstract final class ZoomCursors {
         : ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
     final int size = (32 * dpr).round().clamp(32, 128);
     try {
-      _zoomIn = await _WindowsZoomCursor.create(
+      _zoomInImpl = await _WindowsZoomCursor.create(
         name: 'ecycloud_zoom_in',
         icon: Icons.zoom_in,
         size: size,
       );
-      _zoomOut = await _WindowsZoomCursor.create(
+      _zoomOutImpl = await _WindowsZoomCursor.create(
         name: 'ecycloud_zoom_out',
         icon: Icons.zoom_out,
         size: size,
       );
     } on Object {
-      _zoomIn = SystemMouseCursors.zoomIn;
-      _zoomOut = SystemMouseCursors.zoomOut;
+      _zoomInImpl = SystemMouseCursors.zoomIn;
+      _zoomOutImpl = SystemMouseCursors.zoomOut;
     }
   }
+}
+
+class _ResolvingCursor extends MouseCursor {
+  const _ResolvingCursor(this._resolve);
+
+  final ValueGetter<MouseCursor> _resolve;
+
+  @override
+  String get debugDescription => 'ResolvingCursor';
+
+  @override
+  @protected
+  MouseCursorSession createSession(int device) =>
+      _resolve().createSession(device);
 }
 
 class _WindowsZoomCursor extends MouseCursor {

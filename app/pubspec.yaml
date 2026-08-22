@@ -36,3 +36,4 @@ flutter:
     - assets/regions.json
     - assets/alipay.png
     - assets/wxpay.png
+    - assets/app_icon.png

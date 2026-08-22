@@ -920,7 +920,6 @@ class _PreflightCard extends StatelessWidget {
                   '· $problem',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: scheme.onErrorContainer,
-                    fontSize: 12,
                   ),
                 ),
               ),

@@ -113,6 +113,7 @@ class EcyCloudApp extends StatefulWidget {
 class _EcyCloudAppState extends State<EcyCloudApp> {
   bool _bootstrapped = false;
   bool _platformReady = false;
+  bool _hasStoredLocale = false;
   ThemeMode _themeMode = ThemeMode.system;
   Locale _locale = L10n.current.flutterLocale;
   AuthController? _auth;
@@ -134,6 +135,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       _update = scope.update;
       _platform = scope.platform;
       _themeMode = scope.connection.settings.themeMode;
+      _hasStoredLocale = scope.connection.settings.locale.isNotEmpty;
       L10n.current = AppLanguage.resolve(
         stored: scope.connection.settings.locale,
       );
@@ -193,13 +195,17 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       stored: connection.settings.locale,
     );
     final Locale nextLocale = language.flutterLocale;
-    if (next == _themeMode && nextLocale == _locale) {
+    final bool hasStoredLocale = connection.settings.locale.isNotEmpty;
+    if (next == _themeMode &&
+        nextLocale == _locale &&
+        hasStoredLocale == _hasStoredLocale) {
       return;
     }
     L10n.current = language;
     setState(() {
       _themeMode = next;
       _locale = nextLocale;
+      _hasStoredLocale = hasStoredLocale;
     });
   }
 

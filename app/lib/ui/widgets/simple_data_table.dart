@@ -309,25 +309,19 @@ class TableText extends StatelessWidget {
     this.muted = false,
     this.bold = false,
     this.color,
-    this.maxLines = 3,
-    this.softWrap = true,
   });
 
   final String text;
   final bool muted;
   final bool bold;
   final Color? color;
-  final int maxLines;
-  final bool softWrap;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return Text(
       text.isEmpty ? '—' : text,
-      maxLines: maxLines,
-      softWrap: softWrap,
-      overflow: TextOverflow.ellipsis,
+      softWrap: true,
       style: (bold ? theme.textTheme.bodyMedium : theme.textTheme.bodySmall)
           ?.copyWith(
             fontWeight: bold ? FontWeight.w600 : null,

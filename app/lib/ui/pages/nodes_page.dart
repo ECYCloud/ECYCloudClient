@@ -387,7 +387,6 @@ class _AutoGroupHint extends StatelessWidget {
             child: Text(
               detail,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontSize: 11,
                 color: scheme.onSurfaceVariant,
               ),
             ),
@@ -507,7 +506,7 @@ class _NodeTile extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(fontSize: 12, color: titleColor),
+                                  ?.copyWith(color: titleColor),
                             ),
                           ),
                           if (groupTag != null) ...<Widget>[
@@ -531,10 +530,7 @@ class _NodeTile extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(
-                                    fontSize: 12,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
                             ),
                           ),
                         ],
@@ -583,7 +579,6 @@ class _Placeholder extends StatelessWidget {
           Text(
             message,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              fontSize: 13,
               color: scheme.onSurfaceVariant,
             ),
           ),
