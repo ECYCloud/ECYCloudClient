@@ -202,11 +202,20 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: installer-linux-${{ matrix.arch }}
-          path: |
-            build/installer/ECYCloud-*.deb
-            build/installer/ECYCloud-*.rpm
-            build/installer/ECYCloud-*.tar.gz
+          name: installer-linux-${{ matrix.arch }}-deb
+          path: build/installer/ECYCloud-*-linux-${{ matrix.arch }}.deb
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-linux-${{ matrix.arch }}-rpm
+          path: build/installer/ECYCloud-*-linux-${{ matrix.arch }}.rpm
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-linux-${{ matrix.arch }}-tar
+          path: build/installer/ECYCloud-*-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   android:
@@ -265,8 +274,20 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: installer-android
-          path: build/installer/ECYCloud-*.apk
+          name: installer-android-arm64
+          path: build/installer/ECYCloud-*-android-arm64.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-android-arm
+          path: build/installer/ECYCloud-*-android-arm.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-android-x64
+          path: build/installer/ECYCloud-*-android-x64.apk
           if-no-files-found: error
 
   release:
