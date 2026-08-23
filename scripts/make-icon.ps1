@@ -244,8 +244,8 @@ if (Test-Path $stringsFile) {
 $macIconDir = Join-Path $rootDir 'app\macos\Runner\Assets.xcassets\AppIcon.appiconset'
 $macMenuBarDir = Join-Path $rootDir 'app\macos\Runner\Assets.xcassets\MenuBarIcon.imageset'
 $macGlassDir = Join-Path $rootDir 'app\macos\Runner\AppIcon.icon'
-# 盾牌占画布的比例：再大就会顶到系统圆角遮罩的上下边
-$macGlassCoverage = 0.66
+# 主图本身已铺满 1024，分层图层按 1 原样落下，和启动台里其它图标本体同级
+$macGlassCoverage = 1
 $androidResDir = Join-Path $rootDir 'app\android\app\src\main\res'
 $linuxIconDir = Join-Path $scriptDir 'installer\linux\icons'
 
