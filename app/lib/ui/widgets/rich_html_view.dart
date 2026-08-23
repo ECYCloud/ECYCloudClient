@@ -14,6 +14,7 @@ import '../pages/operation_logs_page.dart';
 import '../pages/purchases_page.dart';
 import '../pages/recharge_page.dart';
 import '../pages/traffic_log_page.dart';
+import '../theme.dart';
 import 'image_viewer.dart';
 import 'video_viewer.dart';
 import 'zoom_cursors.dart';
@@ -64,6 +65,8 @@ class RichHtmlView extends StatelessWidget {
       fontFamily: body.fontFamily,
       fontFamilyFallback: body.fontFamilyFallback,
     );
+    // 取不到系统等宽字体时留空，由上面的 * 顶成界面字体
+    final Style monoFont = Style(fontFamily: AppTheme.monoFontFamily);
 
     final String base = AppScope.of(context).auth.siteOrigin;
 
@@ -90,10 +93,10 @@ class RichHtmlView extends StatelessWidget {
           textDecoration: TextDecoration.underline,
         ),
         '*': uiFont,
-        'code': Style(fontFamily: 'monospace'),
-        'pre': Style(fontFamily: 'monospace'),
-        'kbd': Style(fontFamily: 'monospace'),
-        'samp': Style(fontFamily: 'monospace'),
+        'code': monoFont,
+        'pre': monoFont,
+        'kbd': monoFont,
+        'samp': monoFont,
       },
       extensions: <HtmlExtension>[
         TagExtension.inline(

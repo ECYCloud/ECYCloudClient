@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "resource.h"
+#include "utils.h"
 
 // 用 \u 转义而不是直接写汉字：源码字符集依赖构建配置，转义在哪都不会串码。
 // 版本号取编译期注入的 ECYCLOUD_DISPLAY_VERSION（见 runner/CMakeLists.txt），
@@ -311,6 +312,35 @@ void ApplyMenuTheme(bool dark) {
   if (flush != nullptr) {
     flush();
   }
+}
+
+// 系统没有「默认等宽字体」这种设置项，只能问设备装了哪些：取系统枚举到的第一个
+// 矢量等宽字族。点阵字体（Terminal / Fixedsys）放大后全是锯齿，排除掉
+int CALLBACK PickFixedPitch(const LOGFONTW* font,
+                            const TEXTMETRICW*,
+                            DWORD type,
+                            LPARAM param) {
+  if ((type & TRUETYPE_FONTTYPE) == 0 ||
+      (font->lfPitchAndFamily & 0x03) != FIXED_PITCH ||
+      font->lfFaceName[0] == L'@') {  // @ 开头是竖排版本，不是独立字族
+    return 1;
+  }
+  *reinterpret_cast<std::wstring*>(param) = font->lfFaceName;
+  return 0;
+}
+
+std::wstring SystemFixedPitchFamily() {
+  std::wstring face;
+  HDC dc = ::GetDC(nullptr);
+  if (dc == nullptr) {
+    return face;
+  }
+  LOGFONTW query{};
+  query.lfCharSet = DEFAULT_CHARSET;
+  ::EnumFontFamiliesExW(dc, &query, PickFixedPitch,
+                        reinterpret_cast<LPARAM>(&face), 0);
+  ::ReleaseDC(nullptr, dc);
+  return face;
 }
 
 std::wstring WideFromUtf8(const std::string& text) {
@@ -647,6 +677,28 @@ void PlatformChannel::HandleMethodCall(
     }
     result->Success(flutter::EncodableValue(
         RunElevated(WideFromUtf8(std::get<std::string>(entry->second)))));
+    return;
+  }
+
+  // 字体不在客户端写死：界面字体取系统自己的消息框字体（中文系统是雅黑 UI、英文
+  // 系统是 Segoe UI，用户在个性化里换过就是换过的那个），与其它 Win32 程序同源；
+  // 等宽字体取设备上枚举到的第一个
+  if (method == "ui.fonts") {
+    NONCLIENTMETRICSW metrics{};
+    metrics.cbSize = sizeof(metrics);
+    if (!::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics),
+                                 &metrics, 0)) {
+      result->Error("ui.fonts", "读取系统界面字体失败");
+      return;
+    }
+    result->Success(flutter::EncodableValue(flutter::EncodableMap{
+        {flutter::EncodableValue("ui"),
+         flutter::EncodableValue(
+             Utf8FromUtf16(metrics.lfMessageFont.lfFaceName))},
+        {flutter::EncodableValue("mono"),
+         flutter::EncodableValue(
+             Utf8FromUtf16(SystemFixedPitchFamily().c_str()))},
+    }));
     return;
   }
 

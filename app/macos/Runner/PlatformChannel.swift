@@ -1,5 +1,4 @@
 import Cocoa
-import CoreImage
 import FlutterMacOS
 import Security
 
@@ -16,10 +15,14 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     case quit
   }
 
+  private static let menuBarIconSize: CGFloat = 18
+  private static let dockIconSize: CGFloat = 256
+
   private let channel: FlutterMethodChannel
   private weak var window: NSWindow?
 
   private var statusItem: NSStatusItem?
+  private var iconTint = -1
   private var closeToTray = false
   private var connected = false
   private var busy = false
@@ -262,14 +265,11 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     guard statusItem == nil else { return }
 
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    item.button?.image = NSImage(
-      systemSymbolName: "network", accessibilityDescription: appDisplayName)
-    // 状态栏图标必须是模板图，否则深色菜单栏下会糊成一团
-    item.button?.image?.isTemplate = true
     item.button?.target = self
     item.button?.action = #selector(onStatusItemClick)
     item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     statusItem = item
+    iconTint = -1
     applyStatusIcons()
   }
 
@@ -381,43 +381,144 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     if defaultDockIcon == nil {
       defaultDockIcon = NSApp.applicationIconImage
     }
-    let tint: NSColor?
-    let hue: CGFloat?
-    if tun {
-      tint = NSColor(srgbRed: 0.18, green: 0.75, blue: 0.44, alpha: 1)
-      hue = 145
-    } else if systemProxy {
-      tint = NSColor(srgbRed: 0.88, green: 0.45, blue: 0.08, alpha: 1)
-      hue = 28
-    } else {
-      tint = nil
-      hue = nil
-    }
-    statusItem?.button?.contentTintColor = tint
     statusItem?.button?.toolTip =
       statusTip.isEmpty ? appDisplayName : "\(appDisplayName)\n\(statusTip)"
+
+    let want = tun ? 2 : (systemProxy ? 1 : 0)
+    guard want != iconTint else { return }
+    iconTint = want
+
+    let hue: CGFloat? = want == 2 ? 145 : (want == 1 ? 28 : nil)
+    if let source = NSImage(named: "MenuBarIcon") ?? defaultDockIcon,
+      let image = statusIcon(source, points: Self.menuBarIconSize, targetHue: hue)
+    {
+      image.accessibilityDescription = appDisplayName
+      statusItem?.button?.image = image
+    }
     if let hue = hue, let source = defaultDockIcon {
-      NSApp.applicationIconImage = hueShiftedDockIcon(source, targetHue: hue)
+      NSApp.applicationIconImage =
+        statusIcon(source, points: Self.dockIconSize, targetHue: hue) ?? source
     } else {
       NSApp.applicationIconImage = defaultDockIcon
     }
   }
 
-  private func hueShiftedDockIcon(_ source: NSImage, targetHue: CGFloat) -> NSImage {
-    guard let tiff = source.tiffRepresentation,
-      let input = CIImage(data: tiff),
-      let filter = CIFilter(name: "CIHueAdjust")
+  private func statusIcon(_ source: NSImage, points: CGFloat, targetHue: CGFloat?)
+    -> NSImage?
+  {
+    let pixels = Int(points * 2)
+    guard
+      let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: pixels,
+        pixelsHigh: pixels,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: pixels * 4,
+        bitsPerPixel: 32
+      ), let context = NSGraphicsContext(bitmapImageRep: rep)
     else {
-      return source
+      return nil
     }
-    filter.setValue(input, forKey: kCIInputImageKey)
-    filter.setValue((targetHue - 210) * .pi / 180, forKey: kCIInputAngleKey)
-    guard let output = filter.outputImage else { return source }
-    let context = CIContext()
-    guard let cg = context.createCGImage(output, from: output.extent) else {
-      return source
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    source.draw(
+      in: NSRect(x: 0, y: 0, width: CGFloat(pixels), height: CGFloat(pixels)))
+    NSGraphicsContext.restoreGraphicsState()
+    if let targetHue = targetHue {
+      recolor(rep, targetHue: targetHue)
     }
-    return NSImage(cgImage: cg, size: source.size)
+    // rep 是 2 倍像素，尺寸按点写回，否则菜单栏与程序坞会按像素当点画得过大
+    rep.size = NSSize(width: points, height: points)
+    let image = NSImage(size: NSSize(width: points, height: points))
+    image.addRepresentation(rep)
+    return image
+  }
+
+  /// 与 Windows / Linux 同一套判据：只把蓝色系像素改成目标色相，保留饱和度与明度，
+  /// 白底与白色字形不动
+  private func recolor(_ rep: NSBitmapImageRep, targetHue: CGFloat) {
+    guard let pixels = rep.bitmapData else { return }
+    for index in 0..<(rep.pixelsWide * rep.pixelsHigh) {
+      let pixel = pixels + index * 4
+      if pixel[3] == 0 {
+        continue
+      }
+      let (hue, saturation, lightness) = rgbToHsl(
+        CGFloat(pixel[0]) / 255, CGFloat(pixel[1]) / 255, CGFloat(pixel[2]) / 255)
+      if saturation <= 0.12 || hue < 170 || hue > 270 {
+        continue
+      }
+      let (red, green, blue) = hslToRgb(targetHue, saturation, lightness)
+      pixel[0] = UInt8((red * 255).rounded())
+      pixel[1] = UInt8((green * 255).rounded())
+      pixel[2] = UInt8((blue * 255).rounded())
+    }
+  }
+
+  private func rgbToHsl(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat)
+    -> (CGFloat, CGFloat, CGFloat)
+  {
+    let high = max(red, green, blue)
+    let low = min(red, green, blue)
+    let lightness = (high + low) / 2
+    if high == low {
+      return (0, 0, lightness)
+    }
+    let delta = high - low
+    let saturation =
+      lightness > 0.5 ? delta / (2 - high - low) : delta / (high + low)
+    var hue: CGFloat
+    if high == red {
+      hue = (green - blue) / delta + (green < blue ? 6 : 0)
+    } else if high == green {
+      hue = (blue - red) / delta + 2
+    } else {
+      hue = (red - green) / delta + 4
+    }
+    return (hue * 60, saturation, lightness)
+  }
+
+  private func hslToRgb(_ hue: CGFloat, _ saturation: CGFloat, _ lightness: CGFloat)
+    -> (CGFloat, CGFloat, CGFloat)
+  {
+    if saturation == 0 {
+      return (lightness, lightness, lightness)
+    }
+    let q =
+      lightness < 0.5
+      ? lightness * (1 + saturation)
+      : lightness + saturation - lightness * saturation
+    let p = 2 * lightness - q
+    let hk = hue / 360
+    return (
+      hueChannel(p, q, hk + 1.0 / 3.0),
+      hueChannel(p, q, hk),
+      hueChannel(p, q, hk - 1.0 / 3.0)
+    )
+  }
+
+  private func hueChannel(_ p: CGFloat, _ q: CGFloat, _ offset: CGFloat) -> CGFloat {
+    var t = offset
+    if t < 0 {
+      t += 1
+    }
+    if t > 1 {
+      t -= 1
+    }
+    if t < 1.0 / 6.0 {
+      return p + (q - p) * 6 * t
+    }
+    if t < 0.5 {
+      return q
+    }
+    if t < 2.0 / 3.0 {
+      return p + (q - p) * (2.0 / 3.0 - t) * 6
+    }
+    return p
   }
 
   func restoreMainWindow() {

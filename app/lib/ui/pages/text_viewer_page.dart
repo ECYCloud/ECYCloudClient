@@ -108,8 +108,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
                   child: SelectableText(
                     text,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      fontFamily: 'Consolas',
-                      fontFamilyFallback: const <String>['Menlo', 'monospace'],
+                      fontFamily: AppTheme.monoFontFamily,
                       fontSize: 12,
                       height: 1.45,
                     ),

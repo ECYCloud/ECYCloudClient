@@ -64,16 +64,6 @@ chinesetraditional.UninstallAppRunningError=%1 正在執行。請在系統匣圖
 english.SetupAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Setup.
 english.UninstallAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Uninstall.
 
-[LangOptions]
-chinese.DialogFontName=Microsoft YaHei UI
-chinese.DialogFontSize=9
-chinese.WelcomeFontName=Microsoft YaHei UI
-chinese.WelcomeFontSize=12
-chinesetraditional.DialogFontName=Microsoft JhengHei UI
-chinesetraditional.DialogFontSize=9
-chinesetraditional.WelcomeFontName=Microsoft JhengHei UI
-chinesetraditional.WelcomeFontSize=12
-
 [CustomMessages]
 chinese.CloseRunningPrompt=%1 正在运行。%n%n点击「确定」关闭客户端并继续安装，或点击「取消」退出安装程序。
 chinesetraditional.CloseRunningPrompt=%1 正在執行。%n%n按「確定」關閉用戶端並繼續安裝，或按「取消」結束安裝程式。

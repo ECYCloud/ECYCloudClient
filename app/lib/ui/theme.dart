@@ -3,6 +3,9 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../core/logger.dart';
 
 class AppTheme {
   AppTheme._();
@@ -89,14 +92,36 @@ class AppTheme {
   // 只能整体缩放；桌面端按 0.8 收到约 42×26
   static const double switchScale = 0.8;
 
-  // 雅黑只在 Windows 上存在。Android / 鸿蒙 / WSA / macOS / Linux 强制指定
-  // 会走到残缺回退链，中文易糊、缺字或度量错乱，宽屏切换时更像「看不清」。
-  // 正文字用雅黑本体：雅黑 UI 为小控件削细之后，11–13 号正文容易发灰发糊。
-  static final bool _windowsUiFont = Platform.isWindows;
-  static final String? _fontFamily = _windowsUiFont ? 'Microsoft YaHei' : null;
-  static final List<String> _fontFamilyFallback = _windowsUiFont
-      ? const <String>['Microsoft YaHei UI', 'Segoe UI']
-      : const <String>[];
+  // 字族一律取用户设备自己的字体，不在代码里写死任何字体名。Windows 由原生侧问
+  // 系统要；其余平台留空，交给引擎的平台默认字体。缺字由系统自身的字体回退补，
+  // 不手写回退链。
+  static String? _fontFamily;
+  static String? _monoFontFamily;
+
+  // 只读查看页显示配置原文，要等宽才对得齐缩进；取不到就退回界面字体
+  static String? get monoFontFamily => _monoFontFamily;
+
+  // 首帧就要用到字族，必须在 runApp 之前完成；取不到就退回引擎默认字体
+  static Future<void> loadSystemUiFont() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+    try {
+      final Map<Object?, Object?>? fonts = await const MethodChannel(
+        'ecycloud/platform',
+      ).invokeMethod<Map<Object?, Object?>>('ui.fonts');
+      if (fonts == null) {
+        return;
+      }
+      _fontFamily = _named(fonts['ui']);
+      _monoFontFamily = _named(fonts['mono']);
+    } on PlatformException catch (e) {
+      Logger.instance.warn('theme', '读取系统字体失败，改用引擎默认字体: $e');
+    }
+  }
+
+  static String? _named(Object? value) =>
+      value is String && value.isNotEmpty ? value : null;
 
   // 组件主题里的 TextStyle 必须自带字族。ThemeData.fontFamily 只会应用到
   // textTheme（theme_data.dart 的 defaultTextTheme.apply），而按钮、分段控件、
@@ -111,7 +136,6 @@ class AppTheme {
     Color? color,
   }) => TextStyle(
     fontFamily: _fontFamily,
-    fontFamilyFallback: _fontFamilyFallback,
     fontSize: size,
     fontWeight: weight,
     color: color,
@@ -133,7 +157,6 @@ class AppTheme {
     TextStyle style(double size, [FontWeight weight = FontWeight.w400]) =>
         TextStyle(
           fontFamily: _fontFamily,
-          fontFamilyFallback: _fontFamilyFallback,
           fontSize: size,
           fontWeight: weight,
           color: scheme.onSurface,
@@ -153,7 +176,6 @@ class AppTheme {
       bodyMedium: style(12),
       bodySmall: TextStyle(
         fontFamily: _fontFamily,
-        fontFamilyFallback: _fontFamilyFallback,
         fontSize: 11,
         color: scheme.onSurfaceVariant,
       ),
@@ -173,7 +195,6 @@ class AppTheme {
       colorScheme: scheme,
       useMaterial3: true,
       fontFamily: _fontFamily,
-      fontFamilyFallback: _fontFamilyFallback,
       textTheme: _textTheme(scheme),
       // 全端同一密度：按平台分档会让 Android 的按钮、输入框、列表行比桌面各高一档
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),

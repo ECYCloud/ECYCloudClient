@@ -25,11 +25,11 @@ LanguageID=$0404
 LanguageCodePage=950 
 ; If the language you are translating to requires special font faces or 
 ; sizes, uncomment any of the following entries and change them accordingly. 
-DialogFontName=Microsoft JhengHei UI 
+;DialogFontName= 
 ;DialogFontSize=9 
 ;DialogFontBaseScaleWidth=7 
 ;DialogFontBaseScaleHeight=15 
-WelcomeFontName=Microsoft JhengHei UI 
+;WelcomeFontName= 
 ;WelcomeFontSize=14 
  
 [Messages] 

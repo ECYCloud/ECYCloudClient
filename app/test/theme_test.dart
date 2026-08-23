@@ -1,11 +1,34 @@
+import 'dart:io' show Platform;
+
 import 'package:ecycloud_client/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // 组件主题给的 TextStyle 会整体顶掉控件默认样式，不与 textTheme 逐字段合并，
 // 因此这些样式必须自带字族；漏掉的话控件里的中文会落到引擎默认字体上。
 void main() {
+  // 字族来自系统而不是代码，断言里不写死字体名：假装系统报这个名字，再看它有没有
+  // 被送到每一处组件样式上。非 Windows 本就不指定字族，期望值即为 null。
+  const String systemFont = '测试界面字体';
+  const String systemMonoFont = '测试等宽字体';
+  final String? expectedFamily = Platform.isWindows ? systemFont : null;
+  final String? expectedMono = Platform.isWindows ? systemMonoFont : null;
+
+  // 主题只构建一次，注入必须赶在任何 AppTheme 调用之前
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('ecycloud/platform'),
+          (MethodCall call) async => call.method == 'ui.fonts'
+              ? <Object?, Object?>{'ui': systemFont, 'mono': systemMonoFont}
+              : null,
+        );
+    await AppTheme.loadSystemUiFont();
+  });
+
   String? familyOf(WidgetTester tester, String text) => tester
       .renderObject<RenderParagraph>(find.text(text))
       .text
@@ -37,22 +60,26 @@ void main() {
     );
 
     for (final String label in <String>['直连', '立即连接', '取消']) {
-      expect(familyOf(tester, label), 'Microsoft YaHei', reason: label);
+      expect(familyOf(tester, label), expectedFamily, reason: label);
     }
   });
 
   test('导航栏与 Tooltip 的文字样式同样带字族', () {
     final ThemeData theme = AppTheme.dark();
 
-    expect(theme.tooltipTheme.textStyle?.fontFamily, 'Microsoft YaHei');
+    expect(theme.tooltipTheme.textStyle?.fontFamily, expectedFamily);
     expect(
       theme.navigationRailTheme.selectedLabelTextStyle?.fontFamily,
-      'Microsoft YaHei',
+      expectedFamily,
     );
     expect(
       theme.navigationRailTheme.unselectedLabelTextStyle?.fontFamily,
-      'Microsoft YaHei',
+      expectedFamily,
     );
+  });
+
+  test('等宽字体同样来自系统，代码里不写死字体名', () {
+    expect(AppTheme.monoFontFamily, expectedMono);
   });
 
   test('电视安全区只补不足 48 的边，已有的不叠加', () {

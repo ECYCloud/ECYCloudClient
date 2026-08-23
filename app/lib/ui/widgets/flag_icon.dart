@@ -17,39 +17,13 @@ class FlagIcon extends StatelessWidget {
     padding: _inkInset,
     child: ClipRRect(
       borderRadius: BorderRadius.circular(2),
+      // xx 是 flag-icons 自带的未知旗占位，与真旗同为 4:3，缺图时行内尺寸不变
       child: LocalIcon(
-        assets: <String>['assets/flags/$code.svg'],
+        assets: <String>['assets/flags/$code.svg', 'assets/flags/xx.svg'],
         width: width,
         height: width * 0.75,
         fit: BoxFit.cover,
-        fallback: _LetterBadge(code: code),
       ),
     ),
   );
-}
-
-class _LetterBadge extends StatelessWidget {
-  const _LetterBadge({required this.code});
-
-  final String code;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
-      child: Center(
-        child: Text(
-          code.toUpperCase(),
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            fontSize: 8,
-            height: 1,
-            fontWeight: FontWeight.w700,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-    );
-  }
 }

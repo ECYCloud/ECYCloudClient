@@ -70,6 +70,9 @@ Future<void> main() async {
   await NodeLabels.load();
   _mark('assets');
 
+  // 主题在首帧就要用到字族，字族取自系统，必须赶在 runApp 之前问到
+  await AppTheme.loadSystemUiFont();
+
   final PlatformService platform = PlatformFactory.createPlatformService();
   final KernelController kernel = PlatformFactory.createKernelController();
 

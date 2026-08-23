@@ -7,7 +7,8 @@
     换图标时只改主图，跑一遍本脚本重新生成，不要手工塞二进制。
     Windows：ICO 各尺寸以 PNG 负载嵌入（Vista 起支持），保留透明通道；
     向导图按 Inno Setup 的缩放档位输出 24 位 BMP，白底以贴合向导页背景。
-    macOS：按 AppIcon.appiconset 的档位输出，白底按系统图标圆角裁切、四角透明；Android：按 mipmap 密度输出，
+    macOS：按 AppIcon.appiconset 的档位输出，白底按系统图标圆角裁切、四角透明；
+    菜单栏图标另出 MenuBarIcon.imageset（透明底，与 Windows / Linux 托盘同一张纯图形）；Android：按 mipmap 密度输出，
     并生成 Android TV 主屏 banner（`drawable-*/ic_banner.png`，xhdpi 为 320×180）；
     Linux：按 hicolor 档位输出，随 deb 装进 /usr/share/icons。
 #>
@@ -181,6 +182,8 @@ $sizes = @(16, 20, 24, 32, 48, 64, 128, 256)
 $wizardSizes = @(55, 83, 110, 138, 165, 192)
 # 与 app/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json 的档位一致
 $macSizes = @(16, 32, 64, 128, 256, 512, 1024)
+# 菜单栏按 18pt 画，1x / 2x 与 MenuBarIcon.imageset/Contents.json 的 filename 一致
+$macMenuBarSizes = @(18, 36)
 $linuxSizes = @(16, 32, 48, 64, 128, 256)
 $androidSizes = [ordered]@{ mdpi = 48; hdpi = 72; xhdpi = 96; xxhdpi = 144; xxxhdpi = 192 }
 # Android TV banner：官方规格是 xhdpi 320×180，其余密度按 160dpi 基线等比
@@ -202,6 +205,7 @@ if (Test-Path $stringsFile) {
 }
 
 $macIconDir = Join-Path $rootDir 'app\macos\Runner\Assets.xcassets\AppIcon.appiconset'
+$macMenuBarDir = Join-Path $rootDir 'app\macos\Runner\Assets.xcassets\MenuBarIcon.imageset'
 $androidResDir = Join-Path $rootDir 'app\android\app\src\main\res'
 $linuxIconDir = Join-Path $scriptDir 'installer\linux\icons'
 
@@ -239,6 +243,9 @@ try {
 
     foreach ($size in $macSizes) {
         Save-MacPng -Image $master -Size $size -Path (Join-Path $macIconDir "app_icon_$size.png")
+    }
+    foreach ($size in $macMenuBarSizes) {
+        Save-Png -Image $master -Size $size -Path (Join-Path $macMenuBarDir "menu_bar_icon_$size.png")
     }
     foreach ($size in $linuxSizes) {
         Save-Png -Image $master -Size $size -Path (Join-Path $linuxIconDir "$size.png")
@@ -294,6 +301,7 @@ Write-Host "登录页图标已复制：$flutterIcon"
 Write-Host "图标已生成：$Output（$($sizes -join '/') px，$([math]::Round((Get-Item $Output).Length / 1KB, 1)) KB）"
 Write-Host "向导图已生成：$WizardDir（$($wizardSizes -join '/') px）"
 Write-Host "macOS 图标已生成：$macIconDir（$($macSizes -join '/') px）"
+Write-Host "macOS 菜单栏图标已生成：$macMenuBarDir（$($macMenuBarSizes -join '/') px）"
 Write-Host "Linux 图标已生成：$linuxIconDir（$($linuxSizes -join '/') px）"
 Write-Host "Android 图标已生成：$androidResDir（$($androidSizes.Values -join '/') px）"
 Write-Host "Android TV banner 已生成：$androidResDir（xhdpi 320x180）"

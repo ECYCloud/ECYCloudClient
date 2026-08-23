@@ -252,8 +252,11 @@ class _LogsPageState extends State<LogsPage> {
     );
   }
 
-  static TextStyle _mono(Color color) =>
-      TextStyle(fontFamily: 'Consolas', fontSize: 12, color: color);
+  static TextStyle _mono(Color color) => TextStyle(
+    fontFamily: AppTheme.monoFontFamily,
+    fontSize: 12,
+    color: color,
+  );
 
   static String _time(DateTime value) =>
       '${_two(value.hour)}:${_two(value.minute)}:${_two(value.second)}';
