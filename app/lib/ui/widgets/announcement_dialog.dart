@@ -97,9 +97,11 @@ Future<void> showAnnouncementBrowser(
             ],
           );
         }
+        final int index = controller.openIndex.clamp(0, items.length - 1);
         return _AnnouncementBrowser(
+          key: ValueKey<int>(items[index].id),
           items: items,
-          initialIndex: controller.unreadFocusIndex ?? 0,
+          initialIndex: index,
         );
       },
     ),
@@ -129,6 +131,13 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
   @override
   void didUpdateWidget(covariant _AnnouncementBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.initialIndex != oldWidget.initialIndex) {
+      _index = widget.initialIndex.clamp(
+        0,
+        widget.items.isEmpty ? 0 : widget.items.length - 1,
+      );
+      return;
+    }
     if (_index >= widget.items.length) {
       _index = widget.items.isEmpty ? 0 : widget.items.length - 1;
     }

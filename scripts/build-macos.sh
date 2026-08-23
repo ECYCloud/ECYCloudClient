@@ -126,23 +126,16 @@ work_dir="$root_dir/build/macos/$arch/pkg"
 rm -rf "$work_dir"
 mkdir -p "$work_dir/resources" "$work_dir/scripts" "$out_dir"
 
-# 未本地化的 LICENSE.txt 作回退；lproj 让安装器按系统语言展示中文译本
-install -m 0644 "$root_dir/LICENSE" "$work_dir/resources/LICENSE.txt"
+# 根目录不能放 LICENSE.txt，否则语言菜单换了正文仍是英文；PKG 只认 English / zh_CN / zh_TW
 mkdir -p \
-    "$work_dir/resources/en.lproj" \
+    "$work_dir/resources/English.lproj" \
     "$work_dir/resources/zh_CN.lproj" \
-    "$work_dir/resources/zh-Hans.lproj" \
-    "$work_dir/resources/zh_TW.lproj" \
-    "$work_dir/resources/zh-Hant.lproj"
-install -m 0644 "$root_dir/LICENSE" "$work_dir/resources/en.lproj/LICENSE.txt"
+    "$work_dir/resources/zh_TW.lproj"
+install -m 0644 "$root_dir/LICENSE" "$work_dir/resources/English.lproj/LICENSE.txt"
 install -m 0644 "$script_dir/installer/lang/LICENSE.zh-CN.txt" \
     "$work_dir/resources/zh_CN.lproj/LICENSE.txt"
-install -m 0644 "$script_dir/installer/lang/LICENSE.zh-CN.txt" \
-    "$work_dir/resources/zh-Hans.lproj/LICENSE.txt"
 install -m 0644 "$script_dir/installer/lang/LICENSE.zh-TW.txt" \
     "$work_dir/resources/zh_TW.lproj/LICENSE.txt"
-install -m 0644 "$script_dir/installer/lang/LICENSE.zh-TW.txt" \
-    "$work_dir/resources/zh-Hant.lproj/LICENSE.txt"
 sed -e "s/APP_VERSION/$version/" \
     -e "s/HOST_ARCHITECTURES/$host_architectures/" \
     "$script_dir/installer/macos/distribution.xml" \

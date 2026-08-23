@@ -58,6 +58,8 @@ class AnnouncementController extends ChangeNotifier {
 
   int? get unreadFocusIndex => focusUnreadIndex(_items, _seenRevisions());
 
+  int get openIndex => unreadFocusIndex ?? latestIndex(_items);
+
   static Map<String, String> decodeSeen(Object? raw) {
     if (raw is! Map) {
       return <String, String>{};
@@ -76,6 +78,9 @@ class AnnouncementController extends ChangeNotifier {
     DateTime? bestAt;
     for (int i = 0; i < items.length; i++) {
       final Announcement item = items[i];
+      if (item.id == 1) {
+        continue;
+      }
       if (seen['${item.id}'] == item.updatedAt) {
         continue;
       }
@@ -87,6 +92,25 @@ class AnnouncementController extends ChangeNotifier {
       }
     }
     return bestIndex;
+  }
+
+  static int latestIndex(List<Announcement> items) {
+    if (items.isEmpty) {
+      return 0;
+    }
+    int best = 0;
+    DateTime? bestAt;
+    for (int i = 0; i < items.length; i++) {
+      if (items[i].id == 1 && items.length > 1) {
+        continue;
+      }
+      final DateTime? at = items[i].revisedAt;
+      if (at != null && (bestAt == null || at.isAfter(bestAt))) {
+        best = i;
+        bestAt = at;
+      }
+    }
+    return best;
   }
 
   Map<String, String> _seenRevisions() =>

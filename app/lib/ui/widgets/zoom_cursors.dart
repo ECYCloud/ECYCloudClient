@@ -43,6 +43,13 @@ abstract final class ZoomCursors {
       _zoomOutImpl = SystemMouseCursors.zoomOut;
     }
   }
+
+  // 打开大图时鼠标没动，Flutter 要等下一次指针事件才换光标
+  static Future<void> showZoomOut() async {
+    final MouseCursorSession session = _zoomOutImpl.createSession(0);
+    await session.activate();
+    session.dispose();
+  }
 }
 
 class _ResolvingCursor extends MouseCursor {
@@ -51,7 +58,7 @@ class _ResolvingCursor extends MouseCursor {
   final ValueGetter<MouseCursor> _resolve;
 
   @override
-  String get debugDescription => 'ResolvingCursor';
+  String get debugDescription => _resolve().debugDescription;
 
   @override
   @protected

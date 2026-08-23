@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -47,11 +49,55 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
 
   late int _index = widget.index;
   int _quarterTurns = 0;
+  bool _cursorHooked = false;
+  Animation<double>? _routeAnimation;
+  AnimationStatusListener? _routeListener;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_cursorHooked) {
+      return;
+    }
+    _cursorHooked = true;
+    final Animation<double>? animation = ModalRoute.of(context)?.animation;
+    if (animation == null || animation.isCompleted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _applyZoomOutCursor();
+      });
+      return;
+    }
+    _routeAnimation = animation;
+    _routeListener = (AnimationStatus status) {
+      if (status == AnimationStatus.completed) {
+        _clearRouteListener();
+        _applyZoomOutCursor();
+      }
+    };
+    animation.addStatusListener(_routeListener!);
+  }
 
   @override
   void dispose() {
+    _clearRouteListener();
     _transform.dispose();
     super.dispose();
+  }
+
+  void _applyZoomOutCursor() {
+    if (!mounted) {
+      return;
+    }
+    unawaited(ZoomCursors.showZoomOut());
+  }
+
+  void _clearRouteListener() {
+    final AnimationStatusListener? listener = _routeListener;
+    if (listener != null) {
+      _routeAnimation?.removeStatusListener(listener);
+    }
+    _routeAnimation = null;
+    _routeListener = null;
   }
 
   void _close() => Navigator.of(context).pop();

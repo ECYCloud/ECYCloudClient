@@ -2,7 +2,6 @@
 <!-- APP_VERSION 由 build-macos.sh 替换 -->
 <installer-gui-script minSpecVersion="2">
     <title>ECY Cloud</title>
-    <!-- 正文在 resources/*.lproj/LICENSE.txt，按系统语言切换；对不上再用未本地化的那份 -->
     <license file="LICENSE.txt" mime-type="text/plain"/>
     <!-- HOST_ARCHITECTURES 由 build-macos.sh 换成 x86_64 或 arm64，禁止装到错误芯片 -->
     <options customize="never" require-scripts="true" hostArchitectures="HOST_ARCHITECTURES"/>

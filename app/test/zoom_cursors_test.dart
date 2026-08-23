@@ -23,15 +23,21 @@ void main() {
       File('linux/runner/platform_channel.cc').readAsStringSync(),
       contains('cursor.create'),
     );
+    expect(
+      File('lib/ui/widgets/image_viewer.dart').readAsStringSync(),
+      contains('showZoomOut'),
+    );
   });
 
   test('macOS 安装器按语言带中文许可译本', () {
     final String src = File('../scripts/build-macos.sh').readAsStringSync();
     expect(src, contains('LICENSE.zh-CN.txt'));
     expect(src, contains('LICENSE.zh-TW.txt'));
+    expect(src, contains('English.lproj'));
     expect(src, contains('zh_CN.lproj'));
-    expect(src, contains('zh-Hans.lproj'));
     expect(src, contains('zh_TW.lproj'));
-    expect(src, contains('zh-Hant.lproj'));
+    expect(src, isNot(contains('resources/LICENSE.txt')));
+    expect(src, isNot(contains('zh-Hans.lproj')));
+    expect(src, isNot(contains('zh-Hant.lproj')));
   });
 }

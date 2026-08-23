@@ -42,6 +42,7 @@ void main() {
     };
 
     expect(AnnouncementController.focusUnreadIndex(items, seen), 2);
+    expect(AnnouncementController.focusUnreadIndex(items, <String, String>{}), 2);
   });
 
   test('弹窗已读后若没有其它未读则不再有红点', () {
@@ -70,5 +71,36 @@ void main() {
     };
 
     expect(AnnouncementController.focusUnreadIndex(items, seen), 0);
+  });
+
+  test('置顶 id=1 未读也不抢焦点，红点只跟其余公告', () {
+    final List<Announcement> items = <Announcement>[
+      _item(id: 1, date: '2020-01-01 00:00:00'),
+      _item(id: 4, date: '2026-08-23 00:00:00'),
+    ];
+    final Map<String, String> seen = <String, String>{
+      '4': '2026-08-23 00:00:00',
+    };
+
+    expect(AnnouncementController.focusUnreadIndex(items, seen), isNull);
+    expect(AnnouncementController.latestIndex(items), 1);
+  });
+
+  test('没有未读时打开最近更新的一条，而不是置顶第一条', () {
+    final List<Announcement> items = <Announcement>[
+      _item(id: 1, date: '2020-01-01 00:00:00'),
+      _item(id: 3, date: '2026-08-20 00:00:00'),
+      _item(
+        id: 2,
+        date: '2026-08-10 00:00:00',
+        updatedAt: '2026-08-22 12:00:00',
+      ),
+    ];
+    final Map<String, String> seen = <String, String>{
+      for (final Announcement item in items) '${item.id}': item.updatedAt,
+    };
+
+    expect(AnnouncementController.focusUnreadIndex(items, seen), isNull);
+    expect(AnnouncementController.latestIndex(items), 2);
   });
 }
