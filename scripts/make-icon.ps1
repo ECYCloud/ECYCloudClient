@@ -7,8 +7,8 @@
     换图标时只改主图，跑一遍本脚本重新生成，不要手工塞二进制。
     Windows：ICO 各尺寸以 PNG 负载嵌入（Vista 起支持），保留透明通道；
     向导图按 Inno Setup 的缩放档位输出 24 位 BMP，白底以贴合向导页背景。
-    macOS：按 AppIcon.appiconset 的档位输出，白底按系统图标圆角裁切、四角透明；
-    菜单栏图标另出 MenuBarIcon.imageset（透明底，与 Windows / Linux 托盘同一张纯图形）；Android：按 mipmap 密度输出，
+    macOS：应用图标 AppIcon.appiconset 与菜单栏 MenuBarIcon.imageset 均按各自档位输出，
+    都是透明底纯图形，与 Windows / Linux 托盘同一张；Android：按 mipmap 密度输出，
     并生成 Android TV 主屏 banner（`drawable-*/ic_banner.png`，xhdpi 为 320×180）；
     Linux：按 hicolor 档位输出，随 deb 装进 /usr/share/icons。
 #>
@@ -113,50 +113,6 @@ function Save-Banner {
     }
 }
 
-function Save-MacPng {
-    param(
-        [System.Drawing.Image]$Image,
-        [int]$Size,
-        [string]$Path
-    )
-
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
-    $bitmap = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $shape = $null
-    $brush = $null
-    try {
-        $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
-        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $graphics.Clear([System.Drawing.Color]::Transparent)
-        $diameter = [single][Math]::Min($Size, [Math]::Max(2, $Size * 0.4474))
-        $shape = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $shape.AddArc(0, 0, $diameter, $diameter, 180, 90)
-        $shape.AddArc(($Size - $diameter), 0, $diameter, $diameter, 270, 90)
-        $shape.AddArc(($Size - $diameter), ($Size - $diameter), $diameter, $diameter, 0, 90)
-        $shape.AddArc(0, ($Size - $diameter), $diameter, $diameter, 90, 90)
-        $shape.CloseFigure()
-        $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
-        $graphics.FillPath($brush, $shape)
-        $graphics.SetClip($shape)
-        $graphics.DrawImage($Image, (New-Object System.Drawing.Rectangle(0, 0, $Size, $Size)))
-    }
-    finally {
-        if ($brush) { $brush.Dispose() }
-        if ($shape) { $shape.Dispose() }
-        $graphics.Dispose()
-    }
-    try {
-        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
-    }
-    finally {
-        $bitmap.Dispose()
-    }
-}
-
 function Save-Png {
     param(
         [System.Drawing.Image]$Image,
@@ -242,7 +198,7 @@ try {
     }
 
     foreach ($size in $macSizes) {
-        Save-MacPng -Image $master -Size $size -Path (Join-Path $macIconDir "app_icon_$size.png")
+        Save-Png -Image $master -Size $size -Path (Join-Path $macIconDir "app_icon_$size.png")
     }
     foreach ($size in $macMenuBarSizes) {
         Save-Png -Image $master -Size $size -Path (Join-Path $macMenuBarDir "menu_bar_icon_$size.png")

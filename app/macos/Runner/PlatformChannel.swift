@@ -41,7 +41,10 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var labelShow = "显示主界面"
   private var labelQuit = "退出"
   private var statusTip = ""
-  private var defaultDockIcon: NSImage?
+  // 换色源只能取包里的原图。NSApp.applicationIconImage 会被下面染完色的赋值顶掉，
+  // 拿它当源第二次就是在已染色的图上再染一遍
+  private lazy var appIcon: NSImage? =
+    NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
   private var customCursors: [String: NSCursor] = [:]
 
   init(messenger: FlutterBinaryMessenger, window: NSWindow) {
@@ -277,7 +280,7 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     guard let item = statusItem else { return }
     NSStatusBar.system.removeStatusItem(item)
     statusItem = nil
-    NSApp.applicationIconImage = defaultDockIcon
+    NSApp.applicationIconImage = nil
   }
 
   @objc private func onStatusItemClick() {
@@ -378,9 +381,6 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   }
 
   private func applyStatusIcons() {
-    if defaultDockIcon == nil {
-      defaultDockIcon = NSApp.applicationIconImage
-    }
     statusItem?.button?.toolTip =
       statusTip.isEmpty ? appDisplayName : "\(appDisplayName)\n\(statusTip)"
 
@@ -389,17 +389,18 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     iconTint = want
 
     let hue: CGFloat? = want == 2 ? 145 : (want == 1 ? 28 : nil)
-    if let source = NSImage(named: "MenuBarIcon") ?? defaultDockIcon,
+    if let source = NSImage(named: "MenuBarIcon") ?? appIcon,
       let image = statusIcon(source, points: Self.menuBarIconSize, targetHue: hue)
     {
       image.accessibilityDescription = appDisplayName
       statusItem?.button?.image = image
     }
-    if let hue = hue, let source = defaultDockIcon {
-      NSApp.applicationIconImage =
-        statusIcon(source, points: Self.dockIconSize, targetHue: hue) ?? source
+    if let hue = hue, let source = appIcon {
+      NSApp.applicationIconImage = statusIcon(
+        source, points: Self.dockIconSize, targetHue: hue)
     } else {
-      NSApp.applicationIconImage = defaultDockIcon
+      // 还原程序坞图标只能写 nil，赋回自己读出来的那张不还原
+      NSApp.applicationIconImage = nil
     }
   }
 

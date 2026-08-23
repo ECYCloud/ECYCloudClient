@@ -151,6 +151,10 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _persistRemember(AuthController auth) async {
+    // 验证码登录没有密码可存，此时既不能覆盖也不能清掉密码登录记住的那一对
+    if (_emailCodeMode) {
+      return;
+    }
     if (_remember) {
       await auth.saveRememberedLogin(
         email: _email.text.trim(),
@@ -452,19 +456,21 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 8),
                       Row(
                         children: <Widget>[
-                          Checkbox(
-                            value: _remember,
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            mouseCursor: SystemMouseCursors.basic,
-                            onChanged: (bool? value) =>
-                                _setRemember(auth, value ?? false),
-                          ),
-                          InkWell(
-                            onTap: () => _setRemember(auth, !_remember),
-                            child: Text(L10n.t('记住账号密码')),
-                          ),
+                          if (!_emailCodeMode) ...<Widget>[
+                            Checkbox(
+                              value: _remember,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              mouseCursor: SystemMouseCursors.basic,
+                              onChanged: (bool? value) =>
+                                  _setRemember(auth, value ?? false),
+                            ),
+                            InkWell(
+                              onTap: () => _setRemember(auth, !_remember),
+                              child: Text(L10n.t('记住账号密码')),
+                            ),
+                          ],
                           const Spacer(),
                           TextButton(
                             onPressed: () => setState(
