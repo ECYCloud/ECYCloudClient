@@ -22,11 +22,19 @@ Linux 的 deb 与 rpm 交给包管理器即可；tar.gz 面向没有这两者的
 ### 卸载
 
 - Windows：从「应用和功能」卸载，可选是否一并删除应用数据。
-- macOS：先 `sudo "/Library/Application Support/ECYCloud/bin/ecycloud-helper" uninstall`，再删除 `/Applications/ECYCloud.app` 与 `/Library/Application Support/ECYCloud`。
-- Linux：deb 用 `sudo apt remove ecycloud`，rpm 用 `sudo dnf remove ecycloud`（openSUSE 用 `sudo zypper remove ecycloud`），tar.gz 用 `sudo /opt/ecycloud/uninstall.sh`。
+- macOS：没有系统卸载器。先注销后台服务（会停内核并还原系统代理），再删应用与用户数据：
+
+```bash
+sudo "/Library/Application Support/ECYCloud/bin/ecycloud-helper" uninstall
+sudo rm -rf "/Applications/ECYCloud.app" "/Library/Application Support/ECYCloud"
+rm -f ~/Library/LaunchAgents/com.ecycloud.client.plist
+rm -rf ~/Library/Application\ Support/ECYCloud
+```
+
+- Linux：先退出客户端（系统代理由界面还原）。deb 用 `sudo apt remove ecycloud`，rpm 用 `sudo dnf remove ecycloud`（openSUSE 用 `sudo zypper remove ecycloud`），tar.gz 用 `sudo /opt/ecycloud/uninstall.sh`。再删用户数据与开机自启：`rm -rf ~/.config/ECYCloud ~/.config/autostart/com.ecycloud.client.desktop`。`/var/lib/ECYCloud` 与 `ecycloud` 账户按惯例保留，重装可续用。
 - Android：按常规卸载应用。
 
-后台服务在注销时会停止内核并还原系统代理，请勿跳过这一步直接删文件。
+请勿跳过后台服务注销直接删文件。
 
 ## 从源码构建
 

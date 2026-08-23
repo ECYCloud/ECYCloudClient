@@ -39,6 +39,7 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private var labelQuit = "退出"
   private var statusTip = ""
   private var defaultDockIcon: NSImage?
+  private var customCursors: [String: NSCursor] = [:]
 
   init(messenger: FlutterBinaryMessenger, window: NSWindow) {
     channel = FlutterMethodChannel(
@@ -154,9 +155,107 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
       }
       deleteSecret(name)
       result(nil)
+    case "cursor.create":
+      createCursor(call.arguments, result: result)
+    case "cursor.set":
+      setCursor(call.arguments, result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  private func createCursor(_ arguments: Any?, result: @escaping FlutterResult) {
+    guard let arguments = arguments as? [String: Any],
+      let name = arguments["name"] as? String,
+      let data = arguments["buffer"] as? FlutterStandardTypedData,
+      let width = intArg(arguments["width"]),
+      let height = intArg(arguments["height"]),
+      width > 0,
+      height > 0,
+      data.data.count >= width * height * 4
+    else {
+      result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+      return
+    }
+    let logical = max(intArg(arguments["logicalSize"]) ?? width, 1)
+    guard let rep = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: width,
+      pixelsHigh: height,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: width * 4,
+      bitsPerPixel: 32
+    ), let planes = rep.bitmapData
+    else {
+      result(FlutterError(code: "cursor", message: "无法创建指针图像", details: nil))
+      return
+    }
+    data.data.copyBytes(to: planes, count: width * height * 4)
+    // size 用逻辑点，否则 Retina 上像素尺寸会被当成点，放大镜大一倍
+    let image = NSImage(size: NSSize(width: logical, height: logical))
+    image.addRepresentation(rep)
+    let scale = CGFloat(width) / CGFloat(logical)
+    let hotX = (doubleArg(arguments["hotX"]) ?? (Double(width) * 0.35)) / Double(scale)
+    let hotY = (doubleArg(arguments["hotY"]) ?? (Double(height) * 0.35)) / Double(scale)
+    customCursors[name] = NSCursor(
+      image: image, hotSpot: NSPoint(x: hotX, y: hotY))
+    result(nil)
+  }
+
+  private func setCursor(_ arguments: Any?, result: @escaping FlutterResult) {
+    guard let arguments = arguments as? [String: Any],
+      let name = arguments["name"] as? String,
+      let cursor = customCursors[name]
+    else {
+      result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+      return
+    }
+    cursor.set()
+    // FlutterView.cursorUpdate 会把指针改回 _lastCursor；不登记的话放大镜会被引擎盖成箭头
+    rememberFlutterCursor(cursor)
+    result(nil)
+  }
+
+  private func rememberFlutterCursor(_ cursor: NSCursor) {
+    guard let root = window?.contentView else {
+      return
+    }
+    var pending: [NSView] = [root]
+    let sel = NSSelectorFromString("didUpdateMouseCursor:")
+    while let view = pending.popLast() {
+      if view.responds(to: sel) {
+        view.perform(sel, with: cursor)
+        return
+      }
+      pending.append(contentsOf: view.subviews)
+    }
+  }
+
+  private func intArg(_ value: Any?) -> Int? {
+    if let value = value as? Int {
+      return value
+    }
+    if let value = value as? NSNumber {
+      return value.intValue
+    }
+    return nil
+  }
+
+  private func doubleArg(_ value: Any?) -> Double? {
+    if let value = value as? Double {
+      return value
+    }
+    if let value = value as? Int {
+      return Double(value)
+    }
+    if let value = value as? NSNumber {
+      return value.doubleValue
+    }
+    return nil
   }
 
   private func installTray() {

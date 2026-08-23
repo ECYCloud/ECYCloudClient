@@ -27,13 +27,10 @@ class SwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ValueChanged<bool>? onChanged = this.onChanged;
-    final VoidCallback? onSettings = this.onSettings;
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return ListTile(
       contentPadding: contentPadding,
-      onTap: onChanged == null ? null : () => onChanged(!value),
       leading: icon == null
           ? null
           : Icon(
@@ -66,14 +63,10 @@ class SwitchTile extends StatelessWidget {
               ],
             ),
       subtitle: subtitle == null ? null : Text(subtitle!),
-      trailing: Focus(
-        canRequestFocus: false,
-        descendantsAreFocusable: false,
-        child: Transform.scale(
-          scale: AppTheme.switchScale,
-          alignment: Alignment.centerRight,
-          child: Switch(value: value, onChanged: onChanged),
-        ),
+      trailing: Transform.scale(
+        scale: AppTheme.switchScale,
+        alignment: Alignment.centerRight,
+        child: Switch(value: value, onChanged: onChanged),
       ),
     );
   }

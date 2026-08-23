@@ -25,7 +25,9 @@ const SecretSchema kRememberedSchema = {
 
 struct _PlatformChannel {
   FlMethodChannel* channel;
+  FlView* view;
   GtkWindow* window;
+  GHashTable* cursors;
   AppIndicator* indicator;
   gboolean close_to_tray;
   gboolean connected;
@@ -73,6 +75,108 @@ static gboolean lookup_bool(FlValue* arguments, const gchar* key) {
   FlValue* value = fl_value_lookup_string(arguments, key);
   return value != nullptr && fl_value_get_type(value) == FL_VALUE_TYPE_BOOL &&
          fl_value_get_bool(value);
+}
+
+static FlValue* lookup_value(FlValue* arguments, const gchar* key) {
+  if (arguments == nullptr ||
+      fl_value_get_type(arguments) != FL_VALUE_TYPE_MAP) {
+    return nullptr;
+  }
+  return fl_value_lookup_string(arguments, key);
+}
+
+static gint64 lookup_int(FlValue* arguments, const gchar* key) {
+  FlValue* value = lookup_value(arguments, key);
+  if (value == nullptr) {
+    return 0;
+  }
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_INT) {
+    return fl_value_get_int(value);
+  }
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_FLOAT) {
+    return static_cast<gint64>(fl_value_get_float(value));
+  }
+  return 0;
+}
+
+static gdouble lookup_double(FlValue* arguments, const gchar* key) {
+  FlValue* value = lookup_value(arguments, key);
+  if (value == nullptr) {
+    return 0;
+  }
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_FLOAT) {
+    return fl_value_get_float(value);
+  }
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_INT) {
+    return static_cast<gdouble>(fl_value_get_int(value));
+  }
+  return 0;
+}
+
+static void free_pixbuf_pixels(guchar* pixels, gpointer) {
+  g_free(pixels);
+}
+
+static void apply_named_cursor(PlatformChannel* self, const gchar* name) {
+  GdkCursor* cursor = static_cast<GdkCursor*>(
+      g_hash_table_lookup(self->cursors, name));
+  if (cursor == nullptr) {
+    return;
+  }
+  // Flutter 把指针设在 FlView 上，设到 GtkWindow 会被子控件盖掉
+  GtkWidget* widget =
+      self->view != nullptr ? GTK_WIDGET(self->view) : GTK_WIDGET(self->window);
+  GdkWindow* gdk_window = gtk_widget_get_window(widget);
+  if (gdk_window != nullptr) {
+    gdk_window_set_cursor(gdk_window, cursor);
+  }
+}
+
+static gboolean create_named_cursor(PlatformChannel* self, FlValue* arguments) {
+  const gchar* name = lookup_string(arguments, "name");
+  FlValue* buffer = lookup_value(arguments, "buffer");
+  const gint width = static_cast<gint>(lookup_int(arguments, "width"));
+  const gint height = static_cast<gint>(lookup_int(arguments, "height"));
+  if (name == nullptr || buffer == nullptr ||
+      fl_value_get_type(buffer) != FL_VALUE_TYPE_UINT8_LIST || width <= 0 ||
+      height <= 0) {
+    return FALSE;
+  }
+  const size_t length = fl_value_get_length(buffer);
+  const size_t need = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+  if (length < need) {
+    return FALSE;
+  }
+  guchar* pixels = static_cast<guchar*>(
+      g_memdup2(fl_value_get_uint8_list(buffer), need));
+  GdkPixbuf* pixbuf = gdk_pixbuf_new_from_data(
+      pixels, GDK_COLORSPACE_RGB, TRUE, 8, width, height, width * 4,
+      free_pixbuf_pixels, nullptr);
+  if (pixbuf == nullptr) {
+    g_free(pixels);
+    return FALSE;
+  }
+  GdkDisplay* display = gtk_widget_get_display(
+      self->view != nullptr ? GTK_WIDGET(self->view) : GTK_WIDGET(self->window));
+  gint hot_x = static_cast<gint>(lookup_double(arguments, "hotX"));
+  gint hot_y = static_cast<gint>(lookup_double(arguments, "hotY"));
+  if (hot_x < 0) {
+    hot_x = 0;
+  } else if (hot_x > width - 1) {
+    hot_x = width - 1;
+  }
+  if (hot_y < 0) {
+    hot_y = 0;
+  } else if (hot_y > height - 1) {
+    hot_y = height - 1;
+  }
+  GdkCursor* cursor = gdk_cursor_new_from_pixbuf(display, pixbuf, hot_x, hot_y);
+  g_object_unref(pixbuf);
+  if (cursor == nullptr) {
+    return FALSE;
+  }
+  g_hash_table_insert(self->cursors, g_strdup(name), cursor);
+  return TRUE;
 }
 
 static void restore_main_window(PlatformChannel* self) {
@@ -552,6 +656,23 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
                                  "account", name, nullptr);
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
     }
+  } else if (g_strcmp0(method, "cursor.create") == 0) {
+    if (create_named_cursor(self, arguments)) {
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    } else {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("argument", "缺少参数", nullptr));
+    }
+  } else if (g_strcmp0(method, "cursor.set") == 0) {
+    const gchar* name = lookup_string(arguments, "name");
+    if (name == nullptr ||
+        g_hash_table_lookup(self->cursors, name) == nullptr) {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("argument", "缺少参数", nullptr));
+    } else {
+      apply_named_cursor(self, name);
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    }
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
@@ -564,7 +685,10 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
 
 PlatformChannel* platform_channel_new(FlView* view, GtkWindow* window) {
   PlatformChannel* self = g_new0(PlatformChannel, 1);
+  self->view = view;
   self->window = window;
+  self->cursors = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                        g_object_unref);
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   self->channel = fl_method_channel_new(
@@ -597,5 +721,6 @@ void platform_channel_free(PlatformChannel* self) {
   g_free(self->route_mode);
   g_free(self->status_tip);
   g_clear_object(&self->default_icon);
+  g_clear_pointer(&self->cursors, g_hash_table_unref);
   g_free(self);
 }

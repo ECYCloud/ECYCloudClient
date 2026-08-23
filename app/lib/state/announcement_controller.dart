@@ -12,6 +12,9 @@ class AnnouncementController extends ChangeNotifier {
 
   static const String _source = 'announcement';
   static const String _readMaxIdKey = 'read_max_id';
+  static const String _seenKey = 'seen_revisions';
+  static const String _dismissedPopupIdKey = 'dismissed_popup_id';
+  static const String _dismissedPopupAtKey = 'dismissed_popup_updated_at';
 
   final JsonFileStore _store = JsonFileStore(
     AppPaths.announcementState,
@@ -36,31 +39,58 @@ class AnnouncementController extends ChangeNotifier {
     if (popup == null) {
       return null;
     }
-    final int? dismissed = _store.read()['dismissed_popup_id'] as int?;
-    return dismissed == popup.id ? null : popup;
+    final Map<String, dynamic> data = _store.read();
+    final Object? dismissedRaw = data[_dismissedPopupIdKey];
+    final int? dismissed = dismissedRaw is num ? dismissedRaw.toInt() : null;
+    if (dismissed != popup.id) {
+      return popup;
+    }
+    final String? dismissedAt = data[_dismissedPopupAtKey] as String?;
+    return dismissedAt == popup.updatedAt ? null : popup;
   }
 
   bool get hasUnread {
     if (!_loaded) {
       return false;
     }
-    final int maxId = _maxItemId;
-    if (maxId <= 0) {
-      return false;
-    }
-    final int? seen = _store.read()[_readMaxIdKey] as int?;
-    return seen == null || maxId > seen;
+    return unreadFocusIndex != null;
   }
 
-  int get _maxItemId {
-    int maxId = 0;
-    for (final Announcement item in _items) {
-      if (item.id > maxId) {
-        maxId = item.id;
+  int? get unreadFocusIndex => focusUnreadIndex(_items, _seenRevisions());
+
+  static Map<String, String> decodeSeen(Object? raw) {
+    if (raw is! Map) {
+      return <String, String>{};
+    }
+    return <String, String>{
+      for (final MapEntry<dynamic, dynamic> entry in raw.entries)
+        entry.key.toString(): entry.value.toString(),
+    };
+  }
+
+  static int? focusUnreadIndex(
+    List<Announcement> items,
+    Map<String, String> seen,
+  ) {
+    int? bestIndex;
+    DateTime? bestAt;
+    for (int i = 0; i < items.length; i++) {
+      final Announcement item = items[i];
+      if (seen['${item.id}'] == item.updatedAt) {
+        continue;
+      }
+      final DateTime? at = item.revisedAt;
+      if (bestIndex == null ||
+          (at != null && (bestAt == null || at.isAfter(bestAt)))) {
+        bestIndex = i;
+        bestAt = at;
       }
     }
-    return maxId;
+    return bestIndex;
   }
+
+  Map<String, String> _seenRevisions() =>
+      decodeSeen(_store.read()[_seenKey]);
 
   void attachApi(PanelApiClient? api) {
     _api = api;
@@ -88,6 +118,7 @@ class AnnouncementController extends ChangeNotifier {
       _items = bundle.items;
       _popup = bundle.popup;
       _loaded = true;
+      _migrateSeenIfNeeded();
     } on ApiException catch (e) {
       if (e.rateLimited) {
         Logger.instance.debug(_source, '拉取公告限流，稍后重试');
@@ -103,23 +134,73 @@ class AnnouncementController extends ChangeNotifier {
 
   void dismissPopup(Announcement announcement) {
     final Map<String, dynamic> data = _store.read();
-    data['dismissed_popup_id'] = announcement.id;
+    data[_dismissedPopupIdKey] = announcement.id;
+    data[_dismissedPopupAtKey] = announcement.updatedAt;
     _store.write(data);
     notifyListeners();
   }
 
+  void markAnnouncementSeen(Announcement announcement) {
+    final Map<String, String> seen = _seenRevisions();
+    if (seen['${announcement.id}'] == announcement.updatedAt) {
+      return;
+    }
+    seen['${announcement.id}'] = announcement.updatedAt;
+    _writeSeen(seen);
+  }
+
   void markSeen() {
-    final int maxId = _maxItemId;
-    if (maxId <= 0) {
+    if (_items.isEmpty) {
       return;
     }
+    _writeSeen(<String, String>{
+      for (final Announcement item in _items) '${item.id}': item.updatedAt,
+    });
+  }
+
+  void _writeSeen(Map<String, String> seen) {
     final Map<String, dynamic> data = _store.read();
-    if (data[_readMaxIdKey] == maxId) {
-      return;
-    }
-    data[_readMaxIdKey] = maxId;
+    data[_seenKey] = seen;
+    data.remove(_readMaxIdKey);
     data.remove('last_seen_id');
     _store.write(data);
     notifyListeners();
+  }
+
+  void _migrateSeenIfNeeded() {
+    final Map<String, dynamic> data = _store.read();
+    bool dirty = false;
+
+    if (data[_seenKey] is! Map) {
+      final Object? maxIdRaw = data[_readMaxIdKey];
+      if (maxIdRaw is num) {
+        final int maxId = maxIdRaw.toInt();
+        data[_seenKey] = <String, String>{
+          for (final Announcement item in _items)
+            if (item.id <= maxId) '${item.id}': item.updatedAt,
+        };
+        data.remove(_readMaxIdKey);
+        data.remove('last_seen_id');
+        dirty = true;
+      }
+    }
+
+    if (data[_dismissedPopupIdKey] != null &&
+        !data.containsKey(_dismissedPopupAtKey)) {
+      final int dismissedId = data[_dismissedPopupIdKey] is num
+          ? (data[_dismissedPopupIdKey] as num).toInt()
+          : 0;
+      for (final Announcement item in _items) {
+        if (item.id == dismissedId) {
+          data[_dismissedPopupAtKey] = item.updatedAt;
+          dirty = true;
+          break;
+        }
+      }
+    }
+
+    if (dirty) {
+      _store.write(data);
+    }
   }
 }

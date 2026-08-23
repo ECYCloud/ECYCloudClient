@@ -15,6 +15,7 @@ Future<void> showAnnouncementPopup(
   required AnnouncementController controller,
   bool dismissible = true,
 }) {
+  controller.markAnnouncementSeen(announcement);
   return showDialog<void>(
     context: context,
     barrierDismissible: dismissible,
@@ -96,7 +97,10 @@ Future<void> showAnnouncementBrowser(
             ],
           );
         }
-        return _AnnouncementBrowser(items: items);
+        return _AnnouncementBrowser(
+          items: items,
+          initialIndex: controller.unreadFocusIndex ?? 0,
+        );
       },
     ),
   );
@@ -104,16 +108,23 @@ Future<void> showAnnouncementBrowser(
 }
 
 class _AnnouncementBrowser extends StatefulWidget {
-  const _AnnouncementBrowser({required this.items});
+  const _AnnouncementBrowser({required this.items, this.initialIndex = 0});
 
   final List<Announcement> items;
+  final int initialIndex;
 
   @override
   State<_AnnouncementBrowser> createState() => _AnnouncementBrowserState();
 }
 
 class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
-  int _index = 0;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex.clamp(0, widget.items.length - 1);
+  }
 
   @override
   void didUpdateWidget(covariant _AnnouncementBrowser oldWidget) {

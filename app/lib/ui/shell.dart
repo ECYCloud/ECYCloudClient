@@ -77,7 +77,7 @@ class _ShellState extends State<Shell> {
   AuthController? _auth;
   AnnouncementController? _announcements;
   bool _forcingUpdate = false;
-  int? _lastPromptedPopupId;
+  String? _lastPromptedPopupKey;
   bool _handlingIpKick = false;
   Timer? _ipKickPollTimer;
 
@@ -273,10 +273,13 @@ class _ShellState extends State<Shell> {
       return;
     }
     final Announcement? pending = announcements.pendingPopup;
-    if (pending == null || _lastPromptedPopupId == pending.id) {
+    final String? key = pending == null
+        ? null
+        : '${pending.id}|${pending.updatedAt}';
+    if (pending == null || _lastPromptedPopupKey == key) {
       return;
     }
-    _lastPromptedPopupId = pending.id;
+    _lastPromptedPopupKey = key;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
