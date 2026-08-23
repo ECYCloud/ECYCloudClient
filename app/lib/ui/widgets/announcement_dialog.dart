@@ -110,7 +110,11 @@ Future<void> showAnnouncementBrowser(
 }
 
 class _AnnouncementBrowser extends StatefulWidget {
-  const _AnnouncementBrowser({required this.items, this.initialIndex = 0});
+  const _AnnouncementBrowser({
+    super.key,
+    required this.items,
+    this.initialIndex = 0,
+  });
 
   final List<Announcement> items;
   final int initialIndex;
