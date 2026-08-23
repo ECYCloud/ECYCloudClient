@@ -57,17 +57,25 @@ class _LanguageSetupPageState extends State<LanguageSetupPage> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                for (final AppLanguage language in AppLanguage.values)
-                  RadioListTile<AppLanguage>(
-                    value: language,
-                    groupValue: _selected,
-                    title: Text(language.label),
-                    onChanged: (AppLanguage? value) {
-                      if (value != null) {
-                        _select(value);
-                      }
-                    },
+                RadioGroup<AppLanguage>(
+                  groupValue: _selected,
+                  onChanged: (AppLanguage? value) {
+                    if (value != null) {
+                      _select(value);
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (final AppLanguage language in AppLanguage.values)
+                        RadioListTile<AppLanguage>(
+                          value: language,
+                          title: Text(language.label),
+                        ),
+                    ],
                   ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton(
                   autofocus: AppScope.of(context).platform.isTelevision,

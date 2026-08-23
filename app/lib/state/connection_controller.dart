@@ -745,8 +745,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _syncTray() {
     final bool active = _state == ConnectionPhase.connected;
-    final bool proxyOn = active && _settings.systemProxyEnabled;
-    final bool tunOn = active && _settings.tunEnabled;
+    // 改设置要重启内核，中途状态落回 connecting：出口开关并没有变，系统代理也还留在
+    // 系统里（_teardown 的重启分支不还原），图标不能跟着闪回默认色
+    final bool serving = active || (busy && _persistRestart);
+    final bool proxyOn = serving && _settings.systemProxyEnabled;
+    final bool tunOn = serving && _settings.tunEnabled;
     final String on = L10n.t('已开启');
     final String off = L10n.t('已关闭');
     final TrayState next = TrayState(

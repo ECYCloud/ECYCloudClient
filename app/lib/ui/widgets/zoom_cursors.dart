@@ -44,10 +44,14 @@ abstract final class ZoomCursors {
     }
   }
 
-  // 打开大图时鼠标没动，Flutter 要等下一次指针事件才换光标
+  // 打开大图时鼠标没动，Flutter 要等下一次指针事件才换光标。框架没给强制刷新的公开
+  // 入口，只能自己走一遍 session；下面三个成员都是 @protected，这里是有意越界
   static Future<void> showZoomOut() async {
+    // ignore: invalid_use_of_protected_member
     final MouseCursorSession session = _zoomOutImpl.createSession(0);
+    // ignore: invalid_use_of_protected_member
     await session.activate();
+    // ignore: invalid_use_of_protected_member
     session.dispose();
   }
 }

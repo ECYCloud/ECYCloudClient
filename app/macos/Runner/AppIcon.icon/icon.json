@@ -1,0 +1,28 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : { "solid" : "extended-srgb:1.00000,1.00000,1.00000,1.00000" }
+    },
+    {
+      "appearance" : "dark",
+      "value" : { "solid" : "extended-srgb:0.11373,0.11373,0.12157,1.00000" }
+    }
+  ],
+  "groups" : [
+    {
+      "name" : "Shield",
+      "layers" : [
+        {
+          "name" : "Shield",
+          "image-name" : "Shield.png"
+        }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.35 },
+      "specular" : true,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

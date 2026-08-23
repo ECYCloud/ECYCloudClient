@@ -127,7 +127,7 @@ class PanelApiClient {
   http.Client? _proxy;
   int? _proxyPort;
 
-  String? _token;
+  String? token;
 
   List<String> get configDirectCidrs {
     final Set<String> seen = <String>{};
@@ -174,10 +174,6 @@ class PanelApiClient {
     }
   }
 
-  String? get token => _token;
-
-  set token(String? value) => _token = value;
-
   Uri _endpoint(String path, [Map<String, String>? query]) =>
       _apiUri(baseUrl, path, query);
 
@@ -215,7 +211,7 @@ class PanelApiClient {
     if (device.appVersion.isNotEmpty)
       'X-App-Version': _headerText(device.appVersion),
     if (json) 'Content-Type': 'application/json; charset=utf-8',
-    if (_token != null) 'Authorization': 'Bearer $_token',
+    if (token != null) 'Authorization': 'Bearer $token',
   };
 
   // HTTP 头只保证 ASCII；非 ASCII 须 encode，面板 rawurldecode 还原
@@ -320,7 +316,7 @@ class PanelApiClient {
 
   LoginResult _loginResult(Map<String, dynamic> data) {
     final String token = data['token'] as String;
-    _token = token;
+    this.token = token;
 
     final Object? userRaw = data['user'];
     final Object? statusRaw = data['account_status'];
@@ -346,8 +342,8 @@ class PanelApiClient {
   Future<AccountStatus> killAccount({String? emailCode, String? passwd}) async {
     final Map<String, dynamic> envelope =
         await _postEnvelope('/user/kill', <String, dynamic>{
-          if (emailCode != null) 'email_code': emailCode,
-          if (passwd != null) 'passwd': passwd,
+          'email_code': ?emailCode,
+          'passwd': ?passwd,
         });
     final Object? data = envelope['data'];
     if (data is Map<String, dynamic>) {
@@ -385,7 +381,7 @@ class PanelApiClient {
     } on ApiException catch (e) {
       Logger.instance.debug(_source, '登出请求未成功: $e');
     } finally {
-      _token = null;
+      token = null;
     }
   }
 

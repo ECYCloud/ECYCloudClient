@@ -135,6 +135,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 镜像默认还是 Xcode 16，它的 actool 不认识 AppIcon.icon，分层图标会被整个跳过
+      - name: 选用 Xcode 26
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [[ -z "$xcode" ]]; then
+            echo "runner 上没有 Xcode 26，编不出 Liquid Glass 图标" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: native/unix/helper/go.mod
