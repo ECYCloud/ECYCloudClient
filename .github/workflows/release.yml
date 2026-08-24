@@ -301,8 +301,37 @@ jobs:
           path: build/installer/ECYCloud-*-android-x64.apk
           if-no-files-found: error
 
+  openwrt:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 SDK 依赖
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
+            build-essential file gawk git libncurses-dev libssl-dev \
+            python3 python3-setuptools rsync unzip wget zstd
+
+      - uses: actions/cache@v4
+        with:
+          path: build/cache/openwrt-sdk-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          key: openwrt-sdk-25.12.5-x86-64-0c8df0151a1e88fe
+
+      - name: 出包
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/build-openwrt.sh --version ${{ needs.prepare.outputs.version }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: installer-openwrt-25.12
+          path: build/installer/ECYCloud-*-openwrt-25.12.tar.gz
+          if-no-files-found: error
+
   release:
-    needs: [prepare, windows, macos, linux, android]
+    needs: [prepare, windows, macos, linux, android, openwrt]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -352,8 +381,11 @@ jobs:
             echo "| Debian / Ubuntu 及衍生版 | \`ECYCloud-$VERSION-linux-x64.deb\` 或 \`...-linux-arm64.deb\` |"
             echo "| Fedora / openSUSE / RHEL 系 | \`ECYCloud-$VERSION-linux-x64.rpm\` 或 \`...-linux-arm64.rpm\` |"
             echo "| 其它 Linux（Arch 等） | \`ECYCloud-$VERSION-linux-*.tar.gz\`，解包后 \`sudo ./install.sh\` |"
+            echo "| OpenWrt 25.12（apk） | \`ECYCloud-$VERSION-openwrt-25.12.tar.gz\` |"
             echo
             echo "不确定 Windows / Mac 架构时：Windows 看「设置 → 系统 → 关于 → 系统类型」；Mac 看「关于本机」，芯片写 Apple 则选 arm64，写 Intel 则选 x64。Android 真机几乎都是 arm64；\`android-arm.apk\` 仅旧 32 位设备，\`android-x64.apk\` 仅模拟器。"
+            echo
+            echo "OpenWrt 包是 noarch apk，解包后先挂第三方源装 \`mihomo\`（如 \`mihomo-meta\`，**不要装 nikki**），再 \`apk add --allow-untrusted ./luci-app-ecycloud-*.apk ./luci-i18n-ecycloud-*.apk\`。此包只对 25.12；24.10 / 23.05 仍是 ipk，需自己用对应 SDK 编。"
             echo
             echo "桌面三端安装时需要一次管理员授权以注册后台服务，此后日常使用不再要求提权；Android 首次连接时会弹出系统的 VPN 授权。客户端每 24 小时检查一次自身与 mihomo 内核更新，发现新版会在界面上提示。"
           } > notes.md
