@@ -167,58 +167,42 @@ class _UnlockPageState extends State<UnlockPage> {
               ? Center(child: Text(_error!))
               : RefreshIndicator(
                   onRefresh: _load,
-                  notificationPredicate: (ScrollNotification n) =>
-                      n.metrics.axis == Axis.vertical,
-                  child: NestedScrollView(
-                    headerSliverBuilder: (BuildContext context, bool _) {
-                      return <Widget>[
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: AppTheme.pageScrollPadding.copyWith(
-                              bottom: 0,
-                            ),
-                            child: SectionCard(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    L10n.t(
-                                      '您可以在这里查看节点的流媒体和各大AI平台解锁情况。',
-                                    ),
-                                  ),
-                                  if (_unlockCheckInterval > 0) ...<Widget>[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      L10n.t(
-                                        '每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。',
-                                        <Object>[_unlockCheckInterval],
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    L10n.t(
-                                      '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)',
-                                    ),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: scheme.onSurfaceVariant,
-                                        ),
-                                  ),
-                                ],
+                  child: ListView(
+                    padding: AppTheme.pageScrollPadding,
+                    children: <Widget>[
+                      SectionCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              L10n.t(
+                                '您可以在这里查看节点的流媒体和各大AI平台解锁情况。',
                               ),
                             ),
-                          ),
+                            if (_unlockCheckInterval > 0) ...<Widget>[
+                              const SizedBox(height: 8),
+                              Text(
+                                L10n.t(
+                                  '每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。',
+                                  <Object>[_unlockCheckInterval],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Text(
+                              L10n.t(
+                                '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)',
+                              ),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ],
                         ),
-                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                      ];
-                    },
-                    body: Padding(
-                      padding: AppTheme.pageScrollPadding.copyWith(top: 0),
-                      child: SimpleDataTable(
-                        stickyHeader: true,
+                      ),
+                      const SizedBox(height: 12),
+                      SimpleDataTable(
                         minWidth: 1280,
                         columnWidths: const <int, TableColumnWidth>{
                           0: IntrinsicColumnWidth(),
@@ -259,7 +243,7 @@ class _UnlockPageState extends State<UnlockPage> {
                             ],
                         ],
                       ),
-                    ),
+                    ],
                   ),
                 ),
         ),

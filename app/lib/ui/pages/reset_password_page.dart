@@ -124,7 +124,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                             Text(
                               L10n.t('可粘贴邮件中的完整重置链接，或只填 token'),
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
+                              style: theme.textTheme.bodyMedium?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
@@ -272,7 +272,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                             Text(
                               L10n.t('输入注册邮箱，我们会发送重置链接'),
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
+                              style: theme.textTheme.bodyMedium?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),

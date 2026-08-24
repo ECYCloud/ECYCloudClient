@@ -137,6 +137,19 @@ class WindowsPlatformService implements PlatformService {
   }
 
   @override
+  Future<void> setWindowDark({
+    required bool dark,
+    int caption = 0,
+    int text = 0,
+  }) async {
+    await _channel.invokeMethod<void>('window.setDark', <String, dynamic>{
+      'dark': dark,
+      'caption': caption,
+      'text': text,
+    });
+  }
+
+  @override
   Future<String> deviceName() async => Platform.localHostname;
 
   @override

@@ -1,0 +1,17 @@
+{
+	"luci-app-ecycloud": {
+		"description": "Grant access to the ECY Cloud client",
+		"read": {
+			"ubus": {
+				"luci.ecycloud": [ "status", "groups", "logs", "delay" ]
+			},
+			"uci": [ "ecycloud" ]
+		},
+		"write": {
+			"ubus": {
+				"luci.ecycloud": [ "login", "logout", "start", "stop", "update", "select", "reselect", "mode" ]
+			},
+			"uci": [ "ecycloud" ]
+		}
+	}
+}

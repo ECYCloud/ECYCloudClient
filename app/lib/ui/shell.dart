@@ -13,6 +13,7 @@ import '../state/auth_controller.dart';
 import '../state/connection_controller.dart';
 import '../state/update_controller.dart';
 import 'app_scope.dart';
+import 'theme.dart';
 import 'widgets/overlay_scroll_view.dart';
 import 'pages/connections_page.dart';
 import 'pages/home_page.dart';
@@ -45,6 +46,8 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
+  static const int _mobilePinnedCount = 4;
+
   static const List<_Destination> _destinations = <_Destination>[
     _Destination(Icons.home_outlined, Icons.home, '首页', HomePage()),
     _Destination(Icons.dns_outlined, Icons.dns, '节点', NodesPage()),
@@ -72,6 +75,7 @@ class _ShellState extends State<Shell> {
   ];
 
   int _index = 0;
+  bool _moreOpen = false;
   UpdateController? _update;
   ConnectionController? _connection;
   AuthController? _auth;
@@ -123,7 +127,10 @@ class _ShellState extends State<Shell> {
   }
 
   void _goToTab(int index) {
-    setState(() => _index = index);
+    setState(() {
+      _index = index;
+      _moreOpen = false;
+    });
   }
 
   void _syncIpKickPoll() {
@@ -413,20 +420,73 @@ class _ShellState extends State<Shell> {
                         Expanded(child: content),
                       ],
                     )
-                  : content,
+                  : Stack(
+                      children: <Widget>[
+                        content,
+                        if (_moreOpen)
+                          Align(
+                            alignment: Alignment.bottomRight,
+                            child: Material(
+                              color: Theme.of(context).colorScheme.surface,
+                              clipBehavior: Clip.antiAlias,
+                              borderRadius: BorderRadius.circular(
+                                AppTheme.cardRadius,
+                              ),
+                              child: IntrinsicWidth(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    for (
+                                      int i = _mobilePinnedCount;
+                                      i < _destinations.length;
+                                      i++
+                                    )
+                                      ListTile(
+                                        leading: Icon(
+                                          _index == i
+                                              ? _destinations[i].selectedIcon
+                                              : _destinations[i].icon,
+                                        ),
+                                        title: Text(
+                                          L10n.t(_destinations[i].label),
+                                        ),
+                                        selected: _index == i,
+                                        onTap: () => _goToTab(i),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
             ),
             bottomNavigationBar: wide
                 ? null
                 : NavigationBar(
-                    selectedIndex: _index,
-                    onDestinationSelected: _goToTab,
+                    selectedIndex: _index < _mobilePinnedCount
+                        ? _index
+                        : _mobilePinnedCount,
+                    onDestinationSelected: (int index) {
+                      if (index < _mobilePinnedCount) {
+                        _goToTab(index);
+                        return;
+                      }
+                      setState(() => _moreOpen = !_moreOpen);
+                    },
                     destinations: <NavigationDestination>[
-                      for (final _Destination destination in _destinations)
+                      for (final _Destination destination
+                          in _destinations.take(_mobilePinnedCount))
                         NavigationDestination(
                           icon: Icon(destination.icon),
                           selectedIcon: Icon(destination.selectedIcon),
                           label: L10n.t(destination.label),
                         ),
+                      NavigationDestination(
+                        icon: const Icon(Icons.more_horiz),
+                        selectedIcon: const Icon(Icons.more_horiz),
+                        label: L10n.t('更多'),
+                      ),
                     ],
                   ),
           ),

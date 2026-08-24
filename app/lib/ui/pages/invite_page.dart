@@ -323,7 +323,12 @@ class _InvitePageState extends State<InvitePage> {
                           children: <Widget>[
                             Text(
                               L10n.t('邀请他人注册时，请将以下链接发送给被邀请者'),
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
                             ),
                             const SizedBox(height: 8),
                             _InviteCopyRow(
@@ -603,26 +608,27 @@ class _InviteCopyRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(label, style: theme.textTheme.bodySmall),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text('$label：', style: theme.textTheme.bodyMedium),
+              Text(
                 value,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium,
               ),
-            ),
-            IconButton(
-              tooltip: L10n.t('复制{0}', <Object>[label]),
-              onPressed: onCopy,
-              icon: const Icon(Icons.copy, size: 18),
-            ),
-          ],
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: L10n.t('复制{0}', <Object>[label]),
+          onPressed: onCopy,
+          icon: const Icon(Icons.copy, size: 18),
         ),
       ],
     );

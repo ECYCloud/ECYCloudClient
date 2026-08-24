@@ -1,0 +1,346 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_Hans\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "%d members"
+msgstr "%d 个成员"
+
+msgid "%d ms"
+msgstr "%d 毫秒"
+
+msgid "%d nodes, fetched %s"
+msgstr "%d 个节点，拉取于 %s"
+
+msgid "%s up / %s down"
+msgstr "上传 %s / 下载 %s"
+
+msgid "%s used of %s, %s today"
+msgstr "已用 %s，共 %s，今日 %s"
+
+msgid "%s, %d days left"
+msgstr "%s，剩余 %d 天"
+
+msgid "%s, current node: %s"
+msgstr "%s，当前节点：%s"
+
+msgid "Account"
+msgstr "账号"
+
+msgid "Advanced"
+msgstr "高级"
+
+msgid "Allow LAN"
+msgstr "允许局域网"
+
+msgid "Also send traffic originating on the router through the kernel."
+msgstr "路由器自身发出的流量也送进内核。"
+
+msgid "Applied"
+msgstr "已生效"
+
+msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel."
+msgstr "geoip.metadb 与 GeoSite.dat 的下载地址前缀，留空则沿用面板下发的地址。"
+
+msgid "Connections"
+msgstr "连接数"
+
+msgid "DNS hijack"
+msgstr "DNS 劫持"
+
+msgid "DNS port"
+msgstr "DNS 端口"
+
+msgid "Debug"
+msgstr "调试"
+
+msgid "Direct"
+msgstr "直连"
+
+msgid "Disabled"
+msgstr "已关闭"
+
+msgid "ECY Cloud"
+msgstr "ECY Cloud"
+
+msgid "Email"
+msgstr "邮箱"
+
+msgid "Error"
+msgstr "错误"
+
+msgid "Expires"
+msgstr "到期时间"
+
+msgid "Failed"
+msgstr "失败"
+
+msgid "Fetching the profile in the background"
+msgstr "正在后台拉取配置"
+
+msgid "Firewall rules"
+msgstr "防火墙规则"
+
+msgid "General"
+msgstr "常规"
+
+msgid "GeoData mirror"
+msgstr "GeoData 镜像"
+
+msgid "Global"
+msgstr "全局"
+
+msgid "HTTP and SOCKS proxy port of the kernel."
+msgstr "内核的 HTTP / SOCKS 代理端口。"
+
+msgid "Handle IPv6 traffic as well."
+msgstr "一并处理 IPv6 流量。"
+
+msgid "Hijack DNS"
+msgstr "劫持 DNS"
+
+msgid "IPv6"
+msgstr "IPv6"
+
+msgid "Info"
+msgstr "信息"
+
+msgid "Kernel"
+msgstr "内核"
+
+msgid "LAN devices"
+msgstr "局域网设备"
+
+msgid "LAN interfaces"
+msgstr "局域网接口"
+
+msgid "Last %d syslog entries of the plugin and the kernel."
+msgstr "插件与内核最近 %d 条系统日志。"
+
+msgid "Latency"
+msgstr "延迟"
+
+msgid "Let LAN clients use the mixed port directly."
+msgstr "允许局域网设备直接使用混合端口。"
+
+msgid "Log level"
+msgstr "日志级别"
+
+msgid "Logs"
+msgstr "日志"
+
+msgid "Loopback port the kernel resolver listens on."
+msgstr "内核 DNS 在回环上监听的端口。"
+
+msgid "Minutes between panel checks, 0 disables the periodic check."
+msgstr "面板检查间隔（分钟），0 表示不定期检查。"
+
+msgid "Mixed"
+msgstr "混合"
+
+msgid "Mixed port"
+msgstr "混合端口"
+
+msgid "No entries yet."
+msgstr "暂无日志。"
+
+msgid "Node"
+msgstr "节点"
+
+msgid "Nodes"
+msgstr "节点"
+
+msgid "Not applied"
+msgstr "未生效"
+
+msgid "Not running"
+msgstr "未运行"
+
+msgid "Overview"
+msgstr "概览"
+
+msgid "Panel"
+msgstr "面板"
+
+msgid "Password"
+msgstr "密码"
+
+msgid "Plan"
+msgstr "套餐"
+
+msgid "Plugin version"
+msgstr "插件版本"
+
+msgid "Ports"
+msgstr "端口"
+
+msgid "Preparing configuration"
+msgstr "正在准备配置"
+
+msgid "Profile"
+msgstr "配置"
+
+msgid "Profile refresh"
+msgstr "配置刷新"
+
+msgid "Proxy mode"
+msgstr "代理模式"
+
+msgid "Proxy the router itself"
+msgstr "代理路由器自身"
+
+msgid "Recovering"
+msgstr "正在自救"
+
+msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver."
+msgstr "重定向局域网设备的 53 端口，并让 dnsmasq 转发给内核 DNS。"
+
+msgid "Refresh profile"
+msgstr "刷新配置"
+
+msgid "Request failed"
+msgstr "请求失败"
+
+msgid "Routing"
+msgstr "分流模式"
+
+msgid "Routing mode updated"
+msgstr "分流模式已更新"
+
+msgid "Rule"
+msgstr "规则"
+
+msgid "Running"
+msgstr "运行中"
+
+msgid "Running (%s)"
+msgstr "运行中（%s）"
+
+msgid "Service"
+msgstr "服务"
+
+msgid "Service starting"
+msgstr "服务正在启动"
+
+msgid "Service stopped"
+msgstr "服务已停止"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Sign in"
+msgstr "登录"
+
+msgid "Sign out"
+msgstr "退出登录"
+
+msgid "Signed in, the service is starting"
+msgstr "登录成功，服务正在启动"
+
+msgid "Signed out"
+msgstr "已退出登录"
+
+msgid "Silent"
+msgstr "静默"
+
+msgid "Start"
+msgstr "启动"
+
+msgid "Starting kernel"
+msgstr "正在启动内核"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Stop"
+msgstr "停止"
+
+msgid "Stopped"
+msgstr "已停止"
+
+msgid "Switched to %s"
+msgstr "已切换到 %s"
+
+msgid "System"
+msgstr "系统"
+
+msgid "TPROXY"
+msgstr "TPROXY"
+
+msgid "TPROXY port"
+msgstr "TPROXY 端口"
+
+msgid "TUN"
+msgstr "TUN"
+
+msgid "TUN device"
+msgstr "TUN 设备"
+
+msgid "TUN stack"
+msgstr "TUN 栈"
+
+msgid "Test latency"
+msgstr "测速"
+
+msgid "The kernel is not running, no proxy group to show."
+msgstr "内核未运行，暂无策略组。"
+
+msgid "Traffic"
+msgstr "流量"
+
+msgid "Traffic from these interfaces is sent to the kernel."
+msgstr "这些接口的流量会被送进内核。"
+
+msgid "Traffic since start"
+msgstr "本次启动流量"
+
+msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
+msgstr "透明代理设置。保存会重启服务，期间连接会短暂中断。"
+
+msgid "Two-factor code"
+msgstr "两步验证码"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Use the account of the panel this plugin was built for. Signing in enables the service."
+msgstr "使用出包时绑定的面板账号登录，登录后会自动启用服务。"
+
+msgid "Validating configuration"
+msgstr "正在校验配置"
+
+msgid "Waiting for the kernel"
+msgstr "等待内核就绪"
+
+msgid "Warning"
+msgstr "警告"
+
+msgid "automatic"
+msgstr "自动"
+
+msgid "dnsmasq forwards to the kernel"
+msgstr "dnsmasq 已转发给内核"
+
+msgid "gVisor"
+msgstr "gVisor"
+
+msgid "manual"
+msgstr "手动"
+
+msgid "no active plan"
+msgstr "无有效套餐"
+
+msgid "none"
+msgstr "无"
+
+msgid "not fetched yet"
+msgstr "尚未拉取"
+
+msgid "unknown version"
+msgstr "版本未知"
+
+msgid "untested"
+msgstr "未测速"

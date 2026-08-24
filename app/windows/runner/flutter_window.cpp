@@ -58,6 +58,10 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_CLOSE || message == WM_EXITSIZEMOVE) {
+    Win32Window::PersistSize(hwnd);
+  }
+
   // 必须早于 Flutter 处理，否则 WM_CLOSE 会被默认关窗逻辑吃掉
   if (platform_channel_) {
     LRESULT result = 0;

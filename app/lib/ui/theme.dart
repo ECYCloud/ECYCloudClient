@@ -173,14 +173,14 @@ class AppTheme {
       titleMedium: style(14, FontWeight.w600),
       titleSmall: style(13, FontWeight.w600),
       bodyLarge: style(13),
-      bodyMedium: style(12),
+      bodyMedium: style(13),
       bodySmall: TextStyle(
         fontFamily: _fontFamily,
-        fontSize: 11,
+        fontSize: 12,
         color: scheme.onSurfaceVariant,
       ),
       labelLarge: style(12, FontWeight.w600),
-      labelMedium: style(11, FontWeight.w500),
+      labelMedium: style(12, FontWeight.w500),
       labelSmall: style(10, FontWeight.w500),
     );
   }
@@ -333,7 +333,7 @@ class AppTheme {
         ) {
           final bool selected = states.contains(WidgetState.selected);
           return _componentText(
-            11,
+            12,
             weight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
           );
@@ -353,12 +353,12 @@ class AppTheme {
           color: scheme.onSurfaceVariant,
         ),
         selectedLabelTextStyle: _componentText(
-          11,
+          12,
           weight: FontWeight.w600,
           color: scheme.primary,
         ),
         unselectedLabelTextStyle: _componentText(
-          11,
+          12,
           color: scheme.onSurfaceVariant,
         ),
       ),

@@ -120,7 +120,19 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
         labelQuit = value
       }
       statusTip = arguments["status_tip"] as? String ?? ""
+      if let dark = arguments["dark"] as? Bool {
+        applyWindowAppearance(dark)
+      }
       applyStatusIcons()
+      result(nil)
+    case "window.setDark":
+      guard let arguments = call.arguments as? [String: Any],
+        let dark = arguments["dark"] as? Bool
+      else {
+        result(FlutterError(code: "argument", message: "缺少参数", details: nil))
+        return
+      }
+      applyWindowAppearance(dark)
       result(nil)
     case "secret.protect":
       guard let arguments = call.arguments as? [String: Any],
@@ -380,6 +392,10 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     channel.invokeMethod("tray.action", arguments: action)
   }
 
+  private func applyWindowAppearance(_ dark: Bool) {
+    window?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+  }
+
   private func applyStatusIcons() {
     statusItem?.button?.toolTip =
       statusTip.isEmpty ? appDisplayName : "\(appDisplayName)\n\(statusTip)"
@@ -529,6 +545,7 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
 
   /// 托盘不可用时不能只是藏起来，否则窗口再也调不出来，只能连进程一起退
   func windowShouldClose(_ sender: NSWindow) -> Bool {
+    (sender as? MainFlutterWindow)?.persistContentSize()
     if closeToTray, statusItem != nil {
       sender.orderOut(nil)
       return false

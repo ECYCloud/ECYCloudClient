@@ -8,6 +8,7 @@ import '../../data/models/account.dart';
 import '../app_scope.dart';
 import '../format.dart';
 import '../shell_navigator.dart';
+import 'subscription_strategy_page.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
@@ -194,10 +195,41 @@ class _TrafficLogPageState extends State<TrafficLogPage> {
       builder: (BuildContext context) => AlertDialog(
         title: Text(L10n.t('流量记录说明')),
         content: OverlayScrollView(
-          child: Text(
-            L10n.t(
-              '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。',
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                L10n.t(
+                  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text.rich(
+                TextSpan(
+                  children: <InlineSpan>[
+                    TextSpan(text: L10n.t('如需关闭自动测试可在本客户端的 ')),
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: TextButton(
+                        onPressed: () {
+                          final NavigatorState nav = Navigator.of(context);
+                          nav.pop();
+                          nav.push(
+                            MaterialPageRoute<void>(
+                              builder: (BuildContext context) =>
+                                  const SubscriptionStrategyPage(),
+                            ),
+                          );
+                        },
+                        child: Text('${L10n.t('分组策略')} ›'),
+                      ),
+                    ),
+                    TextSpan(text: L10n.t(' 关闭 自动选择 和 故障转移 策略组。')),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
         actions: <Widget>[

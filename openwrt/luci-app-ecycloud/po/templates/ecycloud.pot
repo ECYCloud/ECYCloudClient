@@ -1,0 +1,344 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "%d members"
+msgstr ""
+
+msgid "%d ms"
+msgstr ""
+
+msgid "%d nodes, fetched %s"
+msgstr ""
+
+msgid "%s up / %s down"
+msgstr ""
+
+msgid "%s used of %s, %s today"
+msgstr ""
+
+msgid "%s, %d days left"
+msgstr ""
+
+msgid "%s, current node: %s"
+msgstr ""
+
+msgid "Account"
+msgstr ""
+
+msgid "Advanced"
+msgstr ""
+
+msgid "Allow LAN"
+msgstr ""
+
+msgid "Also send traffic originating on the router through the kernel."
+msgstr ""
+
+msgid "Applied"
+msgstr ""
+
+msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel."
+msgstr ""
+
+msgid "Connections"
+msgstr ""
+
+msgid "DNS hijack"
+msgstr ""
+
+msgid "DNS port"
+msgstr ""
+
+msgid "Debug"
+msgstr ""
+
+msgid "Direct"
+msgstr ""
+
+msgid "Disabled"
+msgstr ""
+
+msgid "ECY Cloud"
+msgstr ""
+
+msgid "Email"
+msgstr ""
+
+msgid "Error"
+msgstr ""
+
+msgid "Expires"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Fetching the profile in the background"
+msgstr ""
+
+msgid "Firewall rules"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "GeoData mirror"
+msgstr ""
+
+msgid "Global"
+msgstr ""
+
+msgid "HTTP and SOCKS proxy port of the kernel."
+msgstr ""
+
+msgid "Handle IPv6 traffic as well."
+msgstr ""
+
+msgid "Hijack DNS"
+msgstr ""
+
+msgid "IPv6"
+msgstr ""
+
+msgid "Info"
+msgstr ""
+
+msgid "Kernel"
+msgstr ""
+
+msgid "LAN devices"
+msgstr ""
+
+msgid "LAN interfaces"
+msgstr ""
+
+msgid "Last %d syslog entries of the plugin and the kernel."
+msgstr ""
+
+msgid "Latency"
+msgstr ""
+
+msgid "Let LAN clients use the mixed port directly."
+msgstr ""
+
+msgid "Log level"
+msgstr ""
+
+msgid "Logs"
+msgstr ""
+
+msgid "Loopback port the kernel resolver listens on."
+msgstr ""
+
+msgid "Minutes between panel checks, 0 disables the periodic check."
+msgstr ""
+
+msgid "Mixed"
+msgstr ""
+
+msgid "Mixed port"
+msgstr ""
+
+msgid "No entries yet."
+msgstr ""
+
+msgid "Node"
+msgstr ""
+
+msgid "Nodes"
+msgstr ""
+
+msgid "Not applied"
+msgstr ""
+
+msgid "Not running"
+msgstr ""
+
+msgid "Overview"
+msgstr ""
+
+msgid "Panel"
+msgstr ""
+
+msgid "Password"
+msgstr ""
+
+msgid "Plan"
+msgstr ""
+
+msgid "Plugin version"
+msgstr ""
+
+msgid "Ports"
+msgstr ""
+
+msgid "Preparing configuration"
+msgstr ""
+
+msgid "Profile"
+msgstr ""
+
+msgid "Profile refresh"
+msgstr ""
+
+msgid "Proxy mode"
+msgstr ""
+
+msgid "Proxy the router itself"
+msgstr ""
+
+msgid "Recovering"
+msgstr ""
+
+msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver."
+msgstr ""
+
+msgid "Refresh profile"
+msgstr ""
+
+msgid "Request failed"
+msgstr ""
+
+msgid "Routing"
+msgstr ""
+
+msgid "Routing mode updated"
+msgstr ""
+
+msgid "Rule"
+msgstr ""
+
+msgid "Running"
+msgstr ""
+
+msgid "Running (%s)"
+msgstr ""
+
+msgid "Service"
+msgstr ""
+
+msgid "Service starting"
+msgstr ""
+
+msgid "Service stopped"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
+msgid "Sign out"
+msgstr ""
+
+msgid "Signed in, the service is starting"
+msgstr ""
+
+msgid "Signed out"
+msgstr ""
+
+msgid "Silent"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Starting kernel"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Stop"
+msgstr ""
+
+msgid "Stopped"
+msgstr ""
+
+msgid "Switched to %s"
+msgstr ""
+
+msgid "System"
+msgstr ""
+
+msgid "TPROXY"
+msgstr ""
+
+msgid "TPROXY port"
+msgstr ""
+
+msgid "TUN"
+msgstr ""
+
+msgid "TUN device"
+msgstr ""
+
+msgid "TUN stack"
+msgstr ""
+
+msgid "Test latency"
+msgstr ""
+
+msgid "The kernel is not running, no proxy group to show."
+msgstr ""
+
+msgid "Traffic"
+msgstr ""
+
+msgid "Traffic from these interfaces is sent to the kernel."
+msgstr ""
+
+msgid "Traffic since start"
+msgstr ""
+
+msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
+msgstr ""
+
+msgid "Two-factor code"
+msgstr ""
+
+msgid "Type"
+msgstr ""
+
+msgid "Use the account of the panel this plugin was built for. Signing in enables the service."
+msgstr ""
+
+msgid "Validating configuration"
+msgstr ""
+
+msgid "Waiting for the kernel"
+msgstr ""
+
+msgid "Warning"
+msgstr ""
+
+msgid "automatic"
+msgstr ""
+
+msgid "dnsmasq forwards to the kernel"
+msgstr ""
+
+msgid "gVisor"
+msgstr ""
+
+msgid "manual"
+msgstr ""
+
+msgid "no active plan"
+msgstr ""
+
+msgid "none"
+msgstr ""
+
+msgid "not fetched yet"
+msgstr ""
+
+msgid "unknown version"
+msgstr ""
+
+msgid "untested"
+msgstr ""

@@ -223,6 +223,12 @@ abstract class PlatformService {
 
   Future<void> setTrayState(TrayState state);
 
+  Future<void> setWindowDark({
+    required bool dark,
+    int caption = 0,
+    int text = 0,
+  });
+
   Future<String> deviceName();
 
   Future<({String model, String os})> deviceProfile();

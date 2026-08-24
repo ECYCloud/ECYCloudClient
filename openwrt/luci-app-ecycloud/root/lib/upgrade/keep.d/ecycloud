@@ -1,0 +1,3 @@
+# sysupgrade 的保留清单只认包管理器的 conffiles 加本目录与 /etc/sysupgrade.conf。
+# 不列这一行，刷完固件要重新登录，并让内核重下 11.56 MB geodata。
+/etc/ecycloud

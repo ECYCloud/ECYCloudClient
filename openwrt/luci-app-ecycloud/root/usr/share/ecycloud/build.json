@@ -1,0 +1,5 @@
+{
+	"version": "__VERSION__",
+	"site_url": "__SITE_URL__",
+	"sub_url": "__SUB_URL__"
+}

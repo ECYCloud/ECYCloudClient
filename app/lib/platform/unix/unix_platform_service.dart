@@ -90,6 +90,20 @@ abstract class UnixPlatformService implements PlatformService {
   }
 
   @override
+  Future<void> setWindowDark({
+    required bool dark,
+    int caption = 0,
+    int text = 0,
+  }) async {
+    if (!Platform.isMacOS) {
+      return;
+    }
+    await channel.invokeMethod<void>('window.setDark', <String, dynamic>{
+      'dark': dark,
+    });
+  }
+
+  @override
   Future<String> deviceName() async => Platform.localHostname;
 
   @override

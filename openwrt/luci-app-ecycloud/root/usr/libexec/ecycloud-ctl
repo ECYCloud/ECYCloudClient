@@ -1,0 +1,39 @@
+#!/usr/bin/ucode
+'use strict';
+
+import * as service from 'ecycloud.service';
+
+import { mihomoBin } from 'ecycloud.common';
+
+switch (ARGV[0]) {
+case 'kernel':
+	printf('%s\n', mihomoBin());
+	exit(0);
+
+case 'prepare':
+	exit(service.prepare() ? 0 : 1);
+
+case 'cleanup':
+	service.cleanup();
+	exit(0);
+
+case 'watchdog':
+	service.watchdog();
+	exit(0);
+
+case 'update': {
+	const res = service.update(ARGV[1] == 'force');
+
+	if (!res.ok) {
+		warn(`${res.error}\n`);
+		exit(1);
+	}
+
+	printf('%s\n', res.changed ? (res.reloaded ? '配置已热载' : '配置已更新，等待内核启动') : '配置无变化');
+	exit(0);
+}
+
+default:
+	warn('usage: ecycloud-ctl kernel|prepare|cleanup|update [force]|watchdog\n');
+	exit(1);
+}

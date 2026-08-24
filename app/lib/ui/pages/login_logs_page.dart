@@ -124,7 +124,7 @@ class _LoginLogsPageState extends State<LoginLogsPage> {
                 L10n.t('最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。', <Object>[
                   _logKeepDays,
                 ]),
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),

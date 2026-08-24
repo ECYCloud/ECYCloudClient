@@ -720,8 +720,10 @@ const Map<String, String> _zhTW = <String, String>{
   '运行日志': '執行日誌',
   '提交': '提交',
   '流量记录说明': '流量記錄說明',
-  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。':
-      '如果您手動測試了一些節點的延遲或者您使用了包含自動選擇和故障轉移策略的訂閱，如：Clash / Stash、Surge等自帶分流策略的訂閱連結，以及Quantumult X、Shadowrocket、Loon等帶自動測試的分流規則，會每隔一段時間測試一次延遲(通常是每5分鐘左右)，以檢查最低延遲的節點以及節點存活性，這部分測試也會被計入流量，通常每個節點在一小時內自動測試延遲所消耗的流量在1-5KB左右。\n\n如需關閉自動測試可在本客戶端的帳戶資訊 → 自定義策略 → 分組策略中關閉自動選擇和故障轉移策略組。',
+  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。':
+      '如果您手動測試了一些節點的延遲或者您使用了包含自動選擇和故障轉移策略的訂閱，如：Clash / Stash、Surge等自帶分流策略的訂閱連結，以及Quantumult X、Shadowrocket、Loon等帶自動測試的分流規則，會每隔一段時間測試一次延遲(通常是每5分鐘左右)，以檢查最低延遲的節點以及節點存活性，這部分測試也會被計入流量，通常每個節點在一小時內自動測試延遲所消耗的流量在1-5KB左右。',
+  '如需关闭自动测试可在本客户端的 ': '如需關閉自動測試可在本客戶端的 ',
+  ' 关闭 自动选择 和 故障转移 策略组。': ' 關閉 自動選擇 和 故障轉移 策略組。',
   '此处只展示最近 {0} 天的每日流量记录。': '此處只展示最近 {0} 天的每日流量記錄。',
   '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。':
       '當天的流量資料為實時統計，歷史資料為每日彙總記錄。點選日期可檢視節點使用詳情。',
@@ -1544,8 +1546,11 @@ const Map<String, String> _en = <String, String>{
   '运行日志': 'Runtime log',
   '提交': 'Submit',
   '流量记录说明': 'About traffic logs',
-  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。\n\n如需关闭自动测试可在本客户端的账户信息 → 自定义策略 → 分组策略中关闭自动选择和故障转移策略组。':
-      'Manual delay tests and clients with auto-select / fallback (Clash / Stash, Surge, Quantumult X, Shadowrocket, Loon, and similar) probe nodes every few minutes (often about every 5 minutes). Those probes count as traffic, usually about 1–5 KB per node per hour.\n\nTo turn auto tests off, disable the auto-select and fallback groups under Account → Custom rules → Groups.',
+  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。':
+      'Manual delay tests and clients with auto-select / fallback (Clash / Stash, Surge, Quantumult X, Shadowrocket, Loon, and similar) probe nodes every few minutes (often about every 5 minutes). Those probes count as traffic, usually about 1–5 KB per node per hour.',
+  '如需关闭自动测试可在本客户端的 ': 'To turn off auto tests, in this client’s ',
+  ' 关闭 自动选择 和 故障转移 策略组。':
+      ' turn off the Auto Select and Fallback groups.',
   '此处只展示最近 {0} 天的每日流量记录。': 'Only the last {0} days of daily traffic are shown.',
   '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。':
       'Today is live. Older days are daily totals. Tap a date for per-node details.',

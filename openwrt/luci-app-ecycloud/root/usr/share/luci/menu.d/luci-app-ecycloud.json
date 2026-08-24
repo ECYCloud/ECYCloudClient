@@ -1,0 +1,48 @@
+{
+	"admin/services/ecycloud": {
+		"title": "ECY Cloud",
+		"order": 30,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-ecycloud" ]
+		}
+	},
+
+	"admin/services/ecycloud/overview": {
+		"title": "Overview",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "ecycloud/overview"
+		}
+	},
+
+	"admin/services/ecycloud/nodes": {
+		"title": "Nodes",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "ecycloud/nodes"
+		}
+	},
+
+	"admin/services/ecycloud/settings": {
+		"title": "Settings",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "ecycloud/settings"
+		}
+	},
+
+	"admin/services/ecycloud/logs": {
+		"title": "Logs",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "ecycloud/logs"
+		}
+	}
+}

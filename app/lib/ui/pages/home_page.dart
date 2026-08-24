@@ -639,7 +639,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
             children: <Widget>[
               Text(
                 L10n.t('流量不够用？前往 '),
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -649,7 +649,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
               ),
               Text(
                 L10n.t(' 选购流量包'),
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
+import '../theme.dart';
 import 'overlay_scroll_view.dart';
 
 class SimpleDataTable extends StatelessWidget {
@@ -153,10 +154,10 @@ class _WideTable extends StatelessWidget {
       return TableRow(
         decoration: BoxDecoration(color: headerColor),
         children: <Widget>[
-          for (final String title in columns)
+          for (int i = 0; i < columns.length; i++)
             _Cell(
               padding: cellPadding,
-              child: Text(title, style: headerStyle),
+              child: Text(columns[i], style: headerStyle),
             ),
         ],
       );
@@ -195,7 +196,10 @@ class _WideTable extends StatelessWidget {
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              tableOf(<TableRow>[headerRow()]),
+              Padding(
+                padding: AppTheme.overlayScrollPadding,
+                child: tableOf(<TableRow>[headerRow()]),
+              ),
               Expanded(
                 child: OverlayScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -230,6 +234,21 @@ class _MobileList extends StatelessWidget {
   final List<String> columns;
   final List<List<Widget>> rows;
   final String emptyText;
+
+  // 宽表操作列要靠左；窄屏卡片要把同一颗按钮翻到最右边
+  Widget _mobileValue(List<Widget> row, int index) {
+    if (index >= row.length) {
+      return const SizedBox.shrink();
+    }
+    final Widget value = row[index];
+    if (value is Align) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: value.child,
+      );
+    }
+    return value;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -276,9 +295,7 @@ class _MobileList extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: c < rows[r].length
-                              ? rows[r][c]
-                              : const SizedBox.shrink(),
+                          child: _mobileValue(rows[r], c),
                         ),
                       ],
                     ),

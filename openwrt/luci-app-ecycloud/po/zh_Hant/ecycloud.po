@@ -1,0 +1,346 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_Hant\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "%d members"
+msgstr "%d 個成員"
+
+msgid "%d ms"
+msgstr "%d 毫秒"
+
+msgid "%d nodes, fetched %s"
+msgstr "%d 個節點，拉取於 %s"
+
+msgid "%s up / %s down"
+msgstr "上傳 %s / 下載 %s"
+
+msgid "%s used of %s, %s today"
+msgstr "已用 %s，共 %s，今日 %s"
+
+msgid "%s, %d days left"
+msgstr "%s，剩餘 %d 天"
+
+msgid "%s, current node: %s"
+msgstr "%s，目前節點：%s"
+
+msgid "Account"
+msgstr "帳號"
+
+msgid "Advanced"
+msgstr "進階"
+
+msgid "Allow LAN"
+msgstr "允許區域網路"
+
+msgid "Also send traffic originating on the router through the kernel."
+msgstr "路由器自身發出的流量也送進核心。"
+
+msgid "Applied"
+msgstr "已生效"
+
+msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel."
+msgstr "geoip.metadb 與 GeoSite.dat 的下載位址前綴，留空則沿用面板下發的位址。"
+
+msgid "Connections"
+msgstr "連線數"
+
+msgid "DNS hijack"
+msgstr "DNS 劫持"
+
+msgid "DNS port"
+msgstr "DNS 通訊埠"
+
+msgid "Debug"
+msgstr "除錯"
+
+msgid "Direct"
+msgstr "直連"
+
+msgid "Disabled"
+msgstr "已關閉"
+
+msgid "ECY Cloud"
+msgstr "ECY Cloud"
+
+msgid "Email"
+msgstr "電子郵件"
+
+msgid "Error"
+msgstr "錯誤"
+
+msgid "Expires"
+msgstr "到期時間"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Fetching the profile in the background"
+msgstr "正在背景拉取設定"
+
+msgid "Firewall rules"
+msgstr "防火牆規則"
+
+msgid "General"
+msgstr "一般"
+
+msgid "GeoData mirror"
+msgstr "GeoData 鏡像"
+
+msgid "Global"
+msgstr "全域"
+
+msgid "HTTP and SOCKS proxy port of the kernel."
+msgstr "核心的 HTTP / SOCKS 代理通訊埠。"
+
+msgid "Handle IPv6 traffic as well."
+msgstr "一併處理 IPv6 流量。"
+
+msgid "Hijack DNS"
+msgstr "劫持 DNS"
+
+msgid "IPv6"
+msgstr "IPv6"
+
+msgid "Info"
+msgstr "資訊"
+
+msgid "Kernel"
+msgstr "核心"
+
+msgid "LAN devices"
+msgstr "區域網路裝置"
+
+msgid "LAN interfaces"
+msgstr "區域網路介面"
+
+msgid "Last %d syslog entries of the plugin and the kernel."
+msgstr "外掛與核心最近 %d 筆系統日誌。"
+
+msgid "Latency"
+msgstr "延遲"
+
+msgid "Let LAN clients use the mixed port directly."
+msgstr "允許區域網路裝置直接使用混合通訊埠。"
+
+msgid "Log level"
+msgstr "日誌等級"
+
+msgid "Logs"
+msgstr "日誌"
+
+msgid "Loopback port the kernel resolver listens on."
+msgstr "核心 DNS 在回送介面上監聽的通訊埠。"
+
+msgid "Minutes between panel checks, 0 disables the periodic check."
+msgstr "面板檢查間隔（分鐘），0 表示不定期檢查。"
+
+msgid "Mixed"
+msgstr "混合"
+
+msgid "Mixed port"
+msgstr "混合通訊埠"
+
+msgid "No entries yet."
+msgstr "尚無日誌。"
+
+msgid "Node"
+msgstr "節點"
+
+msgid "Nodes"
+msgstr "節點"
+
+msgid "Not applied"
+msgstr "未生效"
+
+msgid "Not running"
+msgstr "未執行"
+
+msgid "Overview"
+msgstr "概覽"
+
+msgid "Panel"
+msgstr "面板"
+
+msgid "Password"
+msgstr "密碼"
+
+msgid "Plan"
+msgstr "方案"
+
+msgid "Plugin version"
+msgstr "外掛版本"
+
+msgid "Ports"
+msgstr "通訊埠"
+
+msgid "Preparing configuration"
+msgstr "正在準備設定"
+
+msgid "Profile"
+msgstr "設定"
+
+msgid "Profile refresh"
+msgstr "設定刷新"
+
+msgid "Proxy mode"
+msgstr "代理模式"
+
+msgid "Proxy the router itself"
+msgstr "代理路由器自身"
+
+msgid "Recovering"
+msgstr "正在自救"
+
+msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver."
+msgstr "重新導向區域網路裝置的 53 通訊埠，並讓 dnsmasq 轉發給核心 DNS。"
+
+msgid "Refresh profile"
+msgstr "刷新設定"
+
+msgid "Request failed"
+msgstr "請求失敗"
+
+msgid "Routing"
+msgstr "分流模式"
+
+msgid "Routing mode updated"
+msgstr "分流模式已更新"
+
+msgid "Rule"
+msgstr "規則"
+
+msgid "Running"
+msgstr "執行中"
+
+msgid "Running (%s)"
+msgstr "執行中（%s）"
+
+msgid "Service"
+msgstr "服務"
+
+msgid "Service starting"
+msgstr "服務正在啟動"
+
+msgid "Service stopped"
+msgstr "服務已停止"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Sign in"
+msgstr "登入"
+
+msgid "Sign out"
+msgstr "登出"
+
+msgid "Signed in, the service is starting"
+msgstr "登入成功，服務正在啟動"
+
+msgid "Signed out"
+msgstr "已登出"
+
+msgid "Silent"
+msgstr "靜默"
+
+msgid "Start"
+msgstr "啟動"
+
+msgid "Starting kernel"
+msgstr "正在啟動核心"
+
+msgid "Status"
+msgstr "狀態"
+
+msgid "Stop"
+msgstr "停止"
+
+msgid "Stopped"
+msgstr "已停止"
+
+msgid "Switched to %s"
+msgstr "已切換到 %s"
+
+msgid "System"
+msgstr "系統"
+
+msgid "TPROXY"
+msgstr "TPROXY"
+
+msgid "TPROXY port"
+msgstr "TPROXY 通訊埠"
+
+msgid "TUN"
+msgstr "TUN"
+
+msgid "TUN device"
+msgstr "TUN 裝置"
+
+msgid "TUN stack"
+msgstr "TUN 堆疊"
+
+msgid "Test latency"
+msgstr "測速"
+
+msgid "The kernel is not running, no proxy group to show."
+msgstr "核心未執行，尚無策略群組。"
+
+msgid "Traffic"
+msgstr "流量"
+
+msgid "Traffic from these interfaces is sent to the kernel."
+msgstr "這些介面的流量會被送進核心。"
+
+msgid "Traffic since start"
+msgstr "本次啟動流量"
+
+msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
+msgstr "透明代理設定。儲存會重啟服務，期間連線會短暫中斷。"
+
+msgid "Two-factor code"
+msgstr "兩步驟驗證碼"
+
+msgid "Type"
+msgstr "類型"
+
+msgid "Use the account of the panel this plugin was built for. Signing in enables the service."
+msgstr "使用出包時綁定的面板帳號登入，登入後會自動啟用服務。"
+
+msgid "Validating configuration"
+msgstr "正在校驗設定"
+
+msgid "Waiting for the kernel"
+msgstr "等待核心就緒"
+
+msgid "Warning"
+msgstr "警告"
+
+msgid "automatic"
+msgstr "自動"
+
+msgid "dnsmasq forwards to the kernel"
+msgstr "dnsmasq 已轉發給核心"
+
+msgid "gVisor"
+msgstr "gVisor"
+
+msgid "manual"
+msgstr "手動"
+
+msgid "no active plan"
+msgstr "無有效方案"
+
+msgid "none"
+msgstr "無"
+
+msgid "not fetched yet"
+msgstr "尚未拉取"
+
+msgid "unknown version"
+msgstr "版本未知"
+
+msgid "untested"
+msgstr "未測速"

@@ -161,7 +161,7 @@ class _UsageIpsPageState extends State<UsageIpsPage> {
               alignment: Alignment.centerLeft,
               child: Text(
                 L10n.t('请确认均为本人 IP，如有异常请及时修改密码。'),
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),

@@ -228,7 +228,9 @@ class _BannedCard extends StatelessWidget {
               children: <Widget>[
                 Text(
                   L10n.t('如果我们错误地禁用了您的账户，请 '),
-                  style: theme.textTheme.bodySmall,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 TextButton(
                   onPressed: () {
@@ -241,7 +243,12 @@ class _BannedCard extends StatelessWidget {
                   },
                   child: Text('${L10n.t('发送工单')} ›'),
                 ),
-                Text(L10n.t(' 与我们联系。'), style: theme.textTheme.bodySmall),
+                Text(
+                  L10n.t(' 与我们联系。'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             )
           else if (status.supportEmail.isNotEmpty)
@@ -250,7 +257,9 @@ class _BannedCard extends StatelessWidget {
               children: <Widget>[
                 Text(
                   L10n.t('如果我们错误地禁用了您的账户，请通过邮箱：'),
-                  style: theme.textTheme.bodySmall,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 TextButton(
                   onPressed: () => unawaited(
@@ -260,7 +269,12 @@ class _BannedCard extends StatelessWidget {
                   ),
                   child: Text(status.supportEmail),
                 ),
-                Text(L10n.t(' 与我们联系。'), style: theme.textTheme.bodySmall),
+                Text(
+                  L10n.t(' 与我们联系。'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
         ],

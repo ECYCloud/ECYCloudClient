@@ -1,5 +1,7 @@
 #include "my_application.h"
 
+#include <cstdio>
+
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -20,6 +22,65 @@ struct _MyApplication {
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// 必须与 Dart AppPaths.userData 一致：XDG_CONFIG_HOME/ECYCloud 或 ~/.config/ECYCloud
+static void window_size_path(char* out, size_t cap) {
+  const char* xdg = g_getenv("XDG_CONFIG_HOME");
+  if (xdg != nullptr && xdg[0] != '\0') {
+    snprintf(out, cap, "%s/ECYCloud/window-size", xdg);
+    return;
+  }
+  snprintf(out, cap, "%s/.config/ECYCloud/window-size", g_get_home_dir());
+}
+
+static void load_window_size(int* width, int* height, gboolean* maximized) {
+  char path[512];
+  window_size_path(path, sizeof(path));
+  FILE* file = fopen(path, "r");
+  if (file == nullptr) {
+    return;
+  }
+  int w = 0;
+  int h = 0;
+  int maxed = 0;
+  const int read = fscanf(file, "%d %d %d", &w, &h, &maxed);
+  fclose(file);
+  if (read < 2 || w < 400 || h < 300) {
+    return;
+  }
+  *width = w;
+  *height = h;
+  if (maximized != nullptr && read == 3) {
+    *maximized = maxed != 0;
+  }
+}
+
+static void save_window_size(GtkWindow* window) {
+  int width = 0;
+  int height = 0;
+  gtk_window_get_size(window, &width, &height);
+  if (width < 400 || height < 300) {
+    return;
+  }
+  char path[512];
+  window_size_path(path, sizeof(path));
+  gchar* dir = g_path_get_dirname(path);
+  g_mkdir_with_parents(dir, 0700);
+  g_free(dir);
+  FILE* file = fopen(path, "w");
+  if (file == nullptr) {
+    return;
+  }
+  fprintf(file, "%d %d %d\n", width, height,
+          gtk_window_is_maximized(window) ? 1 : 0);
+  fclose(file);
+}
+
+static gboolean on_persist_window_size(GtkWidget* widget, GdkEvent* /*event*/,
+                                       gpointer /*user_data*/) {
+  save_window_size(GTK_WINDOW(widget));
+  return FALSE;
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -68,7 +129,14 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, kWindowTitle);
   }
 
-  gtk_window_set_default_size(window, 1000, 720);
+  int width = 1000;
+  int height = 720;
+  gboolean maximized = FALSE;
+  load_window_size(&width, &height, &maximized);
+  gtk_window_set_default_size(window, width, height);
+  if (maximized) {
+    gtk_window_maximize(window);
+  }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -88,6 +156,9 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+
+  g_signal_connect(window, "delete-event", G_CALLBACK(on_persist_window_size),
+                   nullptr);
 
   self->platform_channel = platform_channel_new(view, window);
 

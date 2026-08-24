@@ -244,7 +244,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                               if (options.emailVerify) ...<Widget>[
                                 Text(
                                   L10n.t('删除账号验证码将发送到 {0} 邮箱', <Object>[email]),
-                                  style: Theme.of(context).textTheme.bodySmall
+                                  style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(
                                         color: Theme.of(
                                           context,

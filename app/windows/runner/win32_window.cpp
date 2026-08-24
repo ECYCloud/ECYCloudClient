@@ -3,6 +3,9 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <cstdio>
+#include <string>
+
 #include "resource.h"
 
 namespace {
@@ -35,6 +38,42 @@ using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 // scale factor
 int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
+}
+
+constexpr unsigned kDefaultWidth = 1000;
+constexpr unsigned kDefaultHeight = 720;
+constexpr unsigned kMinWidth = 400;
+constexpr unsigned kMinHeight = 300;
+
+std::wstring SizeFilePath() {
+  wchar_t appdata[MAX_PATH];
+  const DWORD n = GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) {
+    return {};
+  }
+  std::wstring dir = std::wstring(appdata) + L"\\ECYCloud";
+  CreateDirectoryW(dir.c_str(), nullptr);
+  return dir + L"\\window-size";
+}
+
+void ClampToWorkArea(unsigned& width, unsigned& height) {
+  POINT primary{0, 0};
+  HMONITOR monitor = MonitorFromPoint(primary, MONITOR_DEFAULTTOPRIMARY);
+  MONITORINFO info{sizeof(info)};
+  if (!GetMonitorInfo(monitor, &info)) {
+    return;
+  }
+  const double scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+  const unsigned work_w = static_cast<unsigned>(
+      (info.rcWork.right - info.rcWork.left) / scale);
+  const unsigned work_h = static_cast<unsigned>(
+      (info.rcWork.bottom - info.rcWork.top) / scale);
+  if (width > work_w) {
+    width = work_w;
+  }
+  if (height > work_h) {
+    height = work_h;
+  }
 }
 
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
@@ -111,6 +150,82 @@ void WindowClassRegistrar::UnregisterWindowClass() {
   class_registered_ = false;
 }
 
+Win32Window::Size Win32Window::RestoredSize() {
+  Size size(kDefaultWidth, kDefaultHeight);
+  const std::wstring path = SizeFilePath();
+  if (path.empty()) {
+    return size;
+  }
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, path.c_str(), L"r") != 0 || file == nullptr) {
+    return size;
+  }
+  int width = 0;
+  int height = 0;
+  int maximized = 0;
+  const int read = fscanf_s(file, "%d %d %d", &width, &height, &maximized);
+  fclose(file);
+  if (read < 2 || width < static_cast<int>(kMinWidth) ||
+      height < static_cast<int>(kMinHeight)) {
+    return size;
+  }
+  size.width = static_cast<unsigned>(width);
+  size.height = static_cast<unsigned>(height);
+  ClampToWorkArea(size.width, size.height);
+  return size;
+}
+
+bool Win32Window::RestoredMaximized() {
+  const std::wstring path = SizeFilePath();
+  if (path.empty()) {
+    return false;
+  }
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, path.c_str(), L"r") != 0 || file == nullptr) {
+    return false;
+  }
+  int width = 0;
+  int height = 0;
+  int maximized = 0;
+  const int read = fscanf_s(file, "%d %d %d", &width, &height, &maximized);
+  fclose(file);
+  return read == 3 && maximized != 0;
+}
+
+void Win32Window::PersistSize(HWND hwnd) {
+  if (!hwnd || IsIconic(hwnd)) {
+    return;
+  }
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  if (!GetWindowPlacement(hwnd, &placement)) {
+    return;
+  }
+  const RECT& rect = placement.rcNormalPosition;
+  HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
+  const double scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+  const int width =
+      static_cast<int>((rect.right - rect.left) / scale + 0.5);
+  const int height =
+      static_cast<int>((rect.bottom - rect.top) / scale + 0.5);
+  if (width < static_cast<int>(kMinWidth) ||
+      height < static_cast<int>(kMinHeight)) {
+    return;
+  }
+  const std::wstring path = SizeFilePath();
+  if (path.empty()) {
+    return;
+  }
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, path.c_str(), L"w") != 0 || file == nullptr) {
+    return;
+  }
+  const int maximized =
+      (IsZoomed(hwnd) || placement.showCmd == SW_SHOWMAXIMIZED) ? 1 : 0;
+  fprintf(file, "%d %d %d\n", width, height, maximized);
+  fclose(file);
+}
+
 Win32Window::Win32Window() {
   ++g_active_window_count;
 }
@@ -150,7 +265,8 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  return ShowWindow(window_handle_,
+                    RestoredMaximized() ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }
 
 // static
@@ -180,12 +296,17 @@ Win32Window::MessageHandler(HWND hwnd,
                             LPARAM const lparam) noexcept {
   switch (message) {
     case WM_DESTROY:
+      PersistSize(hwnd);
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_EXITSIZEMOVE:
+      PersistSize(hwnd);
+      break;
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
@@ -204,6 +325,9 @@ Win32Window::MessageHandler(HWND hwnd,
         MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
                    rect.bottom - rect.top, TRUE);
       }
+      if (wparam == SIZE_MAXIMIZED || wparam == SIZE_RESTORED) {
+        PersistSize(hwnd);
+      }
       return 0;
     }
 
@@ -214,7 +338,7 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
-      UpdateTheme(hwnd);
+      // 标题栏明暗由 Flutter window.setDark 管，这里按系统主题重刷会盖掉客户端设置
       return 0;
   }
 

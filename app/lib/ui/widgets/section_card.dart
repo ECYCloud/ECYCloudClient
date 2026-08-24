@@ -132,7 +132,12 @@ class InfoRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.baseline,
         textBaseline: TextBaseline.alphabetic,
         children: <Widget>[
-          Text(label, style: theme.textTheme.bodySmall),
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(width: 12),
           // 取值必须占满剩余宽度才能真正右对齐：换成 Spacer + Flexible 时两者
           // 各分走一半余量，短取值会停在半程上，同列各行的右边缘对不齐

@@ -36,6 +36,11 @@ class Win32Window {
   // |Show| is called. Returns true if the window was created successfully.
   bool Create(const std::wstring& title, const Point& origin, const Size& size);
 
+  // 与 Dart AppPaths.userData 一致：%APPDATA%\ECYCloud\window-size
+  static Size RestoredSize();
+  static bool RestoredMaximized();
+  static void PersistSize(HWND hwnd);
+
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 

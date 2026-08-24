@@ -122,7 +122,7 @@ class _OperationLogsPageState extends State<OperationLogsPage> {
               alignment: Alignment.centerLeft,
               child: Text(
                 L10n.t('以下显示您最近 {0} 天的操作记录。', <Object>[_logKeepDays]),
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),

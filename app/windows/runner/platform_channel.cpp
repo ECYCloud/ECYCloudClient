@@ -1,6 +1,7 @@
 #include "platform_channel.h"
 
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <flutter/standard_method_codec.h>
 #include <imm.h>
 #include <shellapi.h>
@@ -22,6 +23,17 @@ const wchar_t kWindowTitle[] =
     L"ECY Cloud " WIDEN(ECYCLOUD_DISPLAY_VERSION);
 
 namespace {
+
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+constexpr DWORD kImmersiveDarkModeLegacy = 19;
 
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
 constexpr UINT kTrayIconId = 1;
@@ -266,6 +278,49 @@ std::wstring ReadLabel(const flutter::EncodableMap& arguments,
 // 托盘菜单由 uxtheme 画，不受 Flutter 主题影响。135/136 号导出无头文件：
 // 1809 是 AllowDarkModeForApp(BOOL)，1903 起是 SetPreferredAppMode(枚举)
 enum PreferredAppMode { kAppModeDefault = 0, kAppModeForceLight = 3, kAppModeForceDark = 2 };
+
+COLORREF ColorRefFromArgb(int argb) {
+  const unsigned value = static_cast<unsigned>(argb);
+  return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
+}
+
+int ReadInt(const flutter::EncodableMap& arguments, const char* key) {
+  auto entry = arguments.find(flutter::EncodableValue(key));
+  if (entry == arguments.end()) {
+    return 0;
+  }
+  if (std::holds_alternative<int32_t>(entry->second)) {
+    return std::get<int32_t>(entry->second);
+  }
+  if (std::holds_alternative<int64_t>(entry->second)) {
+    return static_cast<int>(std::get<int64_t>(entry->second));
+  }
+  return 0;
+}
+
+void ApplyTitleBar(HWND window, bool dark, int caption_argb, int text_argb) {
+  if (!window) {
+    return;
+  }
+  BOOL enable_dark = dark ? TRUE : FALSE;
+  // 1903 起是 20，之前是 19。改完属性 DWM 自己会重画标题栏，
+  // 不能再强制重算窗口框：那会连客户区一起重绘，切主题时闪一下
+  if (FAILED(DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                                   &enable_dark, sizeof(enable_dark)))) {
+    DwmSetWindowAttribute(window, kImmersiveDarkModeLegacy, &enable_dark,
+                          sizeof(enable_dark));
+  }
+  // 标题栏底色与文字取客户端主题色，与界面同时换色（Win11 才支持，旧版忽略）
+  if (caption_argb != 0) {
+    COLORREF caption = ColorRefFromArgb(caption_argb);
+    DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR, &caption,
+                          sizeof(caption));
+  }
+  if (text_argb != 0) {
+    COLORREF text = ColorRefFromArgb(text_argb);
+    DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR, &text, sizeof(text));
+  }
+}
 
 void ApplyMenuTheme(bool dark) {
   using SetPreferredAppModeProc = int(WINAPI*)(int);
@@ -644,8 +699,22 @@ void PlatformChannel::HandleMethodCall(
     g_label_direct = ReadLabel(*arguments, "label_direct", g_label_direct);
     g_label_show = ReadLabel(*arguments, "label_show", g_label_show);
     g_label_quit = ReadLabel(*arguments, "label_quit", g_label_quit);
+    // 标题栏由 window.setDark 负责，这里只管 Win32 弹出菜单
     ApplyMenuTheme(ReadBool(*arguments, "dark"));
     ApplyStatusIcons();
+    result->Success();
+    return;
+  }
+
+  if (method == "window.setDark") {
+    const auto* arguments =
+        std::get_if<flutter::EncodableMap>(call.arguments());
+    if (arguments == nullptr) {
+      result->Error("argument", "缺少参数");
+      return;
+    }
+    ApplyTitleBar(window_, ReadBool(*arguments, "dark"),
+                  ReadInt(*arguments, "caption"), ReadInt(*arguments, "text"));
     result->Success();
     return;
   }

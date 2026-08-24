@@ -95,6 +95,13 @@ class AndroidPlatformService implements PlatformService {
   Future<void> setTrayState(TrayState state) async {}
 
   @override
+  Future<void> setWindowDark({
+    required bool dark,
+    int caption = 0,
+    int text = 0,
+  }) async {}
+
+  @override
   Future<String> deviceName() async =>
       await _channel.invokeMethod<String>('device.name') ?? 'Android';
 

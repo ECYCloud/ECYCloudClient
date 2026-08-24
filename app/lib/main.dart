@@ -125,6 +125,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
   UpdateController? _update;
   PlatformService? _platform;
   AuthStage _authStage = AuthStage.unknown;
+  bool? _windowDark;
 
   @override
   void didChangeDependencies() {
@@ -205,11 +206,42 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       return;
     }
     L10n.current = language;
+    if (next != _themeMode) {
+      _syncWindowDark(_windowDarkOf(next));
+    }
     setState(() {
       _themeMode = next;
       _locale = nextLocale;
       _hasStoredLocale = hasStoredLocale;
     });
+  }
+
+  bool _windowDarkOf(ThemeMode mode) {
+    return switch (mode) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system =>
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark,
+    };
+  }
+
+  void _syncWindowDark(bool dark) {
+    if (_windowDark == dark) {
+      return;
+    }
+    _windowDark = dark;
+    final PlatformService? platform = _platform;
+    if (platform != null) {
+      final ThemeData theme = dark ? AppTheme.dark() : AppTheme.light();
+      unawaited(
+        platform.setWindowDark(
+          dark: dark,
+          caption: theme.scaffoldBackgroundColor.toARGB32(),
+          text: theme.colorScheme.onSurface.toARGB32(),
+        ),
+      );
+    }
   }
 
   void _onAuthChanged() {
@@ -267,6 +299,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       darkTheme: AppTheme.dark(),
       themeMode: _themeMode,
       builder: (BuildContext context, Widget? child) {
+        _syncWindowDark(Theme.of(context).brightness == Brightness.dark);
         final Widget content = child ?? const SizedBox.shrink();
         if (!scope.platform.isTelevision) {
           return content;
