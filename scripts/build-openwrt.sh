@@ -83,8 +83,15 @@ fi
 (
 	cd "$sdk_root"
 	./scripts/feeds update luci
-	./scripts/feeds install luci-base
 )
+
+# 只要 luci.mk 与 po2lmo。feeds install luci-base 会把 lucihttp / rpcd-mod-luci
+# 拉进编译图，SDK 里没有它们的 C 依赖，会编到一半炸掉。
+po_src="$sdk_root/feeds/luci/modules/luci-base/src"
+make -C "$po_src" clean po2lmo
+mkdir -p "$sdk_root/staging_dir/host/bin" "$sdk_root/staging_dir/hostpkg/bin"
+cp -a "$po_src/po2lmo" "$sdk_root/staging_dir/host/bin/po2lmo"
+cp -a "$po_src/po2lmo" "$sdk_root/staging_dir/hostpkg/bin/po2lmo"
 
 rm -rf "$sdk_root/package/luci-app-ecycloud"
 cp -a "$pkg_dir" "$sdk_root/package/luci-app-ecycloud"
@@ -102,16 +109,24 @@ export ECYCLOUD_VERSION="$version"
 	echo 'CONFIG_PACKAGE_luci-app-ecycloud=y'
 	echo 'CONFIG_PACKAGE_luci-i18n-ecycloud-zh-cn=y'
 	echo 'CONFIG_PACKAGE_luci-i18n-ecycloud-zh-tw=y'
+	echo 'CONFIG_LUCI_CSSTIDY=n'
+	echo 'CONFIG_LUCI_SRCDIET=n'
+	echo 'CONFIG_LUCI_JSMIN=n'
 } >> "$sdk_root/.config"
 
 (
 	cd "$sdk_root"
 	make defconfig
-	make package/luci-base/host/compile -j"$(nproc)"
-	make package/luci-app-ecycloud/compile \
-		package/luci-i18n-ecycloud-zh-cn/compile \
-		package/luci-i18n-ecycloud-zh-tw/compile \
-		-j"$(nproc)"
+	# defconfig 可能把上面几项改回去
+	sed -i \
+		-e 's/^CONFIG_LUCI_CSSTIDY=.*/# CONFIG_LUCI_CSSTIDY is not set/' \
+		-e 's/^CONFIG_LUCI_SRCDIET=.*/# CONFIG_LUCI_SRCDIET is not set/' \
+		-e 's/^CONFIG_LUCI_JSMIN=.*/# CONFIG_LUCI_JSMIN is not set/' \
+		.config
+	grep -q '^CONFIG_PACKAGE_luci-app-ecycloud=y' .config || echo 'CONFIG_PACKAGE_luci-app-ecycloud=y' >> .config
+	grep -q '^CONFIG_PACKAGE_luci-i18n-ecycloud-zh-cn=y' .config || echo 'CONFIG_PACKAGE_luci-i18n-ecycloud-zh-cn=y' >> .config
+	grep -q '^CONFIG_PACKAGE_luci-i18n-ecycloud-zh-tw=y' .config || echo 'CONFIG_PACKAGE_luci-i18n-ecycloud-zh-tw=y' >> .config
+	make package/luci-app-ecycloud/compile -j"$(nproc)"
 )
 
 mapfile -t apks < <(find "$sdk_root/bin/packages" -type f \( \
