@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-xs" viewBox="0 0 640 480">
+  <path fill="#1d8025" d="M0 0h640v160H0z"/>
+  <path fill="#fff" d="M0 160h640v160H0z"/>
+  <path fill="#d3151b" d="M0 320h640v160H0z"/>
+  <text x="320" y="108" text-anchor="middle" fill="#fff" font-family="Amiri,Scheherazade,'Traditional Arabic',serif" font-size="78" font-weight="700" direction="rtl">لا إله إلا الله محمد رسول الله</text>
+  <path fill="#000" d="m320 200 21.4 65.9h69.3l-56 40.7 21.4 65.9-56-40.7-56 40.7 21.4-65.9-56-40.7h69.3z"/>
+</svg>

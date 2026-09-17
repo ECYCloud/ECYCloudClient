@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+if [ -x /opt/ecycloud/link-libmpv.sh ]; then
+    /opt/ecycloud/link-libmpv.sh
+fi
+/opt/ecycloud/ecycloud-helper install
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+fi
+exit 0

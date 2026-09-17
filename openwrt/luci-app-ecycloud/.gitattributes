@@ -1,0 +1,4 @@
+# 本目录全部文件要么在路由器上执行，要么被 buildroot 原样打进 ipk。仓库 core.autocrlf=true，
+# 不锁死行尾的话 Windows 检出会写成 CRLF：`#!/bin/sh` 与 `#!/usr/bin/ucode` 随即变成无效解释器，
+# ucode 拼出的 nft 片段带上 CR 也会被 nftables 判成语法错误。
+* text eol=lf

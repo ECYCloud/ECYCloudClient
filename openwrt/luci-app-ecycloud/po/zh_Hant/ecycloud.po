@@ -1,0 +1,865 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_Hant\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "%d nodes"
+msgstr "%d 個節點"
+
+msgid "%d nodes · current %s"
+msgstr "%d 個節點 · 當前 %s"
+
+msgid "%d ms"
+msgstr "%d 毫秒"
+
+msgid "%d nodes, fetched %s"
+msgstr "%d 個節點，拉取於 %s"
+
+msgid "%s up / %s down"
+msgstr "上傳 %s / 下載 %s"
+
+msgid "%s used of %s, %s today"
+msgstr "已用 %s，共 %s，今日 %s"
+
+msgid "%s, %d days left"
+msgstr "%s，剩餘 %d 天"
+
+msgid "%s, current node: %s"
+msgstr "%s，目前節點：%s"
+
+msgid "Account"
+msgstr "帳號"
+
+msgid "Account info"
+msgstr "帳戶資訊"
+
+msgid "Advanced"
+msgstr "進階"
+
+msgid "Allow LAN"
+msgstr "允許區域網路"
+
+msgid "Also send traffic originating on the router through the kernel."
+msgstr "路由器自身發出的流量也送進核心。"
+
+msgid "All"
+msgstr "全部"
+
+msgid "Applied"
+msgstr "已生效"
+
+msgid "A verification code has been sent to your email"
+msgstr "驗證碼已發送，請查收郵件"
+
+msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr "geoip.metadb 與 GeoSite.dat 的下載位址前綴，留空則沿用面板下發的位址。不懂就請不要亂修改，地址無效會導致無法使用！"
+
+msgid "Connection details"
+msgstr "連線"
+
+msgid "Config URL"
+msgstr "設定位址"
+
+msgid "Connections"
+msgstr "連線"
+
+msgid "DNS hijack"
+msgstr "DNS 劫持"
+
+msgid "DNS port"
+msgstr "DNS 通訊埠"
+
+msgid "Direct"
+msgstr "直連"
+
+msgid "Disabled"
+msgstr "已關閉"
+
+msgid "ECY Cloud"
+msgstr "ECY Cloud"
+
+msgid "Host"
+msgstr "主機"
+
+msgid "Email"
+msgstr "電子郵件"
+
+msgid "Email code sign-in"
+msgstr "郵箱驗證碼登入"
+
+msgid "Enter your email first"
+msgstr "請先填寫郵箱"
+
+msgid "Expires"
+msgstr "到期時間"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Clash profile is invalid"
+msgstr "面板設定不規範"
+
+msgid "Fetching the profile in the background"
+msgstr "正在背景拉取設定"
+
+msgid "Already up to date"
+msgstr "已是最新"
+
+msgid "Update succeeded"
+msgstr "更新成功"
+
+msgid "Update saved, takes effect the next time the kernel starts"
+msgstr "更新成功，下次啟動核心時生效"
+
+msgid "Update failed"
+msgstr "更新失敗"
+
+msgid "Firewall rules"
+msgstr "防火牆規則"
+
+msgid "General"
+msgstr "一般"
+
+msgid "GeoData mirror"
+msgstr "GeoData 鏡像"
+
+msgid "Global"
+msgstr "全域"
+
+msgid "HTTP and SOCKS proxy port of the kernel."
+msgstr "核心的 HTTP / SOCKS 代理通訊埠。"
+
+msgid "Handle IPv6 traffic as well."
+msgstr "一併處理 IPv6 流量。"
+
+msgid "Host that serves the clash profile. Must be https. Leave empty to use the panel URL. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr "下發 clash 設定的主機，必須是 https。留空則使用面板位址。不懂就請不要亂修改，地址無效會導致無法使用！"
+
+msgid "Hijack DNS"
+msgstr "劫持 DNS"
+
+msgid "IPv6"
+msgstr "IPv6"
+
+msgid "Kernel"
+msgstr "核心"
+
+msgid "LAN devices"
+msgstr "區域網路裝置"
+
+msgid "LAN interfaces"
+msgstr "區域網路介面"
+
+msgid "Last %d syslog entries of the plugin and the kernel."
+msgstr "外掛與核心最近 %d 筆系統日誌。"
+
+msgid "Latency"
+msgstr "延遲"
+
+msgid "Let LAN clients use the mixed port directly."
+msgstr "允許區域網路裝置直接使用混合通訊埠。"
+
+msgid "Log level"
+msgstr "日誌等級"
+
+msgid "Logs"
+msgstr "日誌"
+
+msgid "Loopback port the kernel resolver listens on."
+msgstr "核心 DNS 在回送介面上監聽的通訊埠。"
+
+msgid "Minutes between panel checks, 0 disables the periodic check."
+msgstr "面板檢查間隔（分鐘），0 表示不定期檢查。"
+
+msgid "Mixed"
+msgstr "混合"
+
+msgid "Mixed port"
+msgstr "混合通訊埠"
+
+msgid "No entries yet."
+msgstr "尚無日誌。"
+
+msgid "Node"
+msgstr "節點"
+
+msgid "Nodes"
+msgstr "節點"
+
+msgid "Not applied"
+msgstr "未生效"
+
+msgid "Not signed in"
+msgstr "未登入"
+
+msgid "Not running"
+msgstr "未執行"
+
+msgid "Overview"
+msgstr "概覽"
+
+msgid "Panel"
+msgstr "面板"
+
+msgid "Panel URL"
+msgstr "面板位址"
+
+msgid "Password"
+msgstr "密碼"
+
+msgid "Password sign-in"
+msgstr "密碼登入"
+
+msgid "Plan"
+msgstr "方案"
+
+msgid "Plugin version"
+msgstr "外掛版本"
+
+msgid "Ports"
+msgstr "通訊埠"
+
+msgid "Preparing configuration"
+msgstr "正在準備設定"
+
+msgid "Profile"
+msgstr "設定"
+
+msgid "Profile refresh"
+msgstr "設定刷新"
+
+msgid "Proxy mode"
+msgstr "代理模式"
+
+msgid "Proxy the router itself"
+msgstr "代理路由器自身"
+
+msgid "Recovering"
+msgstr "正在自救"
+
+msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver."
+msgstr "重新導向區域網路裝置的 53 通訊埠，並讓 dnsmasq 轉發給核心 DNS。"
+
+msgid "Refresh profile"
+msgstr "刷新"
+
+msgid "No matching connections"
+msgstr "沒有符合條件的連線"
+
+msgid "No matching log entries."
+msgstr "沒有符合條件的日誌。"
+
+msgid "Request failed"
+msgstr "請求失敗"
+
+msgid "Routing"
+msgstr "分流模式"
+
+msgid "Routing mode updated"
+msgstr "分流模式已更新"
+
+msgid "Search host, IP, process, rule"
+msgstr "搜尋域名、IP、進程、規則"
+
+msgid "Search logs"
+msgstr "搜尋日誌"
+
+msgid "Rule"
+msgstr "規則"
+
+msgid "Running"
+msgstr "執行中"
+
+msgid "Running (%s)"
+msgstr "執行中（%s）"
+
+msgid "Send code"
+msgstr "取得驗證碼"
+
+msgid "Send code (%ds)"
+msgstr "取得驗證碼（%d 秒）"
+
+msgid "Service"
+msgstr "服務"
+
+msgid "Service starting"
+msgstr "服務正在啟動"
+
+msgid "Service stopped"
+msgstr "服務已停止"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Sign in"
+msgstr "登入"
+
+msgid "Sign out"
+msgstr "登出"
+
+msgid "Quit"
+msgstr "退出"
+
+msgid "This disconnects and clears saved sign-in credentials on this device."
+msgstr "退出後將斷開連線並清除本機儲存的登入憑據。"
+
+msgid "Signed in"
+msgstr "登入成功"
+
+msgid "Signed in, the service is starting"
+msgstr "登入成功，服務正在啟動"
+
+msgid "Signed out"
+msgstr "已登出"
+
+msgid "Start"
+msgstr "啟動"
+
+msgid "Starting kernel"
+msgstr "正在啟動核心"
+
+msgid "Status"
+msgstr "狀態"
+
+msgid "Stop"
+msgstr "停止"
+
+msgid "Stopped"
+msgstr "已停止"
+
+msgid "System"
+msgstr "系統"
+
+msgid "TPROXY"
+msgstr "TPROXY"
+
+msgid "TPROXY port"
+msgstr "TPROXY 通訊埠"
+
+msgid "TUN"
+msgstr "TUN"
+
+msgid "TUN device"
+msgstr "TUN 裝置"
+
+msgid "TUN stack"
+msgstr "TUN 堆疊"
+
+msgid "Test all nodes in this group"
+msgstr "測試本組全部節點延遲"
+
+msgid "Test all nodes in this group speed"
+msgstr "測試本組全部節點網速"
+
+msgid "Test this node"
+msgstr "測試該節點延遲"
+
+msgid "Test this node speed"
+msgstr "測試該節點網速"
+
+msgid "Currently sorted by name. Tap to sort by lowest latency"
+msgstr "目前按名稱正序排列，點擊切換為最低延遲"
+
+msgid "Currently sorted by lowest latency. Tap to sort by highest speed"
+msgstr "目前按最低延遲排列，點擊切換為最高網速"
+
+msgid "Currently sorted by highest speed. Tap to sort by name"
+msgstr "目前按最高網速排列，點擊切換為名稱正序"
+
+msgid "Timeout"
+msgstr "超時"
+
+msgid "The panel did not publish any node groups."
+msgstr "面板未下發節點分組"
+
+msgid "Traffic"
+msgstr "流量"
+
+msgid "Traffic details"
+msgstr "流量明細"
+
+msgid "Traffic from these interfaces is sent to the kernel."
+msgstr "這些介面的流量會被送進核心。"
+
+msgid "Traffic since start"
+msgstr "本次啟動流量"
+
+msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
+msgstr "透明代理設定。儲存會重啟服務，期間連線會短暫中斷。"
+
+msgid "Two-factor code"
+msgstr "兩步驟驗證碼"
+
+msgid "Verification code"
+msgstr "驗證碼"
+
+msgid "Type"
+msgstr "類型"
+
+msgid "Validating configuration"
+msgstr "正在校驗設定"
+
+msgid "Waiting for the kernel"
+msgstr "等待核心就緒"
+
+msgid "Website address used to sign in. Must be https. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr "登入用的網站位址，必須是 https。不懂就請不要亂修改，地址無效會導致無法使用！"
+
+msgid "automatic"
+msgstr "自動"
+
+msgid "dnsmasq forwards to the kernel"
+msgstr "dnsmasq 已轉發給核心"
+
+msgid "gVisor"
+msgstr "gVisor"
+
+msgid "manual"
+msgstr "手動"
+
+msgid "no active plan"
+msgstr "無有效方案"
+
+msgid "none"
+msgstr "無"
+
+msgid "not fetched yet"
+msgstr "尚未拉取"
+
+msgid "unknown version"
+msgstr "版本未知"
+
+msgid "untested"
+msgstr "未測速"
+
+msgid "Create an account"
+msgstr "註冊帳號"
+
+msgid "Forgot password?"
+msgstr "忘記密碼？"
+
+msgid "Got it"
+msgstr "我知道了"
+
+msgid "Notice"
+msgstr "提示"
+
+msgid "Remember email and password"
+msgstr "記住帳號密碼"
+
+msgid "Sign in with your %s account to load available nodes"
+msgstr "使用 %s 帳號登入，登入後自動取得可用節點"
+
+msgid "Home"
+msgstr "首頁"
+
+msgid "Connect"
+msgstr "連線"
+
+msgid "Disconnect"
+msgstr "斷開"
+
+msgid "Currently disconnecting"
+msgstr "正在中斷連線"
+
+msgid "Disconnecting"
+msgstr "斷開中"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Connected"
+msgstr "已連線"
+
+msgid "Connected %s"
+msgstr "已連線 %s"
+
+msgid "Connecting"
+msgstr "正在連線"
+
+msgid "Disconnected"
+msgstr "未連線"
+
+msgid "Click the button on the right to connect"
+msgstr "點擊右側按鈕開始連線"
+
+msgid "Disconnecting, please wait"
+msgstr "正在中斷連線，請稍候"
+
+msgid "Current node"
+msgstr "目前節點"
+
+msgid "No node selected"
+msgstr "未選擇節點"
+
+msgid "Preparing kernel"
+msgstr "正在準備核心"
+
+msgid "Kernel not ready"
+msgstr "核心尚未就緒"
+
+msgid "Not selected"
+msgstr "未選擇"
+
+msgid "Proxy group"
+msgstr "策略群組"
+
+msgid "Nodes ›"
+msgstr "節點 ›"
+
+msgid "Refresh nodes"
+msgstr "刷新節點"
+
+msgid "Locate selected node"
+msgstr "定位到目前節點"
+
+msgid "This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately"
+msgstr "本組由核心按列表順序選用第一個可用節點，點擊節點不改變選中項；測延遲會刷新可用性並讓核心立即重選"
+
+msgid "This group is selected by the kernel by latency; tapping a node does not change the selection. Testing latency lets the kernel reselect immediately"
+msgstr "本組由核心按延遲自動選擇，點擊節點不改變選中項；測延遲會讓核心立即重選"
+
+msgid "Upload"
+msgstr "上傳"
+
+msgid "Download"
+msgstr "下載"
+
+msgid "Total %s"
+msgstr "累計 %s"
+
+msgid "Kernel status"
+msgstr "核心狀態"
+
+msgid "Memory"
+msgstr "記憶體占用"
+
+msgid "Active connections"
+msgstr "活躍連線"
+
+msgid "Closed connections"
+msgstr "已關閉連線"
+
+msgid "Traffic usage"
+msgstr "流量使用情況"
+
+msgid "Today used"
+msgstr "今日已使用"
+
+msgid "Previously used"
+msgstr "之前已使用"
+
+msgid "Remaining traffic"
+msgstr "剩餘流量"
+
+msgid "Account total traffic"
+msgstr "帳戶總流量"
+
+msgid "Need more traffic? Open the panel to buy a traffic pack"
+msgstr "流量不夠用？前往面板選購流量包"
+
+msgid "Next usage reset"
+msgstr "下次重置已使用流量日期"
+
+msgid "Last used"
+msgstr "上次使用時間"
+
+msgid "Never used"
+msgstr "從未使用"
+
+msgid "Used only while running"
+msgstr "僅連線後占用，當前未生效"
+
+msgid "TUN mode"
+msgstr "TUN 模式"
+
+msgid "Take over all forwarded traffic"
+msgstr "接管全部轉發流量"
+
+msgid "%d entries"
+msgstr "%d 條"
+
+msgid "Search log content"
+msgstr "搜尋日誌內容"
+
+msgid "No matching logs"
+msgstr "沒有符合條件的日誌"
+
+msgid "Connect to see connection details"
+msgstr "連線後可檢視連線明細"
+
+msgid "All %d"
+msgstr "全部 %d"
+
+msgid "Active %d"
+msgstr "活躍中 %d"
+
+msgid "Closed %d"
+msgstr "已關閉 %d"
+
+msgid "Closed · %s"
+msgstr "已關閉 · %s"
+
+msgid "Application"
+msgstr "應用"
+
+msgid "Configuration"
+msgstr "設定"
+
+msgid "About"
+msgstr "關於"
+
+msgid "Current version"
+msgstr "目前版本"
+
+msgid "%s/s"
+msgstr "%s/s"
+
+msgid "Saving restarts the service, connections are dropped for a moment."
+msgstr "儲存會重啟服務，期間連線會短暫中斷。"
+
+msgid "Online clients"
+msgstr "線上用戶端"
+
+msgid "%d / unlimited"
+msgstr "%d / 無限制"
+
+msgid "Online client limit reached"
+msgstr "線上用戶端數量已達上限"
+
+msgid "The online client limit has been reached. Disconnect one client to make room?"
+msgstr "線上用戶端數量已達上限，是否下線其中一個用戶端，以挪出位置？"
+
+msgid "The online client limit has been reached. Pick a client to disconnect:"
+msgstr "線上用戶端數量已達上限，請選擇一個要下線的用戶端："
+
+msgid "Third-party client"
+msgstr "第三方用戶端"
+
+msgid "This device"
+msgstr "目前裝置"
+
+msgid "%d years"
+msgstr "%d年"
+
+msgid "%d months"
+msgstr "%d個月"
+
+msgid "%d days"
+msgstr "%d天"
+
+msgid "%d hours"
+msgstr "%d小時"
+
+msgid "%d minutes"
+msgstr "%d分鐘"
+
+msgid "%d seconds"
+msgstr "%d秒"
+
+msgid "OK"
+msgstr "確定"
+
+msgid "Device disconnected"
+msgstr "裝置已離線"
+
+msgid "A new client connected after the online client limit was reached, so this device was disconnected."
+msgstr "由於超出線上用戶端數量限制，有新用戶端請求連線，已將您的裝置踢下線。"
+
+msgid "This device was removed from the usage list, so it was disconnected."
+msgstr "該裝置已從使用記錄中被移除離線。"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Remove this device?"
+msgstr "確認移除該裝置？"
+
+msgid "The client on %s will be told to disconnect, within 60 seconds."
+msgstr "將通知 %s 上的用戶端下線，最長 60 秒後生效。"
+
+msgid "Not supported"
+msgstr "不支援"
+
+msgid "No online clients"
+msgstr "目前沒有線上客戶端"
+
+msgid "Confirm these IPs are yours. Change your password if anything looks wrong."
+msgstr "請確認均為本人 IP，如有異常請及時修改密碼。"
+
+msgid "Online clients in the last %d days"
+msgstr "最近 %d 天的線上客戶端"
+
+msgid "No online clients in the last %d days"
+msgstr "最近 %d 天沒有線上客戶端記錄"
+
+msgid "Account info updated"
+msgstr "帳戶資訊已重新整理"
+
+msgid "TUN excluded networks"
+msgstr "TUN 排除自訂網段"
+
+msgid "IPv4/IPv6 CIDR only, for example 192.168.56.0/24 or fd00::/8. LAN and loopback are already excluded."
+msgstr "僅支援 IPv4/IPv6 CIDR，例如 192.168.56.0/24 或 fd00::/8；區域網路與回環已預設排除"
+
+msgid "Color scheme"
+msgstr "介面配色"
+
+msgid "Follow system"
+msgstr "跟隨系統"
+
+msgid "Light"
+msgstr "淺色"
+
+msgid "Dark"
+msgstr "深色"
+
+msgid "Language"
+msgstr "語言"
+
+msgid "Connect at startup"
+msgstr "啟動後自動連線"
+
+msgid "Start the kernel after reboot if this router is signed in."
+msgstr "已登入時，路由器重啟後自動啟動核心。"
+
+msgid "Refresh panel profile"
+msgstr "重新整理面板設定"
+
+msgid "Pull nodes and rules again. Node changes also follow the account refresh."
+msgstr "重新拉取節點與分流規則；節點變更後隨帳戶資訊重新整理自動更新"
+
+msgid "Update GeoData"
+msgstr "更新 GeoData"
+
+msgid "Redownload the geo databases using the panel geox-url. The kernel must be running."
+msgstr "依面板 geox-url 重新下載地理位置資料庫（需核心執行中）"
+
+msgid "View runtime config"
+msgstr "檢視執行設定"
+
+msgid "Read-only view of the kernel config.json"
+msgstr "唯讀檢視核心落盤的 config.json"
+
+msgid "View routing rules"
+msgstr "檢視分流規則"
+
+msgid "Read-only view of downloaded rule-providers"
+msgstr "唯讀檢視已下載的 rule-providers"
+
+msgid "Runtime config"
+msgstr "執行設定"
+
+msgid "Routing rules"
+msgstr "分流規則"
+
+msgid "No routing rules yet. Connect once and they will download into the run directory."
+msgstr "尚無分流規則。連線一次後，規則會下載到執行目錄。"
+
+msgid "The kernel is not running"
+msgstr "核心未執行"
+
+msgid "This file is a binary rule set and cannot be viewed as text"
+msgstr "該檔案為二進位規則集，無法以文字檢視"
+
+msgid "No runtime config yet"
+msgstr "還沒有執行設定"
+
+msgid "Invalid path"
+msgstr "無效路徑"
+
+msgid "File not found"
+msgstr "找不到檔案"
+
+msgid "Open"
+msgstr "檢視"
+
+msgid "TPROXY bypass"
+msgstr "TPROXY 略過"
+
+msgid "Destinations that skip TPROXY. IPv4/IPv6 address or CIDR only, for example 192.168.56.0/24. LAN, loopback and link-local are already bypassed."
+msgstr "TPROXY 略過的目標。僅支援 IPv4/IPv6 位址或 CIDR，例如 192.168.56.0/24。區域網路、回環與鏈路本地已預設略過。"
+
+msgid "Check for updates"
+msgstr "檢查更新"
+
+msgid "This only checks the version. To install, open the releases page, download the OpenWrt package, extract it, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk"
+msgstr "僅檢查版本，不會自動安裝。有新版請打開發佈頁下載 OpenWrt 包，解壓後在路由器 SSH 按包格式安裝。apk：apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk；ipk：opkg install /tmp/luci-app-ecycloud_*.ipk"
+
+msgid "This only checks the version. To upgrade, use the router package manager via SSH. apk: apk update && apk upgrade mihomo-meta; opkg: opkg update && opkg upgrade mihomo-meta"
+msgstr "僅檢查版本，不會自動升級。升級請在路由器 SSH 按包管理器執行。apk：apk update && apk upgrade mihomo-meta；opkg：opkg update && opkg upgrade mihomo-meta"
+
+msgid "Open releases"
+msgstr "打開發佈頁"
+
+msgid "Not checked yet"
+msgstr "尚未檢查"
+
+msgid "Up to date (%s)"
+msgstr "已是最新（%s）"
+
+msgid "Update available (%s). This page cannot install it. Open the releases page, extract the OpenWrt package, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk"
+msgstr "發現新版本（%s）。本頁不能安裝。請打開發佈頁下載並解壓，在路由器 SSH 按包格式安裝。apk：apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk；ipk：opkg install /tmp/luci-app-ecycloud_*.ipk"
+
+msgid "Check failed: %s"
+msgstr "檢查失敗：%s"
+
+msgid "Local version unknown"
+msgstr "本機版本未知"
+
+msgid "Local version unknown, latest (%s)"
+msgstr "本機版本未知，最新（%s）"
+
+msgid "Current (%s)"
+msgstr "目前（%s）"
+
+msgid "Update available (%s). This page cannot install it. Use the router package manager via SSH. apk: apk update && apk upgrade mihomo-meta; opkg: opkg update && opkg upgrade mihomo-meta"
+msgstr "發現新版本（%s）。本頁不能安裝。在路由器 SSH 按包管理器執行。apk：apk update && apk upgrade mihomo-meta；opkg：opkg update && opkg upgrade mihomo-meta"
+
+msgid "mihomo kernel"
+msgstr "mihomo 核心"
+
+msgid "Announcements"
+msgstr "網站公告"
+
+msgid "No announcements"
+msgstr "暫無公告"
+
+msgid "Unable to load announcements. Try again later."
+msgstr "暫時無法獲取公告，請稍後重試"
+
+msgid "Previous"
+msgstr "上一條"
+
+msgid "Next"
+msgstr "下一條"
+
+msgid "Close"
+msgstr "關閉"
+
+msgid "IPv4/IPv6 address or CIDR only"
+msgstr "僅支援 IPv4/IPv6 位址或 CIDR"
+
+msgid "IPv4/IPv6 CIDR only"
+msgstr "僅支援 IPv4/IPv6 CIDR"
+
+msgid "Traffic ranking"
+msgstr "流量排行"
+
+msgid "Policy groups"
+msgstr "策略組"
+
+msgid "Domains / IPs"
+msgstr "網域/IP"
+
+msgid "Today"
+msgstr "今日"
+
+msgid "Yesterday"
+msgstr "昨日"
+
+msgid "No ranking data yet"
+msgstr "暫無排行資料"

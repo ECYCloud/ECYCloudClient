@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 沙盒容器外的三样东西都是必需的：/var/run 下的特权服务套接字、
+	     ~/Library/LaunchAgents 登录项、以及用 open 拉起安装包。
+	     客户端走 pkg 分发不上架 App Store，关掉沙盒。 -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

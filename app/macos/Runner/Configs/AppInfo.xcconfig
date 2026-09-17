@@ -1,0 +1,15 @@
+// Application-level settings for the Runner target.
+//
+// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
+// future. If not, the values below would default to using the project name when this becomes a
+// 'flutter create' template.
+
+// 决定 .app 与可执行文件的名字，必须与 helper 的 guiExePath()
+// （/Applications/ECYCloud.app/Contents/MacOS/ECYCloud）一致，否则特权指令会被拒
+PRODUCT_NAME = ECYCloud
+
+// The application's bundle identifier
+PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 com.ecycloud. All rights reserved.

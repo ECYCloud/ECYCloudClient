@@ -1,0 +1,204 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'search_field.dart';
+import '../../l10n/l10n.dart';
+import '../theme.dart';
+import 'overlay_scroll_view.dart';
+
+class ListToolbar extends StatefulWidget {
+  const ListToolbar({
+    super.key,
+    required this.currentPage,
+    required this.lastPage,
+    required this.total,
+    required this.onSearchChanged,
+    required this.onPageChanged,
+    this.searchHint,
+    this.showSearch = true,
+  });
+
+  final int currentPage;
+  final int lastPage;
+  final int total;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<int> onPageChanged;
+  final String? searchHint;
+  final bool showSearch;
+
+  static const int pageSize = 25;
+  static const double _rowHeight = 30;
+  static const double _gap = 8;
+
+  @override
+  State<ListToolbar> createState() => _ListToolbarState();
+}
+
+class _ListToolbarState extends State<ListToolbar> {
+  final TextEditingController _jump = TextEditingController();
+
+  @override
+  void dispose() {
+    _jump.dispose();
+    super.dispose();
+  }
+
+  void _jumpTo() {
+    final int? page = int.tryParse(_jump.text.trim());
+    if (page == null) {
+      return;
+    }
+    final int clamped = page.clamp(
+      1,
+      widget.lastPage < 1 ? 1 : widget.lastPage,
+    );
+    widget.onPageChanged(clamped);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final TextStyle? fieldStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontSize: 12,
+      height: 1.0,
+    );
+    final bool canPrev = widget.currentPage > 1;
+    final bool canNext = widget.currentPage < widget.lastPage;
+    final int lastPage = widget.lastPage < 1 ? 1 : widget.lastPage;
+
+    final Widget stats = Text(
+      L10n.t('共 {0} 条 · 第 {1}/{2} 页', <Object>[
+        widget.total,
+        widget.currentPage,
+        lastPage,
+      ]),
+      style: theme.textTheme.bodySmall,
+    );
+    final Widget prevButton = IconButton(
+      tooltip: L10n.t('上一页'),
+      onPressed: canPrev
+          ? () => widget.onPageChanged(widget.currentPage - 1)
+          : null,
+      icon: const Icon(Icons.chevron_left, size: 20),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+    );
+    final Widget nextButton = IconButton(
+      tooltip: L10n.t('下一页'),
+      onPressed: canNext
+          ? () => widget.onPageChanged(widget.currentPage + 1)
+          : null,
+      icon: const Icon(Icons.chevron_right, size: 20),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+    );
+    final Widget jumpField = SizedBox(
+      width: 64,
+      height: ListToolbar._rowHeight,
+      child: AppTheme.withControlDensity(
+        TextField(
+          contextMenuBuilder: AppTheme.editableTextMenu,
+          controller: _jump,
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          textAlignVertical: TextAlignVertical.center,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+          ],
+          style: fieldStyle,
+          decoration: InputDecoration(
+            hintText: L10n.t('页码'),
+            constraints: const BoxConstraints.tightFor(
+              height: ListToolbar._rowHeight,
+            ),
+            prefixIcon: SizedBox(height: ListToolbar._rowHeight),
+            prefixIconConstraints: BoxConstraints.tightFor(
+              width: 10,
+              height: ListToolbar._rowHeight,
+            ),
+            suffixIcon: SizedBox(height: ListToolbar._rowHeight),
+            suffixIconConstraints: BoxConstraints.tightFor(
+              width: 10,
+              height: ListToolbar._rowHeight,
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+          onSubmitted: (_) => _jumpTo(),
+        ),
+      ),
+    );
+    final Widget jumpButton = TextButton(
+      onPressed: _jumpTo,
+      child: Text(L10n.t('跳转')),
+    );
+    final List<Widget> pageControls = <Widget>[
+      stats,
+      prevButton,
+      nextButton,
+      jumpField,
+      jumpButton,
+    ];
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool narrow = constraints.maxWidth < 640;
+        if (narrow) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (widget.showSearch) ...<Widget>[
+                  SearchField(
+                    hintText: widget.searchHint,
+                    width: double.infinity,
+                    onChanged: widget.onSearchChanged,
+                  ),
+                  const SizedBox(height: ListToolbar._gap),
+                ],
+                Wrap(
+                  spacing: ListToolbar._gap,
+                  runSpacing: ListToolbar._gap,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: pageControls,
+                ),
+              ],
+            ),
+          );
+        }
+
+        final List<Widget> items = <Widget>[
+          if (widget.showSearch)
+            SearchField(
+              hintText: widget.searchHint,
+              onChanged: widget.onSearchChanged,
+            ),
+          ...pageControls,
+        ];
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: OverlayScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                height: ListToolbar._rowHeight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    for (int i = 0; i < items.length; i++) ...<Widget>[
+                      if (i > 0) const SizedBox(width: ListToolbar._gap),
+                      items[i],
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

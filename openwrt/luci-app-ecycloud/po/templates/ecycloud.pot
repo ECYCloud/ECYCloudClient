@@ -1,0 +1,863 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "%d nodes"
+msgstr ""
+
+msgid "%d nodes · current %s"
+msgstr ""
+
+msgid "%d ms"
+msgstr ""
+
+msgid "%d nodes, fetched %s"
+msgstr ""
+
+msgid "%s up / %s down"
+msgstr ""
+
+msgid "%s used of %s, %s today"
+msgstr ""
+
+msgid "%s, %d days left"
+msgstr ""
+
+msgid "%s, current node: %s"
+msgstr ""
+
+msgid "Account"
+msgstr ""
+
+msgid "Account info"
+msgstr ""
+
+msgid "Advanced"
+msgstr ""
+
+msgid "Allow LAN"
+msgstr ""
+
+msgid "Also send traffic originating on the router through the kernel."
+msgstr ""
+
+msgid "All"
+msgstr ""
+
+msgid "Applied"
+msgstr ""
+
+msgid "A verification code has been sent to your email"
+msgstr ""
+
+msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr ""
+
+msgid "Connection details"
+msgstr ""
+
+msgid "Config URL"
+msgstr ""
+
+msgid "Connections"
+msgstr ""
+
+msgid "DNS hijack"
+msgstr ""
+
+msgid "DNS port"
+msgstr ""
+
+msgid "Direct"
+msgstr ""
+
+msgid "Disabled"
+msgstr ""
+
+msgid "ECY Cloud"
+msgstr ""
+
+msgid "Host"
+msgstr ""
+
+msgid "Email"
+msgstr ""
+
+msgid "Email code sign-in"
+msgstr ""
+
+msgid "Enter your email first"
+msgstr ""
+
+msgid "Expires"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Clash profile is invalid"
+msgstr ""
+
+msgid "Fetching the profile in the background"
+msgstr ""
+
+msgid "Already up to date"
+msgstr ""
+
+msgid "Update succeeded"
+msgstr ""
+
+msgid "Update saved, takes effect the next time the kernel starts"
+msgstr ""
+
+msgid "Update failed"
+msgstr ""
+
+msgid "Firewall rules"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "GeoData mirror"
+msgstr ""
+
+msgid "Global"
+msgstr ""
+
+msgid "HTTP and SOCKS proxy port of the kernel."
+msgstr ""
+
+msgid "Handle IPv6 traffic as well."
+msgstr ""
+
+msgid "Host that serves the clash profile. Must be https. Leave empty to use the panel URL. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr ""
+
+msgid "Hijack DNS"
+msgstr ""
+
+msgid "IPv6"
+msgstr ""
+
+msgid "Kernel"
+msgstr ""
+
+msgid "LAN devices"
+msgstr ""
+
+msgid "LAN interfaces"
+msgstr ""
+
+msgid "Last %d syslog entries of the plugin and the kernel."
+msgstr ""
+
+msgid "Latency"
+msgstr ""
+
+msgid "Let LAN clients use the mixed port directly."
+msgstr ""
+
+msgid "Log level"
+msgstr ""
+
+msgid "Logs"
+msgstr ""
+
+msgid "Loopback port the kernel resolver listens on."
+msgstr ""
+
+msgid "Minutes between panel checks, 0 disables the periodic check."
+msgstr ""
+
+msgid "Mixed"
+msgstr ""
+
+msgid "Mixed port"
+msgstr ""
+
+msgid "No entries yet."
+msgstr ""
+
+msgid "Node"
+msgstr ""
+
+msgid "Nodes"
+msgstr ""
+
+msgid "Not applied"
+msgstr ""
+
+msgid "Not signed in"
+msgstr ""
+
+msgid "Not running"
+msgstr ""
+
+msgid "Overview"
+msgstr ""
+
+msgid "Panel"
+msgstr ""
+
+msgid "Panel URL"
+msgstr ""
+
+msgid "Password"
+msgstr ""
+
+msgid "Password sign-in"
+msgstr ""
+
+msgid "Plan"
+msgstr ""
+
+msgid "Plugin version"
+msgstr ""
+
+msgid "Ports"
+msgstr ""
+
+msgid "Preparing configuration"
+msgstr ""
+
+msgid "Profile"
+msgstr ""
+
+msgid "Profile refresh"
+msgstr ""
+
+msgid "Proxy mode"
+msgstr ""
+
+msgid "Proxy the router itself"
+msgstr ""
+
+msgid "Recovering"
+msgstr ""
+
+msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver."
+msgstr ""
+
+msgid "Refresh profile"
+msgstr ""
+
+msgid "No matching connections"
+msgstr ""
+
+msgid "No matching log entries."
+msgstr ""
+
+msgid "Request failed"
+msgstr ""
+
+msgid "Routing"
+msgstr ""
+
+msgid "Routing mode updated"
+msgstr ""
+
+msgid "Search host, IP, process, rule"
+msgstr ""
+
+msgid "Search logs"
+msgstr ""
+
+msgid "Rule"
+msgstr ""
+
+msgid "Running"
+msgstr ""
+
+msgid "Running (%s)"
+msgstr ""
+
+msgid "Send code"
+msgstr ""
+
+msgid "Send code (%ds)"
+msgstr ""
+
+msgid "Service"
+msgstr ""
+
+msgid "Service starting"
+msgstr ""
+
+msgid "Service stopped"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
+msgid "Sign out"
+msgstr ""
+
+msgid "Quit"
+msgstr ""
+
+msgid "This disconnects and clears saved sign-in credentials on this device."
+msgstr ""
+
+msgid "Signed in"
+msgstr ""
+
+msgid "Signed in, the service is starting"
+msgstr ""
+
+msgid "Signed out"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Starting kernel"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Stop"
+msgstr ""
+
+msgid "Stopped"
+msgstr ""
+
+msgid "System"
+msgstr ""
+
+msgid "TPROXY"
+msgstr ""
+
+msgid "TPROXY port"
+msgstr ""
+
+msgid "TUN"
+msgstr ""
+
+msgid "TUN device"
+msgstr ""
+
+msgid "TUN stack"
+msgstr ""
+
+msgid "Test all nodes in this group"
+msgstr ""
+
+msgid "Test all nodes in this group speed"
+msgstr ""
+
+msgid "Test this node"
+msgstr ""
+
+msgid "Test this node speed"
+msgstr ""
+
+msgid "Currently sorted by name. Tap to sort by lowest latency"
+msgstr ""
+
+msgid "Currently sorted by lowest latency. Tap to sort by highest speed"
+msgstr ""
+
+msgid "Currently sorted by highest speed. Tap to sort by name"
+msgstr ""
+
+msgid "Timeout"
+msgstr ""
+
+msgid "The panel did not publish any node groups."
+msgstr ""
+
+msgid "Traffic"
+msgstr ""
+
+msgid "Traffic details"
+msgstr ""
+
+msgid "Traffic from these interfaces is sent to the kernel."
+msgstr ""
+
+msgid "Traffic since start"
+msgstr ""
+
+msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
+msgstr ""
+
+msgid "Two-factor code"
+msgstr ""
+
+msgid "Verification code"
+msgstr ""
+
+msgid "Type"
+msgstr ""
+
+msgid "Validating configuration"
+msgstr ""
+
+msgid "Waiting for the kernel"
+msgstr ""
+
+msgid "Website address used to sign in. Must be https. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr ""
+
+msgid "automatic"
+msgstr ""
+
+msgid "dnsmasq forwards to the kernel"
+msgstr ""
+
+msgid "gVisor"
+msgstr ""
+
+msgid "manual"
+msgstr ""
+
+msgid "no active plan"
+msgstr ""
+
+msgid "none"
+msgstr ""
+
+msgid "not fetched yet"
+msgstr ""
+
+msgid "unknown version"
+msgstr ""
+
+msgid "untested"
+msgstr ""
+
+msgid "Create an account"
+msgstr ""
+
+msgid "Forgot password?"
+msgstr ""
+
+msgid "Got it"
+msgstr ""
+
+msgid "Notice"
+msgstr ""
+
+msgid "Remember email and password"
+msgstr ""
+
+msgid "Sign in with your %s account to load available nodes"
+msgstr ""
+
+msgid "Home"
+msgstr ""
+
+msgid "Connect"
+msgstr ""
+
+msgid "Disconnect"
+msgstr ""
+
+msgid "Currently disconnecting"
+msgstr ""
+
+msgid "Disconnecting"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Connected"
+msgstr ""
+
+msgid "Connected %s"
+msgstr ""
+
+msgid "Connecting"
+msgstr ""
+
+msgid "Disconnected"
+msgstr ""
+
+msgid "Click the button on the right to connect"
+msgstr ""
+
+msgid "Disconnecting, please wait"
+msgstr ""
+
+msgid "Current node"
+msgstr ""
+
+msgid "No node selected"
+msgstr ""
+
+msgid "Preparing kernel"
+msgstr ""
+
+msgid "Kernel not ready"
+msgstr ""
+
+msgid "Not selected"
+msgstr ""
+
+msgid "Proxy group"
+msgstr ""
+
+msgid "Nodes ›"
+msgstr ""
+
+msgid "Refresh nodes"
+msgstr ""
+
+msgid "Locate selected node"
+msgstr ""
+
+msgid "This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately"
+msgstr ""
+
+msgid "This group is selected by the kernel by latency; tapping a node does not change the selection. Testing latency lets the kernel reselect immediately"
+msgstr ""
+
+msgid "Upload"
+msgstr ""
+
+msgid "Download"
+msgstr ""
+
+msgid "Total %s"
+msgstr ""
+
+msgid "Kernel status"
+msgstr ""
+
+msgid "Memory"
+msgstr ""
+
+msgid "Active connections"
+msgstr ""
+
+msgid "Closed connections"
+msgstr ""
+
+msgid "Traffic usage"
+msgstr ""
+
+msgid "Today used"
+msgstr ""
+
+msgid "Previously used"
+msgstr ""
+
+msgid "Remaining traffic"
+msgstr ""
+
+msgid "Account total traffic"
+msgstr ""
+
+msgid "Need more traffic? Open the panel to buy a traffic pack"
+msgstr ""
+
+msgid "Next usage reset"
+msgstr ""
+
+msgid "Last used"
+msgstr ""
+
+msgid "Never used"
+msgstr ""
+
+msgid "Used only while running"
+msgstr ""
+
+msgid "TUN mode"
+msgstr ""
+
+msgid "Take over all forwarded traffic"
+msgstr ""
+
+msgid "%d entries"
+msgstr ""
+
+msgid "Search log content"
+msgstr ""
+
+msgid "No matching logs"
+msgstr ""
+
+msgid "Connect to see connection details"
+msgstr ""
+
+msgid "All %d"
+msgstr ""
+
+msgid "Active %d"
+msgstr ""
+
+msgid "Closed %d"
+msgstr ""
+
+msgid "Closed · %s"
+msgstr ""
+
+msgid "Application"
+msgstr ""
+
+msgid "Configuration"
+msgstr ""
+
+msgid "About"
+msgstr ""
+
+msgid "Current version"
+msgstr ""
+
+msgid "%s/s"
+msgstr ""
+
+msgid "Saving restarts the service, connections are dropped for a moment."
+msgstr ""
+
+msgid "Online clients"
+msgstr ""
+
+msgid "%d / unlimited"
+msgstr ""
+
+msgid "Online client limit reached"
+msgstr ""
+
+msgid "The online client limit has been reached. Disconnect one client to make room?"
+msgstr ""
+
+msgid "The online client limit has been reached. Pick a client to disconnect:"
+msgstr ""
+
+msgid "Third-party client"
+msgstr ""
+
+msgid "This device"
+msgstr ""
+
+msgid "%d years"
+msgstr ""
+
+msgid "%d months"
+msgstr ""
+
+msgid "%d days"
+msgstr ""
+
+msgid "%d hours"
+msgstr ""
+
+msgid "%d minutes"
+msgstr ""
+
+msgid "%d seconds"
+msgstr ""
+
+msgid "OK"
+msgstr ""
+
+msgid "Device disconnected"
+msgstr ""
+
+msgid "A new client connected after the online client limit was reached, so this device was disconnected."
+msgstr ""
+
+msgid "This device was removed from the usage list, so it was disconnected."
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Remove this device?"
+msgstr ""
+
+msgid "The client on %s will be told to disconnect, within 60 seconds."
+msgstr ""
+
+msgid "Not supported"
+msgstr ""
+
+msgid "No online clients"
+msgstr ""
+
+msgid "Confirm these IPs are yours. Change your password if anything looks wrong."
+msgstr ""
+
+msgid "Online clients in the last %d days"
+msgstr ""
+
+msgid "No online clients in the last %d days"
+msgstr ""
+
+msgid "Account info updated"
+msgstr ""
+
+msgid "TUN excluded networks"
+msgstr ""
+
+msgid "IPv4/IPv6 CIDR only, for example 192.168.56.0/24 or fd00::/8. LAN and loopback are already excluded."
+msgstr ""
+
+msgid "Color scheme"
+msgstr ""
+
+msgid "Follow system"
+msgstr ""
+
+msgid "Light"
+msgstr ""
+
+msgid "Dark"
+msgstr ""
+
+msgid "Language"
+msgstr ""
+
+msgid "Connect at startup"
+msgstr ""
+
+msgid "Start the kernel after reboot if this router is signed in."
+msgstr ""
+
+msgid "Refresh panel profile"
+msgstr ""
+
+msgid "Pull nodes and rules again. Node changes also follow the account refresh."
+msgstr ""
+
+msgid "Update GeoData"
+msgstr ""
+
+msgid "Redownload the geo databases using the panel geox-url. The kernel must be running."
+msgstr ""
+
+msgid "View runtime config"
+msgstr ""
+
+msgid "Read-only view of the kernel config.json"
+msgstr ""
+
+msgid "View routing rules"
+msgstr ""
+
+msgid "Read-only view of downloaded rule-providers"
+msgstr ""
+
+msgid "Runtime config"
+msgstr ""
+
+msgid "Routing rules"
+msgstr ""
+
+msgid "No routing rules yet. Connect once and they will download into the run directory."
+msgstr ""
+
+msgid "The kernel is not running"
+msgstr ""
+
+msgid "This file is a binary rule set and cannot be viewed as text"
+msgstr ""
+
+msgid "No runtime config yet"
+msgstr ""
+
+msgid "Invalid path"
+msgstr ""
+
+msgid "File not found"
+msgstr ""
+
+msgid "Open"
+msgstr ""
+
+msgid "TPROXY bypass"
+msgstr ""
+
+msgid "Destinations that skip TPROXY. IPv4/IPv6 address or CIDR only, for example 192.168.56.0/24. LAN, loopback and link-local are already bypassed."
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
+msgid "This only checks the version. To install, open the releases page, download the OpenWrt package, extract it, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk"
+msgstr ""
+
+msgid "This only checks the version. To upgrade, use the router package manager via SSH. apk: apk update && apk upgrade mihomo-meta; opkg: opkg update && opkg upgrade mihomo-meta"
+msgstr ""
+
+msgid "Open releases"
+msgstr ""
+
+msgid "Not checked yet"
+msgstr ""
+
+msgid "Up to date (%s)"
+msgstr ""
+
+msgid "Update available (%s). This page cannot install it. Open the releases page, extract the OpenWrt package, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk"
+msgstr ""
+
+msgid "Check failed: %s"
+msgstr ""
+
+msgid "Local version unknown"
+msgstr ""
+
+msgid "Local version unknown, latest (%s)"
+msgstr ""
+
+msgid "Current (%s)"
+msgstr ""
+
+msgid "Update available (%s). This page cannot install it. Use the router package manager via SSH. apk: apk update && apk upgrade mihomo-meta; opkg: opkg update && opkg upgrade mihomo-meta"
+msgstr ""
+
+msgid "mihomo kernel"
+msgstr ""
+
+msgid "Announcements"
+msgstr ""
+
+msgid "No announcements"
+msgstr ""
+
+msgid "Unable to load announcements. Try again later."
+msgstr ""
+
+msgid "Previous"
+msgstr ""
+
+msgid "Next"
+msgstr ""
+
+msgid "Close"
+msgstr ""
+
+msgid "IPv4/IPv6 address or CIDR only"
+msgstr ""
+
+msgid "IPv4/IPv6 CIDR only"
+msgstr ""
+
+msgid "Traffic ranking"
+msgstr ""
+
+msgid "Policy groups"
+msgstr ""
+
+msgid "Domains / IPs"
+msgstr ""
+
+msgid "Today"
+msgstr ""
+
+msgid "Yesterday"
+msgstr ""
+
+msgid "No ranking data yet"
+msgstr ""

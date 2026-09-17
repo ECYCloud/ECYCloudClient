@@ -1,0 +1,51 @@
+{
+  "comment": "只用官方发布二进制。amd64 必须取 compatible（GOAMD64=v1）。Android 由 build-libmihomo.sh 以同一 tag 依赖构建。发布包不含 LICENSE，出包复用仓库根 LICENSE。",
+  "mihomo": {
+    "tag": "v1.19.31",
+    "version": "1.19.31",
+    "releasePage": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.31",
+    "assets": {
+      "windows-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-windows-amd64-compatible-v1.19.31.zip",
+        "sha256": "93d14e9a13b49b2f2d256202d02cc8d14a7c4695edf084cae0f941986bc9c218",
+        "entry": "mihomo-windows-amd64-compatible.exe"
+      },
+      "windows-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-windows-arm64-v1.19.31.zip",
+        "sha256": "68659624a38ae1dbc4e1b92f45d4dc75da0eaedd4d732b0a6f01a308da945792",
+        "entry": "mihomo-windows-arm64.exe"
+      },
+      "macos-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-darwin-amd64-compatible-v1.19.31.gz",
+        "sha256": "fb6fca0e105b4310a21eaacd3a8d3853d3d8b87fa4c69737bea52a30a435aac7"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-darwin-arm64-v1.19.31.gz",
+        "sha256": "d131f44b3deb2a8356f7ac75048ad67a10d53243323951c4f3cda7b672922963"
+      },
+      "linux-x64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-compatible-v1.19.31.gz",
+        "sha256": "04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-arm64-v1.19.31.gz",
+        "sha256": "9e0f11afbf38426b8bd88fdc594678f8161c57eccb4e1b77acb12b493904f1d4"
+      }
+    }
+  },
+  "geodata": {
+    "comment": "target 是内核认的本地文件名（MMDB() / GeoSite）。上游滚动 latest、锁不住 sha256，只校验体积下限与 MaxMind 魔数。",
+    "assets": {
+      "mmdb": {
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb",
+        "target": "geoip.metadb",
+        "minBytes": 4000000
+      },
+      "geosite": {
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
+        "target": "GeoSite.dat",
+        "minBytes": 2000000
+      }
+    }
+  }
+}

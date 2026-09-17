@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ECY Cloud
+Comment=ECY Cloud
+Exec=/opt/ecycloud/ECYCloud
+Icon=com.ecycloud.client
+Terminal=false
+Categories=Network;
+StartupWMClass=ECYCloud
