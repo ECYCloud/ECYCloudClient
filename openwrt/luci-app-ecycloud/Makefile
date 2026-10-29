@@ -17,6 +17,8 @@ else
   $(error 未知通道 $(ECYCLOUD_CHANNEL)，只能是 last 或 pre)
 endif
 PKG_RELEASE:=1
+# luci.mk 的翻译包版本默认取 git 记录，SDK 里没有，会固定成 0 / unknown，升级时被 opkg 当作未变而跳过
+PKG_PO_VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_MAINTAINER:=ECY Cloud
 
