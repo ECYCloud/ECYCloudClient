@@ -49,11 +49,6 @@ define Build/Prepare/luci-app-ecycloud
 	fi
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/ecycloud \
 		$(PKG_BUILD_DIR)/root/usr/libexec/ecycloud-ctl
-	mkdir -p $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags
-	cp -f $(CURDIR)/../../app/assets/flags/*.svg $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags/
-	cp -f $(CURDIR)/../../app/assets/regions.json $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/regions.json
-	test -s $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags/xx.svg
-	test -s $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/regions.json
 endef
 
 include $(TOPDIR)/feeds/luci/luci.mk

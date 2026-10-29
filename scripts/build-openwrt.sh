@@ -143,6 +143,12 @@ fi
 chmod 0755 \
 	"$sdk_root/package/luci-app-ecycloud/root/etc/init.d/ecycloud" \
 	"$sdk_root/package/luci-app-ecycloud/root/usr/libexec/ecycloud-ctl"
+# 国旗与地区表随包：SDK 里的副本找不到仓库的 app/assets，23.05 的 luci.mk 也不执行 Prepare 钩子
+resources="$sdk_root/package/luci-app-ecycloud/htdocs/luci-static/resources/ecycloud"
+mkdir -p "$resources/flags"
+cp -f "$root_dir/app/assets/flags/"*.svg "$resources/flags/"
+cp -f "$root_dir/app/assets/regions.json" "$resources/regions.json"
+test -s "$resources/flags/xx.svg" && test -s "$resources/regions.json"
 
 if [[ "$package_format" == apk && ! -s "$sdk_root/private-key.pem" ]]; then
 	openssl ecparam -name prime256v1 -genkey -noout -out "$sdk_root/private-key.pem"
