@@ -95,6 +95,10 @@ class LocalTemplate {
     // 入站认证归客户端：界面上没有填代理口账号密码的地方，本机浏览器与系统代理
     // 也不会带上面板那组密码，而内核对回环不豁免（实测 127.0.0.1 也回 407）
     'authentication': const <String>[],
+    'ss-config': '',
+    'vmess-config': '',
+    'tuic-server': const <String, dynamic>{'enable': false},
+    'iptables': const <String, dynamic>{'enable': false},
     // listeners 与 tunnels 能开出任意协议的入站口与端口转发，界面上没有这两项开关，
     // 面板下发就等于替用户开了看不见的监听
     'listeners': const <Map<String, dynamic>>[],

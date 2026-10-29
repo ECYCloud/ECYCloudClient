@@ -7,5 +7,13 @@
 	     客户端走 pkg 分发不上架 App Store，关掉沙盒。 -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<!-- 加固运行时（ENABLE_HARDENED_RUNTIME）默认忽略 DYLD_* 环境变量：这里不授予
+	     allow-dyld-environment-variables，从而阻断 DYLD_INSERT_LIBRARIES 注入官方 GUI 后驱动特权 helper 的提权路径。
+	     未配置 Developer ID 时走 ad-hoc 签名，库校验对 ad-hoc 签名的嵌套框架会拦下启动，
+	     因此显式关闭库校验以保证可启动；DYLD 注入防护由上面「不授予 dyld 环境变量」独立保证，不受此项影响。
+	     应用包安装在 root:wheel 的 /Applications 下，dylib 劫持需 root，风险已被目录属主收敛。
+	     Developer ID 签名时 build-macos.sh 在副本里删掉此项，恢复完整库校验（见 docs/macos.md）。 -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>

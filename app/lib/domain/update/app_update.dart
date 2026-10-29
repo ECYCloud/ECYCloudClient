@@ -60,9 +60,10 @@ class AppUpdate {
 
   static String get releasesUrl => 'https://github.com/$repo/releases';
 
-  // tar.gz 要 root 解包再跑 install.sh，没有能接手的安装器，客户端不代装
+  // tar.gz 与 AppImage 都靠 install.sh 以 root 铺文件，没有能接手的安装器，客户端不代装
   static bool get selfInstallable =>
-      !Platform.isLinux || _linuxPackageFormat != 'tar.gz';
+      !Platform.isLinux ||
+      (_linuxPackageFormat != 'tar.gz' && _linuxPackageFormat != 'AppImage');
 
   /// 与 scripts/build-*.{ps1,sh} 的产物名后缀逐字一致。四端均按架构分包。
   static String get assetSuffix {
@@ -78,7 +79,7 @@ class AppUpdate {
     return 'android-$arch.apk';
   }
 
-  // Linux 同一架构出 deb / rpm / tar.gz，装的是哪种由安装器写入；调试构建没有这份标记，退回 deb
+  // Linux 同一架构出 deb / rpm / tar.gz / AppImage，标记即产物后缀，由安装器写入；调试构建没有这份标记，退回 deb
   static final String _linuxPackageFormat = _readPackageFormat();
 
   static String _readPackageFormat() {

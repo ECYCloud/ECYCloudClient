@@ -42,9 +42,8 @@ func requireRoot(action func() error) error {
 
 func run() error {
 	srv := newServer()
-	// 掉电或强杀会留下快照，必须早于任何 GUI 连接就还原
-	if err := srv.proxy.restore(); err != nil {
-		logf("启动自检还原系统代理失败: %v", err)
+	if err := srv.initialize(); err != nil {
+		return err
 	}
 
 	listener, err := srv.listen()

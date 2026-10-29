@@ -7,28 +7,33 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 )
 
 // 请求体里的 pid 是调用方自己填的、不可信，只能取内核记录的对端凭据
-func peerPID(conn *net.UnixConn) (int, error) {
+func peerIdentity(conn *net.UnixConn) (int, string, error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
-		return 0, fmt.Errorf("获取连接底层句柄失败: %w", err)
+		return 0, "", fmt.Errorf("获取连接底层句柄失败: %w", err)
 	}
 
 	var pid int
+	var cred *unix.Xucred
 	var pidErr error
 	if err := raw.Control(func(fd uintptr) {
 		pid, pidErr = unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID)
+		if pidErr == nil {
+			cred, pidErr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+		}
 	}); err != nil {
-		return 0, fmt.Errorf("读取对端凭据失败: %w", err)
+		return 0, "", fmt.Errorf("读取对端凭据失败: %w", err)
 	}
 	if pidErr != nil {
-		return 0, fmt.Errorf("读取对端凭据失败: %w", pidErr)
+		return 0, "", fmt.Errorf("读取对端凭据失败: %w", pidErr)
 	}
-	return pid, nil
+	return pid, strconv.FormatUint(uint64(cred.Uid), 10), nil
 }
 
 // macOS 没有 /proc，proc_pidpath 又要 cgo。kern.procargs2 的布局是
@@ -55,4 +60,4 @@ func processExePath(pid int) (string, error) {
 // utun 只认 root，macOS 也没有 capability 可降权
 func resolveKernelUser() (int, int) { return 0, 0 }
 
-func applyKernelCredential(_ *exec.Cmd) {}
+func applyKernelCredential(_ *exec.Cmd) error { return nil }

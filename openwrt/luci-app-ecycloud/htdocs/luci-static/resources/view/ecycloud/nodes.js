@@ -63,6 +63,61 @@ return view.extend({
 			this.patchNode(this.body.firstChild, content);
 		else
 			this.body.appendChild(content);
+		this.focusPendingSearch();
+		this.warmFlags(reply.flag_regex);
+	},
+
+	warmFlags: function(regex) {
+		var names = [];
+		var generation = (this.flagGeneration || 0) + 1;
+
+		(this.groups || []).forEach(function(group) {
+			(group.members || []).forEach(function(member) {
+				if (member.label)
+					names.push(member.label);
+				if (member.via_label)
+					names.push(member.via_label);
+			});
+		});
+		this.flagGeneration = generation;
+		return api.warmFlags(names, regex).then(L.bind(function(changed) {
+			if (changed && generation == this.flagGeneration)
+				this.repaint();
+		}, this));
+	},
+
+	repaint: function() {
+		if (!this.body)
+			return;
+
+		var content = this.renderGroups({ groups: this.groups || [] });
+		if (this.body.firstChild)
+			this.patchNode(this.body.firstChild, content);
+		else
+			this.body.appendChild(content);
+		this.focusPendingSearch();
+	},
+
+	focusPendingSearch: function() {
+		var name = this.pendingSearchFocus;
+		var fields;
+		var i;
+
+		if (!name || !this.body)
+			return;
+
+		this.pendingSearchFocus = '';
+		fields = this.body.querySelectorAll('[data-ecy-search]');
+		for (i = 0; i < fields.length; i++) {
+			if (fields[i].getAttribute('data-ecy-search') == name) {
+				fields[i].focus();
+				return;
+			}
+		}
+	},
+
+	memberShown: function(member) {
+		return member.label || member.name || '';
 	},
 
 	patchNode: function(current, next) {
@@ -119,7 +174,7 @@ return view.extend({
 					'data-ico': this.routeMode == 'direct' ? 'tower' : 'inbox' }),
 				E('div', {}, [
 					this.routeMode == 'direct' ? _('Direct')
-						: (data.error || _('The panel did not publish any node groups.'))
+						: api.messageText(data.error || _('The panel did not publish any node groups.'))
 				])
 			]);
 
@@ -162,40 +217,84 @@ return view.extend({
 					: _('Currently sorted by highest speed. Tap to sort by name'),
 			'data-ico': sortMode == 'name' ? 'sort-alpha' : sortMode == 'latency' ? 'sort-delay' : 'sort-speed'
 		});
+		var searching = !!this.searchOpen[group.name];
+		var query = searching ? (this.query[group.name] || '') : '';
+		var searchBtn = api.pressable('ecycloud-icon-btn' + (searching ? ' is-on' : ''), {
+			title: _('Search node name'),
+			'aria-label': _('Search node name'),
+			'aria-pressed': searching ? 'true' : 'false',
+			'data-ico': 'search'
+		});
 		var locateBtn = api.pressable('ecycloud-icon-btn', {
 			title: _('Locate selected node'),
 			'data-ico': 'locate',
 			disabled: !group.now
 		});
+		var members = api.sortGroupMembers(group.members, sortMode).filter(L.bind(function(member) {
+			if (!query)
+				return true;
+			return String(this.memberShown(member)).toLowerCase().indexOf(query) != -1;
+		}, this));
 		var hint = '';
+		var searchRow = '';
+		var list;
 
 		if (!selectable)
-			hint = E('div', { 'class': 'ecycloud-group-hint' }, [
+			hint = E('div', { 'class': 'ecycloud-group-hint', 'data-ecy-key': 'hint' }, [
 				group.type == 'Fallback'
 					? _('This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately')
 					: _('This group is selected by the kernel by latency; tapping a node does not change the selection. Testing latency lets the kernel reselect immediately')
 			]);
 
-		var body = E('div', { 'class': 'ecycloud-group-body' }, [
-			hint,
-			E('div', { 'class': 'ecycloud-node-grid' },
-				api.sortGroupMembers(group.members, sortMode).map(L.bind(this.renderMember, this, group)))
-		]);
+		if (searching) {
+			searchRow = E('div', { 'class': 'ecycloud-group-search', 'data-ecy-key': 'search' }, [
+				api.input({
+					placeholder: _('Search node name'),
+					value: this.searchText[group.name] || '',
+					autocomplete: 'off',
+					input: L.bind(function(ev) {
+						var text = ev.target.value;
+						this.searchText[group.name] = text;
+						this.query[group.name] = text.trim().toLowerCase();
+						this.repaint();
+					}, this)
+				})
+			]);
+			searchRow.firstChild.setAttribute('data-ecy-key', 'search-input');
+			searchRow.firstChild.setAttribute('data-ecy-search', group.name);
+		}
+
+		list = query && !members.length
+			? E('div', { 'class': 'ecycloud-group-empty', 'data-ecy-key': 'empty' }, [
+				_('No matching nodes')
+			])
+			: E('div', { 'class': 'ecycloud-node-grid', 'data-ecy-key': 'nodes' },
+				members.map(L.bind(this.renderMember, this, group)));
+
+		var bodyChildren = [];
+		if (searchRow)
+			bodyChildren.push(searchRow);
+		if (hint)
+			bodyChildren.push(hint);
+		bodyChildren.push(list);
+
+		var body = E('div', { 'class': 'ecycloud-group-body' }, bodyChildren);
 		var card = E('div', {
 			'class': 'ecycloud-group' + (opened ? ' is-open' : ''),
 			'data-ecy-key': JSON.stringify([ group.name, group.type ])
 		}, [
 			E('div', { 'class': 'ecycloud-group-head' }, [
+				api.groupMark(group.icon, selectable),
 				E('div', { 'class': 'ecycloud-group-title' }, [
-					E('div', { 'class': 'ecycloud-group-name' }, [ group.name ]),
+					E('div', { 'class': 'ecycloud-group-name' }, [ group.label || group.name ]),
 					E('span', { 'class': 'ecycloud-tag' }, [
 						selectable ? _('manual') : _('automatic')
 					]),
 					E('div', { 'class': 'cbi-section-descr' }, (function() {
 						var now = group.now_label
 							? (group.now_via_label
-								? group.now_label + ' → ' + group.now_via_label
-								: group.now_label)
+								? api.nodeLabel(group.now_label) + ' → ' + api.nodeLabel(group.now_via_label)
+								: api.nodeLabel(group.now_label))
 							: '';
 						var line = now
 							? _('%d nodes · current %s').format(group.members.length, now)
@@ -211,6 +310,7 @@ return view.extend({
 				testBtn,
 				speedBtn,
 				sortBtn,
+				searchBtn,
 				locateBtn,
 				E('span', { 'class': 'ecycloud-group-chevron' })
 			]),
@@ -252,6 +352,17 @@ return view.extend({
 			return this.refresh();
 		}, this));
 
+		searchBtn.addEventListener('click', L.bind(function(ev) {
+			ev.stopPropagation();
+			var open = !this.searchOpen[group.name];
+			this.searchOpen[group.name] = open;
+			if (open) {
+				this.open[group.name] = true;
+				this.pendingSearchFocus = group.name;
+			}
+			this.repaint();
+		}, this));
+
 		locateBtn.addEventListener('click', L.bind(function(ev) {
 			ev.stopPropagation();
 			this.open[group.name] = true;
@@ -291,13 +402,13 @@ return view.extend({
 			}, this));
 		}, this));
 
-		if (member.is_group)
-			chips.push(E('span', { 'class': 'ecycloud-tag' }, [
-				member.group_selectable ? _('manual') : _('automatic')
-			]));
+		var region = api.flagCode(member.via_label || member.label);
+		var flag = api.flagImg(region);
 
 		if (member.via_label)
-			chips.push(E('span', { 'class': 'ecycloud-node-via' }, [ member.via_label ]));
+			chips.push(E('span', { 'class': 'ecycloud-node-via' }, [
+				flag || '', E('span', {}, [ api.nodeLabel(member.via_label) ])
+			]));
 		else
 			[ member.protocol, (member.network || '').toUpperCase(), member.tls, member.udp ].forEach(function(tag) {
 				if (tag)
@@ -311,7 +422,11 @@ return view.extend({
 			E('div', { 'class': 'ecycloud-node-info' }, [
 				E('div', { 'class': 'ecycloud-node-name' }, [
 					selected ? E('span', { 'class': 'ecycloud-node-check' }) : '',
-					member.label
+					member.via_label ? '' : (flag || ''),
+					E('span', { 'class': 'ecycloud-node-label', title: member.label }, [ api.nodeLabel(member.label) ]),
+					member.is_group ? E('span', { 'class': 'ecycloud-tag' }, [
+						member.group_selectable ? _('manual') : _('automatic')
+					]) : ''
 				]),
 				chips.length ? E('div', { 'class': 'ecycloud-tags' }, chips) : ''
 			]),
@@ -343,6 +458,9 @@ return view.extend({
 			self.body = E('div', {});
 			self.open = {};
 			self.sort = {};
+			self.searchOpen = {};
+			self.searchText = {};
+			self.query = {};
 			self.update(data);
 			poll.add(L.bind(self.refresh, self), 2);
 			var refreshBtn = api.pressable('ecycloud-icon-btn', {

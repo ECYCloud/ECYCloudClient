@@ -14,6 +14,9 @@ import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'login_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_text_field.dart';
 
 class DeleteAccountPage extends StatefulWidget {
   const DeleteAccountPage({super.key});
@@ -24,11 +27,11 @@ class DeleteAccountPage extends StatefulWidget {
 
 class _DeleteAccountPageState extends State<DeleteAccountPage> {
   final TextEditingController _emailCode = TextEditingController();
-  final TextEditingController _passwd = TextEditingController();
 
   AuthOptions? _options;
   bool _loading = true;
   bool _busy = false;
+  bool _sendingCode = false;
   int _sendCooldown = 0;
   Timer? _cooldownTimer;
 
@@ -44,14 +47,12 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
   void dispose() {
     _cooldownTimer?.cancel();
     _emailCode.dispose();
-    _passwd.dispose();
     super.dispose();
   }
 
   Future<void> _loadOptions() async {
-    final AuthOptions? options = await AppScope.of(
-      context,
-    ).auth.fetchAuthOptions();
+    final AuthOptions? options = await AppScope.of(context).auth
+        .fetchAuthOptions();
     if (!mounted) {
       return;
     }
@@ -70,26 +71,30 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       return;
     }
 
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _sendingCode = true;
+    });
     try {
       final String message = await api.sendKillEmailCode();
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
       _startCooldown();
     } on ApiException catch (e) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _sendingCode = false;
+        });
       }
     }
   }
@@ -119,21 +124,14 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
 
     if (options.emailVerify) {
       if (_emailCode.text.trim().isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(L10n.t('请先输入邮箱验证码'))));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(L10n.t('请先输入邮箱验证码'))));
         return;
       }
-    } else if (_passwd.text.trim().isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(L10n.t('请先输入登录密码'))));
-      return;
     }
-
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('确认提交删除请求吗？')),
         content: Text(L10n.t('提交后，您的账户将被禁用，并在 30 天后彻底删除。在此期间可取消删除。')),
         actions: <Widget>[
@@ -163,9 +161,14 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     try {
       final AccountStatus status = await api.killAccount(
         emailCode: options.emailVerify ? _emailCode.text.trim() : null,
-        passwd: options.emailVerify ? null : _passwd.text,
       );
+      if (!identical(api, auth.api)) {
+        return;
+      }
       await connection.disconnect();
+      if (!identical(api, auth.api)) {
+        return;
+      }
       auth.enterRestricted(status);
       if (!mounted) {
         return;
@@ -175,9 +178,8 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -190,7 +192,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     final AuthOptions? options = _options;
     final String email = AppScope.of(context).auth.profile?.email ?? '';
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -263,7 +265,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                             icon: Icons.verified_user_outlined,
                             title: options.emailVerify
                                 ? L10n.t('输入邮箱验证码以验证身份')
-                                : L10n.t('输入登录密码以验证身份'),
+                                : L10n.t('提交删除请求'),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
@@ -276,9 +278,9 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                         .textTheme
                                         .bodyMedium
                                         ?.copyWith(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
                                         ),
                                   ),
                                   const SizedBox(height: 10),
@@ -288,9 +290,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                           BuildContext context,
                                           FocusNode focusNode,
                                         ) {
-                                          return TextField(
-                                            contextMenuBuilder:
-                                                AppTheme.editableTextMenu,
+                                          return AppTextField(
                                             controller: _emailCode,
                                             focusNode: focusNode,
                                             enabled: !_busy,
@@ -308,35 +308,9 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                           );
                                         },
                                   ),
-                                ] else
-                                  EmailOtpIme(
-                                    builder:
-                                        (
-                                          BuildContext context,
-                                          FocusNode focusNode,
-                                        ) {
-                                          return TextField(
-                                            contextMenuBuilder:
-                                                AppTheme.editableTextMenu,
-                                            controller: _passwd,
-                                            focusNode: focusNode,
-                                            enabled: !_busy,
-                                            obscureText: true,
-                                            keyboardType:
-                                                TextInputType.visiblePassword,
-                                            autocorrect: false,
-                                            enableSuggestions: false,
-                                            inputFormatters:
-                                                <TextInputFormatter>[
-                                                  asciiOnlyFormatter,
-                                                ],
-                                            decoration: InputDecoration(
-                                              labelText: L10n.t('登录密码（必填）'),
-                                            ),
-                                          );
-                                        },
-                                  ),
-                                const SizedBox(height: 14),
+                                ],
+                                if (options.emailVerify)
+                                  const SizedBox(height: 14),
                                 Wrap(
                                   spacing: 12,
                                   runSpacing: 8,
@@ -346,10 +320,19 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                         onPressed: _busy || _sendCooldown > 0
                                             ? null
                                             : () => unawaited(_sendCode()),
-                                        icon: const Icon(
-                                          Icons.mail_outline,
-                                          size: 18,
-                                        ),
+                                        icon: _sendingCode
+                                            ? const SizedBox(
+                                                height: 18,
+                                                width: 18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(
+                                                Icons.mail_outline,
+                                                size: 18,
+                                              ),
                                         label: Text(
                                           _sendCooldown > 0
                                               ? L10n.t('获取验证码 ({0}s)', <Object>[

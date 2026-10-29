@@ -13,6 +13,21 @@ val signing = Properties().apply {
     }
 }
 
+val requireReleaseSigning = tasks.register("requireReleaseSigning") {
+    doLast {
+        check(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all {
+            !signing.getProperty(it).isNullOrBlank()
+        }) { "正式构建缺少完整的签名配置，请配置 android/key.properties" }
+        check(file(signing.getProperty("storeFile")).isFile) {
+            "正式构建的签名密钥文件不存在"
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(requireReleaseSigning)
+}
+
 android {
     namespace = "com.ecycloud.client"
     compileSdk = 37
@@ -52,7 +67,6 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -65,7 +79,7 @@ android {
 
 dependencies {
     implementation(files("libs/libmihomo.aar"))
-    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.core:core-ktx:1.19.1")
 }
 
 flutter {

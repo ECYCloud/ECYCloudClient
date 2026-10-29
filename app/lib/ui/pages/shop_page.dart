@@ -20,10 +20,11 @@ import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
 import '../widgets/clipped_scroll_body.dart';
-import '../widgets/overlay_scroll_view.dart';
 import 'recharge_page.dart';
 import '../../l10n/app_language.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_text_field.dart';
 
 enum _PayMethod { balance, alipay, wxpay }
 
@@ -51,6 +52,7 @@ class ShopPage extends StatefulWidget {
 class _ShopSession {
   const _ShopSession({
     required this.accountKey,
+    required this.language,
     required this.catalog,
     required this.duration,
     required this.cooldownUntil,
@@ -58,6 +60,7 @@ class _ShopSession {
   });
 
   final String accountKey;
+  final String language;
   final ShopCatalog catalog;
   final int duration;
   final DateTime? cooldownUntil;
@@ -80,6 +83,8 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
   String? _error;
   bool _busy = false;
   bool _started = false;
+  String? _contentLanguage;
+  int _loadGeneration = 0;
   String _tab = 'plan';
   int _duration = 0;
   DateTime? _cooldownUntil;
@@ -98,10 +103,20 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    Localizations.localeOf(context);
+    final String language = L10n.current.contentLanguage;
+    if (_contentLanguage != language) {
+      _contentLanguage = language;
+      ++_loadGeneration;
+      _started = false;
+      _catalog = null;
+      _error = null;
+      _busy = false;
+    }
     if (!_started) {
       _started = true;
       _restoreSession();
-      startAutoRefresh(() => _load(silent: true));
+      startAutoRefresh(() => _load(silent: true), revision: 'shop');
       if (_catalog == null || !(_session?.fresh ?? false)) {
         unawaited(_load(silent: _catalog != null));
       }
@@ -114,7 +129,9 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
     if (session == null) {
       return;
     }
-    if (key == null || session.accountKey != key) {
+    if (key == null ||
+        session.accountKey != key ||
+        session.language != _contentLanguage) {
       _session = null;
       return;
     }
@@ -132,6 +149,7 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
     }
     _session = _ShopSession(
       accountKey: key,
+      language: L10n.current.contentLanguage,
       catalog: catalog,
       duration: _duration,
       cooldownUntil: _cooldownUntil,
@@ -169,6 +187,8 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
     if (api == null) {
       return;
     }
+    final String language = L10n.current.contentLanguage;
+    final int generation = ++_loadGeneration;
     if (!silent || _catalog == null) {
       setState(() {
         _busy = true;
@@ -177,7 +197,10 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
     }
     try {
       final ShopCatalog catalog = await api.fetchShopProducts();
-      if (!mounted) {
+      if (!mounted ||
+          !identical(api, _api) ||
+          language != L10n.current.contentLanguage ||
+          generation != _loadGeneration) {
         return;
       }
       setState(() {
@@ -190,7 +213,10 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
       _rememberSession();
       _syncTicker(catalog);
     } on ApiException catch (e) {
-      if (!mounted) {
+      if (!mounted ||
+          !identical(api, _api) ||
+          language != L10n.current.contentLanguage ||
+          generation != _loadGeneration) {
         return;
       }
       if (silent && _catalog != null) {
@@ -535,9 +561,8 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
                   title: L10n.t('注意事项'),
                   child: RichHtmlView(
                     catalog.notice,
-                    textStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontSize: AppTheme.pageHintSize,
-                    ),
+                    textStyle: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(fontSize: AppTheme.pageHintSize),
                   ),
                 ),
               ],
@@ -725,7 +750,9 @@ class _PlanCard extends StatelessWidget {
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: scheme.primary.withValues(alpha: 0.06),
+                  color: scheme.primary.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.06 : 0.10,
+                  ),
                   border: Border(
                     bottom: BorderSide(
                       color: scheme.outlineVariant.withValues(alpha: 0.6),
@@ -934,7 +961,9 @@ class _CompactCard extends StatelessWidget {
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: scheme.primary.withValues(alpha: 0.06),
+                  color: scheme.primary.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.06 : 0.10,
+                  ),
                   border: Border(
                     bottom: BorderSide(
                       color: scheme.outlineVariant.withValues(alpha: 0.6),
@@ -1024,7 +1053,6 @@ class _CompactCard extends StatelessWidget {
                               CrossAxisAlignment.stretch,
                           children: <Widget>[
                             ClippedScrollBody(
-                              filled: false,
                               child: RichHtmlView(product.description),
                             ),
                           ],
@@ -1080,7 +1108,7 @@ class _ProductChips extends StatelessWidget {
         if (showStock)
           TagChip(
             icon: Icons.inventory_2_outlined,
-            label: L10n.t('库存{0}', <Object>[product.stock]),
+            label: L10n.t('库存{0}', <Object>[L10n.message(product.stock)]),
             color: _stockChipColor(product),
             capsule: true,
           ),
@@ -1156,12 +1184,14 @@ class _ProductCountdowns extends StatelessWidget {
       children: <Widget>[
         Icon(Icons.schedule, size: 15, color: labelColor),
         const SizedBox(width: 4),
-        Text(
-          countdown.label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: labelColor,
+        Flexible(
+          child: Text(
+            L10n.t(countdown.label),
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: labelColor,
+            ),
           ),
         ),
         const SizedBox(width: 6),
@@ -1288,106 +1318,103 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
     final ThemeData theme = Theme.of(context);
     final PlanQuote quote = _quote;
 
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(L10n.t('套餐订单确认')),
       content: SizedBox(
         width: 460,
-        child: OverlayScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
+            const SizedBox(height: 4),
+            Text(
+              _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
+              style: theme.textTheme.titleSmall,
+            ),
+            if (quote.hasStockLimit) ...<Widget>[
               const SizedBox(height: 4),
-              Text(
-                _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
-                style: theme.textTheme.titleSmall,
-              ),
-              if (quote.hasStockLimit) ...<Widget>[
-                const SizedBox(height: 4),
-                Text(L10n.t('库存：{0}', <Object>[quote.stock])),
-              ],
-              if (quote.hasTrafficResetFee) ...<Widget>[
-                const SizedBox(height: 10),
-                _DetailBlock(
-                  title: L10n.t('流量重置费用'),
-                  lines: <String>[
-                    L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[
-                      quote.trafficCurrentShopName,
-                      Format.bytes(quote.trafficUsed),
-                      Format.bytes(quote.trafficTotal),
-                      quote.trafficUsagePercent.toStringAsFixed(2),
-                    ]),
-                    L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[
-                      quote.name,
-                      quote.trafficBillingBasePrice,
-                    ]),
-                    L10n.t('流量重置费：{0} x {1}%{2} = {3} 元', <Object>[
-                      quote.trafficBillingBasePrice,
-                      quote.trafficFeePercent.toStringAsFixed(2),
-                      quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
-                      quote.trafficResetFee,
-                    ]),
-                    L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
-                  ],
-                ),
-              ],
-              if (quote.hasValidOrder &&
-                  quote.upgradeMsg.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 10),
-                _DetailBlock(
-                  title: L10n.t('剩余价值抵扣'),
-                  lines: <String>[quote.upgradeMsg],
-                ),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      contextMenuBuilder: AppTheme.editableTextMenu,
-                      controller: _coupon,
-                      decoration: InputDecoration(
-                        labelText: L10n.t('优惠码'),
-                        hintText: L10n.t('如有优惠码请在此输入'),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: _applying ? null : _applyCoupon,
-                    // 「应用」在导航里是名词 App，这里是动词，不能共用那条译文
-                    child: Text(switch (L10n.current) {
-                      AppLanguage.en => 'Apply',
-                      AppLanguage.zhTW => '套用',
-                      AppLanguage.zhCN => '应用',
-                    }),
-                  ),
+              Text(L10n.t('库存：{0}', <Object>[L10n.message(quote.stock)])),
+            ],
+            if (quote.hasTrafficResetFee) ...<Widget>[
+              const SizedBox(height: 10),
+              _DetailBlock(
+                title: L10n.t('流量重置费用'),
+                lines: <String>[
+                  L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[
+                    quote.trafficCurrentShopName,
+                    Format.bytes(quote.trafficUsed),
+                    Format.bytes(quote.trafficTotal),
+                    quote.trafficUsagePercent.toStringAsFixed(2),
+                  ]),
+                  L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[
+                    quote.name,
+                    quote.trafficBillingBasePrice,
+                  ]),
+                  L10n.t('流量重置费：{0} x {1}%{2} = {3} 元', <Object>[
+                    quote.trafficBillingBasePrice,
+                    quote.trafficFeePercent.toStringAsFixed(2),
+                    quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
+                    quote.trafficResetFee,
+                  ]),
+                  L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
                 ],
               ),
-              if (_couponMsg.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 6),
-                Text(_couponMsg, style: theme.textTheme.bodySmall),
-              ],
-              const SizedBox(height: 12),
-              _PaymentPicker(
-                total: quote.amount,
-                balance: widget.balance,
-                value: _method,
-                onChanged: (_PayMethod method) =>
-                    setState(() => _method = method),
-              ),
-              if (widget.product.autoRenew != 0)
-                SwitchTile(
-                  icon: Icons.autorenew,
-                  title: L10n.t('到期时自动续费'),
-                  value: _autoRenew,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (bool value) => setState(() => _autoRenew = value),
-                ),
             ],
-          ),
+            if (quote.hasValidOrder &&
+                quote.upgradeMsg.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              _DetailBlock(
+                title: L10n.t('剩余价值抵扣'),
+                lines: <String>[quote.upgradeMsg],
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: AppTextField(
+                    controller: _coupon,
+                    decoration: InputDecoration(
+                      labelText: L10n.t('优惠码'),
+                      hintText: L10n.t('如有优惠码请在此输入'),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _applying ? null : _applyCoupon,
+                  // 「应用」在导航里是名词 App，这里是动词，不能共用那条译文
+                  child: Text(switch (L10n.current) {
+                    AppLanguage.en => 'Apply',
+                    AppLanguage.zhTW => '套用',
+                    AppLanguage.zhCN => '应用',
+                  }),
+                ),
+              ],
+            ),
+            if (_couponMsg.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(_couponMsg, style: theme.textTheme.bodySmall),
+            ],
+            const SizedBox(height: 12),
+            _PaymentPicker(
+              total: quote.amount,
+              balance: widget.balance,
+              value: _method,
+              onChanged: (_PayMethod method) =>
+                  setState(() => _method = method),
+            ),
+            if (widget.product.autoRenew != 0)
+              SwitchTile(
+                icon: Icons.autorenew,
+                title: L10n.t('到期时自动续费'),
+                value: _autoRenew,
+                contentPadding: EdgeInsets.zero,
+                onChanged: (bool value) => setState(() => _autoRenew = value),
+              ),
+          ],
         ),
       ),
       actions: <Widget>[
@@ -1442,46 +1469,44 @@ class _SimpleOrderDialogState extends State<_SimpleOrderDialog> {
     final ThemeData theme = Theme.of(context);
     final ProductQuote quote = widget.quote;
 
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: 460,
-        child: OverlayScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (widget.note.isNotEmpty) ...<Widget>[
-                Text(widget.note, style: theme.textTheme.bodySmall),
-                const SizedBox(height: 8),
-              ],
-              Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
-              const SizedBox(height: 4),
-              Text(
-                _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
-                style: theme.textTheme.titleSmall,
-              ),
-              if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
-                const SizedBox(height: 4),
-                Text(L10n.t('库存：{0}', <Object>[quote.stock])),
-              ],
-              const SizedBox(height: 12),
-              _PaymentPicker(
-                total: quote.amount,
-                balance: widget.balance,
-                value: _method,
-                onChanged: (_PayMethod method) =>
-                    setState(() => _method = method),
-              ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (widget.note.isNotEmpty) ...<Widget>[
+              Text(widget.note, style: theme.textTheme.bodySmall),
+              const SizedBox(height: 8),
             ],
-          ),
+            Text(L10n.t('商品名称：{0}', <Object>[quote.name])),
+            const SizedBox(height: 4),
+            Text(
+              _totalText(quote.total, quote.basePrice, quote.hasLimitedSale),
+              style: theme.textTheme.titleSmall,
+            ),
+            if (widget.alwaysShowStock || quote.hasStockLimit) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(L10n.t('库存：{0}', <Object>[L10n.message(quote.stock)])),
+            ],
+            const SizedBox(height: 12),
+            _PaymentPicker(
+              total: quote.amount,
+              balance: widget.balance,
+              value: _method,
+              onChanged: (_PayMethod method) =>
+                  setState(() => _method = method),
+            ),
+          ],
         ),
       ),
       actions: <Widget>[
         FilledButton(
-          onPressed: () => Navigator.of(
-            context,
-          ).pop(quote.amount <= 0 ? _PayMethod.balance : _method),
+          onPressed: () =>
+              Navigator.of(context)
+                  .pop(quote.amount <= 0 ? _PayMethod.balance : _method),
           child: Text(L10n.t('确定')),
         ),
         TextButton(
@@ -1592,9 +1617,8 @@ class _PaymentPicker extends StatelessWidget {
   }
 
   static double _minHorizontalChip(BuildContext context) {
-    final TextStyle style = Theme.of(
-      context,
-    ).textTheme.labelLarge!.copyWith(fontSize: 12, fontWeight: FontWeight.w600);
+    final TextStyle style = Theme.of(context).textTheme.labelLarge!
+        .copyWith(fontSize: 12, fontWeight: FontWeight.w600);
     final TextPainter painter = TextPainter(
       text: TextSpan(text: L10n.t('微信支付'), style: style),
       textDirection: Directionality.of(context),
@@ -1657,27 +1681,21 @@ class _MessageDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(L10n.t('提示')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           // 服务端 msg 给网页用，卡密已嵌在 HTML 里；客户端另有 card_key，去掉重复
-          ClippedScrollBody(
-            child: RichHtmlView(
-              cardKey.isEmpty
-                  ? message
-                  : _messageWithoutCardKey(message, cardKey),
-            ),
+          RichHtmlView(
+            cardKey.isEmpty
+                ? message
+                : _messageWithoutCardKey(message, cardKey),
           ),
           if (cardKey.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
-            SelectableText(
-              cardKey,
-              contextMenuBuilder: AppTheme.editableTextMenu,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
+            Text(cardKey, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerLeft,

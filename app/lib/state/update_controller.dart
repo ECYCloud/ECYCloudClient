@@ -6,8 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
+import '../core/app_config.dart';
 import '../core/app_paths.dart';
 import '../core/logger.dart';
+import '../core/safe_url.dart';
 import '../domain/kernel/kernel_update.dart';
 import '../domain/platform/platform_service.dart';
 import '../domain/update/app_update.dart';
@@ -31,6 +33,8 @@ class UpdateController extends ChangeNotifier {
   final PlatformService _platform;
 
   Timer? _timer;
+  Timer? _githubRetryTimer;
+  GithubReleaseException? _githubRateLimit;
 
   AppUpdate? _app;
   String? _appError;
@@ -45,6 +49,10 @@ class UpdateController extends ChangeNotifier {
 
   bool _checking = false;
   bool _retryWhenConnected = false;
+  bool _networkReady = false;
+  bool _retryAfterCheck = false;
+  bool _retryAfterRateLimit = false;
+  bool _disposed = false;
   String _dismissedKey = '';
 
   AppUpdate? get appUpdate => _app;
@@ -111,8 +119,26 @@ class UpdateController extends ChangeNotifier {
 
   void dismissUpdatePrompt() => _dismissedKey = _updateKey;
 
+  // 安装器接手时本进程已退出，客户端更新的结果只能由新进程按记下的目标版本核对
+  static File get _installTarget =>
+      File('${AppPaths.updates.path}${Platform.pathSeparator}install-target');
+
+  String? takeInstallResult() {
+    final File marker = _installTarget;
+    if (!marker.existsSync()) {
+      return null;
+    }
+    final String target = marker.readAsStringSync().trim();
+    marker.deleteSync();
+    return target == AppConfig.appVersion
+        ? L10n.t('更新成功（{0}）', <Object>[target])
+        : L10n.t('更新失败：{0}', <Object>[
+            L10n.t('安装未完成，当前版本仍为 {0}', <Object>[AppConfig.appVersion]),
+          ]);
+  }
+
   Future<bool> githubReachable() async {
-    if (!updateNetworkReady) {
+    if (_disposed || !updateNetworkReady || _githubRateLimit != null) {
       return false;
     }
     final http.Client client = _httpClient();
@@ -144,6 +170,7 @@ class UpdateController extends ChangeNotifier {
   }
 
   void start() {
+    _networkReady = updateNetworkReady;
     _connection.addListener(_onConnectionChanged);
     unawaited(loadKernelVersion().then((_) => checkAll()));
     _timer = Timer.periodic(interval, (_) => unawaited(checkAll()));
@@ -151,48 +178,72 @@ class UpdateController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _timer?.cancel();
+    _githubRetryTimer?.cancel();
     _kernelProgressTimer?.cancel();
     _connection.removeListener(_onConnectionChanged);
     super.dispose();
   }
 
   Future<void> checkAll() async {
-    if (_checking) {
+    if (_disposed || _checking || _githubRateLimit != null) {
       return;
     }
     _checking = true;
+    _retryWhenConnected = false;
     try {
       await checkApp();
       await checkKernel();
     } finally {
       _checking = false;
+      final bool retry =
+          !_disposed &&
+          (_retryAfterRateLimit ||
+              (_retryAfterCheck && _retryWhenConnected && updateNetworkReady));
+      _retryAfterCheck = false;
+      _retryAfterRateLimit = false;
+      if (retry) {
+        unawaited(checkAll());
+      }
     }
   }
 
   Future<void> checkApp() async {
-    final http.Client client = _httpClient();
+    if (_disposed) return;
+    http.Client? client;
     try {
-      _app = await AppUpdate.check(client: client);
+      if (_githubRateLimit case final limited?) throw limited;
+      client = _httpClient();
+      final AppUpdate update = await AppUpdate.check(client: client);
+      if (_disposed) return;
+      _app = update;
       _appError = null;
-      _retryWhenConnected = false;
     } on Object catch (e) {
-      _appError = L10n.t('检查失败：{0}', <Object>['$e']);
+      if (_disposed) return;
+      _recordGithubRateLimit(e);
+      _appError = L10n.t('检查失败：{0}', <Object>['${_githubRateLimit ?? e}']);
       _retryWhenConnected = true;
       Logger.instance.debug(_source, '检查客户端更新失败: $e');
     } finally {
-      client.close();
+      client?.close();
     }
     notifyListeners();
   }
 
   Future<void> checkKernel() async {
-    final http.Client client = _httpClient();
+    if (_disposed) return;
+    http.Client? client;
     try {
+      final String current = await _connection.kernelVersion();
+      if (_disposed) return;
+      if (_githubRateLimit case final limited?) throw limited;
+      client = _httpClient();
       final KernelUpdate update = await KernelUpdate.check(
-        await _connection.kernelVersion(),
+        current,
         client: client,
       );
+      if (_disposed) return;
       _kernel = update;
       if (update.current.isEmpty) {
         _kernelStatus = L10n.t('本机版本未知，最新（{0}）', <Object>[update.latest]);
@@ -204,20 +255,52 @@ class UpdateController extends ChangeNotifier {
         _kernelStatus = L10n.t('已是最新（{0}）', <Object>[update.current]);
       }
     } on Object catch (e) {
-      _kernelStatus = L10n.t('检查失败：{0}', <Object>['$e']);
+      if (_disposed) return;
+      _recordGithubRateLimit(e);
+      _kernelStatus = L10n.t('检查失败：{0}', <Object>['${_githubRateLimit ?? e}']);
       _retryWhenConnected = true;
       Logger.instance.debug(_source, '检查内核更新失败: $e');
     } finally {
-      client.close();
+      client?.close();
     }
     notifyListeners();
   }
 
+  void _recordGithubRateLimit(Object error) {
+    if (_disposed ||
+        error is! GithubReleaseException ||
+        error.retryAt == null) {
+      return;
+    }
+    final DateTime retryAt = error.retryAt!;
+    final DateTime? previous = _githubRateLimit?.retryAt;
+    if (previous != null && !retryAt.isAfter(previous)) return;
+    _githubRateLimit = error;
+    final String status = L10n.t('检查失败：{0}', <Object>['$error']);
+    _appError = status;
+    _kernelStatus = status;
+    _githubRetryTimer?.cancel();
+    _githubRetryTimer = Timer(
+      retryAt.difference(DateTime.now()) + const Duration(seconds: 1),
+      () {
+        if (_disposed) return;
+        _githubRateLimit = null;
+        _githubRetryTimer = null;
+        if (_checking) {
+          _retryAfterRateLimit = true;
+        } else {
+          unawaited(checkAll());
+        }
+      },
+    );
+  }
+
   Future<void> loadKernelVersion() async {
-    if (_kernel != null) {
+    if (_disposed || _kernel != null) {
       return;
     }
     final String version = await _connection.kernelVersion();
+    if (_disposed) return;
     _kernelStatus = version.isEmpty
         ? L10n.t('本机版本未知')
         : L10n.t('当前（{0}）', <Object>[version]);
@@ -317,25 +400,13 @@ class UpdateController extends ChangeNotifier {
     try {
       final File file = await _download(asset);
 
-      _appStage = L10n.t('正在校验安装包');
-      _appPercent = 0;
-      notifyListeners();
-
-      if (asset.sha256.isEmpty) {
-        throw GithubReleaseException('发布资产没有校验值，已中止更新');
-      }
-      final String actual = sha256.convert(await file.readAsBytes()).toString();
-      if (actual != asset.sha256.toLowerCase()) {
-        await file.delete();
-        throw GithubReleaseException('安装包校验失败，已删除');
-      }
-
       _appStage = L10n.t('正在启动安装程序');
       notifyListeners();
 
       if (!await _platform.runInstaller(file.path)) {
         throw GithubReleaseException('已取消更新');
       }
+      _installTarget.writeAsStringSync(_app!.latest, flush: true);
 
       Logger.instance.info(_source, '安装器已启动，客户端退出让位');
       exit(0);
@@ -352,28 +423,58 @@ class UpdateController extends ChangeNotifier {
     if (!asset.url.startsWith(AppUpdate.downloadPrefix)) {
       throw GithubReleaseException('下载地址不在官方发布路径下，已中止更新');
     }
+    if (asset.size <= 0 || asset.size > 1 << 30) {
+      throw GithubReleaseException('安装包大小无效或超过 1 GiB，已中止更新');
+    }
+    if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(asset.sha256)) {
+      throw GithubReleaseException('发布资产没有有效校验值，已中止更新');
+    }
     final File file = File(
       '${AppPaths.updates.path}${Platform.pathSeparator}${_localName(asset.name)}',
     );
+    final File partial = File('${file.path}.part');
     final http.Client client = _httpClient();
+    final Completer<void> abort = Completer<void>();
+    final Timer deadline = Timer(const Duration(minutes: 15), abort.complete);
 
     try {
-      final http.StreamedResponse response = await client.send(
-        http.Request('GET', Uri.parse(asset.url)),
-      );
+      Uri uri = Uri.parse(asset.url);
+      http.StreamedResponse response;
+      int redirects = 0;
+      while (true) {
+        if (!SafeUrl.canLoad(uri.toString()) || uri.scheme != 'https') {
+          throw GithubReleaseException('安装包下载地址不安全，已中止更新');
+        }
+        response = await client.send(
+          http.AbortableRequest('GET', uri, abortTrigger: abort.future)
+            ..followRedirects = false,
+        );
+        if (!response.isRedirect) break;
+        await response.stream.listen(null).cancel();
+        final String? location = response.headers['location'];
+        if (location == null || redirects++ >= 5) {
+          throw GithubReleaseException('安装包下载重定向无效');
+        }
+        uri = uri.resolve(location);
+      }
       if (response.statusCode != 200) {
         throw GithubReleaseException('下载返回 HTTP ${response.statusCode}');
       }
+      if ((response.contentLength ?? 0) > asset.size) {
+        throw GithubReleaseException('安装包超过发布信息中的大小，已中止更新');
+      }
 
-      final int total = response.contentLength ?? 0;
-      final IOSink sink = file.openWrite();
+      final RandomAccessFile sink = await partial.open(mode: FileMode.write);
       int received = 0;
       try {
         await for (final List<int> chunk in response.stream) {
-          sink.add(chunk);
+          if (received + chunk.length > asset.size) {
+            throw GithubReleaseException('安装包超过发布信息中的大小，已中止更新');
+          }
+          await sink.writeFrom(chunk);
           received += chunk.length;
           // 每字节都通知会把界面刷爆，只在整数百分比变化时报一次
-          final int percent = total > 0 ? received * 100 ~/ total : 0;
+          final int percent = received * 100 ~/ asset.size;
           if (percent != _appPercent) {
             _appPercent = percent;
             notifyListeners();
@@ -382,9 +483,24 @@ class UpdateController extends ChangeNotifier {
       } finally {
         await sink.close();
       }
-      return file;
+      if (received != asset.size) {
+        throw GithubReleaseException('安装包下载不完整，已中止更新');
+      }
+      _appStage = L10n.t('正在校验安装包');
+      _appPercent = 0;
+      notifyListeners();
+      final String actual = (await sha256.bind(partial.openRead()).first)
+          .toString();
+      if (actual != asset.sha256.toLowerCase()) {
+        throw GithubReleaseException('安装包校验失败，已删除');
+      }
+      return await partial.rename(file.path);
     } finally {
+      deadline.cancel();
       client.close();
+      if (await partial.exists()) {
+        await partial.delete();
+      }
     }
   }
 
@@ -394,7 +510,17 @@ class UpdateController extends ChangeNotifier {
       name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
 
   void _onConnectionChanged() {
-    if (!_retryWhenConnected || !updateNetworkReady) {
+    final bool ready = updateNetworkReady;
+    final bool restored = !_networkReady && ready;
+    _networkReady = ready;
+    if (!restored) {
+      return;
+    }
+    if (_checking) {
+      _retryAfterCheck = true;
+      return;
+    }
+    if (!_retryWhenConnected) {
       return;
     }
     _retryWhenConnected = false;

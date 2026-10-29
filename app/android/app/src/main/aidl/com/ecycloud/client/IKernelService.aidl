@@ -16,6 +16,8 @@ interface IKernelService {
 
     void stop();
 
+    int clearSession();
+
     // oneway：不该让界面主线程等 Binder 往返
     oneway void registerUi(IUiCallback callback);
 }

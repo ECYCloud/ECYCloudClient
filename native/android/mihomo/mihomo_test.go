@@ -4,12 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"net/netip"
+	"os"
+	"runtime"
 	"testing"
 
 	"github.com/metacubex/mihomo/component/profile/cachefile"
 	"github.com/metacubex/mihomo/component/resolver"
 	D "github.com/miekg/dns"
 )
+
+func TestStartClosesTunFDWhenConfigIsInvalid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Android 使用 POSIX 文件描述符")
+	}
+	for range 20 {
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = Start("{", int32(reader.Fd()))
+		_, statErr := reader.Stat()
+		reader.Close()
+		writer.Close()
+		if err == nil {
+			t.Fatal("无效配置未被拒绝")
+		}
+		if statErr == nil {
+			t.Fatal("配置解析失败后 TUN 文件描述符仍然打开")
+		}
+	}
+}
 
 func TestStartPreservesFakeIPAfterValidationAndRestart(t *testing.T) {
 	Setup(t.TempDir())

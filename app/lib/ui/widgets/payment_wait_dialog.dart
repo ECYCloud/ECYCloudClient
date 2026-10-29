@@ -7,8 +7,8 @@ import '../../data/api/panel_api_client.dart';
 import '../../data/models/shop.dart';
 import '../../l10n/l10n.dart';
 import '../app_scope.dart';
-import 'overlay_scroll_view.dart';
 import 'qr_card.dart';
+import 'app_alert_dialog.dart';
 
 enum _PayMode { scheme, qrcode, browser }
 
@@ -138,37 +138,35 @@ class _PaymentWaitDialogState extends State<PaymentWaitDialog> {
     final bool canRetry =
         _mode == _PayMode.scheme || widget.result.paymentUrl.isNotEmpty;
 
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(L10n.t('等待支付')),
-      content: OverlayScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(_hint),
-            if (_mode == _PayMode.qrcode) ...<Widget>[
-              const SizedBox(height: 12),
-              Center(child: QrCard(data: widget.result.payQrcode)),
-            ],
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(_hint),
+          if (_mode == _PayMode.qrcode) ...<Widget>[
             const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _status,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
+            Center(child: QrCard(data: widget.result.payQrcode)),
           ],
-        ),
+          const SizedBox(height: 12),
+          Row(
+            children: <Widget>[
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _status,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       actions: <Widget>[
         TextButton(

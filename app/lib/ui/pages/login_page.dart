@@ -9,11 +9,14 @@ import '../../l10n/l10n.dart';
 import '../../domain/platform/platform_service.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
-import '../theme.dart';
 import '../widgets/auth_store_panel.dart';
 import '../widgets/field_subtext.dart';
 import 'register_page.dart';
 import 'reset_password_page.dart';
+import 'privacy_policy_page.dart';
+import 'tos_page.dart';
+import '../widgets/app_text_field.dart';
+import '../widgets/app_alert_dialog.dart';
 
 /// 组字中不能回退到 oldValue：引擎仍持有 composing，IME 提交时同一段文本会再来一遍
 class OtpCodeFormatter extends TextInputFormatter {
@@ -101,16 +104,6 @@ double loginFieldHeight(ThemeData theme) => theme.visualDensity
     )
     .minHeight;
 
-ButtonStyle authControlStyle(ThemeData theme) {
-  return ButtonStyle(
-    minimumSize: WidgetStatePropertyAll<Size>(
-      Size(0, loginFieldHeight(theme)),
-    ),
-    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    visualDensity: VisualDensity.standard,
-  );
-}
-
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -143,9 +136,13 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) {
       return;
     }
-    final RememberedLogin? saved = await AppScope.of(
-      context,
-    ).auth.loadRememberedLogin();
+    RememberedLogin? saved;
+    try {
+      saved = await AppScope.of(context).auth.loadRememberedLogin();
+    } on Object catch (e) {
+      _showRememberError(e);
+      return;
+    }
     if (!mounted || saved == null) {
       return;
     }
@@ -154,11 +151,26 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _remember = true);
   }
 
-  void _setRemember(AuthController auth, bool remember) {
-    setState(() => _remember = remember);
+  Future<void> _setRemember(AuthController auth, bool remember) async {
     if (!remember) {
-      unawaited(auth.clearRememberedLogin());
+      try {
+        await auth.clearRememberedLogin();
+      } on Object catch (e) {
+        _showRememberError(e);
+        return;
+      }
     }
+    if (mounted) {
+      setState(() => _remember = remember);
+    }
+  }
+
+  void _showRememberError(Object error) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('${L10n.t('记住账号密码')}：$error')));
   }
 
   Future<void> _persistRemember(AuthController auth) async {
@@ -222,7 +234,7 @@ class _LoginPageState extends State<LoginPage> {
       );
       return;
     }
-    if (_sendCooldown > 0 || auth.busy || _entering) {
+    if (_sendCooldown > 0 || auth.busy || auth.sendingCode || _entering) {
       return;
     }
 
@@ -288,7 +300,11 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _showSuccessAndEnter(AuthController auth) async {
-    await _persistRemember(auth);
+    try {
+      await _persistRemember(auth);
+    } on Object catch (e) {
+      _showRememberError(e);
+    }
     if (!mounted) {
       return;
     }
@@ -313,207 +329,82 @@ class _LoginPageState extends State<LoginPage> {
     final ThemeData theme = Theme.of(context);
     final bool isTelevision = AppScope.of(context).platform.isTelevision;
 
-    final double titleSize = AppTheme.authTitleSizeOf(context);
     return AuthStorePanel(
+      title: L10n.t('登录'),
+      subtitle: L10n.t('使用 {0} 账号登录，登录后自动获取可用节点', <Object>[
+        AppConfig.siteHost,
+      ]),
       child: ListenableBuilder(
-              listenable: auth,
-              builder: (BuildContext context, _) {
-                return Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+        listenable: auth,
+        builder: (BuildContext context, _) {
+          final ButtonStyle subtle = TextButton.styleFrom(
+            foregroundColor: theme.colorScheme.onSurfaceVariant,
+          );
+          return Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                AppTextField(
+                  controller: _email,
+                  autofocus: isTelevision,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: isTelevision ? TextInputAction.next : null,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const <String>[AutofillHints.email],
+                  decoration: InputDecoration(
+                    labelText: L10n.t('邮箱'),
+                    prefixIcon: const Icon(Icons.mail_outline),
+                  ),
+                ).validated(
+                  () => _email.text.trim().isEmpty ? L10n.t('请填写邮箱') : null,
+                ),
+                const SizedBox(height: 16),
+                if (_emailCodeMode)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      const Center(
-                        child: Image(
-                          image: AssetImage('assets/app_icon.png'),
-                          width: 56,
-                          height: 56,
-                          filterQuality: FilterQuality.medium,
-                          excludeFromSemantics: true,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'ECY Cloud',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontSize: titleSize,
-                          fontWeight: FontWeight.w600,
-                          height: 1.1,
-                          letterSpacing: titleSize * -0.04,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        L10n.t('使用 {0} 账号登录，登录后自动获取可用节点', <Object>[
-                          AppConfig.siteHost,
-                        ]),
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 28),
-                      TextField(
-                        contextMenuBuilder: AppTheme.editableTextMenu,
-                        controller: _email,
-                        autofocus: isTelevision,
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: isTelevision ? TextInputAction.next : null,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        autofillHints: const <String>[AutofillHints.email],
-                        decoration: InputDecoration(
-                          labelText: L10n.t('邮箱'),
-                          prefixIcon: const Icon(Icons.mail_outline),
-                        ),
-                      ).validated(
-                        () =>
-                            _email.text.trim().isEmpty ? L10n.t('请填写邮箱') : null,
-                      ),
-                      const SizedBox(height: 16),
-                      if (_emailCodeMode)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: EmailOtpIme(
-                                builder:
-                                    (
-                                      BuildContext context,
-                                      FocusNode focusNode,
-                                    ) {
-                                      return TextField(
-                                        contextMenuBuilder: AppTheme.editableTextMenu,
-                                        controller: _code,
-                                        focusNode: focusNode,
-                                        keyboardType:
-                                            TextInputType.visiblePassword,
-                                        autocorrect: false,
-                                        enableSuggestions: false,
-                                        autofillHints: const <String>[
-                                          AutofillHints.oneTimeCode,
-                                        ],
-                                        inputFormatters: <TextInputFormatter>[
-                                          OtpCodeFormatter(),
-                                        ],
-                                        decoration: InputDecoration(
-                                          labelText: L10n.t('验证码'),
-                                          prefixIcon: const Icon(
-                                            Icons.pin_outlined,
-                                          ),
-                                        ),
-                                        onSubmitted: (_) =>
-                                            auth.busy || _entering
-                                            ? null
-                                            : _submit(auth),
-                                      ).validated(
-                                        () => _code.text.trim().isEmpty
-                                            ? L10n.t('请填写验证码')
-                                            : null,
-                                      );
-                                    },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            OutlinedButton(
-                              style: authControlStyle(theme),
-                              onPressed:
-                                  auth.busy || _entering || _sendCooldown > 0
-                                  ? null
-                                  : () => _sendCode(auth),
-                              child: Text(
-                                _sendCooldown > 0
-                                    ? '${_sendCooldown}s'
-                                    : L10n.t('获取验证码'),
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        EmailOtpIme(
+                      Expanded(
+                        child: EmailOtpIme(
                           builder: (BuildContext context, FocusNode focusNode) {
-                            return TextField(
-                              contextMenuBuilder: AppTheme.editableTextMenu,
-                              controller: _password,
+                            return AppTextField(
+                              controller: _code,
                               focusNode: focusNode,
-                              obscureText: _obscure,
                               keyboardType: TextInputType.visiblePassword,
                               autocorrect: false,
                               enableSuggestions: false,
                               autofillHints: const <String>[
-                                AutofillHints.password,
+                                AutofillHints.oneTimeCode,
                               ],
                               inputFormatters: <TextInputFormatter>[
-                                asciiOnlyFormatter,
+                                OtpCodeFormatter(),
                               ],
                               decoration: InputDecoration(
-                                labelText: L10n.t('密码'),
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscure
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined,
-                                  ),
-                                  onPressed: () =>
-                                      setState(() => _obscure = !_obscure),
-                                ),
+                                labelText: L10n.t('验证码'),
+                                prefixIcon: const Icon(Icons.pin_outlined),
                               ),
                               onSubmitted: (_) =>
                                   auth.busy || _entering ? null : _submit(auth),
                             ).validated(
-                              () => _password.text.isEmpty
-                                  ? L10n.t('请填写密码')
+                              () => _code.text.trim().isEmpty
+                                  ? L10n.t('请填写验证码')
                                   : null,
                             );
                           },
                         ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: <Widget>[
-                          if (!_emailCodeMode) ...<Widget>[
-                            Checkbox(
-                              value: _remember,
-                              visualDensity: VisualDensity.compact,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              mouseCursor: SystemMouseCursors.basic,
-                              onChanged: (bool? value) =>
-                                  _setRemember(auth, value ?? false),
-                            ),
-                            InkWell(
-                              onTap: () => _setRemember(auth, !_remember),
-                              child: Text(L10n.t('记住账号密码')),
-                            ),
-                          ],
-                          const Spacer(),
-                          TextButton(
-                            style: authControlStyle(theme),
-                            onPressed: () => setState(
-                              () => _emailCodeMode = !_emailCodeMode,
-                            ),
-                            child: Text(
-                              _emailCodeMode
-                                  ? L10n.t('密码登录')
-                                  : L10n.t('邮箱验证码登录'),
-                            ),
-                          ),
-                        ],
                       ),
-                      if (auth.error != null &&
-                          auth.stage != AuthStage.needsTwoFactor) ...<Widget>[
-                        const SizedBox(height: 8),
-                        AuthErrorBanner(message: auth.error!),
-                      ],
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        style: authControlStyle(theme),
-                        onPressed: auth.busy || _entering
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed:
+                            auth.busy ||
+                                auth.sendingCode ||
+                                _entering ||
+                                _sendCooldown > 0
                             ? null
-                            : () => _submit(auth),
-                        child: auth.busy || _entering
+                            : () => _sendCode(auth),
+                        child: auth.sendingCode
                             ? const SizedBox(
                                 height: 18,
                                 width: 18,
@@ -521,29 +412,148 @@ class _LoginPageState extends State<LoginPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : Text(L10n.t('登录')),
+                            : Text(
+                                _sendCooldown > 0
+                                    ? '${_sendCooldown}s'
+                                    : L10n.t('获取验证码'),
+                              ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: <Widget>[
-                          TextButton(
-                            style: authControlStyle(theme),
-                            onPressed: _openRegister,
-                            child: Text('${L10n.t('注册账号')} ›'),
+                    ],
+                  )
+                else
+                  EmailOtpIme(
+                    builder: (BuildContext context, FocusNode focusNode) {
+                      return AppTextField(
+                        controller: _password,
+                        focusNode: focusNode,
+                        obscureText: _obscure,
+                        keyboardType: TextInputType.visiblePassword,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        autofillHints: const <String>[AutofillHints.password],
+                        inputFormatters: <TextInputFormatter>[
+                          asciiOnlyFormatter,
+                        ],
+                        decoration: InputDecoration(
+                          labelText: L10n.t('密码'),
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscure
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
                           ),
-                          const Spacer(),
-                          TextButton(
-                            style: authControlStyle(theme),
-                            onPressed: _openForgotPassword,
-                            child: Text(L10n.t('忘记密码？')),
+                        ),
+                        onSubmitted: (_) =>
+                            auth.busy || _entering ? null : _submit(auth),
+                      ).validated(
+                        () => _password.text.isEmpty ? L10n.t('请填写密码') : null,
+                      );
+                    },
+                  ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: _emailCodeMode
+                      ? WrapAlignment.end
+                      : WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    if (!_emailCodeMode)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Checkbox(
+                            value: _remember,
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            mouseCursor: SystemMouseCursors.basic,
+                            onChanged: (bool? value) =>
+                                _setRemember(auth, value ?? false),
+                          ),
+                          InkWell(
+                            onTap: () => _setRemember(auth, !_remember),
+                            child: Text(L10n.t('记住账号密码')),
                           ),
                         ],
                       ),
-                    ],
+                    TextButton(
+                      onPressed: _openForgotPassword,
+                      child: Text(L10n.t('忘记密码？')),
+                    ),
+                  ],
+                ),
+                if (auth.error != null &&
+                    auth.stage != AuthStage.needsTwoFactor) ...<Widget>[
+                  const SizedBox(height: 8),
+                  AuthErrorBanner(message: auth.error!),
+                ],
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: auth.busy || _entering
+                      ? null
+                      : () => _submit(auth),
+                  child: auth.busy || _entering
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(L10n.t('登录')),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () =>
+                      setState(() => _emailCodeMode = !_emailCodeMode),
+                  child: Text(
+                    _emailCodeMode ? L10n.t('密码登录') : L10n.t('邮箱验证码登录'),
                   ),
-                );
-              },
+                ),
+                const SizedBox(height: 28),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  children: <Widget>[
+                    TextButton(
+                      onPressed: _openRegister,
+                      child: Text('${L10n.t('注册账号')} ›'),
+                    ),
+                    Wrap(
+                      spacing: 16,
+                      children: <Widget>[
+                        TextButton(
+                          style: subtle,
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (BuildContext context) =>
+                                  const TosPage(),
+                            ),
+                          ),
+                          child: Text(L10n.t('服务条款')),
+                        ),
+                        TextButton(
+                          style: subtle,
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (BuildContext context) =>
+                                  const PrivacyPolicyPage(),
+                            ),
+                          ),
+                          child: Text(L10n.t('隐私政策')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
             ),
+          );
+        },
+      ),
     );
   }
 }
@@ -599,7 +609,7 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
 
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(L10n.t('两步验证'), textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -611,8 +621,7 @@ class _TwoFactorDialogState extends State<_TwoFactorDialog> {
             ),
           ),
           const SizedBox(height: 16),
-          TextField(
-            contextMenuBuilder: AppTheme.editableTextMenu,
+          AppTextField(
             controller: _code,
             autofocus: true,
             enabled: !_busy,
@@ -673,7 +682,7 @@ class AuthErrorBanner extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: scheme.errorContainer,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AuthStorePanel.radius,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -683,9 +692,8 @@ class AuthErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: scheme.onErrorContainer,
-              ),
+              style: Theme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: scheme.onErrorContainer),
             ),
           ),
         ],

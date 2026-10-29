@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'zoom_cursors.dart';
+import 'icon_image.dart';
 import '../../l10n/l10n.dart';
+import 'app_scaffold.dart';
 
 Future<void> showImageViewer(
   BuildContext context, {
@@ -15,19 +17,17 @@ Future<void> showImageViewer(
     PageRouteBuilder<void>(
       transitionDuration: const Duration(milliseconds: 180),
       reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder:
-          (
-            BuildContext context,
-            Animation<double> animation,
-            Animation<double> secondaryAnimation,
-          ) => _ImageViewerPage(images: images, index: index),
-      transitionsBuilder:
-          (
-            BuildContext context,
-            Animation<double> animation,
-            Animation<double> secondaryAnimation,
-            Widget child,
-          ) => FadeTransition(opacity: animation, child: child),
+      pageBuilder: (
+        BuildContext context,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+      ) => _ImageViewerPage(images: images, index: index),
+      transitionsBuilder: (
+        BuildContext context,
+        Animation<double> animation,
+        Animation<double> secondaryAnimation,
+        Widget child,
+      ) => FadeTransition(opacity: animation, child: child),
     ),
   );
 }
@@ -115,7 +115,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
   Widget build(BuildContext context) {
     final bool multi = widget.images.length > 1;
 
-    return Scaffold(
+    return AppScaffold(
       backgroundColor: Colors.black,
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
@@ -155,7 +155,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
                                   child: Image(
                                     key: ValueKey<String>(url),
                                     image: ResizeImage(
-                                      NetworkImage(url),
+                                      RemoteImage(url),
                                       width: cacheW,
                                       height: cacheH,
                                       policy: ResizeImagePolicy.fit,

@@ -24,8 +24,7 @@ func logf(format string, args ...any) {
 	logMu.Lock()
 	defer logMu.Unlock()
 
-	// 不能收成 0700：Linux 上内核以受限用户运行，穿不过就读不到 run/
-	if err := os.MkdirAll(dataDir(), 0o755); err != nil {
+	if err := ensureDataDir(); err != nil {
 		return
 	}
 	if info, err := os.Stat(helperLogPath()); err == nil && info.Size() > logMaxBytes {

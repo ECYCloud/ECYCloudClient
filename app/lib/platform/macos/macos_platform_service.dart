@@ -18,6 +18,8 @@ class MacosPlatformService extends UnixPlatformService {
 
   final HelperClient _helper;
 
+  Future<String>? _name;
+
   @override
   String get platformId => 'macos';
 
@@ -29,11 +31,30 @@ class MacosPlatformService extends UnixPlatformService {
 
   @override
   Future<({String model, String os})> deviceProfile() async => (
-    model: 'macOS',
-    os:
-        RegExp(r'\d+(\.\d+)*').stringMatch(Platform.operatingSystemVersion) ??
-        '',
+    model: 'Mac（Flutter）',
+    os: 'macOS ${RegExp(r'\d+(\.\d+)*').stringMatch(Platform.operatingSystemVersion) ?? ''}'
+        .trimRight(),
   );
+
+  // 主机名是 PCdeMacBook-Air.local 这类网络名；与 Apple 原生端一样登记系统设置里的电脑名
+  @override
+  Future<String> deviceName() => _name ??= _computerName();
+
+  Future<String> _computerName() async {
+    try {
+      final ProcessResult result = await Process.run('scutil', <String>[
+        '--get',
+        'ComputerName',
+      ]);
+      final String name = '${result.stdout}'.trim();
+      if (result.exitCode == 0 && name.isNotEmpty) {
+        return name;
+      }
+    } on ProcessException catch (e) {
+      Logger.instance.warn(UnixPlatformService.source, '读取电脑名失败: $e');
+    }
+    return Platform.localHostname;
+  }
 
   @override
   Future<void> setSystemProxy({
@@ -71,6 +92,7 @@ class MacosPlatformService extends UnixPlatformService {
       if (plist.existsSync()) {
         plist.deleteSync();
       }
+      await _launchctl('disable');
       return;
     }
 
@@ -93,7 +115,25 @@ class MacosPlatformService extends UnixPlatformService {
 </dict>
 </plist>
 ''');
+    // 用户在「系统设置 - 登录项」里关过一次，launchd 就把这个 label 记进了禁用表，
+    // 之后只重写 plist 不会恢复自启，必须显式解禁
+    await _launchctl('enable');
     Logger.instance.info(UnixPlatformService.source, '已写入登录项 ${plist.path}');
+  }
+
+  // launchctl 的域名目标只认数字 uid，没有 gui/self 这种写法，交给 shell 展开
+  Future<void> _launchctl(String subcommand) async {
+    final ProcessResult result = await Process.run('/bin/sh', <String>[
+      '-c',
+      'launchctl $subcommand "gui/\$(id -u)/$_launchAgentLabel"',
+    ]);
+    if (result.exitCode != 0) {
+      Logger.instance.warn(
+        UnixPlatformService.source,
+        'launchctl $subcommand 失败（${result.exitCode}）：'
+        '${(result.stderr as String).trim()}',
+      );
+    }
   }
 
   File get _launchAgent => File(

@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/search_field.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_scaffold.dart';
 
 class PerAppProxyPage extends StatefulWidget {
   const PerAppProxyPage({super.key});
@@ -58,7 +59,7 @@ class _PerAppProxyPageState extends State<PerAppProxyPage> {
   Widget build(BuildContext context) {
     final ConnectionController connection = AppScope.of(context).connection;
 
-    return Scaffold(
+    return AppScaffold(
       appBar: AppBar(title: Text(L10n.t('分应用代理'))),
       body: ListenableBuilder(
         listenable: connection,

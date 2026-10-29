@@ -75,6 +75,7 @@ class UserProfile {
     this.apiOrigin = '',
     this.siteOrigin = '',
     this.latestAdminReplyAt = '',
+    this.revisions = const <String, String>{},
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
@@ -112,6 +113,12 @@ class UserProfile {
     apiOrigin: json['api_origin'] as String? ?? '',
     siteOrigin: json['site_origin'] as String? ?? '',
     latestAdminReplyAt: json['latest_admin_reply_at'] as String? ?? '',
+    revisions: <String, String>{
+      if (json['revisions'] is Map<String, dynamic>)
+        for (final MapEntry<String, dynamic> e
+            in (json['revisions'] as Map<String, dynamic>).entries)
+          if (e.value is String) e.key: e.value as String,
+    },
   );
 
   final int id;
@@ -145,6 +152,9 @@ class UserProfile {
   final String apiOrigin;
   final String siteOrigin;
   final String latestAdminReplyAt;
+
+  /// 面板各页面数据的版本号（shop / tickets / invite / unlock），缺项表示该页仍按定时刷新
+  final Map<String, String> revisions;
 
   String get displayName => userName.isEmpty ? email : userName;
 
@@ -206,6 +216,7 @@ class UserProfile {
     'api_origin': apiOrigin,
     'site_origin': siteOrigin,
     'latest_admin_reply_at': latestAdminReplyAt,
+    'revisions': revisions,
   };
 
   static DateTime? _parseDate(Object? raw) {

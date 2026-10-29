@@ -32,7 +32,11 @@ fi
 here="$(cd "$(dirname "$0")" && pwd)"
 
 if [ -x /opt/ecycloud/ecycloud-helper ]; then
-    /opt/ecycloud/ecycloud-helper uninstall || true
+    state="$(systemctl show --property=LoadState --value ecycloud-helper.service)"
+    if [ "$state" != not-found ]; then
+        systemctl stop ecycloud-helper.service
+    fi
+    /opt/ecycloud/ecycloud-helper uninstall
 fi
 
 if [ "$purge" = 1 ]; then

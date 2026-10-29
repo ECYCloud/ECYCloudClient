@@ -15,6 +15,7 @@ import '../pages/recharge_page.dart';
 import '../pages/traffic_log_page.dart';
 import '../theme.dart';
 import 'image_viewer.dart';
+import 'icon_image.dart';
 import 'video_viewer.dart';
 import 'zoom_cursors.dart';
 
@@ -53,6 +54,7 @@ class RichHtmlView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final Color linkColor = theme.colorScheme.primary;
     final String source = html.trim();
     if (source.isEmpty) {
       return const SizedBox.shrink();
@@ -83,6 +85,9 @@ class RichHtmlView extends StatelessWidget {
           padding: HtmlPaddings.zero,
           lineHeight: const LineHeight(1.45),
           color: theme.colorScheme.onSurface,
+          textAlign: DefaultTextStyle.of(context).textAlign == TextAlign.justify
+              ? TextAlign.justify
+              : null,
         ),
         'p': Style(margin: Margins.only(bottom: 6)),
         'hr': Style(
@@ -91,9 +96,11 @@ class RichHtmlView extends StatelessWidget {
           border: Border(top: BorderSide(color: theme.dividerColor, width: 1)),
           backgroundColor: theme.dividerColor,
         ),
+        // 字体下划线压在中文上，颜色也不跟链接色。
         'a': Style(
-          color: theme.colorScheme.primary,
-          textDecoration: TextDecoration.underline,
+          color: linkColor,
+          textDecoration: TextDecoration.none,
+          lineHeight: const LineHeight(1),
         ),
         '*': uiFont,
         'code': monoFont,
@@ -108,21 +115,44 @@ class RichHtmlView extends StatelessWidget {
             final String? href = ctx.attributes['href'];
             final bool canTap = href != null && _canTapLink(href, base);
             final TextStyle? linkStyle = ctx.style?.generateTextStyle();
-            final Widget label = Text.rich(
-              TextSpan(children: ctx.inlineSpanChildren, style: linkStyle),
-            );
-            final Widget link = MouseRegion(
-              cursor: canTap ? SystemMouseCursors.click : MouseCursor.defer,
-              child: InkWell(
-                onTap: canTap
-                    ? () => ctx.parser.internalOnAnchorTap?.call(
-                        href,
-                        ctx.attributes,
-                        ctx.element,
-                      )
-                    : null,
-                child: label,
-              ),
+            var hover = false;
+            final Widget link = StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                return MouseRegion(
+                  cursor: canTap
+                      ? SystemMouseCursors.click
+                      : MouseCursor.defer,
+                  onEnter: (_) => setState(() => hover = true),
+                  onExit: (_) => setState(() => hover = false),
+                  child: InkWell(
+                    onTap: canTap
+                        ? () => ctx.parser.internalOnAnchorTap?.call(
+                            href,
+                            ctx.attributes,
+                            ctx.element,
+                          )
+                        : null,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: hover ? linkColor : Colors.transparent,
+                          ),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 1),
+                        child: Text.rich(
+                          TextSpan(
+                            children: ctx.inlineSpanChildren,
+                            style: linkStyle,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             );
             return WidgetSpan(
               alignment: PlaceholderAlignment.baseline,
@@ -360,7 +390,8 @@ class _TicketImageState extends State<_TicketImage> {
               ? _placeholder(theme)
               : MouseRegion(
                   cursor: ZoomCursors.zoomIn,
-                  child: GestureDetector(
+                  // 遥控器要能选中它，点击控件必须是可聚焦的 Material 组件
+                  child: InkWell(
                     onTap: () {
                       final List<String> album = widget.album();
                       if (album.isEmpty) {
@@ -372,8 +403,18 @@ class _TicketImageState extends State<_TicketImage> {
                       }
                       showImageViewer(context, images: album, index: index);
                     },
-                    child: Image.network(
-                      widget.src,
+                    child: Image(
+                      image: ResizeImage(
+                        RemoteImage(widget.src),
+                        width:
+                            (_maxWidth * MediaQuery.devicePixelRatioOf(context))
+                                .ceil(),
+                        height:
+                            (_maxHeight *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .ceil(),
+                        policy: ResizeImagePolicy.fit,
+                      ),
                       key: ValueKey<String>('ticket-img-${widget.src}'),
                       fit: BoxFit.contain,
                       alignment: Alignment.centerLeft,

@@ -15,6 +15,9 @@ import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_text_field.dart';
 
 class SubscriptionStrategyPage extends StatefulWidget {
   const SubscriptionStrategyPage({super.key});
@@ -31,6 +34,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
   String? _error;
   bool _loading = true;
   bool _busy = false;
+  Locale? _contentLocale;
+  int _loadId = 0;
 
   final Set<String> _disabled = <String>{};
   final TextEditingController _hosts = TextEditingController();
@@ -52,7 +57,16 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
-    unawaited(_load());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final Locale locale = Localizations.localeOf(context);
+    if (_contentLocale != locale) {
+      _contentLocale = locale;
+      unawaited(_load(labelsOnly: _config != null));
+    }
   }
 
   @override
@@ -68,39 +82,42 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool labelsOnly = false}) async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
     if (api == null) {
       return;
     }
+    final int loadId = ++_loadId;
     setState(() {
-      _loading = true;
+      _loading = !labelsOnly;
       _error = null;
     });
     try {
       final SubscriptionConfig config = await api.fetchSubscriptionConfig();
-      if (!mounted) {
+      if (!mounted || loadId != _loadId) {
         return;
       }
       setState(() {
         _config = config;
-        _disabled
-          ..clear()
-          ..addAll(config.disabledGroups);
-        _hosts.text = config.customHosts;
-        _rules.text = config.customRules;
-        _customGroups
-          ..clear()
-          ..addAll(config.customGroups);
-        _customRuleProviders
-          ..clear()
-          ..addAll(config.customRuleProviders);
-        _clearGroupForm();
-        _clearProviderForm();
+        if (!labelsOnly) {
+          _disabled
+            ..clear()
+            ..addAll(config.disabledGroups);
+          _hosts.text = config.customHosts;
+          _rules.text = config.customRules;
+          _customGroups
+            ..clear()
+            ..addAll(config.customGroups);
+          _customRuleProviders
+            ..clear()
+            ..addAll(config.customRuleProviders);
+          _clearGroupForm();
+          _clearProviderForm();
+        }
         _loading = false;
       });
     } on Object catch (e) {
-      if (!mounted) {
+      if (!mounted || loadId != _loadId) {
         return;
       }
       setState(() {
@@ -157,6 +174,16 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     return null;
   }
 
+  void _setGroupEnabled(String name, bool enabled) {
+    setState(() {
+      if (enabled) {
+        _disabled.remove(name);
+      } else {
+        _disabled.add(name);
+      }
+    });
+  }
+
   void _clearGroupForm() {
     _groupName.clear();
     _groupIcon.clear();
@@ -195,7 +222,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     }
     final bool? ok = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('确认删除')),
         content: Text(
           L10n.t('确定要删除自定义策略组「{0}」吗？', <Object>[_customGroups[i].name]),
@@ -436,7 +463,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     final ThemeData theme = Theme.of(context);
     final SubscriptionConfig? config = _config;
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -518,27 +545,22 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                 for (final String name in toggleable)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
+                    onTap: () =>
+                        _setGroupEnabled(name, _disabled.contains(name)),
                     leading: GroupIcon(
                       url: _groupToggleIcon(config, name),
                       selectable: true,
                       size: 20,
                     ),
-                    title: Text(name),
+                    title: Text(config.groupLabels[name] ?? name),
                     trailing: Transform.scale(
                       scale: AppTheme.switchScale,
                       alignment: Alignment.centerRight,
                       child: Switch(
                         splashRadius: 0,
                         value: !_disabled.contains(name),
-                        onChanged: (bool enabled) {
-                          setState(() {
-                            if (enabled) {
-                              _disabled.remove(name);
-                            } else {
-                              _disabled.add(name);
-                            }
-                          });
-                        },
+                        onChanged: (bool enabled) =>
+                            _setGroupEnabled(name, enabled),
                       ),
                     ),
                   ),
@@ -591,8 +613,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            TextField(
-                              contextMenuBuilder: AppTheme.editableTextMenu,
+                            AppTextField(
                               controller: _groupName,
                               focusNode: _groupNameFocus,
                               decoration: AppTheme.controlDecoration(
@@ -600,8 +621,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextField(
-                              contextMenuBuilder: AppTheme.editableTextMenu,
+                            AppTextField(
                               controller: _groupIcon,
                               decoration: AppTheme.controlDecoration(
                                 hintText: L10n.t('图标 URL（可选）'),
@@ -626,7 +646,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                 for (final String name
                                     in config.availableProxyNames)
                                   FilterChip(
-                                    label: Text(name),
+                                    label: Text(
+                                      config.groupLabels[name] ?? name,
+                                    ),
                                     selected: _draftProxies.contains(name),
                                     onSelected: (bool selected) {
                                       setState(() {
@@ -699,8 +721,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                       ),
                 if (_editingGroupIdx == null) ...<Widget>[
                   const SizedBox(height: 8),
-                  TextField(
-                    contextMenuBuilder: AppTheme.editableTextMenu,
+                  AppTextField(
                     controller: _groupName,
                     focusNode: _groupNameFocus,
                     decoration: AppTheme.controlDecoration(
@@ -708,8 +729,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                     ),
                   ),
                   const SizedBox(height: 8),
-                  TextField(
-                    contextMenuBuilder: AppTheme.editableTextMenu,
+                  AppTextField(
                     controller: _groupIcon,
                     decoration: AppTheme.controlDecoration(
                       hintText: L10n.t('图标 URL（可选）'),
@@ -733,7 +753,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                     children: <Widget>[
                       for (final String name in config.availableProxyNames)
                         FilterChip(
-                          label: Text(name),
+                          label: Text(config.groupLabels[name] ?? name),
                           selected: _draftProxies.contains(name),
                           onSelected: (bool selected) {
                             setState(() {
@@ -883,8 +903,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            TextField(
-                              contextMenuBuilder: AppTheme.editableTextMenu,
+                            AppTextField(
                               controller: _providerUrl,
                               focusNode: _providerUrlFocus,
                               decoration: AppTheme.controlDecoration(
@@ -916,7 +935,9 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                             options: <String, String>{
                                               for (final String name
                                                   in policies)
-                                                name: name,
+                                                name:
+                                                    config.groupLabels[name] ??
+                                                    name,
                                             },
                                             onChanged: (String value) =>
                                                 setState(
@@ -953,7 +974,10 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(_customRuleProviders[i].url),
-                        subtitle: Text(_customRuleProviders[i].policy),
+                        subtitle: Text(
+                          config.groupLabels[_customRuleProviders[i].policy] ??
+                              _customRuleProviders[i].policy,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
@@ -974,8 +998,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                       ),
                 if (_editingProviderIdx == null) ...<Widget>[
                   const SizedBox(height: 8),
-                  TextField(
-                    contextMenuBuilder: AppTheme.editableTextMenu,
+                  AppTextField(
                     controller: _providerUrl,
                     focusNode: _providerUrlFocus,
                     decoration: AppTheme.controlDecoration(
@@ -1003,7 +1026,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                                   placeholder: L10n.t('选择策略'),
                                   options: <String, String>{
                                     for (final String name in policies)
-                                      name: name,
+                                      name: config.groupLabels[name] ?? name,
                                   },
                                   onChanged: (String value) =>
                                       setState(() => _draftPolicy = value),
@@ -1028,12 +1051,13 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
                           ? null
                           : () => unawaited(
                               _save(<String, dynamic>{
-                                'custom_rule_providers':
-                                    jsonEncode(<Map<String, dynamic>>[
-                                      for (final CustomRuleProvider p
-                                          in _customRuleProviders)
-                                        p.toJson(),
-                                    ]),
+                                'custom_rule_providers': jsonEncode(
+                                  <Map<String, dynamic>>[
+                                    for (final CustomRuleProvider p
+                                        in _customRuleProviders)
+                                      p.toJson(),
+                                  ],
+                                ),
                               }),
                             ),
                       child: Text(L10n.t('保存远程规则集')),

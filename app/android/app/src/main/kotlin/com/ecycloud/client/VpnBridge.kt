@@ -9,6 +9,8 @@ import io.flutter.plugin.common.MethodChannel
 class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) :
     MethodChannel.MethodCallHandler {
 
+    private var generation = 0
+
     init {
         MethodChannel(messenger, "ecycloud/vpn").setMethodCallHandler(this)
         KernelClient.bind(activity)
@@ -20,16 +22,22 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 status(call.argument<Int>("log_cursor") ?: 0)
             }
             "ping" -> Bridge.run(result) { KernelClient.call { it.ping() }.toMap() }
+            "kernel.bind" -> Bridge.run(result) {
+                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
+                val key = call.argument<String>("cache_key").orEmpty()
+                require(Regex("[a-f0-9]{64}").matches(key)) { "缓存身份格式错误" }
+                emptyMap<String, Any>()
+            }
             "kernel.check" -> Bridge.run(result) {
                 KernelClient.call { it.check(call.argument<String>("config")) }.toMap()
             }
             "kernel.write" -> Bridge.run(result) {
+                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
                 val config = call.argument<String>("config").orEmpty()
                 if (config.isBlank()) {
                     error("缺少配置内容")
                 }
-                BoxState.runDir(activity).mkdirs()
-                BoxState.configFile(activity).writeText(config)
+                BoxState.writeConfig(activity, config)
                 emptyMap<String, Any>()
             }
             "kernel.reload" -> Bridge.run(result) {
@@ -37,6 +45,7 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 emptyMap<String, Any>()
             }
             "kernel.read" -> Bridge.run(result) {
+                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
                 val path = call.argument<String>("path").orEmpty()
                 if (path.isBlank()) {
                     error("缺少路径")
@@ -44,6 +53,7 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 mapOf("content" to BoxState.readRunFile(activity, path))
             }
             "kernel.start" -> {
+                val requested = generation
                 val config = call.argument<String>("config").orEmpty()
                 val startKernel = {
                     Bridge.run(result) {
@@ -56,7 +66,11 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                         if (denied != null) {
                             result.error("ecycloud", denied, null)
                         } else {
-                            startKernel()
+                            if (requested != generation) {
+                                result.error("ecycloud", "账户会话已变化", null)
+                            } else {
+                                startKernel()
+                            }
                         }
                     }
                 } else {
@@ -66,6 +80,13 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
             "kernel.stop" -> Bridge.run(result) {
                 KernelClient.call { it.stop() }
                 emptyMap<String, Any>()
+            }
+            "kernel.clear" -> {
+                generation++
+                Bridge.run(result) {
+                    KernelClient.clearSession(activity)
+                    emptyMap<String, Any>()
+                }
             }
             else -> result.notImplemented()
         }

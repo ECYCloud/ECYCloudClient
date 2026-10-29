@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:math';
 
 import '../../core/app_paths.dart';
+import '../../l10n/l10n.dart';
 import 'json_file_store.dart';
 
 class Credentials {
@@ -25,10 +27,34 @@ class RememberedLogin {
 }
 
 class CredentialStore {
-  CredentialStore()
-    : _store = JsonFileStore(AppPaths.credentials, 'credential');
+  CredentialStore({JsonFileStore? store})
+    : _store = store ?? JsonFileStore(AppPaths.credentials, 'credential');
 
   final JsonFileStore _store;
+
+  File get _sessionMarker => File('${_store.file.path}.session-ending');
+
+  bool get sessionCleanupPending =>
+      FileSystemEntity.typeSync(_sessionMarker.path, followLinks: false) !=
+      FileSystemEntityType.notFound;
+
+  void beginSessionCleanup() {
+    final FileSystemEntityType type = FileSystemEntity.typeSync(
+      _sessionMarker.path,
+      followLinks: false,
+    );
+    if (type != FileSystemEntityType.notFound &&
+        type != FileSystemEntityType.file) {
+      throw FileSystemException(L10n.t('会话清理标记不是普通文件'), _sessionMarker.path);
+    }
+    _sessionMarker.writeAsStringSync('1', flush: true);
+  }
+
+  void finishSessionCleanup() {
+    if (sessionCleanupPending) {
+      _sessionMarker.deleteSync();
+    }
+  }
 
   Credentials? load() {
     final Map<String, dynamic> data = _store.read();
@@ -64,7 +90,7 @@ class CredentialStore {
     if (data['remember'] != true) {
       return null;
     }
-    final String email = data['email'] as String? ?? '';
+    final String email = data['remembered_email'] as String? ?? '';
     if (email.isEmpty) {
       return null;
     }
@@ -77,7 +103,7 @@ class CredentialStore {
   void saveRemembered({required String email, required String password}) {
     final Map<String, dynamic> data = _store.read()
       ..['remember'] = true
-      ..['email'] = email
+      ..['remembered_email'] = email
       ..['password'] = password;
     _store.write(data);
   }
@@ -85,6 +111,7 @@ class CredentialStore {
   void clearRemembered() {
     final Map<String, dynamic> data = _store.read()
       ..remove('remember')
+      ..remove('remembered_email')
       ..remove('password');
     _store.write(data);
   }

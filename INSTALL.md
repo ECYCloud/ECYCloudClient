@@ -42,6 +42,15 @@ cd ECYCloud-<版本>-linux-x64
 sudo ./install.sh
 ```
 
+也可用 AppImage（同样需要 systemd，且需要 polkit 提供的 `pkexec`）：
+
+```sh
+chmod +x ECYCloud-<版本>-linux-x64.AppImage
+./ECYCloud-<版本>-linux-x64.AppImage
+```
+
+首次运行会弹出管理员授权，把客户端与后台服务装到 `/opt/ecycloud`，之后直接启动客户端；装好后可从应用程序菜单启动，AppImage 文件可以删除。已用 deb / rpm 安装时，AppImage 不会覆盖，只启动已装版本。AppImage 版不自动更新，发现新版本后到发布页下载新的 AppImage 并运行一次，会再次申请授权完成升级。
+
 从应用程序菜单启动 **ECY Cloud**，使用面板账号登录。
 
 ### Android
@@ -157,6 +166,8 @@ sudo /opt/ecycloud/uninstall.sh
 ```
 
 终端会询问「是否同时删除登录与配置？」，直接回车为否（保留数据）。非交互环境默认保留；脚本可用 `--purge` 或 `--keep-data` 跳过询问。
+
+AppImage 与 tar.gz 安装的客户端都用上面这条命令卸载，之后删除 AppImage 文件即可。
 
 也可用包管理器（不会弹出该询问）：`sudo apt remove ecycloud` 保留数据，`sudo apt purge ecycloud` 删除数据。Fedora / RHEL 用 `dnf remove`，openSUSE 用 `zypper remove`（默认都保留数据；要删数据须先 `sudo /opt/ecycloud/purge-data.sh`）。
 

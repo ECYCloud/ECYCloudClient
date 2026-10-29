@@ -9,7 +9,7 @@ out_dir="${1:?用法: fetch-geodata.sh <输出目录>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(dirname "$script_dir")"
 lock="$script_dir/kernel.lock.json"
-cache_dir="$root_dir/build/cache"
+cache_dir="${ECYCLOUD_BUILD_DIR:-$root_dir/build}/cache"
 mkdir -p "$cache_dir" "$out_dir"
 
 # 上游滚动 latest、锁不住 sha256；只拦 404 与截断（体积下限 + MaxMind 魔数）
@@ -19,10 +19,8 @@ for name in mmdb geosite; do
     min="$(jq -er --arg n "$name" '.geodata.assets[$n].minBytes' "$lock")"
     file="$cache_dir/$target"
 
-    if [[ ! -f "$file" ]]; then
-        echo "下载 $url"
-        curl -fsSL -o "$file" "$url"
-    fi
+    echo "下载 $url"
+    curl -fsSL -o "$file" "$url"
 
     size="$(wc -c < "$file" | tr -d ' ')"
     if [[ "$size" -lt "$min" ]]; then

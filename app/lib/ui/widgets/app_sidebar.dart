@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import 'nav_glyph.dart';
 import 'overlay_scroll_view.dart';
+import 'television_navigation.dart';
 
 class AppSidebarItem {
   const AppSidebarItem({
@@ -34,35 +35,39 @@ class AppSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
-    return Material(
-      color: scheme.surface,
-      child: SizedBox(
-        width: AppTheme.sidebarWidth,
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            return OverlayScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
-                  minWidth: constraints.maxWidth - AppTheme.overlayScrollGutter,
-                  maxWidth: constraints.maxWidth - AppTheme.overlayScrollGutter,
+    return TelevisionFocusSection(
+      child: Material(
+        color: scheme.surface,
+        child: SizedBox(
+          width: AppTheme.sidebarWidth,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return OverlayScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight,
+                    minWidth:
+                        constraints.maxWidth - AppTheme.overlayScrollGutter,
+                    maxWidth:
+                        constraints.maxWidth - AppTheme.overlayScrollGutter,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      const _BrandRow(),
+                      const SizedBox(height: 8),
+                      for (int i = 0; i < items.length; i++)
+                        _NavTile(
+                          item: items[i],
+                          selected: selectedIndex == i,
+                          onTap: () => onSelected(i),
+                        ),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const _BrandRow(),
-                    const SizedBox(height: 8),
-                    for (int i = 0; i < items.length; i++)
-                      _NavTile(
-                        item: items[i],
-                        selected: selectedIndex == i,
-                        onTap: () => onSelected(i),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

@@ -1,0 +1,13 @@
+{
+  "package": "media_kit_libs_windows_video",
+  "version": "1.0.11",
+  "archive": "https://pub.dev/api/archives/media_kit_libs_windows_video-1.0.11.tar.gz",
+  "sha256": "dff76da2778729ab650229e6b4ec6ec111eb5151431002cbd7ea304ff1f112ab",
+  "originalFiles": {
+    "windows/include/media_kit_libs_windows_video/media_kit_libs_windows_video_plugin_c_api.h": "038fba3b80fac0b2a8fcc660154e1cb1d85f327221dc110648189f6aabf01106",
+    "windows/media_kit_libs_windows_video_plugin_c_api.cpp": "59c764feea8eb41df4f93a48a18640394e19828a998d9d8d319a1e46689e4256",
+    "windows/CMakeLists.txt": "66b855114b842c7d0641013370c735404131b99b396bb90f153f2f84d9f046da",
+    "pubspec.yaml": "4b1f5cb08afcac094a751a3f4a7bfc93b85fd3ecd081338dceb88342a7654b2f",
+    "LICENSE": "2e3000f38718f050869d57540c288c661a446f64df1ba4ea4764df552b04a331"
+  }
+}

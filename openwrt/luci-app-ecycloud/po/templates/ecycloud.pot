@@ -445,7 +445,7 @@ msgstr ""
 msgid "Notice"
 msgstr ""
 
-msgid "Remember email and password"
+msgid "Remember email"
 msgstr ""
 
 msgid "Sign in with your %s account to load available nodes"
@@ -514,6 +514,12 @@ msgstr ""
 msgid "Locate selected node"
 msgstr ""
 
+msgid "Search node name"
+msgstr ""
+
+msgid "No matching nodes"
+msgstr ""
+
 msgid "This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately"
 msgstr ""
 
@@ -563,6 +569,21 @@ msgid "Next usage reset"
 msgstr ""
 
 msgid "Last used"
+msgstr ""
+
+msgid "Last check-in"
+msgstr ""
+
+msgid "Never checked in"
+msgstr ""
+
+msgid "Check-in grants %d–%d MB at random"
+msgstr ""
+
+msgid "Check in"
+msgstr ""
+
+msgid "Checked in today"
 msgstr ""
 
 msgid "Never used"
@@ -667,13 +688,16 @@ msgstr ""
 msgid "A new client connected after the online client limit was reached, so this device was disconnected."
 msgstr ""
 
-msgid "This device was removed from the usage list, so it was disconnected."
+msgid "This device was disconnected."
 msgstr ""
 
 msgid "Remove"
 msgstr ""
 
-msgid "Remove this device?"
+msgid "Take offline"
+msgstr ""
+
+msgid "Disconnect this device?"
 msgstr ""
 
 msgid "The client on %s will be told to disconnect, within 60 seconds."
@@ -823,6 +847,9 @@ msgstr ""
 msgid "Announcements"
 msgstr ""
 
+msgid "Announcement"
+msgstr ""
+
 msgid "No announcements"
 msgstr ""
 
@@ -847,6 +874,9 @@ msgstr ""
 msgid "Traffic ranking"
 msgstr ""
 
+msgid "Statistics are stored locally for the last two days, cover only this device, and are not synchronized between devices."
+msgstr ""
+
 msgid "Policy groups"
 msgstr ""
 
@@ -860,4 +890,94 @@ msgid "Yesterday"
 msgstr ""
 
 msgid "No ranking data yet"
+msgstr ""
+
+msgid "Account session changed. Please retry."
+msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Client"
+msgstr ""
+
+msgid "Search IP, device, location, version"
+msgstr ""
+
+msgid "%d / %d · %d items"
+msgstr ""
+
+msgid "Copy all"
+msgstr ""
+
+msgid "Copied"
+msgstr ""
+
+msgid "Copy failed"
+msgstr ""
+
+msgid "Loading rule providers: %d/%d"
+msgstr ""
+
+msgid "Update available: %s %s. See About for installation."
+msgstr ""
+
+msgid "Client log level; kernel uses info for connection diagnostics."
+msgstr ""
+
+msgid "Session expired. Sign in again."
+msgstr ""
+
+msgid "Previous page"
+msgstr ""
+
+msgid "Next page"
+msgstr ""
+
+msgid "Need more traffic? Open "
+msgstr ""
+
+msgid "Shop"
+msgstr ""
+
+msgid " to buy a traffic pack"
+msgstr ""
+
+msgid "Privacy Policy"
+msgstr ""
+
+msgid "Terms of Service"
+msgstr ""
+
+msgid "Downloaded"
+msgstr ""
+
+msgid "Uploaded"
+msgstr ""
+
+msgid "Download speed"
+msgstr ""
+
+msgid "Upload speed"
+msgstr ""
+
+msgid "Chain"
+msgstr ""
+
+msgid "Process"
+msgstr ""
+
+msgid "Connected at"
+msgstr ""
+
+msgid "Source address"
+msgstr ""
+
+msgid "Destination address"
+msgstr ""
+
+msgid "Destination port"
+msgstr ""
+
+msgid "Close connection"
 msgstr ""

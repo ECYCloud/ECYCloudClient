@@ -2,13 +2,18 @@
 
 import { popen, readfile } from 'fs';
 
-import { build, coreRunning, httpRequest, mihomoBin, settings, shellquote,
-         userAgent } from 'ecycloud.common';
+import { STATE_DIR, build, coreRunning, ensurePrivateDir, httpRequest, mihomoBin, readJson, settings, shellquote,
+         userAgent, writePrivateJson } from 'ecycloud.common';
 
 const APP_REPO = 'ECYCloud/ECYCloudClient';
 const NIKKI_FEED = 'https://nikkinikki.pages.dev';
 const PRE_PREFIX = 'Pre ';
 const RELEASES_URL = `https://github.com/${APP_REPO}/releases`;
+const UPDATE_FILE = `${STATE_DIR}/updates.json`;
+
+export function cached() {
+	return readJson(UPDATE_FILE) ?? {};
+};
 
 function isPre(version) {
 	return index(`${version ?? ''}`, PRE_PREFIX) == 0;
@@ -98,6 +103,11 @@ function parseRelease(entry) {
 
 function listReleases(repo) {
 	const res = githubGet(`https://api.github.com/repos/${repo}/releases?per_page=30`);
+	if (res.status == 429 || (res.status == 403 && (res.retry_after != null || res.rate_limited))) {
+		const retryAt = max(res.retry_after != null ? time() + res.retry_after : 0, +(res.rate_limit_reset ?? 0));
+		return { ok: false, error: `GitHub 请求过于频繁（HTTP ${res.status}）`,
+			retry_at: retryAt > time() ? retryAt : time() + 60 };
+	}
 	if (res.status != 200)
 		return { ok: false, error: `GitHub 返回 HTTP ${res.status || 0}` };
 	if (type(res.data) != 'array')
@@ -132,9 +142,12 @@ function newestStable(releases) {
 
 export function checkApp() {
 	const current = build().version ?? '';
+	const previous = cached().app;
+	if (previous?.ok == false && +(previous.retry_at ?? 0) > time())
+		return previous;
 	const listed = listReleases(APP_REPO);
 	if (!listed.ok)
-		return { ok: false, msg: listed.error };
+		return { ok: false, msg: listed.error, retry_at: listed.retry_at };
 
 	const target = isPre(current) ? listed.releases[0] : newestStable(listed.releases);
 	if (!target)
@@ -218,4 +231,14 @@ export function checkKernel(current) {
 		latest,
 		outdated: length(local) > 0 && newer(latest, local)
 	};
+};
+export function checkPeriodic() {
+	const saved = cached();
+	if (time() < +(saved.next_check ?? 0))
+		return;
+	const app = checkApp();
+	const kernel = checkKernel();
+	ensurePrivateDir(STATE_DIR);
+	writePrivateJson(UPDATE_FILE, { app, kernel, checked_at: time(),
+		next_check: app.retry_at != null ? max(time(), app.retry_at) + 1 : time() + (app.ok && kernel.ok ? 86400 : 3600) });
 };

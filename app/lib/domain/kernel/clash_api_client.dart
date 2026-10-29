@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 import '../../core/logger.dart';
+import '../../l10n/l10n.dart';
 import '../config/local_template.dart';
 import '../config/speed_probe_config.dart';
 
@@ -82,7 +83,7 @@ class ClashApiException implements Exception {
   final String message;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }
 
 class ClashApiClient {
@@ -96,6 +97,7 @@ class ClashApiClient {
 
   final ClashApiOptions options;
   final http.Client _http;
+  final Map<String, String> _nodeProviders = <String, String>{};
 
   int _memoryInuse = 0;
   StreamSubscription<Map<String, dynamic>>? _memorySubscription;
@@ -113,8 +115,8 @@ class ClashApiClient {
   Uri _uri(String path, [Map<String, String>? query]) =>
       options.baseUri.replace(path: path, queryParameters: query);
 
-  // 首次启动要下载并编译面板下发的全部远程规则集，实测冷缓存下 6~27 秒才开始监听
   Future<void> waitReady({
+    int? proxyPort,
     Duration timeout = const Duration(seconds: 60),
     bool Function()? isCancelled,
   }) async {
@@ -125,17 +127,45 @@ class ClashApiClient {
         throw ClashApiException('连接已取消');
       }
       try {
-        final http.Response response = await _http
-            .get(_uri('/version'), headers: _headers)
-            .timeout(const Duration(seconds: 2));
-        if (response.statusCode == 200) {
-          return;
+        final http.Response response = await _request(
+          'GET',
+          '/version',
+          timeout: const Duration(seconds: 2),
+        );
+        if (response.statusCode == 200 && !(isCancelled?.call() ?? false)) {
+          if (proxyPort == null) {
+            return;
+          }
+          await selectProxy(SpeedProbeConfig.groupName, 'DIRECT');
+          final http.Client probe = IOClient(
+            HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$proxyPort',
+          );
+          try {
+            // /version 先于转发就绪；经入站转发至本机 API 的 401 才能确认放行。
+            // 探测不发送控制密钥，防止初始化期间的旧选中项将它转发出本机。
+            final http.Request request = http.Request('GET', _uri('/version'))
+              ..followRedirects = false
+              ..headers['Proxy-Authorization'] =
+                  'Basic ${base64Encode(utf8.encode(SpeedProbeConfig.credential(options.secret)))}';
+            final http.Response forwarded = await probe
+                .send(request)
+                .then(http.Response.fromStream)
+                .timeout(const Duration(seconds: 2));
+            if (forwarded.statusCode == 401 &&
+                !(isCancelled?.call() ?? false)) {
+              return;
+            }
+          } finally {
+            probe.close();
+          }
         }
       } on Exception catch (_) {}
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
 
-    throw ClashApiException('内核控制面在 ${timeout.inSeconds} 秒内未就绪');
+    throw ClashApiException(
+      '内核${proxyPort == null ? '控制面' : '转发'}在 ${timeout.inSeconds} 秒内未就绪',
+    );
   }
 
   Future<(List<ProxyGroup>, List<ProxyNode>)> fetchProxies() async {
@@ -147,6 +177,39 @@ class ClashApiClient {
 
     final List<ProxyGroup> groups = <ProxyGroup>[];
     final List<ProxyNode> nodes = <ProxyNode>[];
+    final bool hasProviderNodes = proxies.values.whereType<Map>().any(
+      (Map value) =>
+          value['all'] is List &&
+          (value['all'] as List).any(
+            (Object? name) =>
+                name != 'DIRECT' &&
+                name != 'REJECT' &&
+                !proxies.containsKey(name),
+          ),
+    );
+    final Map<String, dynamic> providerPayload = hasProviderNodes
+        ? await _getJson('/providers/proxies')
+        : const <String, dynamic>{};
+    _nodeProviders.clear();
+    final Object? providers = providerPayload['providers'];
+    final Object? panel = providers is Map
+        ? providers['ecy-panel-nodes']
+        : null;
+    if (panel is Map && panel['proxies'] is List) {
+      for (final Map value in (panel['proxies'] as List).whereType<Map>()) {
+        final String name = value['name'] as String;
+        _nodeProviders[name] = 'ecy-panel-nodes';
+        nodes.add(
+          ProxyNode(
+            name: name,
+            type: value['type'] as String,
+            delay: _latestDelay(Map<String, dynamic>.from(value)),
+            udp: value['udp'] as bool?,
+            xudp: value['xudp'] as bool?,
+          ),
+        );
+      }
+    }
 
     for (final MapEntry<String, dynamic> entry in proxies.entries) {
       if (entry.key == SpeedProbeConfig.groupName) {
@@ -154,6 +217,9 @@ class ClashApiClient {
       }
       final Object? value = entry.value;
       if (value is! Map<String, dynamic>) {
+        continue;
+      }
+      if (value['hidden'] == true) {
         continue;
       }
 
@@ -193,13 +259,10 @@ class ClashApiClient {
   }
 
   Future<void> selectProxy(String group, String member) async {
-    final http.Response response = await _http.put(
-      _uri('/proxies/${Uri.encodeComponent(group)}'),
-      headers: <String, String>{
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(<String, String>{'name': member}),
+    final http.Response response = await _request(
+      'PUT',
+      '/proxies/${Uri.encodeComponent(group)}',
+      body: <String, String>{'name': member},
     );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
@@ -216,7 +279,9 @@ class ClashApiClient {
     Duration timeout = const Duration(seconds: 5),
   }) async {
     final Map<String, dynamic> payload = await _getJson(
-      '/proxies/${Uri.encodeComponent(name)}/delay',
+      _nodeProviders.containsKey(name)
+          ? '/providers/proxies/${Uri.encodeComponent(_nodeProviders[name]!)}/${Uri.encodeComponent(name)}/healthcheck'
+          : '/proxies/${Uri.encodeComponent(name)}/delay',
       <String, String>{'url': url, 'timeout': '${timeout.inMilliseconds}'},
     );
 
@@ -251,13 +316,10 @@ class ClashApiClient {
   }
 
   Future<void> setMode(String mode) async {
-    final http.Response response = await _http.patch(
-      _uri('/configs'),
-      headers: <String, String>{
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(<String, String>{'mode': mode}),
+    final http.Response response = await _request(
+      'PATCH',
+      '/configs',
+      body: <String, String>{'mode': mode},
     );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
@@ -270,18 +332,14 @@ class ClashApiClient {
     bool enabled, {
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    final http.Response response = await _http
-        .patch(
-          _uri('/configs'),
-          headers: <String, String>{
-            ..._headers,
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(<String, dynamic>{
-            'tun': <String, dynamic>{'enable': enabled},
-          }),
-        )
-        .timeout(timeout);
+    final http.Response response = await _request(
+      'PATCH',
+      '/configs',
+      body: <String, dynamic>{
+        'tun': <String, dynamic>{'enable': enabled},
+      },
+      timeout: timeout,
+    );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
       throw ClashApiException(
@@ -296,18 +354,23 @@ class ClashApiClient {
       setTunEnabled(false, timeout: const Duration(seconds: 1));
 
   // ApplyConfig / 热载不绕过 interval；规则内容变而 url 未变必须 PUT /providers/rules/{name}
-  Future<void> updateRuleProviders(Iterable<String> names) async {
+  Future<void> updateRuleProviders(Iterable<String> names) =>
+      _updateProviders('rules', names);
+
+  Future<void> updateProxyProviders(Iterable<String> names) =>
+      _updateProviders('proxies', names);
+
+  Future<void> _updateProviders(String kind, Iterable<String> names) async {
     await Future.wait(
       names.map((String name) async {
-        final http.Response response = await _http
-            .put(
-              _uri('/providers/rules/${Uri.encodeComponent(name)}'),
-              headers: _headers,
-            )
-            .timeout(const Duration(seconds: 120));
+        final http.Response response = await _request(
+          'PUT',
+          '/providers/$kind/${Uri.encodeComponent(name)}',
+          timeout: const Duration(seconds: 120),
+        );
         if (response.statusCode != 204 && response.statusCode != 200) {
           throw ClashApiException(
-            '更新分流规则 $name 失败（HTTP ${response.statusCode}）',
+            '更新 $kind/$name 失败（HTTP ${response.statusCode}）',
           );
         }
       }),
@@ -316,9 +379,11 @@ class ClashApiClient {
 
   // 禁止另写 geodata 下载器；走内核 updater.UpdateGeoDatabases，结束才回 204 / 500
   Future<void> updateGeoDatabases() async {
-    final http.Response response = await _http
-        .post(_uri('/configs/geo'), headers: _headers)
-        .timeout(const Duration(seconds: 180));
+    final http.Response response = await _request(
+      'POST',
+      '/configs/geo',
+      timeout: const Duration(seconds: 180),
+    );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
       throw ClashApiException(_errorDetail(response));
@@ -347,16 +412,13 @@ class ClashApiClient {
     String configJson, {
     bool force = true,
   }) async {
-    final http.Response response = await _http
-        .put(
-          _uri('/configs', <String, String>{'force': '$force'}),
-          headers: <String, String>{
-            ..._headers,
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(<String, String>{'payload': configJson}),
-        )
-        .timeout(const Duration(seconds: 120));
+    final http.Response response = await _request(
+      'PUT',
+      '/configs',
+      query: <String, String>{'force': '$force'},
+      body: <String, String>{'payload': configJson},
+      timeout: const Duration(seconds: 120),
+    );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
       final String body = response.body.trim();
@@ -377,7 +439,7 @@ class ClashApiClient {
       for (final Map<String, dynamic> item in snapshot.connections) {
         final Object? chains = item['chains'];
         if (chains is List && chains.any(outbounds.contains)) {
-          closing.add(_closeConnection('${item['id']}'));
+          closing.add(closeConnection('${item['id']}'));
         }
       }
       await Future.wait(closing);
@@ -387,10 +449,10 @@ class ClashApiClient {
   }
 
   // 内核对不存在的 id 回 204
-  Future<void> _closeConnection(String id) async {
-    final http.Response response = await _http.delete(
-      _uri('/connections/${Uri.encodeComponent(id)}'),
-      headers: _headers,
+  Future<void> closeConnection(String id) async {
+    final http.Response response = await _request(
+      'DELETE',
+      '/connections/${Uri.encodeComponent(id)}',
     );
 
     if (response.statusCode != 204 && response.statusCode != 200) {
@@ -509,9 +571,12 @@ class ClashApiClient {
     Map<String, String>? query,
     Duration httpTimeout = const Duration(seconds: 10),
   ]) async {
-    final http.Response response = await _http
-        .get(_uri(path, query), headers: _headers)
-        .timeout(httpTimeout);
+    final http.Response response = await _request(
+      'GET',
+      path,
+      query: query,
+      timeout: httpTimeout,
+    );
 
     if (response.statusCode != 200) {
       throw ClashApiException('$path 请求失败（HTTP ${response.statusCode}）');
@@ -519,6 +584,39 @@ class ClashApiClient {
 
     final Object? decoded = jsonDecode(utf8.decode(response.bodyBytes));
     return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+  }
+
+  Future<http.Response> _request(
+    String method,
+    String path, {
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final Completer<void> abort = Completer<void>();
+    final http.AbortableRequest request = http.AbortableRequest(
+      method,
+      _uri(path, query),
+      abortTrigger: abort.future,
+    )..headers.addAll(_headers);
+    if (body != null) {
+      request.headers['Content-Type'] = 'application/json';
+      request.body = jsonEncode(body);
+    }
+    try {
+      return await _http
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(
+            timeout,
+            onTimeout: () {
+              abort.complete();
+              throw TimeoutException('内核请求超时', timeout);
+            },
+          );
+    } finally {
+      if (!abort.isCompleted) abort.complete();
+    }
   }
 
   static int _latestDelay(Map<String, dynamic> proxy) {

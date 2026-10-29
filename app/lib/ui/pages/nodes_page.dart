@@ -16,6 +16,7 @@ import '../widgets/group_sort_button.dart';
 import '../widgets/group_speed_test_button.dart';
 import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
+import '../widgets/search_field.dart';
 import '../widgets/speed_badge.dart';
 import '../widgets/tag_chip.dart';
 import '../../l10n/l10n.dart';
@@ -108,14 +109,25 @@ class _GroupCardState extends State<_GroupCard> {
   static const double _tileGap = 8;
 
   final GlobalKey _selectedTileKey = GlobalKey();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
 
   late bool _expanded;
   NodeGroupSort _sort = NodeGroupSort.name;
+  bool _searchOpen = false;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _expanded = widget.initiallyExpanded;
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
   }
 
   void _toast(String? message) {
@@ -244,14 +256,17 @@ class _GroupCardState extends State<_GroupCard> {
       group.name,
     );
     final bool wide = AppTheme.isWide(context);
-    final List<String> members = NodeGroupSortLogic.apply(
-      members: group.members,
-      mode: _sort,
-      delayOf: (String name) =>
-          connection.delayOf(connection.resolveNode(name)),
-      speedOf: (String name) =>
-          connection.speedOf(connection.resolveNode(name)),
-    );
+    final List<String> members = <String>[
+      for (final String member in NodeGroupSortLogic.apply(
+        members: group.members,
+        mode: _sort,
+        delayOf: (String name) =>
+            connection.delayOf(connection.resolveNode(name)),
+        speedOf: (String name) =>
+            connection.speedOf(connection.resolveNode(name)),
+      ))
+        if (!_searchOpen || _query.isEmpty || _matchesQuery(member)) member,
+    ];
 
     final List<Widget> actions = <Widget>[
       GroupDelayTestButton(
@@ -271,6 +286,40 @@ class _GroupCardState extends State<_GroupCard> {
         inMenu: !wide,
         onPressed: () => setState(() => _sort = NodeGroupSortLogic.next(_sort)),
       ),
+      if (wide)
+        IconButton(
+          tooltip: L10n.t('搜索节点名称'),
+          iconSize: 16,
+          visualDensity: VisualDensity.standard,
+          constraints: BoxConstraints.tightFor(
+            width: AppTheme.minTapTarget,
+            height: AppTheme.minTapTarget,
+          ),
+          padding: EdgeInsets.zero,
+          style: _searchOpen
+              ? IconButton.styleFrom(
+                  backgroundColor: scheme.onSurfaceVariant.withValues(
+                    alpha: 0.08,
+                  ),
+                )
+              : null,
+          icon: const Icon(Icons.search),
+          onPressed: _toggleSearch,
+        )
+      else
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.search, size: 16),
+          style: MenuItemButton.styleFrom(
+            backgroundColor: _searchOpen
+                ? scheme.onSurfaceVariant.withValues(alpha: 0.08)
+                : null,
+            textStyle: theme.textTheme.bodyMedium,
+            minimumSize: Size(0, AppTheme.minTapTarget),
+            visualDensity: VisualDensity.standard,
+          ),
+          onPressed: _toggleSearch,
+          child: Text(L10n.t('搜索节点名称')),
+        ),
       if (wide)
         IconButton(
           tooltip: L10n.t('定位到当前节点'),
@@ -347,7 +396,7 @@ class _GroupCardState extends State<_GroupCard> {
                                   children: <Widget>[
                                     Flexible(
                                       child: Text(
-                                        group.name,
+                                        NodeLabels.displayName(group.name),
                                         maxLines: !wide && _expanded ? null : 1,
                                         overflow: !wide && _expanded
                                             ? TextOverflow.visible
@@ -457,6 +506,19 @@ class _GroupCardState extends State<_GroupCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       const SizedBox(height: 10),
+                      if (_searchOpen)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                          child: SearchField(
+                            controller: _searchController,
+                            focusNode: _searchFocus,
+                            hintText: L10n.t('搜索节点名称'),
+                            width: double.infinity,
+                            onChanged: (String value) => setState(
+                              () => _query = value.trim().toLowerCase(),
+                            ),
+                          ),
+                        ),
                       if (!group.selectable)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
@@ -465,7 +527,18 @@ class _GroupCardState extends State<_GroupCard> {
                             group: group,
                           ),
                         ),
-                      LayoutBuilder(
+                      if (_query.isNotEmpty && members.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            L10n.t('没有符合条件的节点'),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      else
+                        LayoutBuilder(
                         builder:
                             (BuildContext context, BoxConstraints constraints) {
                               final int columns =
@@ -498,7 +571,7 @@ class _GroupCardState extends State<_GroupCard> {
                                 ],
                               );
                             },
-                      ),
+                        ),
                     ],
                   ),
                 ),
@@ -507,6 +580,29 @@ class _GroupCardState extends State<_GroupCard> {
           ),
       ],
     );
+  }
+
+  void _toggleSearch() {
+    final bool open = !_searchOpen;
+    setState(() {
+      _searchOpen = open;
+      if (open) {
+        _expanded = true;
+      }
+    });
+    if (!open) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _searchOpen) {
+        _searchFocus.requestFocus();
+      }
+    });
+  }
+
+  bool _matchesQuery(String member) {
+    final String shown = NodeLabels.displayName(member);
+    return (shown.isEmpty ? member : shown).toLowerCase().contains(_query);
   }
 
   ShapeBorder _cardShape({required bool top, required bool bottom}) {
@@ -542,9 +638,8 @@ class _AutoGroupHint extends StatelessWidget {
           Expanded(
             child: Text(
               detail,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ),
         ],
@@ -618,13 +713,14 @@ class _NodeTile extends StatelessWidget {
     return Material(
       color: selected
           ? Color.alphaBlend(
-              scheme.primary.withValues(alpha: 0.10),
+              scheme.primary.withValues(alpha: 0.16),
               scheme.surface,
             )
           : scheme.surface,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppTheme.tileRadius),
+        side: selected ? BorderSide(color: scheme.primary) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -633,9 +729,11 @@ class _NodeTile extends StatelessWidget {
             ? SystemMouseCursors.basic
             : SystemMouseCursors.click,
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: AppTheme.isTouch ? 10 : 0.5,
+          padding: EdgeInsets.fromLTRB(
+            20,
+            4.5,
+            AppTheme.trailingIconButtonInset(16) - 4,
+            4.5,
           ),
           child: Row(
             children: <Widget>[
@@ -649,34 +747,41 @@ class _NodeTile extends StatelessWidget {
                           ? NodeLabels.originalName(name)
                           : '${NodeLabels.originalName(name)} → ${NodeLabels.originalName(via!)}',
                       waitDuration: const Duration(milliseconds: 600),
-                      child: Row(
+                      child: Stack(
+                        clipBehavior: Clip.none,
                         children: <Widget>[
                           if (selected)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 3),
+                            Positioned(
+                              left: -16,
+                              top: 0,
+                              bottom: 0,
                               child: Icon(
                                 Icons.check_circle,
                                 size: 12,
                                 color: scheme.primary,
                               ),
                             ),
-                          if (via == null && region != null) ...<Widget>[
-                            FlagIcon(code: region),
-                            const SizedBox(width: 4),
-                          ],
-                          Flexible(
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: titleColor),
-                            ),
+                          Row(
+                            children: <Widget>[
+                              if (via == null && region != null) ...<Widget>[
+                                FlagIcon(code: region),
+                                const SizedBox(width: 4),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(color: titleColor),
+                                ),
+                              ),
+                              if (groupTag != null) ...<Widget>[
+                                const SizedBox(width: 6),
+                                TagChip(label: groupTag!),
+                              ],
+                            ],
                           ),
-                          if (groupTag != null) ...<Widget>[
-                            const SizedBox(width: 6),
-                            TagChip(label: groupTag!),
-                          ],
                         ],
                       ),
                     ),
@@ -710,23 +815,33 @@ class _NodeTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  DelayBadge(
-                    delay: delay,
-                    testing: testing,
-                    unreachable: unreachable,
-                    onTest: onTest,
-                  ),
-                  SpeedBadge(
-                    bytesPerSecond: speed,
-                    testing: speedTesting,
-                    failed: speedFailed,
-                    onTest: onSpeedTest,
-                  ),
-                ],
+              // 触控盒是 48，两枚照原样叠会把卡片撑到桌面的近两倍。
+              SizedBox(
+                height: AppTheme.pointerTapTarget * 2,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    SizedBox(
+                      height: AppTheme.pointerTapTarget,
+                      child: DelayBadge(
+                        delay: delay,
+                        testing: testing,
+                        unreachable: unreachable,
+                        onTest: onTest,
+                      ),
+                    ),
+                    SizedBox(
+                      height: AppTheme.pointerTapTarget,
+                      child: SpeedBadge(
+                        bytesPerSecond: speed,
+                        testing: speedTesting,
+                        failed: speedFailed,
+                        onTest: onSpeedTest,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -754,9 +869,8 @@ class _Placeholder extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             message,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(context).textTheme.bodyLarge
+                ?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],
       ),

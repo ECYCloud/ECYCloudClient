@@ -1,0 +1,907 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 110;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3A0E3FE6A9B44F238876ACB3 /* ECYCloudKit in Frameworks */ = {isa = PBXBuildFile; productRef = EC1000000000000000000002 /* ECYCloudKit */; };
+		EC1000000000000000000001 /* ECYCloudKit in Frameworks */ = {isa = PBXBuildFile; productRef = EC1000000000000000000002 /* ECYCloudKit */; };
+		EC1000000000000000000003 /* ../config/panel.json in Resources */ = {isa = PBXBuildFile; fileRef = EC1000000000000000000004 /* ../config/panel.json */; };
+		EC200000000000000000006B /* Tunnel/PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */; };
+		EC200000000000000000006C /* ECYCloudKit in Frameworks */ = {isa = PBXBuildFile; productRef = EC1000000000000000000002 /* ECYCloudKit */; };
+		EC200000000000000000006D /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; };
+		EC200000000000000000006E /* ECYCloudTunnel.appex in Embed VPN Extension */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000065 /* ECYCloudTunnel.appex */; platformFilters = (ios, xros, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EC20000000000000000000CF /* Tunnel/PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */; };
+		EC20000000000000000000D0 /* ECYCloudKit in Frameworks */ = {isa = PBXBuildFile; productRef = EC1000000000000000000002 /* ECYCloudKit */; };
+		EC20000000000000000000D1 /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; };
+		EC20000000000000000000D2 /* ECYCloudTVTunnel.appex in Embed VPN Extension */ = {isa = PBXBuildFile; fileRef = EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		ECA200000000000000000001 /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; platformFilters = (ios, xros, ); };
+		ECA200000000000000000002 /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; };
+		ECA300000000000000000003 /* geoip.metadb in Resources */ = {isa = PBXBuildFile; fileRef = ECA300000000000000000001 /* geoip.metadb */; platformFilters = (ios, xros, ); };
+		ECA300000000000000000004 /* GeoSite.dat in Resources */ = {isa = PBXBuildFile; fileRef = ECA300000000000000000002 /* GeoSite.dat */; platformFilters = (ios, xros, ); };
+		ECA300000000000000000005 /* geoip.metadb in Resources */ = {isa = PBXBuildFile; fileRef = ECA300000000000000000001 /* geoip.metadb */; };
+		ECA300000000000000000006 /* GeoSite.dat in Resources */ = {isa = PBXBuildFile; fileRef = ECA300000000000000000002 /* GeoSite.dat */; };
+		F5925515793B46F9B44ACE63 /* ../config/panel.json in Resources */ = {isa = PBXBuildFile; fileRef = EC1000000000000000000004 /* ../config/panel.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		04E881CC308AEFB2008951F5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 04F8B3CB3086419900B3E525 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC20000000000000000000C8;
+			remoteInfo = ECYCloudTVTunnel;
+		};
+		04E881CD308AEFB2008951F5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 04F8B3CB3086419900B3E525 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC2000000000000000000064;
+			remoteInfo = ECYCloudTunnel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EC200000000000000000006F /* Embed VPN Extension */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				EC200000000000000000006E /* ECYCloudTunnel.appex in Embed VPN Extension */,
+			);
+			name = "Embed VPN Extension";
+		};
+		EC20000000000000000000D3 /* Embed VPN Extension */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				EC20000000000000000000D2 /* ECYCloudTVTunnel.appex in Embed VPN Extension */,
+			);
+			name = "Embed VPN Extension";
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		04F8B3D33086419A00B3E525 /* ECYCloud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ECYCloud.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		59F9AD7C10EF468C8CD09563 /* ECYCloudTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ECYCloudTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC1000000000000000000004 /* ../config/panel.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ../config/panel.json; sourceTree = "<group>"; };
+		EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tunnel/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		EC2000000000000000000002 /* AppleKernel.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = AppleKernel.xcframework; sourceTree = ECY_KERNEL_FRAMEWORK_DIR; };
+		EC2000000000000000000065 /* ECYCloudTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = ECYCloudTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = ECYCloudTVTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECA300000000000000000001 /* geoip.metadb */ = {isa = PBXFileReference; lastKnownFileType = file; path = geoip.metadb; sourceTree = ECY_KERNEL_FRAMEWORK_DIR; };
+		ECA300000000000000000002 /* GeoSite.dat */ = {isa = PBXFileReference; lastKnownFileType = file; path = GeoSite.dat; sourceTree = ECY_KERNEL_FRAMEWORK_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		04F8B3D53086419A00B3E525 /* ECYCloud */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ECYCloud;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		04F8B3D03086419A00B3E525 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				EC1000000000000000000001 /* ECYCloudKit in Frameworks */,
+				ECA200000000000000000001 /* AppleKernel.xcframework in Frameworks */,
+			);
+		};
+		E242A93B05914EF9A0D0A002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				3A0E3FE6A9B44F238876ACB3 /* ECYCloudKit in Frameworks */,
+				ECA200000000000000000002 /* AppleKernel.xcframework in Frameworks */,
+			);
+		};
+		EC2000000000000000000068 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				EC200000000000000000006C /* ECYCloudKit in Frameworks */,
+				EC200000000000000000006D /* AppleKernel.xcframework in Frameworks */,
+			);
+		};
+		EC20000000000000000000CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				EC20000000000000000000D0 /* ECYCloudKit in Frameworks */,
+				EC20000000000000000000D1 /* AppleKernel.xcframework in Frameworks */,
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		04E88184308AEFB1008951F5 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */,
+				EC2000000000000000000065 /* ECYCloudTunnel.appex */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		04F8B3CA3086419900B3E525 = {
+			isa = PBXGroup;
+			children = (
+				EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */,
+				EC2000000000000000000002 /* AppleKernel.xcframework */,
+				ECA300000000000000000001 /* geoip.metadb */,
+				ECA300000000000000000002 /* GeoSite.dat */,
+				04F8B3D53086419A00B3E525 /* ECYCloud */,
+				EC1000000000000000000004 /* ../config/panel.json */,
+				04F8B3D43086419A00B3E525 /* Products */,
+				04E88184308AEFB1008951F5 /* Recovered References */,
+			);
+			sourceTree = "<group>";
+		};
+		04F8B3D43086419A00B3E525 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				59F9AD7C10EF468C8CD09563 /* ECYCloudTV.app */,
+				04F8B3D33086419A00B3E525 /* ECYCloud.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		04F8B3D23086419A00B3E525 /* ECYCloud */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 04F8B3DE3086419B00B3E525 /* Build configuration list for PBXNativeTarget "ECYCloud" */;
+			buildPhases = (
+				EC200000000000000000006F /* Embed VPN Extension */,
+				04F8B3CF3086419A00B3E525 /* Sources */,
+				04F8B3D03086419A00B3E525 /* Frameworks */,
+				04F8B3D13086419A00B3E525 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EC2000000000000000000070 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				04F8B3D53086419A00B3E525 /* ECYCloud */,
+			);
+			name = ECYCloud;
+			packageProductDependencies = (
+				EC1000000000000000000002 /* ECYCloudKit */,
+			);
+			productName = ECYCloud;
+			productReference = 04F8B3D33086419A00B3E525 /* ECYCloud.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EC2000000000000000000064 /* ECYCloudTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2000000000000000000066 /* Build configuration list for PBXNativeTarget "ECYCloudTunnel" */;
+			buildPhases = (
+				EC2000000000000000000067 /* Sources */,
+				EC2000000000000000000068 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			name = ECYCloudTunnel;
+			packageProductDependencies = (
+				EC1000000000000000000002 /* ECYCloudKit */,
+			);
+			productName = ECYCloudTunnel;
+			productReference = EC2000000000000000000065 /* ECYCloudTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		EC20000000000000000000C8 /* ECYCloudTVTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC20000000000000000000CA /* Build configuration list for PBXNativeTarget "ECYCloudTVTunnel" */;
+			buildPhases = (
+				EC20000000000000000000CB /* Sources */,
+				EC20000000000000000000CC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			name = ECYCloudTVTunnel;
+			packageProductDependencies = (
+				EC1000000000000000000002 /* ECYCloudKit */,
+			);
+			productName = ECYCloudTVTunnel;
+			productReference = EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		EC8AC9F50CA6498995EE0D29 /* ECYCloudTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3229956584F642EDAB7FB571 /* Build configuration list for PBXNativeTarget "ECYCloudTV" */;
+			buildPhases = (
+				EC20000000000000000000D3 /* Embed VPN Extension */,
+				DB36AE4A962544A9B97D8864 /* Sources */,
+				E242A93B05914EF9A0D0A002 /* Frameworks */,
+				2D866465862E49009D403A38 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EC20000000000000000000D4 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				04F8B3D53086419A00B3E525 /* ECYCloud */,
+			);
+			name = ECYCloudTV;
+			packageProductDependencies = (
+				EC1000000000000000000002 /* ECYCloudKit */,
+			);
+			productName = ECYCloudTV;
+			productReference = 59F9AD7C10EF468C8CD09563 /* ECYCloudTV.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		04F8B3CB3086419900B3E525 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2710;
+				LastUpgradeCheck = 2710;
+				TargetAttributes = {
+					04F8B3D23086419A00B3E525 = {
+						CreatedOnToolsVersion = 27.1;
+						SystemCapabilities = {
+							com.apple.Keychain = {
+								enabled = 1;
+							};
+						};
+					};
+					EC8AC9F50CA6498995EE0D29 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+				};
+			};
+			buildConfigurationList = 04F8B3CE3086419900B3E525 /* Build configuration list for PBXProject "ECYCloud" */;
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = 04F8B3CA3086419900B3E525;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EC1000000000000000000007 /* XCLocalSwiftPackageReference "Packages/ECYCloudKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 04F8B3D43086419A00B3E525 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EC20000000000000000000C8 /* ECYCloudTVTunnel */,
+				EC2000000000000000000064 /* ECYCloudTunnel */,
+				EC8AC9F50CA6498995EE0D29 /* ECYCloudTV */,
+				04F8B3D23086419A00B3E525 /* ECYCloud */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		04F8B3D13086419A00B3E525 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				EC1000000000000000000003 /* ../config/panel.json in Resources */,
+				ECA300000000000000000003 /* geoip.metadb in Resources */,
+				ECA300000000000000000004 /* GeoSite.dat in Resources */,
+			);
+		};
+		2D866465862E49009D403A38 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				F5925515793B46F9B44ACE63 /* ../config/panel.json in Resources */,
+				ECA300000000000000000005 /* geoip.metadb in Resources */,
+				ECA300000000000000000006 /* GeoSite.dat in Resources */,
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		04F8B3CF3086419A00B3E525 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		DB36AE4A962544A9B97D8864 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		EC2000000000000000000067 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				EC200000000000000000006B /* Tunnel/PacketTunnelProvider.swift in Sources */,
+			);
+		};
+		EC20000000000000000000CB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				EC20000000000000000000CF /* Tunnel/PacketTunnelProvider.swift in Sources */,
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EC2000000000000000000070 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilters = (
+				ios,
+				xros,
+			);
+			target = EC2000000000000000000064 /* ECYCloudTunnel */;
+			targetProxy = 04E881CD308AEFB2008951F5 /* PBXContainerItemProxy */;
+		};
+		EC20000000000000000000D4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilters = (
+				tvos,
+			);
+			target = EC20000000000000000000C8 /* ECYCloudTVTunnel */;
+			targetProxy = 04E881CC308AEFB2008951F5 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		04F8B3DC3086419B00B3E525 /* Debug configuration for PBXProject "ECYCloud" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_KERNEL_FRAMEWORK_DIR = "$(SRCROOT)/../build";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		04F8B3DD3086419B00B3E525 /* Release configuration for PBXProject "ECYCloud" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_KERNEL_FRAMEWORK_DIR = "$(SRCROOT)/../build";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		04F8B3DF3086419B00B3E525 /* Debug configuration for PBXNativeTarget "ECYCloud" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xr*]" = VisionAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ECYCloud/ECYCloud.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xrsimulator*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_DISPLAY_VERSION = "$(MARKETING_VERSION)";
+				ENABLE_APP_SANDBOX = YES;
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Platforms/AppInfo.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Debug;
+		};
+		04F8B3E03086419B00B3E525 /* Release configuration for PBXNativeTarget "ECYCloud" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=xr*]" = VisionAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ECYCloud/ECYCloud.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xrsimulator*]" = ECYCloud/Mobile.entitlements;
+				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_DISPLAY_VERSION = "$(MARKETING_VERSION)";
+				ENABLE_APP_SANDBOX = YES;
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Platforms/AppInfo.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Release;
+		};
+		32D4573A39524257A27AFE18 /* Debug configuration for PBXNativeTarget "ECYCloudTV" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ECYCloud/Mobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+		E4CDC4DF53BF468BB9BE66A8 /* Release configuration for PBXNativeTarget "ECYCloudTV" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ECYCloud/Mobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
+		EC2000000000000000000069 /* Debug configuration for PBXNativeTarget "ECYCloudTunnel" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_APP_GROUP = group.com.ecycloud.client;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tunnel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud VPN";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator xros xrsimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Debug;
+		};
+		EC200000000000000000006A /* Release configuration for PBXNativeTarget "ECYCloudTunnel" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_APP_GROUP = group.com.ecycloud.client;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tunnel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud VPN";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator xros xrsimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Release;
+		};
+		EC20000000000000000000CD /* Debug configuration for PBXNativeTarget "ECYCloudTVTunnel" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_APP_GROUP = group.com.ecycloud.client.tv;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tunnel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud VPN";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tv.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Debug;
+		};
+		EC20000000000000000000CE /* Release configuration for PBXNativeTarget "ECYCloudTVTunnel" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
+				ECY_APP_GROUP = group.com.ecycloud.client.tv;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tunnel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud VPN";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					Security,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Network,
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecycloud.client.tv.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+				XROS_DEPLOYMENT_TARGET = 1.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		04F8B3CE3086419900B3E525 /* Build configuration list for PBXProject "ECYCloud" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				04F8B3DC3086419B00B3E525 /* Debug configuration for PBXProject "ECYCloud" */,
+				04F8B3DD3086419B00B3E525 /* Release configuration for PBXProject "ECYCloud" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		04F8B3DE3086419B00B3E525 /* Build configuration list for PBXNativeTarget "ECYCloud" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				04F8B3DF3086419B00B3E525 /* Debug configuration for PBXNativeTarget "ECYCloud" */,
+				04F8B3E03086419B00B3E525 /* Release configuration for PBXNativeTarget "ECYCloud" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		3229956584F642EDAB7FB571 /* Build configuration list for PBXNativeTarget "ECYCloudTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				32D4573A39524257A27AFE18 /* Debug configuration for PBXNativeTarget "ECYCloudTV" */,
+				E4CDC4DF53BF468BB9BE66A8 /* Release configuration for PBXNativeTarget "ECYCloudTV" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EC2000000000000000000066 /* Build configuration list for PBXNativeTarget "ECYCloudTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2000000000000000000069 /* Debug configuration for PBXNativeTarget "ECYCloudTunnel" */,
+				EC200000000000000000006A /* Release configuration for PBXNativeTarget "ECYCloudTunnel" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EC20000000000000000000CA /* Build configuration list for PBXNativeTarget "ECYCloudTVTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC20000000000000000000CD /* Debug configuration for PBXNativeTarget "ECYCloudTVTunnel" */,
+				EC20000000000000000000CE /* Release configuration for PBXNativeTarget "ECYCloudTVTunnel" */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		EC1000000000000000000007 /* XCLocalSwiftPackageReference "Packages/ECYCloudKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ECYCloudKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EC1000000000000000000002 /* ECYCloudKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ECYCloudKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 04F8B3CB3086419900B3E525 /* Project object */;
+	validationLevel = 1;
+}

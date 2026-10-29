@@ -1,6 +1,9 @@
 package com.ecycloud.client
 
 import android.content.Context
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import org.json.JSONObject
 import java.io.File
 
@@ -64,6 +67,71 @@ object BoxState {
     fun runDir(context: Context): File = File(context.filesDir, "run")
 
     fun configFile(context: Context): File = File(runDir(context), "config.json")
+
+    @Synchronized
+    fun writeConfig(context: Context, raw: String) {
+        val config = JSONObject(raw)
+        val providers = config.optJSONObject("proxy-providers")
+        val files = mutableMapOf<String, String>()
+        providers?.keys()?.forEach { name ->
+            if (name.startsWith("ecy-panel-")) {
+                require(name == "ecy-panel-nodes" || Regex("ecy-panel-[a-f0-9]{64}").matches(name)) {
+                    "节点文件名称不合法"
+                }
+                val provider = providers.getJSONObject(name)
+                require(provider.getString("type") == "file" && provider.getString("path") == "$name.json") {
+                    "节点文件配置不合法"
+                }
+                val payload = provider.getJSONArray("payload")
+                require(payload.length() > 0) { "节点文件不能为空" }
+                val content = JSONObject().put("proxies", payload).toString()
+                require(content.toByteArray(Charsets.UTF_8).size <= maxRunFileBytes) { "节点文件过大" }
+                files["$name.json"] = content
+            }
+        }
+        val root = runDir(context)
+        root.mkdirs()
+        require(stat(root)?.let { OsConstants.S_ISDIR(it.st_mode) } == true) { "运行目录类型不可信" }
+        files.forEach { (name, content) ->
+            val target = File(root, name)
+            stat(target)?.let {
+                require(OsConstants.S_ISREG(it.st_mode) && it.st_nlink == 1L) { "节点文件类型或链接数不可信" }
+                if (target.readText() == content) return@forEach
+            }
+            val temp = File.createTempFile(".ecy-provider-", ".tmp", root)
+            try {
+                temp.writeText(content)
+                Os.rename(temp.path, target.path)
+            } finally {
+                temp.delete()
+            }
+        }
+        configFile(context).writeText(raw)
+    }
+
+    // 与 Dart CredentialStore 的凭据文件清理标记保持同名，跨进程、重启后仍须阻止旧配置自启。
+    fun sessionCleanupPending(context: Context): Boolean =
+        stat(File(context.filesDir, "credentials.json.session-ending")) != null
+
+    fun clearRunFiles(context: Context) {
+        deleteTree(runDir(context))
+    }
+
+    private fun deleteTree(file: File) {
+        val info = stat(file) ?: return
+        if (OsConstants.S_ISDIR(info.st_mode)) {
+            val children = file.listFiles() ?: error("不能读取旧运行目录")
+            children.forEach(::deleteTree)
+        }
+        check(file.delete()) { "不能删除旧运行数据" }
+    }
+
+    private fun stat(file: File) = try {
+        Os.lstat(file.path)
+    } catch (e: ErrnoException) {
+        if (e.errno != OsConstants.ENOENT) throw e
+        null
+    }
 
     fun cacheReady(context: Context): Boolean =
         File(runDir(context), "cache.db").let { it.isFile && it.length() > 0 }

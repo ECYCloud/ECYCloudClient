@@ -17,6 +17,7 @@ import '../widgets/rich_html_view.dart';
 import '../widgets/simple_data_table.dart';
 import 'account_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_scaffold.dart';
 
 class PurchasesPage extends StatefulWidget {
   const PurchasesPage({super.key});
@@ -120,7 +121,19 @@ class _PurchasesPageState extends State<PurchasesPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final ListToolbar toolbar = ListToolbar(
+      currentPage: _page,
+      lastPage: _lastPage,
+      total: _total,
+      showSearch: false,
+      searchHint: L10n.t('订单号 / 商品名'),
+      onSearchChanged: _onSearch,
+      onPageChanged: (int page) {
+        _page = page;
+        unawaited(_load());
+      },
+    );
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -141,17 +154,7 @@ class _PurchasesPageState extends State<PurchasesPage>
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: AppTheme.pageScrollPadding.copyWith(left: 0, top: 0),
                 children: <Widget>[
-                  ListToolbar(
-                    currentPage: _page,
-                    lastPage: _lastPage,
-                    total: _total,
-                    searchHint: L10n.t('订单号 / 商品名'),
-                    onSearchChanged: _onSearch,
-                    onPageChanged: (int page) {
-                      _page = page;
-                      unawaited(_load());
-                    },
-                  ),
+                  toolbar.buildSearch(),
                   if (_busy && _items.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 80),
@@ -225,6 +228,7 @@ class _PurchasesPageState extends State<PurchasesPage>
                         ],
                       ),
                     ),
+                  toolbar,
                 ],
               ),
             ),

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -51,10 +52,7 @@ func ensureOwnedDir(path string) error {
 	if trusted {
 		return nil
 	}
-	if err := takeOwnership(path); err != nil {
-		return fmt.Errorf("目录 %s 的属主不可信且无法收归管理员: %w", path, err)
-	}
-	return nil
+	return fmt.Errorf("目录 %s 的属主不可信，拒绝使用，请重新安装后台服务", path)
 }
 
 func hasReparsePoint(path string) (bool, error) {
@@ -82,20 +80,6 @@ func ownedByAdmins(path string) (bool, error) {
 		owner.IsWellKnown(windows.WinBuiltinAdministratorsSid), nil
 }
 
-// 收归 Administrators：该组在服务令牌里带 SE_GROUP_OWNER，不需要 SeRestorePrivilege
-func takeOwnership(path string) error {
-	owner, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(
-		path,
-		windows.SE_FILE_OBJECT,
-		windows.OWNER_SECURITY_INFORMATION,
-		owner, nil, nil, nil,
-	)
-}
-
 // 目录已存在时也要重写 DACL，否则会沿用历史遗留的宽松权限
 func applyDACL(path string, sddl string) error {
 	sd, err := windows.SecurityDescriptorFromString(sddl)
@@ -116,17 +100,7 @@ func applyDACL(path string, sddl string) error {
 }
 
 // 不能改用 WTSQueryUserToken：需要 SE_TCB_NAME，debug 拿不到，也认不出远程桌面会话
-func clientUserSID(pid int) (string, error) {
-	if pid <= 0 {
-		return "", fmt.Errorf("请求缺少 GUI 进程 ID，无法定位用户配置单元")
-	}
-
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return "", fmt.Errorf("打开 GUI 进程 %d 失败: %w", pid, err)
-	}
-	defer windows.CloseHandle(handle)
-
+func clientUserSID(handle windows.Handle) (string, error) {
 	var token windows.Token
 	if err := windows.OpenProcessToken(handle, windows.TOKEN_QUERY, &token); err != nil {
 		return "", fmt.Errorf("读取 GUI 进程令牌失败: %w", err)
@@ -156,20 +130,45 @@ func pipeClientPID(conn net.Conn) (int, error) {
 
 // 管道 DACL 只能收到交互用户，必须再核对接官方 GUI 可执行文件路径
 func verifyGUICaller(pid int) error {
+	_, err := guiCallerSID(pid)
+	return err
+}
+
+func guiCallerSID(pid int) (string, error) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return fmt.Errorf("打开调用方进程失败: %w", err)
+		return "", fmt.Errorf("打开调用方进程失败: %w", err)
 	}
 	defer windows.CloseHandle(handle)
 
 	buf := make([]uint16, windows.MAX_PATH)
 	size := uint32(len(buf))
 	if err := windows.QueryFullProcessImageName(handle, 0, &buf[0], &size); err != nil {
-		return fmt.Errorf("查询调用方可执行文件失败: %w", err)
+		return "", fmt.Errorf("查询调用方可执行文件失败: %w", err)
 	}
 
 	if actual := windows.UTF16ToString(buf[:size]); !strings.EqualFold(actual, guiExePath()) {
-		return fmt.Errorf("拒绝来自非官方客户端的指令: %s", actual)
+		return "", fmt.Errorf("拒绝来自非官方客户端的指令: %s", actual)
+	}
+	return clientUserSID(handle)
+}
+
+// 句柄保持至服务进程退出，异常退出也会结束继承此作业的内核子进程。
+func containServiceProcesses() error {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return err
+	}
+	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
+		windows.CloseHandle(job)
+		return err
+	}
+	if err := windows.AssignProcessToJobObject(job, windows.CurrentProcess()); err != nil {
+		windows.CloseHandle(job)
+		return err
 	}
 	return nil
 }

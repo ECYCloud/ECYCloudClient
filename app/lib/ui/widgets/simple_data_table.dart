@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+
 import '../../l10n/l10n.dart';
 import '../theme.dart';
 import 'overlay_scroll_view.dart';
+import 'app_text_selection.dart';
 
 class SimpleDataTable extends StatelessWidget {
   const SimpleDataTable({
@@ -236,10 +238,7 @@ class _MobileList extends StatelessWidget {
     }
     final Widget value = row[index];
     if (value is Align) {
-      return Align(
-        alignment: Alignment.centerRight,
-        child: value.child,
-      );
+      return Align(alignment: Alignment.centerRight, child: value.child);
     }
     return value;
   }
@@ -280,17 +279,17 @@ class _MobileList extends StatelessWidget {
                       children: <Widget>[
                         SizedBox(
                           width: 96,
-                          child: Text(
-                            columns[c],
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                          child: _Cell(
+                            child: Text(
+                              columns[c],
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: _mobileValue(rows[r], c),
-                        ),
+                        Expanded(child: _Cell(child: _mobileValue(rows[r], c))),
                       ],
                     ),
                   ),
@@ -304,13 +303,15 @@ class _MobileList extends StatelessWidget {
 }
 
 class _Cell extends StatelessWidget {
-  const _Cell({required this.child, required this.padding});
+  const _Cell({required this.child, this.padding = EdgeInsets.zero});
 
   final Widget child;
   final EdgeInsets padding;
 
   @override
-  Widget build(BuildContext context) => Padding(padding: padding, child: child);
+  Widget build(BuildContext context) => AppTextSelection(
+    child: Padding(padding: padding, child: child),
+  );
 }
 
 class TableText extends StatelessWidget {

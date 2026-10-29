@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -78,6 +79,9 @@ func Start(configJSON string, tunFd int32) error {
 
 	cfg, err := executor.ParseWithBytes([]byte(configJSON))
 	if err != nil {
+		if tunFd > 0 {
+			_ = os.NewFile(uintptr(tunFd), "tun").Close()
+		}
 		return trimmed(err)
 	}
 	bindTun(&cfg.General.Tun, configJSON, int(tunFd))

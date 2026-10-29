@@ -2,15 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../data/api/api_exception.dart';
 import '../../data/models/user_profile.dart';
 import '../../state/auth_controller.dart';
-import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../pages/account_page.dart';
 import '../theme.dart';
 import '../../l10n/l10n.dart';
+import 'icon_image.dart';
+import 'app_alert_dialog.dart';
 
 class UserAvatar extends StatelessWidget {
   const UserAvatar({super.key, required this.profile, this.radius = 18});
@@ -48,18 +49,12 @@ class UserAvatar extends StatelessWidget {
         double.parse(hsl.group(3)!) / 100,
       ).toColor();
     }
-    final Match? hex = RegExp(
-      r'''fill=["']#([0-9A-Fa-f]{6})["']''',
-    ).firstMatch(svg);
+    final Match? hex = RegExp(r'''fill=["']#([0-9A-Fa-f]{6})["']''')
+        .firstMatch(svg);
     if (hex != null) {
       return Color(int.parse(hex.group(1)!, radix: 16) | 0xFF000000);
     }
     return null;
-  }
-
-  static bool _isSvgUrl(String url) {
-    final String path = Uri.tryParse(url)?.path ?? url;
-    return path.toLowerCase().endsWith('.svg');
   }
 
   @override
@@ -68,9 +63,8 @@ class UserAvatar extends StatelessWidget {
     final String letter = user == null || user.displayName.isEmpty
         ? '?'
         : user.displayName.substring(0, 1).toUpperCase();
-    final TextStyle? letterStyle = Theme.of(
-      context,
-    ).textTheme.labelMedium?.copyWith(fontSize: radius * 0.9);
+    final TextStyle? letterStyle = Theme.of(context).textTheme.labelMedium
+        ?.copyWith(fontSize: radius * 0.9);
     final Widget fallback = CircleAvatar(
       radius: radius,
       child: Text(letter, style: letterStyle),
@@ -112,26 +106,13 @@ class UserAvatar extends StatelessWidget {
       return fallback;
     }
 
-    if (_isSvgUrl(url)) {
-      return ClipOval(
-        child: SvgPicture.network(
-          url,
-          width: radius * 2,
-          height: radius * 2,
-          fit: BoxFit.cover,
-          placeholderBuilder: (_) => fallback,
-          errorBuilder: (_, _, _) => fallback,
-        ),
-      );
-    }
-
     return ClipOval(
-      child: Image.network(
-        url,
+      child: RemoteIcon(
+        url: url,
         width: radius * 2,
         height: radius * 2,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => fallback,
+        fallback: fallback,
       ),
     );
   }
@@ -152,7 +133,6 @@ class UserAvatarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppScope scope = AppScope.of(context);
     final AuthController auth = scope.auth;
-    final ConnectionController connection = scope.connection;
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final TextStyle style = theme.textTheme.bodyLarge!.copyWith(
@@ -221,7 +201,7 @@ class UserAvatarButton extends StatelessWidget {
               icon: Icons.logout_outlined,
               selectedIcon: Icons.logout,
               label: L10n.t('退出登录'),
-              onPressed: () => unawaited(_logout(context, auth, connection)),
+              onPressed: () => unawaited(_logout(context, auth)),
             ),
           ],
           builder:
@@ -341,14 +321,10 @@ class _HoverFillMenuItemState extends State<_HoverFillMenuItem> {
   }
 }
 
-Future<void> _logout(
-  BuildContext context,
-  AuthController auth,
-  ConnectionController connection,
-) async {
+Future<void> _logout(BuildContext context, AuthController auth) async {
   final bool? confirmed = await showDialog<bool>(
     context: context,
-    builder: (BuildContext context) => AlertDialog(
+    builder: (BuildContext context) => AppAlertDialog(
       title: Text(L10n.t('退出登录')),
       content: Text(L10n.t('退出后将断开连接并清除本机保存的登录凭据。')),
       actions: <Widget>[
@@ -368,8 +344,16 @@ Future<void> _logout(
     return;
   }
 
-  await connection.disconnect();
-  await auth.logout();
+  try {
+    await auth.logout();
+  } on ApiException catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
+      );
+    }
+    return;
+  }
   if (context.mounted) {
     Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
   }

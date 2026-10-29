@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-class OptionDropdown<T> extends StatelessWidget {
+class OptionDropdown<T> extends StatefulWidget {
   const OptionDropdown({
     super.key,
     required this.value,
@@ -33,133 +33,164 @@ class OptionDropdown<T> extends StatelessWidget {
   final Widget? selectedTrailing;
 
   @override
+  State<OptionDropdown<T>> createState() => _OptionDropdownState<T>();
+}
+
+class _OptionDropdownState<T> extends State<OptionDropdown<T>> {
+  // MenuAnchor 靠 childFocusNode 认这个触发器：不给它，菜单收起后焦点无处可去，
+  // 遥控器之后按任何方向键都没有反应
+  final FocusNode _trigger = FocusNode();
+
+  @override
+  void dispose() {
+    _trigger.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final TextStyle style = theme.textTheme.bodyMedium!;
+    final T? value = widget.value;
+    final Map<T, String> options = widget.options;
+    final double width = widget.width;
+    final double height = widget.height;
+    final bool enabled = widget.enabled;
     final String label = value == null
-        ? placeholder
-        : (options[value as T] ?? placeholder);
+        ? widget.placeholder
+        : (options[value] ?? widget.placeholder);
+
+    // 菜单自己是一个 FocusScope，方向键进不去，必须开菜单时就把焦点放进某一项
+    final T? entryFocus = options.containsKey(value)
+        ? value
+        : (options.isEmpty ? null : options.keys.first);
 
     final BorderRadius menuRadius = BorderRadius.circular(AppTheme.menuRadius);
-    final double menuHeight = height * options.length > maxMenuHeight
-        ? maxMenuHeight
+    final double menuHeight = height * options.length > widget.maxMenuHeight
+        ? widget.maxMenuHeight
         : height * options.length;
 
     return SizedBox(
       width: width,
-      child: MenuAnchor(
-        crossAxisUnconstrained: false,
-        clipBehavior: Clip.antiAlias,
-        style: MenuStyle(
-          alignment: AlignmentDirectional.bottomStart,
-          padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.zero),
-          visualDensity: VisualDensity.standard,
-          minimumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
-          maximumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
-          shape: WidgetStatePropertyAll<OutlinedBorder>(
-            RoundedRectangleBorder(borderRadius: menuRadius),
+      child: ScrollbarTheme(
+        data: AppTheme.scrollbarInsideRadius(theme, AppTheme.menuRadius),
+        child: MenuAnchor(
+          childFocusNode: _trigger,
+          crossAxisUnconstrained: false,
+          clipBehavior: Clip.antiAlias,
+          style: MenuStyle(
+            alignment: AlignmentDirectional.bottomStart,
+            padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.zero),
+            visualDensity: VisualDensity.standard,
+            minimumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
+            maximumSize: WidgetStatePropertyAll<Size>(Size(width, menuHeight)),
+            shape: WidgetStatePropertyAll<OutlinedBorder>(
+              RoundedRectangleBorder(borderRadius: menuRadius),
+            ),
           ),
-        ),
-        menuChildren: <Widget>[
-          for (final (int index, MapEntry<T, String> entry)
-              in options.entries.indexed)
-            SizedBox(
-              width: width,
-              height: height,
-              child: MenuItemButton(
-                onPressed: enabled ? () => onChanged(entry.key) : null,
-                style: MenuItemButton.styleFrom(
-                  minimumSize: Size(width, height),
-                  fixedSize: Size(width, height),
-                  maximumSize: Size(width, height),
-                  padding: const EdgeInsets.fromLTRB(
-                    12,
-                    0,
-                    AppTheme.overlayScrollGutter,
-                    0,
-                  ),
-                  alignment: Alignment.centerLeft,
-                  visualDensity: VisualDensity.standard,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: _itemRadius(
-                      menuRadius,
-                      index: index,
-                      length: options.length,
+          menuChildren: <Widget>[
+            for (final (int index, MapEntry<T, String> entry)
+                in options.entries.indexed)
+              SizedBox(
+                width: width,
+                height: height,
+                child: MenuItemButton(
+                  autofocus: entry.key == entryFocus,
+                  onPressed: enabled ? () => widget.onChanged(entry.key) : null,
+                  style: MenuItemButton.styleFrom(
+                    minimumSize: Size(width, height),
+                    fixedSize: Size(width, height),
+                    maximumSize: Size(width, height),
+                    padding: const EdgeInsets.fromLTRB(
+                      12,
+                      0,
+                      AppTheme.overlayScrollGutter,
+                      0,
                     ),
+                    alignment: Alignment.centerLeft,
+                    visualDensity: VisualDensity.standard,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: _itemRadius(
+                        menuRadius,
+                        index: index,
+                        length: options.length,
+                      ),
+                    ),
+                    textStyle: style,
+                    foregroundColor: entry.key == value
+                        ? scheme.primary
+                        : scheme.onSurface,
+                    backgroundColor: entry.key == value
+                        ? scheme.primary.withValues(alpha: 0.08)
+                        : null,
                   ),
-                  textStyle: style,
-                  foregroundColor: entry.key == value
-                      ? scheme.primary
-                      : scheme.onSurface,
-                  backgroundColor: entry.key == value
-                      ? scheme.primary.withValues(alpha: 0.08)
-                      : null,
-                ),
-                child: _OptionRow(
-                  label: entry.value,
-                  leading: itemLeading?.call(entry.key),
-                  trailing: itemTrailing?.call(entry.key),
-                  style: style,
+                  child: _OptionRow(
+                    label: entry.value,
+                    leading: widget.itemLeading?.call(entry.key),
+                    trailing: widget.itemTrailing?.call(entry.key),
+                    style: style,
+                  ),
                 ),
               ),
-            ),
-        ],
-        builder:
-            (BuildContext context, MenuController controller, Widget? child) {
-              final bool open = controller.isOpen;
+          ],
+          builder:
+              (BuildContext context, MenuController controller, Widget? child) {
+                final bool open = controller.isOpen;
 
-              return InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: enabled
-                    ? () {
-                        if (open) {
-                          controller.close();
-                        } else {
-                          controller.open(position: Offset(0, height + 4));
+                return InkWell(
+                  focusNode: _trigger,
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: enabled
+                      ? () {
+                          if (open) {
+                            controller.close();
+                          } else {
+                            controller.open(position: Offset(0, height + 4));
+                          }
                         }
-                      }
-                    : null,
-                child: Container(
-                  width: width,
-                  height: height,
-                  padding: const EdgeInsets.only(left: 12, right: 6),
-                  decoration: BoxDecoration(
-                    color: scheme.surface,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: open ? scheme.primary : scheme.outline,
+                      : null,
+                  child: Container(
+                    width: width,
+                    height: height,
+                    padding: const EdgeInsets.only(left: 12, right: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.surface,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: open ? scheme.primary : scheme.outline,
+                      ),
                     ),
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: _OptionRow(
-                          label: label,
-                          leading: selectedLeading,
-                          trailing: selectedTrailing,
-                          style: style.copyWith(
-                            color: value == null
-                                ? scheme.onSurfaceVariant
-                                : null,
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: _OptionRow(
+                            label: label,
+                            leading: widget.selectedLeading,
+                            trailing: widget.selectedTrailing,
+                            style: style.copyWith(
+                              color: value == null
+                                  ? scheme.onSurfaceVariant
+                                  : null,
+                            ),
                           ),
                         ),
-                      ),
-                      AnimatedRotation(
-                        turns: open ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 180),
-                        child: Icon(
-                          Icons.expand_more,
-                          size: 16,
-                          color: open ? scheme.primary : scheme.outline,
+                        AnimatedRotation(
+                          turns: open ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: Icon(
+                            Icons.expand_more,
+                            size: 16,
+                            color: open ? scheme.primary : scheme.outline,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+        ),
       ),
     );
   }

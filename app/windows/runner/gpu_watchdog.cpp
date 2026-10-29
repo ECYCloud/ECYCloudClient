@@ -21,23 +21,35 @@ std::thread g_thread;
 HANDLE g_stop_event = nullptr;
 
 void Relaunch() {
-  CloseInstanceMutex();
-
   wchar_t path[MAX_PATH]{};
-  if (::GetModuleFileNameW(nullptr, path, MAX_PATH) != 0) {
-    // 原样沿用命令行：开机自启是带参数拉起的，重启后行为要一致
-    std::wstring command_line = ::GetCommandLineW();
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION created{};
-    if (::CreateProcessW(path, command_line.data(), nullptr, nullptr, FALSE, 0,
-                         nullptr, nullptr, &startup, &created)) {
-      ::CloseHandle(created.hProcess);
-      ::CloseHandle(created.hThread);
-    }
+  const DWORD length = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    return;
   }
 
-  ::ExitProcess(EXIT_SUCCESS);
+  // 原样沿用命令行：开机自启是带参数拉起的，重启后行为要一致
+  std::wstring command_line = ::GetCommandLineW();
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION created{};
+  // 新进程必须先挂起，创建成功后才能释放单实例锁，否则启动失败会丢掉当前实例。
+  if (!::CreateProcessW(path, command_line.data(), nullptr, nullptr, FALSE,
+                        CREATE_SUSPENDED, nullptr, nullptr, &startup, &created)) {
+    return;
+  }
+
+  CloseInstanceMutex();
+  const bool resumed = ::ResumeThread(created.hThread) != static_cast<DWORD>(-1);
+  if (!resumed) {
+    HoldInstanceMutex(::CreateMutexW(nullptr, TRUE, kInstanceMutexName));
+    ::TerminateProcess(created.hProcess, EXIT_FAILURE);
+  }
+  ::CloseHandle(created.hThread);
+  ::CloseHandle(created.hProcess);
+
+  if (resumed) {
+    ::ExitProcess(EXIT_SUCCESS);
+  }
 }
 
 // 哨兵必须与 ANGLE 同一适配器；不能每轮新建设备（适配器会先恢复）。建设备必须在本线程：

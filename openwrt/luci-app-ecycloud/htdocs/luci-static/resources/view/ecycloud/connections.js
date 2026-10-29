@@ -37,6 +37,44 @@ function lifetime(item, active) {
 	return start ? api.duration(end - start) : '';
 }
 
+function text(value) {
+	return String(value || '').trim();
+}
+
+function connectedAt(item) {
+	var start = startedAt(item);
+	var date = new Date(start);
+
+	return start
+		? '%04d-%02d-%02d %s'.format(date.getFullYear(), date.getMonth() + 1, date.getDate(), api.clock(start))
+		: '';
+}
+
+function detailFields(item, speed) {
+	var name = api.processName(item);
+	var path = text(item.process_path);
+	var network = text(item.network);
+	var inbound = text(item.inbound);
+	var rule = text(item.rule);
+	var payload = text(item.rule_payload);
+
+	return [
+		[ _('Host'), target(item) ],
+		[ _('Downloaded'), api.bytes(item.download) ],
+		[ _('Uploaded'), api.bytes(item.upload) ],
+		[ _('Download speed'), api.speed(speed.down) ],
+		[ _('Upload speed'), api.speed(speed.up) ],
+		[ _('Chain'), outbound(item) ],
+		[ _('Rule'), payload ? rule + '(' + payload + ')' : rule ],
+		[ _('Process'), !path || path == name ? name : name + ' (' + path + ')' ],
+		[ _('Connected at'), connectedAt(item) ],
+		[ _('Source address'), api.connectionSource(item) ],
+		[ _('Destination address'), text(item.remote_destination) || text(item.destination_ip) ],
+		[ _('Destination port'), text(item.destination_port) ],
+		[ _('Type'), network ? inbound + '(' + network + ')' : inbound ]
+	];
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
@@ -61,8 +99,10 @@ return view.extend({
 		this.signedIn = api.signedIn(data[0]);
 		this.running = !!(data[0] && data[0].running);
 		this.store = api.ingestConnections((data[1] && data[1].connections) || []);
+		this.at = +((data[1] && data[1].at) || 0);
 		this.error = (data[1] && data[1].error) || '';
 		this.paint();
+		this.refreshDetail();
 	},
 
 	rows: function() {
@@ -119,7 +159,7 @@ return view.extend({
 		var rows = this.rows();
 
 		if (this.error && !rows.length) {
-			dom.content(this.body, E('div', { 'class': 'ecycloud-empty' }, [ this.error ]));
+			dom.content(this.body, E('div', { 'class': 'ecycloud-empty' }, [ api.messageText(this.error) ]));
 			this.paintFilter();
 			return;
 		}
@@ -160,6 +200,9 @@ return view.extend({
 		var process = api.processName(item);
 		var time = lifetime(item, row.active);
 
+		if (item.inbound)
+			chips.push(E('span', { 'class': 'ecycloud-tag' }, [ item.inbound ]));
+
 		if (network)
 			chips.push(E('span', { 'class': 'ecycloud-tag' }, [ network ]));
 
@@ -172,7 +215,13 @@ return view.extend({
 		if (item.rule)
 			chips.push(E('span', { 'class': 'ecycloud-row-sub' }, [ item.rule ]));
 
-		return E('div', { 'class': 'ecycloud-row' + (row.active ? '' : ' is-closed') }, [
+		return E('div', {
+			'class': 'ecycloud-row is-clickable' + (row.active ? '' : ' is-closed'),
+			'click': L.bind(function() {
+				if (!String(window.getSelection() || ''))
+					this.openDetail(row);
+			}, this)
+		}, [
 			E('div', { 'class': 'ecycloud-row-main' }, [
 				E('div', { 'class': 'ecycloud-row-title' }, [
 					E('span', { 'class': 'ecycloud-dot' }),
@@ -187,6 +236,114 @@ return view.extend({
 				])
 			])
 		]);
+	},
+
+	openDetail: function(row) {
+		var fields = E('div', { 'class': 'ecycloud-modal-fields' });
+		var node = E('div', {
+			'class': 'ecycloud-modal is-dialog is-detail',
+			'data-theme': api.detectTheme()
+		});
+		var close = function() {
+			node.remove();
+		};
+		var closeBtn = api.pressable('ecycloud-modal-ok', {}, [ _('Close connection') ]);
+		var detail = {
+			node: node,
+			fields: fields,
+			closeBtn: closeBtn,
+			item: row.item,
+			active: row.active,
+			at: this.at,
+			speed: { up: 0, down: 0 }
+		};
+
+		closeBtn.addEventListener('click', function() {
+			if (closeBtn.disabled)
+				return;
+
+			closeBtn.disabled = true;
+			api.closeConnection(detail.item.id).then(function(res) {
+				if (res.ok)
+					close();
+				else
+					api.notify(res);
+			}).catch(function(err) {
+				api.notify({ ok: false, msg: (err && err.message) || _('Request failed') });
+			}).finally(function() {
+				closeBtn.disabled = false;
+			});
+		});
+
+		document.querySelectorAll('.ecycloud-modal.is-detail').forEach(function(item) {
+			item.remove();
+		});
+		node.appendChild(E('div', { 'class': 'ecycloud-modal-card is-dialog' }, [
+			E('div', { 'class': 'ecycloud-modal-title' }, [ _('Connection details') ]),
+			fields,
+			E('div', { 'class': 'ecycloud-modal-actions' }, [
+				closeBtn,
+				api.pressable('ecycloud-modal-cancel', { click: close }, [ _('Close') ])
+			])
+		]));
+		this.detail = detail;
+		this.paintDetail();
+		api.onBackdrop(node, close);
+		document.body.appendChild(node);
+		api.isolate(node);
+	},
+
+	refreshDetail: function() {
+		var detail = this.detail;
+		var store = this.store;
+
+		if (!detail)
+			return;
+
+		if (!detail.node.isConnected) {
+			this.detail = null;
+			return;
+		}
+
+		if (detail.active && this.at != detail.at) {
+			var find = function(list) {
+				return list.filter(function(item) {
+					return item.id == detail.item.id;
+				})[0];
+			};
+			var live = find(store.active);
+			var seconds = this.at - detail.at;
+
+			if (live) {
+				if (detail.at > 0 && seconds > 0)
+					detail.speed = {
+						up: Math.round(Math.max(0, live.upload - detail.item.upload) / seconds),
+						down: Math.round(Math.max(0, live.download - detail.item.download) / seconds)
+					};
+				detail.item = live;
+			}
+			else {
+				detail.item = find(store.closed) || detail.item;
+				detail.active = false;
+				detail.speed = { up: 0, down: 0 };
+			}
+
+			detail.at = this.at;
+		}
+
+		this.paintDetail();
+	},
+
+	paintDetail: function() {
+		var detail = this.detail;
+
+		detail.closeBtn.style.display = detail.active ? '' : 'none';
+		dom.content(detail.fields, detailFields(detail.item, detail.speed).map(function(field) {
+			return E('div', {}, [
+				E('span', { 'class': 'ecycloud-modal-label' }, [ field[0] + ': ' ]),
+				field[1] || '—'
+			]);
+		}));
 	},
 
 	render: function(data) {

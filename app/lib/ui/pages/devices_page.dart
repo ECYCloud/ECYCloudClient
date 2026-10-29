@@ -14,6 +14,8 @@ import '../widgets/refresh_button.dart';
 import '../widgets/simple_data_table.dart';
 import '../widgets/tag_chip.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
 
 class DevicesPage extends StatefulWidget {
   const DevicesPage({super.key});
@@ -103,9 +105,9 @@ class _DevicesPageState extends State<DevicesPage>
     final String label = item.device.isEmpty ? item.ip : item.device;
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(L10n.t('确认移除该设备？')),
-        content: Text(L10n.t('将通知 {0} 上的客户端下线，最长 60 秒后生效。', <Object>[label])),
+      builder: (BuildContext context) => AppAlertDialog(
+        title: Text(L10n.t('确认将该设备下线？')),
+        content: Text(L10n.t('将通知 {0} 上的客户端下线。', <Object>[label])),
         actions: <Widget>[
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -146,30 +148,42 @@ class _DevicesPageState extends State<DevicesPage>
   }
 
   Widget _deviceCell(ThemeData theme, DeviceListItem item, String selfId) {
+    final Widget body;
     if (item.device.isEmpty) {
-      return TableText(L10n.t('第三方客户端'));
+      body = TableText(L10n.t('第三方客户端'));
+    } else {
+      final bool current = item.deviceId.isNotEmpty && item.deviceId == selfId;
+      body = Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 6,
+        runSpacing: 4,
+        children: <Widget>[
+          TableText(item.device),
+          if (current)
+            TagChip(label: L10n.t('当前设备'), color: theme.colorScheme.primary),
+        ],
+      );
     }
-    final bool current = item.deviceId.isNotEmpty && item.deviceId == selfId;
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 6,
-      runSpacing: 4,
-      children: <Widget>[
-        TableText(item.device),
-        if (current)
-          TagChip(
-            label: L10n.t('当前设备'),
-            color: theme.colorScheme.primary,
-          ),
-      ],
-    );
+    return body;
   }
 
   @override
   Widget build(BuildContext context) {
+    final ListToolbar toolbar = ListToolbar(
+      currentPage: _page,
+      lastPage: _lastPage,
+      total: _total,
+      showSearch: false,
+      searchHint: L10n.t('IP / 归属地 / 设备 / 版本'),
+      onSearchChanged: _onSearch,
+      onPageChanged: (int page) {
+        _page = page;
+        unawaited(_load());
+      },
+    );
     final ThemeData theme = Theme.of(context);
     final String selfId = AppScope.of(context).auth.api?.device.deviceId ?? '';
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -203,17 +217,7 @@ class _DevicesPageState extends State<DevicesPage>
                       ),
                     ),
                   ),
-                  ListToolbar(
-                    currentPage: _page,
-                    lastPage: _lastPage,
-                    total: _total,
-                    searchHint: L10n.t('IP / 归属地 / 设备 / 版本'),
-                    onSearchChanged: _onSearch,
-                    onPageChanged: (int page) {
-                      _page = page;
-                      unawaited(_load());
-                    },
-                  ),
+                  toolbar.buildSearch(),
                   if (_busy && _items.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 80),
@@ -258,7 +262,7 @@ class _DevicesPageState extends State<DevicesPage>
                                       style: FilledButton.styleFrom(
                                         backgroundColor: AppTheme.danger,
                                       ),
-                                      child: Text(L10n.t('移除')),
+                                      child: Text(L10n.t('下线')),
                                     )
                                   : TableText(
                                       item.device.isEmpty ? L10n.t('不支持') : '',
@@ -268,6 +272,7 @@ class _DevicesPageState extends State<DevicesPage>
                         ],
                       ),
                     ),
+                  toolbar,
                 ],
               ),
             ),

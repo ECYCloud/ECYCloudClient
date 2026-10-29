@@ -1,0 +1,120 @@
+import java.io.File
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+import java.security.MessageDigest
+
+group 'com.alexmercerind.media_kit_libs_android_video'
+version '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:9.4.1'
+    }
+}
+
+def nativeLock = file('native-libraries.json')
+def nativeInputs = new JsonSlurper().parse(nativeLock)
+def nativeOutput = file("$buildDir/native-libs")
+
+def sha256 = { File input ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+
+def fetchArchive = { spec ->
+    def archive = file("$buildDir/downloads/${spec.file}")
+    if (archive.exists() && sha256(archive) == spec.sha256) return archive
+    archive.parentFile.mkdirs()
+    def partial = new File(archive.path + '.partial')
+    try {
+        def connection = new URL(spec.url).openConnection()
+        connection.connectTimeout = 20000
+        connection.readTimeout = 20000
+        connection.inputStream.withCloseable { input ->
+            partial.withOutputStream { output -> output << input }
+        }
+        if (sha256(partial) != spec.sha256) {
+            throw new GradleException("原生依赖校验失败：${spec.file}")
+        }
+        java.nio.file.Files.move(partial.toPath(), archive.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    } finally {
+        partial.delete()
+    }
+    archive
+}
+
+def extractLibrary = { ZipFile archive, String abi, String name ->
+    def entry = archive.getEntry("lib/$abi/$name")
+    if (entry == null) throw new GradleException("依赖缺少 $abi/$name")
+    def target = new File(nativeOutput, "$abi/$name")
+    target.parentFile.mkdirs()
+    archive.getInputStream(entry).withCloseable { input ->
+        target.withOutputStream { output -> output << input }
+    }
+}
+
+def prepareNativeLibraries = tasks.register('downloadDependencies') {
+    inputs.file(nativeLock)
+    outputs.dir(nativeOutput)
+    doLast {
+        def mpvArchive = fetchArchive(nativeInputs.mpv)
+        nativeOutput.deleteDir()
+        new ZipFile(mpvArchive).withCloseable { archive ->
+            nativeInputs.abis.each { abi ->
+                nativeInputs.libraries.each { name -> extractLibrary(archive, abi, name) }
+            }
+        }
+        nativeInputs.abis.each { abi ->
+            new ZipFile(fetchArchive(nativeInputs.helpers[abi])).withCloseable { archive ->
+                extractLibrary(archive, abi, 'libmediakitandroidhelper.so')
+            }
+        }
+    }
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    dependsOn(prepareNativeLibraries)
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    // Conditional for compatibility with AGP <4.2.
+    if (project.android.hasProperty("namespace")) {
+        namespace 'com.alexmercerind.media_kit_libs_android_video'
+    }
+
+    compileSdkVersion 37
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        minSdkVersion 24
+    }
+
+    sourceSets.main.jniLibs.srcDir("$buildDir/native-libs")
+}
+

@@ -132,10 +132,10 @@ body[data-theme="dark"] .ecycloud-modal,
 	gap: 6px;
 	height: auto;
 	min-height: 32px;
-	min-width: 0;
+	min-width: 56px;
 	border-radius: 999px;
 	border: 0;
-	padding: 6px 16px;
+	padding: 3px 20px;
 	font-size: 13px;
 	font-weight: 600;
 	line-height: 1.4;
@@ -275,12 +275,13 @@ html body #main-content .ecycloud-ui .cbi-section.ecycloud-login {
 	float: none;
 	box-sizing: border-box;
 	width: 100%;
-	max-width: 28em;
-	margin: 40px auto 24px;
+	max-width: 30em;
+	margin: 12px auto 24px;
 	padding: 0;
 	border: 0;
-	border-radius: 28px;
+	border-radius: 20px;
 	background: var(--ecy-card);
+	overflow: hidden;
 }
 
 html body .ecycloud-ui .ecycloud-hidden,
@@ -291,38 +292,65 @@ html body .ecycloud-ui .ecycloud-login-remember.ecycloud-hidden {
 	display: none;
 }
 
+.ecycloud-ui .ecycloud-login {
+	--ecy-input-h: 48px;
+	--ecy-input-radius: 999px;
+	--ecy-input-pad: 18px;
+	--ecy-input-bg: var(--ecy-input);
+	--ecy-input-border: transparent;
+}
+
 .ecycloud-ui .ecycloud-login-body {
 	display: flex;
 	flex-direction: column;
+	padding: 24px 20px;
+}
+
+.ecycloud-ui .ecycloud-login-form {
+	display: flex;
+	flex-direction: column;
 	align-items: stretch;
-	padding: 36px 32px;
 }
 
 .ecycloud-ui .ecycloud-login-brand {
 	display: flex;
-	flex-direction: column;
 	align-items: center;
-	gap: 16px;
-	margin: 0 0 4px;
+	justify-content: center;
+	gap: 10px;
+	margin: 0 0 28px;
 	text-align: center;
 }
 
 .ecycloud-ui .ecycloud-login-mark {
 	display: block;
-	width: 56px;
-	height: 56px;
+	width: 28px;
+	height: 28px;
 	border: 0;
 }
 
 .ecycloud-ui .ecycloud-login-name {
-	font-size: 28px;
+	font-size: 16px;
 	font-weight: 600;
-	letter-spacing: -0.02em;
+}
+
+.ecycloud-ui .ecycloud-login-site {
+	display: none;
+}
+
+.ecycloud-ui .ecycloud-login-heading {
+	margin: 0 0 8px;
+	font-size: 28px;
+	font-weight: 700;
+	line-height: 1.15;
+	letter-spacing: -0.03em;
+	text-align: center;
 }
 
 .ecycloud-ui .ecycloud-login .cbi-section-descr {
-	margin: 0 0 24px;
+	margin: 0 0 28px;
 	padding: 0;
+	color: var(--ecy-muted);
+	line-height: 1.5;
 	text-align: center;
 }
 
@@ -337,7 +365,10 @@ html body .ecycloud-ui .ecycloud-login-remember.ecycloud-hidden {
 .ecycloud-ui .ecycloud-login-field > label {
 	margin: 0;
 	padding: 0;
+	font-size: 13px;
+	font-weight: 500;
 	line-height: 1.4;
+	color: var(--ecy-muted);
 }
 
 .ecycloud-ui .ecycloud-login-field .ecycloud-input-host {
@@ -352,7 +383,7 @@ html body .ecycloud-ui .ecycloud-login-remember.ecycloud-hidden {
 .ecycloud-ui .ecycloud-login-code {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 12px;
 }
 
 .ecycloud-ui .ecycloud-login-code .ecycloud-input-host {
@@ -364,12 +395,13 @@ html body .ecycloud-ui .ecycloud-login-remember.ecycloud-hidden {
 .ecycloud-ui .ecycloud-login-send {
 	flex: 0 0 auto;
 	box-sizing: border-box;
-	border: 0;
+	height: 48px;
+	padding: 0 20px;
+	border: 1px solid var(--ecy-input-line);
 	border-radius: 999px;
-	padding: 6px 16px;
-	line-height: 1.4;
-	background: var(--ecy-cta);
-	color: var(--ecy-cta-text);
+	line-height: 46px;
+	background: transparent;
+	color: var(--ecy-fg);
 	font-weight: 600;
 	white-space: nowrap;
 	cursor: pointer;
@@ -378,14 +410,21 @@ html body .ecycloud-ui .ecycloud-login-remember.ecycloud-hidden {
 .ecycloud-ui .ecycloud-login-tools,
 .ecycloud-ui .ecycloud-login-links {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
-	justify-content: flex-end;
 	gap: 8px;
-	margin: 0 0 8px;
+}
+
+.ecycloud-ui .ecycloud-login-tools {
+	justify-content: flex-end;
+	margin: -4px 0 20px;
 }
 
 .ecycloud-ui .ecycloud-login-links {
 	justify-content: space-between;
+	margin: 28px 0 0;
+	padding: 16px 0 0;
+	border-top: 1px solid color-mix(in srgb, var(--ecy-fg) 10%, transparent);
 }
 
 html body .ecycloud-ui .ecycloud-login-remember {
@@ -437,21 +476,33 @@ html body .ecycloud-ui .ecycloud-login-remember[aria-pressed="true"] .ecycloud-l
 	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-.ecycloud-ui .ecycloud-login-submit {
+.ecycloud-ui .ecycloud-login-submit,
+.ecycloud-ui .ecycloud-login-alt {
 	display: block;
-	text-align: center;
 	box-sizing: border-box;
 	width: 100%;
 	max-width: none;
-	margin: 8px 0;
-	padding: 6px 16px;
-	border: 0;
+	height: 48px;
+	margin: 0;
+	padding: 0 16px;
 	border-radius: 999px;
-	line-height: 1.4;
-	background: var(--ecy-cta);
-	color: var(--ecy-cta-text);
+	line-height: 46px;
+	text-align: center;
 	font-weight: 600;
 	cursor: pointer;
+}
+
+.ecycloud-ui .ecycloud-login-submit {
+	border: 1px solid var(--ecy-cta);
+	background: var(--ecy-cta);
+	color: var(--ecy-cta-text);
+}
+
+.ecycloud-ui .ecycloud-login-alt {
+	margin-top: 12px;
+	border: 1px solid var(--ecy-input-line);
+	background: transparent;
+	color: var(--ecy-fg);
 }
 
 .ecycloud-ui .ecycloud-login .ecycloud-login-textbtn,
@@ -469,6 +520,79 @@ html body .ecycloud-ui .ecycloud-login-remember[aria-pressed="true"] .ecycloud-l
 	color: var(--ecy-primary);
 	text-decoration: none;
 	cursor: pointer;
+}
+
+.ecycloud-ui .ecycloud-login-legal {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 16px;
+}
+
+.ecycloud-ui .ecycloud-login a.ecycloud-login-textbtn.is-muted {
+	color: var(--ecy-muted);
+}
+
+@media (min-width: 900px) {
+	html body .ecycloud-ui .cbi-section.ecycloud-login,
+	html body #maincontent .ecycloud-ui .cbi-section.ecycloud-login,
+	html body #main-content .ecycloud-ui .cbi-section.ecycloud-login {
+		max-width: 960px;
+		margin: 24px auto;
+		box-shadow: 0 24px 64px rgba(0, 0, 0, 0.08);
+	}
+
+	.ecycloud-ui .ecycloud-login-body {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		min-height: 560px;
+		padding: 0;
+	}
+
+	.ecycloud-ui .ecycloud-login-brand {
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0;
+		margin: 0;
+		padding: 48px;
+		color: #fff;
+		background:
+			radial-gradient(circle at 100% 0, rgba(41, 151, 255, 0.45), transparent 55%),
+			linear-gradient(135deg, #0b1020, #0a2a66);
+	}
+
+	.ecycloud-ui .ecycloud-login-mark {
+		width: 64px;
+		height: 64px;
+	}
+
+	.ecycloud-ui .ecycloud-login-name {
+		margin-top: 24px;
+		font-size: 44px;
+		font-weight: 700;
+		line-height: 1.05;
+		letter-spacing: -0.03em;
+	}
+
+	.ecycloud-ui .ecycloud-login-site {
+		display: block;
+		margin-top: 12px;
+		font-size: 15px;
+		color: rgba(255, 255, 255, 0.64);
+	}
+
+	.ecycloud-ui .ecycloud-login-form {
+		justify-content: center;
+		box-sizing: border-box;
+		width: 100%;
+		max-width: 496px;
+		margin: 0 auto;
+		padding: 56px 48px;
+	}
+
+	.ecycloud-ui .ecycloud-login-heading {
+		font-size: 30px;
+	}
 }
 
 html body .ecycloud-ui [hidden],
@@ -546,12 +670,16 @@ html body .ecycloud-modal .ecycloud-modal-ok,
 html body .ecycloud-modal .ecycloud-modal-cancel {
 	appearance: none;
 	-webkit-appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	flex: none;
 	height: auto;
-	min-width: 0;
+	min-width: 56px;
 	min-height: 32px;
+	box-sizing: border-box;
 	margin: 0;
-	padding: 11px 20px;
+	padding: 3px 20px;
 	border: 0;
 	border-radius: 999px;
 	background: var(--ecy-cta, #1d1d1f);
@@ -569,6 +697,7 @@ html body .ecycloud-modal-cancel,
 html body .ecycloud-modal .ecycloud-modal-cancel,
 html body .ecycloud-ann-nav .ecycloud-modal-cancel,
 html body .ecycloud-modal-card.is-announce .ecycloud-modal-actions .ecycloud-modal-cancel {
+	padding: 2px 19px;
 	background: transparent;
 	background-image: none;
 	border: 1px solid var(--ecy-cta, #1d1d1f);
@@ -605,6 +734,7 @@ html body .ecycloud-modal-card.is-dialog .ecycloud-modal-text {
 	color: inherit;
 	font-size: 13px;
 	white-space: pre-wrap;
+	text-align: justify;
 	max-height: min(50vh, 22em);
 	overflow: auto;
 	word-break: break-word;
@@ -651,10 +781,6 @@ html body .ecycloud-modal-choice.is-action {
 	cursor: default;
 }
 
-html body .ecycloud-modal-choice.is-action .ecycloud-modal-ok {
-	padding: 4px 12px;
-}
-
 html body .ecycloud-modal-choice-label {
 	font-weight: 600;
 	line-height: 1.35;
@@ -666,6 +792,20 @@ html body .ecycloud-modal-choice-detail {
 	font-size: 12px;
 	line-height: 1.4;
 	word-break: break-all;
+}
+
+html body .ecycloud-modal-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: min(60vh, 32em);
+	overflow: auto;
+	font-size: 13px;
+	word-break: break-word;
+}
+
+html body .ecycloud-modal-label {
+	color: var(--ecy-muted, #6e6e73);
 }
 
 html body .ecycloud-modal-actions {
@@ -715,6 +855,7 @@ html body .ecycloud-ann-html {
 	max-height: min(60vh, 28em);
 	overflow: auto;
 	line-height: 1.45;
+	text-align: justify;
 	word-break: break-word;
 }
 
@@ -737,11 +878,6 @@ html body .ecycloud-ann-nav {
 	justify-content: space-between;
 	align-items: center;
 	gap: 8px;
-}
-
-/* 翻页按钮是内容区控件，保持紧凑；动作区的「关闭」走统一的动作按钮尺寸 */
-html body .ecycloud-ann-nav .ecycloud-modal-cancel {
-	padding: 6px 16px;
 }
 
 html body .ecycloud-ann-count {
@@ -896,7 +1032,7 @@ body[data-theme="dark"] .ecycloud-modal-card {
 	box-sizing: border-box;
 	min-width: 0;
 	max-width: 100%;
-	padding: 12px 14px;
+	padding: 4.5px 14px 4.5px 20px;
 	border: 0;
 	border-radius: 9px;
 	background: var(--ecy-card);
@@ -908,7 +1044,8 @@ body[data-theme="dark"] .ecycloud-modal-card {
 }
 
 .ecycloud-ui .ecycloud-node.is-selected {
-	background: color-mix(in srgb, var(--ecy-primary) 10%, var(--ecy-card));
+	background: color-mix(in srgb, var(--ecy-primary) 16%, var(--ecy-card));
+	box-shadow: inset 0 0 0 1px var(--ecy-primary);
 }
 
 .ecycloud-ui .ecycloud-node-info {
@@ -919,16 +1056,30 @@ body[data-theme="dark"] .ecycloud-modal-card {
 .ecycloud-ui .ecycloud-node-name {
 	display: flex;
 	align-items: center;
+	position: relative;
+	min-width: 0;
+	font-size: 13px;
+}
+
+.ecycloud-ui .ecycloud-node-label {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.ecycloud-ui .ecycloud-node-check {
+.ecycloud-ui .ecycloud-node-name .ecycloud-tag {
 	flex: none;
+	margin-left: 6px;
+}
+
+.ecycloud-ui .ecycloud-node-check {
+	position: absolute;
+	left: -16px;
+	top: 50%;
+	transform: translateY(-50%);
 	width: 12px;
 	height: 12px;
-	margin-right: 3px;
 	background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%230071e3' d='M10.2 2.4L4.6 8 1.8 5.2 1 6l3.6 3.6L11 3.2z'/%3E%3C/svg%3E") no-repeat center;
 }
 
@@ -948,18 +1099,57 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 
 .ecycloud-ui .ecycloud-tag {
 	display: inline-block;
-	padding: 0 6px;
-	border: 1px solid var(--ecy-line);
-	border-radius: 4px;
+	padding: 1px 6px;
+	border: 0;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--ecy-muted) 12%, transparent);
+	color: var(--ecy-muted);
 	font-size: 10px;
 	font-weight: 600;
-	line-height: 1.6;
+	line-height: 1.4;
 }
 
 .ecycloud-ui .ecycloud-node-via {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--ecy-muted);
+	font-size: 13px;
+}
+
+.ecycloud-ui .ecycloud-node-via > span {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.ecycloud-ui .ecycloud-flag {
+	flex: none;
+	width: 18px;
+	height: 14px;
+	margin-right: 4px;
+	border: 0;
+	border-radius: 2px;
+	object-fit: cover;
+}
+
+.ecycloud-ui .ecycloud-group-icon {
+	flex: none;
+	width: 30px;
+	height: 30px;
+	border: 0;
+	border-radius: 6px;
+	object-fit: contain;
+	background: transparent;
+}
+
+.ecycloud-ui .ecycloud-group-mark {
+	width: 22px;
+	height: 22px;
+	margin: 4px;
+	background: var(--ecy-primary);
 }
 
 .ecycloud-ui .ecycloud-node-actions {
@@ -967,7 +1157,17 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	flex-direction: column;
 	align-items: flex-end;
 	flex: none;
-	gap: 2px;
+	gap: 0;
+}
+
+.ecycloud-ui .ecycloud-node-actions .ecycloud-icon-btn {
+	color: var(--ecy-muted);
+}
+
+.ecycloud-ui .ecycloud-node-actions .ecycloud-icon-btn::before {
+	width: 16px;
+	height: 16px;
+	margin: 8px auto;
 }
 
 .ecycloud-ui .ecycloud-group-head .ecycloud-tag {
@@ -1054,6 +1254,7 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 }
 
 .ecycloud-ui .ecycloud-card-head {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 7px;
@@ -1065,6 +1266,63 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	flex: 1 1 auto;
 	font-size: 18px;
 	font-weight: 600;
+}
+
+.ecycloud-ui .ecycloud-rank-info {
+	display: inline-flex;
+	position: relative;
+}
+
+.ecycloud-ui .ecycloud-card-title > span:has(> .ecycloud-rank-info) {
+	display: inline-flex;
+	align-items: center;
+}
+
+.ecycloud-ui .ecycloud-rank-info .ecycloud-icon-btn[data-ico="notice"] {
+	transform: translateY(-2px);
+}
+
+.ecycloud-ui .ecycloud-rank-info .ecycloud-icon-btn[data-ico="notice"]::before {
+	width: 14px;
+	height: 14px;
+	margin: 9px;
+}
+
+.ecycloud-ui .ecycloud-rank-tooltip {
+	display: none;
+	position: absolute;
+	left: calc(100% + 8px);
+	top: calc(50% - 2px);
+	transform: translateY(-50%);
+	z-index: 5;
+	box-sizing: border-box;
+	width: 380px;
+	max-width: var(--ecy-rank-tip-width, 380px);
+	padding: 10px 12px;
+	border: 1px solid var(--ecy-line);
+	border-radius: 9px;
+	background: var(--ecy-card);
+	color: var(--ecy-fg);
+	box-shadow: 0 4px 16px #0002;
+	font-size: 14px;
+	font-weight: 400;
+	line-height: 1.5;
+}
+
+.ecycloud-ui .ecycloud-rank-info.is-open .ecycloud-rank-tooltip {
+	display: block;
+}
+
+.ecycloud-ui .ecycloud-rank-info.is-below {
+	position: static;
+}
+
+.ecycloud-ui .ecycloud-rank-info.is-below .ecycloud-rank-tooltip {
+	left: 0;
+	right: 0;
+	top: calc(100% + 8px);
+	transform: none;
+	width: auto;
 }
 
 .ecycloud-ui .ecycloud-card-actions {
@@ -1137,8 +1395,15 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 .ecycloud-ui .ecycloud-ico[data-ico="inbox"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5v-2h14v2zm0-5H5V5h14v10z'/%3E%3C/svg%3E"); }
 .ecycloud-ui .ecycloud-ico[data-ico="vpn"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M22 4v-.28C21.16 3.03 20.13 3 19 3c-1.13 0-2.16.03-3 .72V4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-1 12h-4V8h4v8zM9 19h8v-2H9c-3.31 0-6-2.69-6-6s2.69-6 6-6v2c-2.21 0-4 1.79-4 4s1.79 4 4 4zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z'/%3E%3C/svg%3E"); }
 .ecycloud-ui .ecycloud-ico[data-ico="tune"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="auto"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M19.14 19.14 21 21l-1.41 1.41-1.86-1.86A9.96 9.96 0 0 1 13 22.5c-5.52 0-10-4.48-10-10 0-1.78.47-3.45 1.28-4.9l1.46 1.46A7.96 7.96 0 0 0 5 12.5c0 4.42 3.58 8 8 8 1.46 0 2.82-.39 4-1.07l1.14 1.14zM12.5 3C7 3 2.5 7.5 2.5 13h2c0-4.42 3.58-8 8-8 1.46 0 2.82.39 4 1.07l1.46-1.46A9.96 9.96 0 0 0 12.5 3z'/%3E%3C/svg%3E"); }
 .ecycloud-ui .ecycloud-ico[data-ico="description"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M8 16h8v2H8zm0-4h8v2H8zm6-10H6c-1.1 0-2 .9-2 2v16c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z'/%3E%3C/svg%3E"); }
 .ecycloud-ui .ecycloud-ico[data-ico="info"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="notice"],
+.ecycloud-ui .ecycloud-icon-btn[data-ico="notice"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M11 7h2v7h-2zm0 9h2v2h-2zM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="leaderboard"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M9 3v5H3v13h18V11h-6V3H9zM5 10h4v9H5v-9zm6-5h2v14h-2V5zm4 8h4v6h-4v-6z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="calendar"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM5 6h14v3H5V6zm0 5h14v9H5v-9z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="schedule"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm1-13h-2v6l5 3 1-1.7-4-2.3V7z'/%3E%3C/svg%3E"); }
+.ecycloud-ui .ecycloud-ico[data-ico="check"] { --ecy-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-2-6.2-3-3-1.4 1.4L10 16.6l8-8-1.4-1.4-6.6 6.6z'/%3E%3C/svg%3E"); }
 
 .ecycloud-ui .ecycloud-status {
 	display: flex;
@@ -1170,8 +1435,24 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	gap: 4px;
 }
 
+.ecycloud-ui .ecycloud-connect-content {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+}
+
+html body .ecycloud-ui .ecycloud-status-connect > .ecycloud-btn {
+	overflow: hidden;
+}
+
+html body .ecycloud-ui .ecycloud-status-connect > .ecycloud-btn[aria-disabled="true"] {
+	opacity: 1;
+}
+
 .ecycloud-ui .ecycloud-badge {
 	flex: none;
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1201,10 +1482,32 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-.ecycloud-ui .ecycloud-badge.is-spin::before {
-	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'/%3E%3C/svg%3E") center / contain no-repeat;
-	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'/%3E%3C/svg%3E") center / contain no-repeat;
-	animation: ecycloud-spin .8s linear infinite;
+.ecycloud-ui .ecycloud-badge.is-spin::after,
+.ecycloud-ui .ecycloud-status-connect .ecycloud-ico.is-spin {
+	box-sizing: border-box;
+	border: 2px solid currentColor;
+	border-right-color: transparent;
+	border-radius: 50%;
+	animation: ecycloud-spin 1.2s linear infinite;
+}
+
+.ecycloud-ui .ecycloud-badge.is-spin::after {
+	content: '';
+	position: absolute;
+	inset: 3px;
+}
+
+.ecycloud-ui .ecycloud-status-connect .ecycloud-ico.is-spin {
+	background: none;
+	-webkit-mask: none;
+	mask: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ecycloud-ui .ecycloud-badge.is-spin::after,
+	.ecycloud-ui .ecycloud-status-connect .ecycloud-ico.is-spin {
+		animation: none;
+	}
 }
 
 .ecycloud-ui .ecycloud-status-text {
@@ -1230,6 +1533,8 @@ html body #maincontent .ecycloud-ui .ecycloud-seg,
 html body #main-content .ecycloud-ui .ecycloud-seg {
 	display: inline-flex;
 	align-items: stretch;
+	box-sizing: border-box;
+	min-height: 32px;
 	overflow: hidden;
 	padding: 0;
 	gap: 0;
@@ -1244,13 +1549,16 @@ html body #maincontent .ecycloud-ui .ecycloud-seg-btn,
 html body #main-content .ecycloud-ui .ecycloud-seg-btn {
 	appearance: none;
 	-webkit-appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	flex: 1 1 auto;
 	box-sizing: border-box;
 	height: auto;
-	min-height: 32px;
+	min-height: 30px;
 	min-width: 0;
 	margin: 0;
-	padding: 6px 16px;
+	padding: 0 14px;
 	border: 0;
 	border-radius: 0;
 	background: transparent;
@@ -1258,7 +1566,7 @@ html body #main-content .ecycloud-ui .ecycloud-seg-btn {
 	box-shadow: none;
 	text-shadow: none;
 	color: var(--ecy-cta);
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 600;
 	line-height: 1.4;
 	cursor: pointer;
@@ -1308,14 +1616,23 @@ html body #main-content .ecycloud-ui .ecycloud-seg-btn.is-on {
 }
 
 .ecycloud-ui .ecycloud-now-name {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	overflow: hidden;
+	font-weight: 600;
+}
+
+.ecycloud-ui .ecycloud-now-name > span {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-weight: 600;
 }
 
 @media (max-width: 640px) {
 	.ecycloud-ui .ecycloud-now-name,
+	.ecycloud-ui .ecycloud-now-name > span,
 	.ecycloud-ui .ecycloud-group-now {
 		white-space: normal;
 		overflow: visible;
@@ -1589,12 +1906,20 @@ html body .ecycloud-ui .cbi-dropdown > ul.dropdown > li[selected] {
 }
 
 .ecycloud-ui .ecycloud-drop-face-ico img,
-.ecycloud-ui .ecycloud-drop-ico {
+.ecycloud-ui .ecycloud-drop-ico,
+.ecycloud-ui .ecycloud-drop-item img {
 	display: block;
 	width: 20px;
 	height: 20px;
 	border: 0;
 	object-fit: contain;
+}
+
+.ecycloud-ui .ecycloud-drop-face-ico img.ecycloud-flag,
+.ecycloud-ui .ecycloud-drop-item img.ecycloud-flag {
+	width: 18px;
+	height: 14px;
+	object-fit: cover;
 }
 
 .ecycloud-ui .ecycloud-drop-label {
@@ -1699,6 +2024,30 @@ html body .ecycloud-ui .cbi-dropdown > ul.dropdown > li[selected] {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.ecycloud-ui .ecycloud-drop-check {
+	flex: none;
+	width: 18px;
+	height: 18px;
+	border: 2px solid var(--ecy-muted);
+	border-radius: 3px;
+}
+
+.ecycloud-ui .ecycloud-drop-item[aria-checked="true"] .ecycloud-drop-check {
+	border-color: var(--ecy-primary);
+	background: var(--ecy-primary);
+}
+
+.ecycloud-ui .ecycloud-drop-item[aria-checked="true"] .ecycloud-drop-check::after {
+	content: '';
+	display: block;
+	width: 5px;
+	height: 9px;
+	margin: 0 0 0 4px;
+	border: solid #fff;
+	border-width: 0 2px 2px 0;
+	transform: rotate(45deg);
 }
 
 .ecycloud-ui .ecycloud-drop-item .ecycloud-delay {
@@ -1955,6 +2304,11 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M17.65 6.35A8 8 0 1 0 19.5 12h-2a6 6 0 1 1-1.76-4.24L13 10h8V2z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
+.ecycloud-ui .ecycloud-icon-btn[data-ico="notice"]::before {
+	-webkit-mask: var(--ecy-mask) center / contain no-repeat;
+	mask: var(--ecy-mask) center / contain no-repeat;
+}
+
 .ecycloud-ui .ecycloud-icon-btn[data-ico="speed"]::before {
 	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zM10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z'/%3E%3C/svg%3E") center / contain no-repeat;
 	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zM10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z'/%3E%3C/svg%3E") center / contain no-repeat;
@@ -1978,6 +2332,15 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 .ecycloud-ui .ecycloud-icon-btn[data-ico="bolt"]::before {
 	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13.01 3h1l-1 7h3.51c.4 0 .62.19.4.66C12.97 17.55 11 21 11 21z'/%3E%3C/svg%3E") center / contain no-repeat;
 	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13.01 3h1l-1 7h3.51c.4 0 .62.19.4.66C12.97 17.55 11 21 11 21z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.ecycloud-ui .ecycloud-icon-btn[data-ico="search"]::before {
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.ecycloud-ui .ecycloud-icon-btn.is-on {
+	background: color-mix(in srgb, var(--ecy-fg) 8%, transparent);
 }
 
 .ecycloud-ui .ecycloud-icon-btn[data-ico="locate"]::before {
@@ -2045,7 +2408,9 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 	body .ecycloud-ui a.ecycloud-jump:hover,
 	.ecycloud-ui a.ecycloud-jump:hover,
 	.ecycloud-ui .ecycloud-jump:hover:not(:disabled):not(.is-disabled),
-	.ecycloud-ui .ecycloud-drop-item:hover:not(.is-on) {
+	.ecycloud-ui .ecycloud-drop-item:hover:not(.is-on),
+	.ecycloud-ui .ecycloud-login-send:hover:not(:disabled):not(.is-disabled):not([aria-disabled="true"]),
+	.ecycloud-ui .ecycloud-login-alt:hover {
 		background: var(--ecy-hover);
 		background-color: var(--ecy-hover);
 		background-image: none;
@@ -2061,7 +2426,6 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 	body .ecycloud-ui .cbi-button-save:hover:not(:disabled),
 	html .ecycloud-ui .cbi-button-apply:hover:not(:disabled),
 	.ecycloud-ui .ecycloud-seg-btn.is-on:hover:not(:disabled):not(.is-disabled),
-	.ecycloud-ui .ecycloud-login-send:hover:not(:disabled):not(.is-disabled):not([aria-disabled="true"]),
 	.ecycloud-ui .ecycloud-login-submit:hover:not(:disabled):not(.is-disabled):not([aria-disabled="true"]),
 	.cbi-page-actions .cbi-button-apply:hover:not(:disabled),
 	.cbi-page-actions .cbi-button-save:hover:not(:disabled),
@@ -2268,7 +2632,7 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 	padding: 0;
 	border-radius: 0;
 	background: none;
-	font-size: 10px;
+	font-size: 13px;
 	font-weight: 600;
 	line-height: 1.8;
 }
@@ -2287,7 +2651,38 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 
 .ecycloud-ui .ecycloud-usage-total {
 	padding: 10px 0;
-	border-top: 1px solid var(--ecy-line);
+	border-top: 1px solid color-mix(in srgb, var(--ecy-fg) 14%, transparent);
+}
+
+.ecycloud-ui .ecycloud-rank-title {
+	gap: 6px;
+	margin-bottom: 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--ecy-fg);
+}
+
+.ecycloud-ui .ecycloud-usage {
+	font-size: 13px;
+}
+
+.ecycloud-ui .ecycloud-usage-meta {
+	font-size: 12px;
+}
+
+.ecycloud-ui .ecycloud-usage-meta > span:first-child {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ecycloud-ui .ecycloud-usage .ecycloud-usage-meta .ecycloud-ico {
+	flex: none;
+}
+
+.ecycloud-ui .ecycloud-usage-meta > span:last-child {
+	color: var(--ecy-fg);
+	text-align: right;
 }
 
 .ecycloud-ui .ecycloud-usage-total span:first-child,
@@ -2331,14 +2726,17 @@ body .ecycloud-ui a.ecycloud-jump,
 	align-items: center;
 	justify-content: center;
 	height: auto;
-	min-height: 0;
-	padding: 6px 16px;
-	border: 1px solid color-mix(in srgb, var(--ecy-fg) 28%, transparent);
+	min-height: 32px;
+	min-width: 56px;
+	box-sizing: border-box;
+	padding: 2px 19px;
+	border: 1px solid var(--ecy-cta);
 	border-radius: 999px;
 	background: transparent;
 	background-image: none;
 	box-shadow: none;
 	color: var(--ecy-fg);
+	font-size: 13px;
 	font-weight: 600;
 	line-height: 1.4;
 	text-decoration: none;
@@ -2347,17 +2745,27 @@ body .ecycloud-ui a.ecycloud-jump,
 }
 
 body .ecycloud-ui .ecycloud-jump.is-danger {
-	border-color: var(--ecy-danger);
+	padding: 3px 20px;
+	border: 0;
 	background: var(--ecy-danger);
 	color: #fff;
 }
 
-.ecycloud-ui .ecycloud-jump.spinning {
+.ecycloud-ui .ecycloud-jump[aria-disabled="true"] {
+	border-color: color-mix(in srgb, var(--ecy-cta) 12%, transparent);
+	color: color-mix(in srgb, var(--ecy-cta) 38%, transparent);
+	cursor: default;
+	pointer-events: none;
+}
+
+.ecycloud-ui .ecycloud-jump.spinning,
+.ecycloud-ui .ecycloud-login-send.spinning {
 	position: relative;
 	padding-left: 32px;
 }
 
-.ecycloud-ui .ecycloud-jump.spinning::before {
+.ecycloud-ui .ecycloud-jump.spinning::before,
+.ecycloud-ui .ecycloud-login-send.spinning::before {
 	content: '';
 	position: absolute;
 	top: 50%;
@@ -2393,6 +2801,10 @@ body .ecycloud-ui .ecycloud-jump.is-danger {
 
 .ecycloud-ui .ecycloud-row.is-closed {
 	opacity: .65;
+}
+
+.ecycloud-ui .ecycloud-row.is-clickable {
+	cursor: pointer;
 }
 
 .ecycloud-ui .ecycloud-row-main {
@@ -2500,6 +2912,7 @@ body .ecycloud-ui .ecycloud-jump.is-danger {
 .ecycloud-ui .ecycloud-log-time { width: 62px; }
 .ecycloud-ui .ecycloud-log-src { width: 82px; overflow: hidden; text-overflow: ellipsis; }
 .ecycloud-ui .ecycloud-log-msg { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.ecycloud-ui .ecycloud-log-msg > .ecycloud-tag { margin-right: 6px; }
 
 .ecycloud-ui .ecycloud-log.is-error .ecycloud-chip,
 .ecycloud-ui .ecycloud-log.is-error .ecycloud-log-msg { color: var(--ecy-danger); }
@@ -2527,6 +2940,52 @@ body .ecycloud-ui .ecycloud-jump.is-danger {
 	gap: 6px;
 	margin: 0 0 10px;
 	color: var(--ecy-muted);
+}
+
+.ecycloud-ui .ecycloud-checkin {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.ecycloud-ui .ecycloud-checkin .ecycloud-meta,
+.ecycloud-ui .ecycloud-checkin .ecycloud-hint {
+	width: 100%;
+	text-align: center;
+	font-size: 12px;
+}
+
+.ecycloud-ui .ecycloud-btn .ecycloud-ico {
+	background: currentColor;
+}
+
+html[data-theme="dark"] .ecycloud-ui .ecycloud-group-icon,
+body[data-theme="dark"] .ecycloud-ui .ecycloud-group-icon,
+.ecycloud-ui[data-theme="dark"] .ecycloud-group-icon,
+html.dark .ecycloud-ui .ecycloud-group-icon,
+body.dark .ecycloud-ui .ecycloud-group-icon {
+	background: #f2f3f5;
+	padding: 3px;
+	box-sizing: border-box;
+}
+
+.ecycloud-ui .ecycloud-group-search {
+	margin: 2px 0 10px;
+}
+
+.ecycloud-ui .ecycloud-group-search .ecycloud-input-host {
+	display: block;
+	width: 100%;
+	max-width: none;
+	min-width: 0;
+}
+
+.ecycloud-ui .ecycloud-group-empty {
+	margin: 0 0 8px;
+	color: var(--ecy-muted);
+	font-size: 13px;
 }
 
 .ecycloud-ui .cbi-map-descr,
@@ -2661,12 +3120,6 @@ body .ecycloud-ui .cbi-value-field .ecycloud-list-dialog {
 	display: block;
 }
 
-body .ecycloud-ui .cbi-value-field .ecycloud-btn {
-	min-height: 36px;
-	height: 36px;
-	padding: 0 16px;
-}
-
 .cbi-value-field .ecycloud-list-drop,
 .cbi-value-field .ecycloud-input-host,
 .cbi-value-field .ecycloud-drop-wrap,
@@ -2727,8 +3180,8 @@ body .ecycloud-ui .cbi-value-field .cbi-dynlist {
 	align-items: center;
 	justify-content: center;
 	box-sizing: border-box;
-	width: 36px;
-	height: 36px;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: 0;
 	border-radius: 999px;
@@ -2852,7 +3305,7 @@ body .ecycloud-ui .cbi-value-field .cbi-dropdown {
 
 	.ecycloud-ui .ecycloud-toolbar .ecycloud-seg-btn {
 		flex: 1 1 0;
-		padding: 6px 8px;
+		padding: 0 8px;
 		font-size: 12px;
 	}
 
@@ -2883,7 +3336,7 @@ body .ecycloud-ui .cbi-value-field .cbi-dropdown {
 	}
 
 	.ecycloud-ui .ecycloud-status-actions {
-		justify-content: flex-end;
+		justify-content: center;
 		margin-left: 0;
 		width: 100%;
 	}
@@ -2894,16 +3347,12 @@ body .ecycloud-ui .cbi-value-field .cbi-dropdown {
 	}
 
 	.ecycloud-ui .ecycloud-status-actions .ecycloud-seg-btn {
-		padding: 6px 12px;
+		padding: 0 12px;
 	}
 
 	.ecycloud-ui .ecycloud-status-actions .cbi-button {
 		flex: none;
 		width: auto;
-	}
-
-	.ecycloud-ui .ecycloud-status-connect {
-		margin-left: auto;
 	}
 }
 
@@ -2946,9 +3395,9 @@ html body .ecycloud-ui .ecycloud-actions-card .cbi-button {
 	justify-content: center;
 	box-sizing: border-box;
 	height: auto;
-	min-height: 34px;
-	min-width: 0;
-	padding: 6px 16px;
+	min-height: 32px;
+	min-width: 56px;
+	padding: 3px 20px;
 	border: 0;
 	border-radius: 999px;
 	background-image: none;
@@ -2985,11 +3434,11 @@ html body .cbi-page-actions > .cbi-dropdown {
 	justify-content: center;
 	position: relative;
 	width: auto;
-	min-width: 0;
+	min-width: 56px;
 	max-width: none;
 	height: auto;
-	min-height: 34px;
-	padding: 6px 16px;
+	min-height: 32px;
+	padding: 3px 20px;
 	border: 0;
 	border-radius: 999px;
 	overflow: hidden;
@@ -3116,9 +3565,9 @@ html body .ecycloud-actions .ecycloud-btn {
 	box-sizing: border-box;
 	gap: 6px;
 	height: auto;
-	min-height: 34px;
-	min-width: 0;
-	padding: 6px 16px;
+	min-height: 32px;
+	min-width: 56px;
+	padding: 3px 20px;
 	border: 0;
 	border-radius: 999px;
 	background: var(--ecy-cta);
@@ -3141,7 +3590,7 @@ html body .cbi-page-actions .ecycloud-btn.is-danger {
 
 html body .ecycloud-ui .ecycloud-btn.is-disabled,
 html body .ecycloud-ui .ecycloud-btn[aria-disabled="true"] {
-	opacity: 0.35;
+	opacity: 0.38;
 	cursor: default;
 	pointer-events: none;
 }
@@ -3182,4 +3631,12 @@ html body .ecycloud-ui {
 	html body .ecycloud-ui .ecycloud-btn.is-danger:hover:not(.is-disabled):not([aria-disabled="true"]) {
 		background: var(--ecy-hover-danger);
 	}
+}
+.ecycloud-copy-buffer {
+	position: fixed;
+	left: -9999px;
+	top: 0;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
 }

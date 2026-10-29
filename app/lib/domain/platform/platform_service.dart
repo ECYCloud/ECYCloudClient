@@ -1,3 +1,5 @@
+import '../../l10n/l10n.dart';
+
 class SystemProxyState {
   const SystemProxyState({
     required this.enabled,
@@ -169,7 +171,7 @@ class PlatformServiceException implements Exception {
   final String message;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }
 
 abstract class PlatformService {

@@ -11,6 +11,7 @@ import '../data/store/credential_store.dart';
 import '../data/store/json_file_store.dart';
 import '../data/store/panel_response_cache.dart';
 import '../domain/platform/platform_service.dart';
+import '../l10n/app_language.dart';
 import '../l10n/l10n.dart';
 
 enum AuthStage {
@@ -22,8 +23,13 @@ enum AuthStage {
 }
 
 class AuthController extends ChangeNotifier {
-  AuthController(this._platform, this._credentials, {PanelResponseCache? cache})
-    : _cache = cache ?? PanelResponseCache();
+  AuthController(
+    this._platform,
+    this._credentials, {
+    required this._clearLocalSession,
+    PanelResponseCache? cache,
+    this._createClient,
+  }) : _cache = cache ?? PanelResponseCache();
 
   static const String _source = 'auth';
   // 与 Website ClientApiRateLimit 一致：60s 窗口；缺 Retry-After 时的退避兜底
@@ -37,6 +43,14 @@ class AuthController extends ChangeNotifier {
   final PlatformService _platform;
   final CredentialStore _credentials;
   final PanelResponseCache _cache;
+  final Future<void> Function() _clearLocalSession;
+  Future<void>? _logoutPending;
+  Future<void>? _cleanupPending;
+  Future<void>? _secretWritePending;
+  Future<void>? _rememberedPending;
+  int _rememberedGeneration = 0;
+  final PanelApiClient Function(String site, String api, DeviceInfo device)?
+  _createClient;
   final JsonFileStore _ticketInbox = JsonFileStore(
     AppPaths.ticketInbox,
     'ticket',
@@ -48,6 +62,8 @@ class AuthController extends ChangeNotifier {
   PanelApiClient? _api;
   String? _error;
   bool _busy = false;
+  bool _sendingCode = false;
+  int _sessionGeneration = 0;
   DateTime? _profileCooldownUntil;
   String? _apiOrigin;
   String? _siteOrigin;
@@ -77,6 +93,8 @@ class AuthController extends ChangeNotifier {
 
   bool get busy => _busy;
 
+  bool get sendingCode => _sendingCode;
+
   bool get hasUnreadTicketReply {
     final UserProfile? profile = _profile;
     if (profile == null) {
@@ -100,9 +118,10 @@ class AuthController extends ChangeNotifier {
     final Object? seenUser = seen['user_id'];
     final int? seenUserId = seenUser is num ? seenUser.toInt() : null;
     if (seenUserId != userId) {
-      return true;
+      return false;
     }
-    return seen['seen_admin_reply_at'] != latestAdminReplyAt;
+    final String seenAt = seen['seen_admin_reply_at'] as String? ?? '';
+    return latestAdminReplyAt.compareTo(seenAt) > 0;
   }
 
   void markTicketsSeen() {
@@ -111,11 +130,12 @@ class AuthController extends ChangeNotifier {
       return;
     }
     final Map<String, dynamic> seen = _ticketInbox.read();
-    if (!ticketReplyUnread(
-      latestAdminReplyAt: profile.latestAdminReplyAt,
-      userId: profile.id,
-      seen: seen,
-    )) {
+    if (seen['user_id'] == profile.id &&
+        !ticketReplyUnread(
+          latestAdminReplyAt: profile.latestAdminReplyAt,
+          userId: profile.id,
+          seen: seen,
+        )) {
       return;
     }
     _ticketInbox.write(<String, dynamic>{
@@ -142,23 +162,31 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<RememberedLogin?> loadRememberedLogin() async {
+    while (_rememberedPending != null) {
+      await _rememberedPending;
+    }
     final RememberedLogin? saved = _credentials.loadRemembered();
     if (saved == null) {
+      await clearRememberedLogin();
       return null;
     }
     final String stored = saved.password;
     if (stored.isNotEmpty && !stored.startsWith(_rememberedPrefix)) {
       await saveRememberedLogin(email: saved.email, password: stored);
-      return saved;
+      return loadRememberedLogin();
     }
+    final int generation = _rememberedGeneration;
     final String? plain = await _revealSecret(_secretPassword, stored);
+    if (generation != _rememberedGeneration) {
+      return null;
+    }
     return RememberedLogin(email: saved.email, password: plain ?? '');
   }
 
   Future<void> saveRememberedLogin({
     required String email,
     required String password,
-  }) async {
+  }) => _changeRemembered(() async {
     try {
       final String blob = await _platform.protectSecret(
         _secretPassword,
@@ -172,21 +200,38 @@ class AuthController extends ChangeNotifier {
       Logger.instance.warn(_source, '记住密码写入失败: $e');
       await _deleteRememberedSecret();
       _credentials.clearRemembered();
+      rethrow;
     }
-  }
+  });
 
-  Future<void> clearRememberedLogin() async {
+  Future<void> clearRememberedLogin() => _changeRemembered(() async {
     await _deleteRememberedSecret();
     _credentials.clearRemembered();
-  }
+  });
 
-  Future<void> _deleteRememberedSecret() async {
+  Future<void> _changeRemembered(Future<void> Function() change) async {
+    _rememberedGeneration++;
+    final Future<void>? previous = _rememberedPending;
+    final Future<void> pending = () async {
+      try {
+        await previous;
+      } on Object {
+        // 之前的失败不得阻止用户再次尝试清除。
+      }
+      await change();
+    }();
+    _rememberedPending = pending;
     try {
-      await _platform.deleteSecret(_secretPassword);
-    } on Object catch (e) {
-      Logger.instance.warn(_source, '清除记住的密码失败: $e');
+      await pending;
+    } finally {
+      if (identical(pending, _rememberedPending)) {
+        _rememberedPending = null;
+      }
     }
   }
+
+  Future<void> _deleteRememberedSecret() =>
+      _platform.deleteSecret(_secretPassword);
 
   Future<String?> _revealSecret(String name, String stored) async {
     if (stored.isEmpty) {
@@ -207,12 +252,38 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> _persistSessionSecret({
+    required int generation,
+    required String token,
+    required DateTime expiresAt,
+    required String email,
+  }) async {
+    final Future<void> pending = _writeSessionSecret(
+      generation: generation,
+      token: token,
+      expiresAt: expiresAt,
+      email: email,
+    );
+    _secretWritePending = pending;
+    try {
+      await pending;
+    } finally {
+      if (identical(pending, _secretWritePending)) {
+        _secretWritePending = null;
+      }
+    }
+  }
+
+  Future<void> _writeSessionSecret({
+    required int generation,
     required String token,
     required DateTime expiresAt,
     required String email,
   }) async {
     try {
       final String blob = await _platform.protectSecret(_secretToken, token);
+      if (generation != _sessionGeneration) {
+        return;
+      }
       _credentials.save(
         Credentials(
           token: '$_rememberedPrefix$blob',
@@ -226,77 +297,97 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> _clearSessionSecret() async {
-    try {
-      await _platform.deleteSecret(_secretToken);
-    } on Object catch (e) {
-      Logger.instance.warn(_source, '清除会话凭据失败: $e');
-    }
+    await _platform.deleteSecret(_secretToken);
     _credentials.clear();
   }
 
   Future<void> restore() async {
-    final Credentials? saved = _credentials.load();
-    if (saved == null || !saved.valid) {
-      _set(AuthStage.loggedOut);
+    if (_busy) {
       return;
     }
-
-    final String? token = await _revealSecret(_secretToken, saved.token);
-    if (token == null || token.isEmpty) {
-      await _clearSessionSecret();
-      _set(AuthStage.loggedOut);
-      return;
-    }
-    if (!saved.token.startsWith(_rememberedPrefix)) {
-      await _persistSessionSecret(
-        token: token,
-        expiresAt: saved.expiresAt,
-        email: saved.email,
-      );
-    }
-
-    final PanelApiClient client = await _clientForRequest();
-    client.token = token;
-    _api = client;
+    final int generation = ++_sessionGeneration;
+    Credentials? saved;
+    PanelApiClient? client;
+    _busy = true;
     _error = null;
+    notifyListeners();
 
     try {
-      final AccountStatus status = await client.fetchAccountStatus();
-      if (!status.isNormal) {
-        _accountStatus = status;
-        _profile ??= _cache.loadProfile(saved.email);
-        await _loadProfileBestEffort(client);
-        _set(AuthStage.accountRestricted);
+      saved = _credentials.load();
+      if (_credentials.sessionCleanupPending || saved == null || !saved.valid) {
+        await logout();
         return;
       }
 
-      // 先凭本地凭据进界面。拉 profile 要走网络，隧道不通时要耗满 20 秒超时，
-      // 期间界面停在启动图上一片空白；缓存里的资料先顶着，真实资料随后覆盖
+      final String? token = await _revealSecret(_secretToken, saved.token);
+      if (generation != _sessionGeneration) {
+        return;
+      }
+      if (token == null || token.isEmpty) {
+        await logout();
+        return;
+      }
+      Logger.instance.warn('boot', 'auth.secret');
+      if (!saved.token.startsWith(_rememberedPrefix)) {
+        await _persistSessionSecret(
+          generation: generation,
+          token: token,
+          expiresAt: saved.expiresAt,
+          email: saved.email,
+        );
+      }
+
+      client = await _clientForRequest();
+      if (generation != _sessionGeneration) {
+        client.close();
+        return;
+      }
+      client.token = token;
+      _api = client;
+      Logger.instance.warn('boot', 'auth.device');
+
+      // 本机登录有效即凭缓存进界面，不等面板：面板请求在网络不通时要耗满超时，
+      // 期间界面不能停在启动图上；账户状态与真实资料随后覆盖
+      _profile = _cache.loadProfile(saved.email);
       _accountStatus = null;
-      _profile ??= _cache.loadProfile(saved.email);
       _emitConfigRevision(_profile);
       _set(AuthStage.loggedIn);
 
-      await _applyProfile(await _fetchProfile(client));
-    } on ApiException catch (e) {
-      if (e.unauthorized) {
-        client.close();
-        _api = null;
-        _profile = null;
-        _accountStatus = null;
-        await _clearSessionSecret();
-        _set(AuthStage.loggedOut);
+      final AccountStatus status = await client.fetchAccountStatus();
+      if (!identical(client, _api)) {
+        return;
+      }
+      Logger.instance.warn('boot', 'auth.accountStatus');
+      if (!status.isNormal) {
+        _accountStatus = status;
+        _set(AuthStage.accountRestricted);
+        await _loadProfileBestEffort(client);
+        return;
+      }
+
+      _applyProfile(await _fetchProfile(client), client);
+    } on Object catch (e) {
+      if (generation != _sessionGeneration ||
+          (client != null && !identical(client, _api))) {
+        return;
+      }
+      if (e is ApiException && e.unauthorized) {
+        await logout();
         return;
       }
       // 429 / 网络错误：凭据仍有效。绝不能清 token 或把限流文案丢到登录页。
       Logger.instance.warn(_source, '恢复会话失败，稍后重试: $e');
-      _profile ??= _cache.loadProfile(saved.email);
-      if (_profile != null) {
-        _emitConfigRevision(_profile);
-        _set(AuthStage.loggedIn);
+      if (_stage == AuthStage.unknown) {
+        client?.close();
+        _api = null;
+        _error = L10n.t('暂时无法恢复登录，请稍后重试。');
+      } else if (e is ApiException && e.transient) {
         _scheduleProfileRetry();
-      } else {
-        _set(AuthStage.loggedOut);
+      }
+    } finally {
+      if (generation == _sessionGeneration) {
+        _busy = false;
+        notifyListeners();
       }
     }
   }
@@ -317,7 +408,7 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> sendLoginVerify({required String email}) async {
-    _busy = true;
+    _sendingCode = true;
     _error = null;
     notifyListeners();
 
@@ -326,12 +417,12 @@ class AuthController extends ChangeNotifier {
     try {
       await client.sendLoginVerify(email: email);
       client.close();
-      _busy = false;
+      _sendingCode = false;
       notifyListeners();
       return true;
     } on ApiException catch (e) {
       client.close();
-      _busy = false;
+      _sendingCode = false;
       _error = e.message;
       notifyListeners();
       return false;
@@ -390,10 +481,18 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<String> fetchTos() async {
+  Future<String> fetchTos() =>
+      _fetchLegalContent((client) => client.fetchTos());
+
+  Future<String> fetchPrivacyPolicy() =>
+      _fetchLegalContent((client) => client.fetchPrivacyPolicy());
+
+  Future<String> _fetchLegalContent(
+    Future<String> Function(PanelApiClient client) loadContent,
+  ) async {
     final PanelApiClient client = await _clientForRequest();
     try {
-      return await client.fetchTos();
+      return await loadContent(client);
     } finally {
       if (!identical(client, _api)) {
         client.close();
@@ -402,7 +501,7 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> sendRegisterVerify({required String email}) async {
-    _busy = true;
+    _sendingCode = true;
     _error = null;
     notifyListeners();
 
@@ -411,12 +510,12 @@ class AuthController extends ChangeNotifier {
     try {
       await client.sendRegisterVerify(email: email);
       client.close();
-      _busy = false;
+      _sendingCode = false;
       notifyListeners();
       return true;
     } on ApiException catch (e) {
       client.close();
-      _busy = false;
+      _sendingCode = false;
       _error = e.message;
       notifyListeners();
       return false;
@@ -450,6 +549,7 @@ class AuthController extends ChangeNotifier {
     required String token,
     required String password,
     required String repasswd,
+    Future<void> Function(String message)? onSuccess,
   }) {
     return _authenticate(
       email: email,
@@ -458,21 +558,46 @@ class AuthController extends ChangeNotifier {
         password: password,
         repasswd: repasswd,
       ),
+      onSuccess: onSuccess,
     );
   }
 
   Future<bool> _authenticate({
     required String email,
     required Future<LoginResult> Function(PanelApiClient client) run,
+    Future<void> Function(String message)? onSuccess,
   }) async {
+    if (_busy) {
+      return false;
+    }
+    final int generation = ++_sessionGeneration;
     _busy = true;
     _error = null;
     notifyListeners();
 
-    final PanelApiClient client = await _clientForRequest();
-
+    PanelApiClient? client;
     try {
+      await _clearPreviousSession();
+      if (generation != _sessionGeneration) {
+        return false;
+      }
+      client = await _clientForRequest();
+      if (generation != _sessionGeneration) {
+        client.close();
+        return false;
+      }
       final LoginResult result = await run(client);
+      if (generation != _sessionGeneration) {
+        client.close();
+        return false;
+      }
+      if (onSuccess != null) {
+        await onSuccess(result.message);
+        if (generation != _sessionGeneration) {
+          client.close();
+          return false;
+        }
+      }
       final String accountEmail = result.profile?.email.isNotEmpty == true
           ? result.profile!.email
           : (result.accountStatus?.email.isNotEmpty == true
@@ -480,10 +605,15 @@ class AuthController extends ChangeNotifier {
                 : email);
 
       await _persistSessionSecret(
+        generation: generation,
         token: result.token,
         expiresAt: result.expiresAt,
         email: accountEmail,
       );
+      if (generation != _sessionGeneration) {
+        client.close();
+        return false;
+      }
 
       _api = client;
       _profileCooldownUntil = null;
@@ -491,6 +621,9 @@ class AuthController extends ChangeNotifier {
       if (result.isRestricted) {
         _accountStatus = result.accountStatus;
         await _loadProfileBestEffort(client);
+        if (generation != _sessionGeneration) {
+          return false;
+        }
         _busy = false;
         _set(AuthStage.accountRestricted);
         return true;
@@ -508,19 +641,25 @@ class AuthController extends ChangeNotifier {
       }
 
       _accountStatus = null;
-      await _applyProfile(profile);
+      _applyProfile(profile, client);
       _busy = false;
       // 注册 / 登录 / 重置密码成功后立刻进主界面，避免页面 delay + mounted 竞态卡住加载
       _set(AuthStage.loggedIn);
       return true;
     } on ApiException catch (e) {
-      client.close();
+      client?.close();
+      if (generation != _sessionGeneration) {
+        return false;
+      }
       _busy = false;
       _error = e.message;
       _set(e.needsTwoFactor ? AuthStage.needsTwoFactor : AuthStage.loggedOut);
       return false;
     } catch (e) {
-      client.close();
+      client?.close();
+      if (generation != _sessionGeneration) {
+        return false;
+      }
       _busy = false;
       _error = L10n.t('登录失败：{0}', <Object>['$e']);
       _set(AuthStage.loggedOut);
@@ -529,10 +668,9 @@ class AuthController extends ChangeNotifier {
   }
 
   void enterShell() {
-    if (_api == null || _profile == null) {
+    if (_api == null || _profile == null || _accountStatus != null) {
       return;
     }
-    _accountStatus = null;
     _set(AuthStage.loggedIn);
   }
 
@@ -549,6 +687,9 @@ class AuthController extends ChangeNotifier {
     }
     final ({String message, AccountStatus status, UserProfile profile}) result =
         await client.cancelAccountDeletion();
+    if (!identical(client, _api)) {
+      throw ApiException(L10n.t('登录状态已变化，请重新操作'));
+    }
     _accountStatus = null;
     _profile = result.profile;
     final String? key = accountKey;
@@ -560,15 +701,74 @@ class AuthController extends ChangeNotifier {
     return result.message;
   }
 
-  Future<void> logout() async {
-    await _api?.logout();
-    _api?.close();
+  Future<void> logout({Future<void> Function()? beforeLogout}) async {
+    final Future<void>? pending = _logoutPending;
+    if (pending != null) {
+      return pending;
+    }
+    final Future<void> current = _logout(beforeLogout: beforeLogout);
+    _logoutPending = current;
+    try {
+      await current;
+    } finally {
+      _logoutPending = null;
+    }
+  }
+
+  Future<void> _logout({Future<void> Function()? beforeLogout}) async {
+    _sessionGeneration++;
+    _busy = true;
+    _error = null;
+    try {
+      if (beforeLogout != null) {
+        await beforeLogout();
+      }
+      await _clearPreviousSession();
+    } on Object catch (e) {
+      _error = L10n.t('退出失败：{0}', <Object>['$e']);
+      throw ApiException(_error!);
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _clearPreviousSession() async {
+    final Future<void>? pending = _cleanupPending;
+    if (pending != null) {
+      return pending;
+    }
+    final Future<void> current = _cleanupSession();
+    _cleanupPending = current;
+    try {
+      await current;
+    } finally {
+      _cleanupPending = null;
+    }
+  }
+
+  Future<void> _cleanupSession() async {
+    final PanelApiClient? client = _api;
     _api = null;
     _profile = null;
     _accountStatus = null;
     _profileCooldownUntil = null;
-    await _clearSessionSecret();
     _set(AuthStage.loggedOut);
+    try {
+      _credentials.beginSessionCleanup();
+      await client?.logout();
+    } finally {
+      client?.close();
+    }
+    await _secretWritePending;
+    try {
+      await _rememberedPending;
+    } on Object {
+      // 等待写入结束；可选的密码记忆失败不能阻止停止内核。
+    }
+    await _clearLocalSession();
+    await _clearSessionSecret();
+    _credentials.finishSessionCleanup();
   }
 
   Future<void> refreshPanelClientAddress() async {
@@ -580,7 +780,9 @@ class AuthController extends ChangeNotifier {
     try {
       await client.fetchConfigRevision();
     } on Object catch (e) {
-      Logger.instance.debug(_source, '刷新面板记录的客户端出口地址失败: $e');
+      if (identical(client, _api)) {
+        Logger.instance.debug(_source, '刷新面板记录的客户端出口地址失败: $e');
+      }
     }
   }
 
@@ -591,8 +793,11 @@ class AuthController extends ChangeNotifier {
     }
 
     try {
-      await _applyProfile(await _fetchProfile(client));
+      _applyProfile(await _fetchProfile(client), client);
     } on ApiException catch (e) {
+      if (!identical(client, _api)) {
+        return;
+      }
       if (e.unauthorized) {
         await logout();
       } else {
@@ -604,6 +809,22 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<void> syncAccountStatus() async {
+    final PanelApiClient? client = _api;
+    if (client == null) {
+      return;
+    }
+    final AccountStatus status = await client.fetchAccountStatus();
+    if (!identical(client, _api)) {
+      return;
+    }
+    if (!status.isNormal) {
+      enterRestricted(status);
+      return;
+    }
+    await refreshProfile();
+  }
+
   Future<String> checkin() async {
     final PanelApiClient? client = _api;
     if (client == null) {
@@ -611,11 +832,17 @@ class AuthController extends ChangeNotifier {
     }
     final ({String message, UserProfile profile}) result = await client
         .checkin();
-    await _applyProfile(result.profile);
+    if (!identical(client, _api)) {
+      throw ApiException(L10n.t('登录状态已变化，请重新操作'));
+    }
+    _applyProfile(result.profile, client);
     return result.message;
   }
 
-  Future<void> _applyProfile(UserProfile profile) async {
+  void _applyProfile(UserProfile profile, PanelApiClient client) {
+    if (!identical(client, _api)) {
+      return;
+    }
     _profile = profile;
     _applyApiOrigin(profile.apiOrigin);
     _applySiteOrigin(profile.siteOrigin);
@@ -627,14 +854,21 @@ class AuthController extends ChangeNotifier {
     if (profile.deviceKickNotice) {
       onDeviceKickNotice?.call();
     }
-    notifyListeners();
+    if (_ticketInbox.read()['user_id'] != profile.id) {
+      markTicketsSeen();
+    } else {
+      notifyListeners();
+    }
   }
 
   Future<void> _loadProfileBestEffort(PanelApiClient client) async {
     try {
       final UserProfile profile = await _fetchProfile(client);
-      await _applyProfile(profile);
+      _applyProfile(profile, client);
     } on ApiException catch (e) {
+      if (!identical(client, _api)) {
+        return;
+      }
       Logger.instance.warn(_source, '拉取账号资料失败: $e');
       final String? key = accountKey;
       if (_profile == null && key != null) {
@@ -656,11 +890,17 @@ class AuthController extends ChangeNotifier {
       );
     }
     try {
+      final AppLanguage language = L10n.current;
       final UserProfile profile = await client.fetchProfile();
-      _profileCooldownUntil = null;
+      if (identical(client, _api) && language != L10n.current) {
+        return await _fetchProfile(client);
+      }
+      if (identical(client, _api)) {
+        _profileCooldownUntil = null;
+      }
       return profile;
     } on ApiException catch (e) {
-      if (e.rateLimited) {
+      if (identical(client, _api) && e.rateLimited) {
         final int seconds = e.retryAfterSeconds ?? _rateLimitFallback.inSeconds;
         _profileCooldownUntil = DateTime.now().add(
           Duration(seconds: seconds.clamp(1, _rateLimitWindowSeconds)),
@@ -723,7 +963,8 @@ class AuthController extends ChangeNotifier {
     required DeviceInfo device,
     String? token,
   }) {
-    return PanelApiClient(baseUrl: site, configBaseUrl: api, device: device)
+    return (_createClient?.call(site, api, device) ??
+          PanelApiClient(baseUrl: site, configBaseUrl: api, device: device))
       ..token = token;
   }
 
@@ -786,7 +1027,9 @@ class AuthController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionGeneration++;
     _api?.close();
+    _api = null;
     super.dispose();
   }
 }

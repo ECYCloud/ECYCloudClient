@@ -1,17 +1,19 @@
 'use strict';
 
-import { popen } from 'fs';
+import { access, popen } from 'fs';
 import { cursor } from 'uci';
 
 import * as clash from 'ecycloud.clash';
+import * as icons from 'ecycloud.icons';
 import * as network from 'ecycloud.network';
 import * as panel from 'ecycloud.panel';
 import * as profile from 'ecycloud.profile';
 
 import { build, clearKicked, coreRunning, instances, kickReason, lanDevices, log, origins,
-         settings, state, wasKicked } from 'ecycloud.common';
+		 sessionLease, settings, state, wasKicked } from 'ecycloud.common';
 import * as release from 'ecycloud.release';
 import * as service from 'ecycloud.service';
+import * as statistics from 'ecycloud.statistics';
 
 const INIT = '/etc/init.d/ecycloud';
 
@@ -42,6 +44,11 @@ function accountView(data) {
 		last_ss_time: acct.last_ss_time ?? '',
 		traffic_reset: acct.traffic_reset ?? '',
 		node_connector: +(acct.node_connector ?? 0),
+		enable_checkin: exists(acct, 'enable_checkin') ? acct.enable_checkin == true : false,
+		able_to_checkin: acct.able_to_checkin == true,
+		checkin_min: +(acct.checkin_min ?? 1),
+		checkin_max: +(acct.checkin_max ?? 300),
+		last_check_in_time: acct.last_check_in_time ?? '',
 		online_client_count: +(acct.online_client_count ?? 0),
 		online_client_self: acct.online_client_self == true,
 		device_kick_notice: acct.device_kick_notice == true,
@@ -53,7 +60,7 @@ function proxyServers(cache) {
 	const seen = {};
 	const list = [];
 
-	for (let proxy in (cache?.config?.proxies ?? [])) {
+	for (let proxy in profile.nodesOf(cache?.config)) {
 		const server = lc(trim(`${proxy?.server ?? ''}`));
 		if (!length(server) || seen[server])
 			continue;
@@ -69,6 +76,7 @@ function statusView() {
 	const base = {
 		version: build().version ?? '',
 		site: origins().site,
+		error: state().error ?? '',
 		session
 	};
 
@@ -85,6 +93,7 @@ function statusView() {
 		const version = running ? clash.version() : { ok: false };
 		const record = network.applied();
 		const acct = accountView();
+		const stats = statistics.read();
 		let mainGroup = '';
 		for (let rule in (cache?.config?.rules ?? [])) {
 			const parts = split(`${rule}`, ',');
@@ -104,6 +113,11 @@ function statusView() {
 			message: st.message,
 			error: st.error,
 			updated: +st.updated,
+			connected_at: +(st.connected_at ?? 0),
+			statistics: { at: stats.at, up: stats.up, down: stats.down, total_up: stats.total_up,
+				total_down: stats.total_down, rank: stats.rank, today: stats.today, yesterday: stats.yesterday },
+			updates: release.cached(),
+			provider_progress: running && st.stage == 'starting' ? clash.providerProgress() : {},
 			version: build().version ?? '',
 			kernel_version: version.ok
 				? (release.kernelVersion(`${version.data?.version ?? ''}`) || `${version.data?.version ?? ''}`)
@@ -116,8 +130,9 @@ function statusView() {
 			profile: {
 				main_group: mainGroup,
 				revision: cache?.revision ?? '',
+				locale: cache?.locale ?? 'zh-CN',
 				fetched_at: +(cache?.fetched_at ?? 0),
-				nodes: length(cache?.config?.proxies ?? []),
+				nodes: length(profile.nodesOf(cache?.config)),
 				servers: proxyServers(cache)
 			},
 			memory: running ? clash.memoryUsage() : 0,
@@ -127,8 +142,8 @@ function statusView() {
 				download: +(snapshot.data?.downloadTotal ?? 0)
 			},
 			lan: lanDevices(),
-			network_applied: record != null,
-			dns_applied: length(record?.dnsmasq) > 0,
+			network_applied: record != null && record.active != false,
+			dns_applied: record?.active != false && length(record?.dnsmasq) > 0,
 			auto_connect: cfg.autoConnect == true
 		};
 	} catch (e) {
@@ -176,23 +191,11 @@ function annotateLabels(text, labels) {
 
 		for (let key in keys) {
 			const value = labels[key];
-			let next = replace(out, key, value);
-
-			while (next != out) {
-				out = next;
-				next = replace(out, key, value);
-			}
+			out = replace(out, key, () => value);
 		}
 	}
 
-	let redacted = replace(out, /node-[0-9]+/, '');
-
-	while (redacted != out) {
-		out = redacted;
-		redacted = replace(out, /node-[0-9]+/, '');
-	}
-
-	return redacted;
+	return replace(out, /node-[0-9]+/g, '');
 };
 
 /* 键是 mihomo 配置里的类型名（ss / vless），查表前统一小写：内核 Clash API 给的是
@@ -348,12 +351,11 @@ function annotateGroups(view, job, speed) {
 		group.speed_testing = speedTesting;
 	}
 
-	if (clash.ready()) {
-		service.ensureDelayWorker();
-		service.ensureSpeedWorker();
-	}
-
-	return { groups, testing: service.delayActive() || length(pending) > 0 };
+	return {
+		groups,
+		flag_regex: view.flag_regex ?? '',
+		testing: service.delayActive() || length(pending) > 0
+	};
 };
 
 function resolveCacheLeaf(name, membersOf, nested, snap) {
@@ -385,7 +387,7 @@ function collectLeavesFromCache(groupName) {
 	for (let group in (cache?.config?.['proxy-groups'] ?? [])) {
 		if (!length(group?.name))
 			continue;
-		membersOf[group.name] = group.proxies ?? [];
+		membersOf[group.name] = profile.membersOf(cache.config, group);
 		nested[group.name] = proxyType(group.type ?? '');
 		if (group.name == groupName)
 			groupType = nested[group.name];
@@ -427,14 +429,27 @@ function collectLeaves(groupName) {
 	return { names, type: proxyType(entry?.type ?? '') };
 };
 
+function presentGroups(result) {
+	const cache = profile.cached();
+	const paths = icons.paths(cache);
+
+	for (let group in (result.groups ?? [])) {
+		group.icon = paths[group.name] ?? '';
+		group.label = cache?.group_labels?.[group.name] ?? group.name;
+	}
+
+	result.flag_regex = type(cache?.flag_regex) == 'string' ? cache.flag_regex : '';
+	return result;
+};
+
 function groupsFromCache() {
 	const cache = profile.cached();
-	const labels = cache?.node_labels ?? {};
+	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
 	const extras = {};
 	const nested = {};
 	const groups = [];
 
-	for (let proxy in (cache?.config?.proxies ?? []))
+	for (let proxy in profile.nodesOf(cache?.config))
 		if (length(proxy?.name))
 			extras[proxy.name] = proxy;
 
@@ -443,11 +458,11 @@ function groupsFromCache() {
 			nested[group.name] = proxyType(group.type ?? '');
 
 	for (let group in (cache?.config?.['proxy-groups'] ?? [])) {
-		if (!length(group?.name))
+		if (!length(group?.name) || group.hidden == true)
 			continue;
 
 		const members = [];
-		for (let member in (group.proxies ?? [])) {
+		for (let member in profile.membersOf(cache.config, group)) {
 			const cfg = extras[member] ?? {};
 			const isGroup = member in nested;
 
@@ -477,7 +492,7 @@ function groupsFromCache() {
 		});
 	}
 
-	return { groups };
+	return presentGroups({ groups });
 };
 
 function groupsView() {
@@ -487,20 +502,24 @@ function groupsView() {
 
 	const proxies = snapshot.data?.proxies ?? {};
 	const cache = profile.cached();
-	const labels = cache?.node_labels ?? {};
+	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
 	const extras = {};
 	const ordered = [];
+	const hidden = { 'ecy-speed': true };
+	for (let group in (cache?.config?.['proxy-groups'] ?? []))
+		if (group.hidden == true)
+			hidden[group.name] = true;
 
-	for (let proxy in (cache?.config?.proxies ?? []))
+	for (let proxy in profile.nodesOf(cache?.config))
 		if (length(proxy?.name))
 			extras[proxy.name] = proxy;
 
 	for (let group in (cache?.config?.['proxy-groups'] ?? []))
-		if (length(group?.name) && exists(proxies, group.name))
+		if (length(group?.name) && !hidden[group.name] && exists(proxies, group.name))
 			push(ordered, group.name);
 
 	for (let name, entry in proxies)
-		if (name != profile.SPEED_GROUP && type(entry?.all) == 'array' && !(name in ordered))
+		if (!hidden[name] && type(entry?.all) == 'array' && !(name in ordered))
 			push(ordered, name);
 
 	const groups = [];
@@ -548,48 +567,15 @@ function groupsView() {
 		});
 	}
 
-	const remembered = {};
-	const saved = service.selectors();
-	for (let group in groups)
-		if (group.type == 'Selector' && length(group.now) && !length(saved[group.name]) &&
-		    group.now != group.members[0]?.name)
-			remembered[group.name] = group.now;
-	service.rememberSelectors(remembered);
-
-	return { groups };
+	return presentGroups({ groups });
 };
 
 function connectionsView() {
-	const snapshot = clash.connections();
-	if (!snapshot.ok)
-		return { connections: [], error: snapshot.error };
-
-	const labels = profile.cached()?.node_labels ?? {};
-	const connections = [];
-
-	for (let conn in (snapshot.data?.connections ?? [])) {
-		const meta = conn.metadata ?? {};
-
-		const raw = conn.chains ?? [];
-
-		push(connections, {
-			id: conn.id ?? '',
-			network: meta.network ?? '',
-			inbound: meta.type ?? '',
-			host: meta.host ?? '',
-			destination_ip: meta.destinationIP ?? '',
-			destination_port: meta.destinationPort ?? '',
-			process: meta.process ?? meta.processPath ?? '',
-			rule: annotateLabels(conn.rule ?? '', labels),
-			leaf: raw[0] ?? '',
-			chains: labeledList(raw, labels),
-			upload: +(conn.upload ?? 0),
-			download: +(conn.download ?? 0),
-			start: conn.start ?? ''
-		});
-	}
-
-	return { connections };
+	const snapshot = statistics.read();
+	const cache = profile.cached();
+	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
+	const label = conn => ({ ...conn, rule: annotateLabels(conn.rule, labels), chains: labeledList(conn.chains, labels) });
+	return { at: +(snapshot.at ?? 0), connections: map(values(snapshot.alive ?? {}), label), closed: map(snapshot.closed ?? [], label) };
 };
 
 const methods = {
@@ -614,10 +600,18 @@ const methods = {
 		}
 	},
 
+	close_connection: {
+		args: { id: '' },
+		call: function(request) {
+			const res = clash.closeConnection(request.args.id);
+			return { ok: res.ok == true, msg: res.error ?? '' };
+		}
+	},
+
 	logs: {
 		args: { lines: 200 },
 		call: function(request) {
-			const lines = request.args?.lines > 0 ? request.args.lines : 200;
+			const lines = min(2000, max(1, int(request.args?.lines) || 200));
 			const proc = popen(`logread 2>/dev/null | grep -iE 'ecycloud|mihomo|clash' | tail -n ${lines}`);
 
 			if (!proc)
@@ -626,7 +620,8 @@ const methods = {
 			const out = proc.read('all') ?? '';
 			proc.close();
 
-			return { log: annotateLabels(out, profile.cached()?.node_labels ?? {}) };
+			const cache = profile.cached();
+			return { log: annotateLabels(out, { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) }) };
 		}
 	},
 
@@ -658,9 +653,6 @@ const methods = {
 
 	logout: {
 		call: function() {
-			toggle(false);
-			background(`${INIT} stop`);
-
 			const res = panel.logout();
 
 			return { ok: true, msg: res.msg ?? '' };
@@ -669,7 +661,13 @@ const methods = {
 
 	start: {
 		call: function() {
-			const cached = profile.cached();
+			let cached = profile.cached(access(profile.PENDING_FILE));
+			if (coreRunning() && !cached) {
+				const refreshed = service.update(true);
+				if (!refreshed.ok)
+					return { ok: false, msg: refreshed.error };
+				cached = profile.cached(access(profile.PENDING_FILE));
+			}
 			if (cached?.config) {
 				const checked = profile.inspect(cached.config);
 				if (!checked.ok)
@@ -678,9 +676,7 @@ const methods = {
 			const live = instances();
 			toggle(true);
 
-			/* TPROXY 下装配结果与 enabled 无关（tun 段恒关、tproxy-port 恒为实值），
-			   接管只是铺 nftables，交给看门狗的 activate，别为此重启内核断掉存量连接 */
-			if (settings().mode == 'tproxy' && live.core?.running && live.watchdog?.running)
+			if (live.core?.running && live.watchdog?.running)
 				return { ok: true, msg: '' };
 
 			return { ok: background(`${INIT} restart`) };
@@ -688,8 +684,23 @@ const methods = {
 	},
 
 	refresh_account: {
-		call: function() {
+		args: { use_cache: false },
+		call: function(request) {
+			const account = panel.account();
+			if (request.args.use_cache == true && profile.cached() && account && account.device_kick_notice != true)
+				return { ok: true, account: accountView(account), msg: '' };
 			const res = panel.refreshAccount();
+			if (res.restricted)
+				service.block(res.msg);
+			if (!res.ok && res.status == 0 && profile.cached() && panel.account())
+				return { ok: true, offline: true, account: accountView(), msg: '' };
+			return { ok: res.ok == true, msg: res.msg ?? '', account: accountView(res.data) };
+		}
+	},
+
+	checkin: {
+		call: function() {
+			const res = panel.checkin();
 			return { ok: res.ok == true, msg: res.msg ?? '', account: accountView(res.data) };
 		}
 	},
@@ -702,9 +713,9 @@ const methods = {
 	},
 
 	devices: {
-		args: { page: 1, length: 100 },
+		args: { page: 1, length: 100, search: '' },
 		call: function(request) {
-			const res = panel.devices(request.args.page, request.args.length);
+			const res = panel.devices(request.args.page, request.args.length, request.args.search);
 			return {
 				ok: res.ok == true,
 				msg: res.msg ?? '',
@@ -751,7 +762,7 @@ const methods = {
 	},
 
 	update: {
-		args: { what: '', path: '' },
+		args: { what: '', path: '', locale: '' },
 		call: function(request) {
 			const what = `${request.args.what ?? ''}`;
 
@@ -771,11 +782,12 @@ const methods = {
 
 			if (what == 'runtime') {
 				const res = profile.runtimeConfig();
+				const cache = profile.cached();
 				return {
 					ok: res.ok == true,
 					msg: res.error ?? '',
 					text: res.ok
-						? annotateLabels(res.text ?? '', profile.cached()?.node_labels ?? {})
+						? annotateLabels(res.text ?? '', { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) })
 						: ''
 				};
 			}
@@ -795,9 +807,9 @@ const methods = {
 				return release.checkKernel('');
 
 			if (what == 'announcements')
-				return panel.announcements(request.args.path);
+				return panel.announcements(request.args.path, request.args.locale);
 
-			const res = service.update(true);
+			const res = service.update(request.args.what != 'language', null, request.args.locale);
 
 			return {
 				ok: res.ok == true,
@@ -1026,24 +1038,30 @@ function guestReply() {
 
 function guard(name, inner) {
 	return function(request) {
-		if (name == 'update') {
-			const what = `${request.args.what ?? ''}`;
-			if (what == 'check_app' || what == 'check_kernel')
-				return inner(request);
+		if (name == 'login' || name == 'login_code' || name == 'logout') {
+			const result = service.changeSession(() => ({ ...inner(request), session: panel.session() }), name == 'logout');
+			return { ...result, session: result.session ?? { logged_in: false } };
 		}
-
-		if (!panel.session().logged_in)
-			return guestReply();
-
-		return inner(request);
+		const lease = sessionLease();
+		if (!lease)
+			return { ok: false, msg: '账户正在切换，请稍后重试', session: { logged_in: false } };
+		let result;
+		try {
+			const checkUpdate = name == 'update' &&
+				(request.args.what == 'check_app' || request.args.what == 'check_kernel');
+			result = GUEST_OK[name] || checkUpdate || panel.session().logged_in
+				? inner(request) : guestReply();
+			result.session = panel.session();
+		} catch (e) {
+			lease.close();
+			die(e.message);
+		}
+		lease.close();
+		return result;
 	};
 };
 
-for (let name in methods) {
-	if (GUEST_OK[name])
-		continue;
-
+for (let name in methods)
 	methods[name].call = guard(name, methods[name].call);
-}
 
 return { 'luci.ecycloud': methods };

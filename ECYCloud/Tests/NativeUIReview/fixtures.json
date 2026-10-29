@@ -1,0 +1,356 @@
+{
+  "/auth/login": {
+    "token": "synthetic-offline-token",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "user": {
+      "id": 7,
+      "email": "member@example.test",
+      "user_name": "测试账户",
+      "class": 2,
+      "class_expire": "2099-01-01 00:00:00",
+      "expire_in": "2099-01-01 00:00:00",
+      "upload": 100,
+      "download": 300,
+      "transfer_enable": 1000,
+      "last_day_t": 150,
+      "node_speedlimit": 100,
+      "node_connector": 3,
+      "online_client_count": 1,
+      "money": 12.5,
+      "traffic_reset": "每月重置",
+      "plan": null,
+      "config_revision": "revision-1",
+      "api_origin": "https://config.example.test",
+      "site_origin": "https://site.example.test"
+    }
+  },
+  "/config/clash": {
+    "revision": "revision-1",
+    "config": {
+      "proxies": [],
+      "proxy-providers": {
+        "ecy-panel-nodes": {
+          "type": "file",
+          "path": "ecy-panel-nodes.json",
+          "payload": [
+            {
+              "name": "node-12",
+              "type": "ss",
+              "server": "192.0.2.1",
+              "port": 443,
+              "cipher": "aes-128-gcm",
+              "password": "synthetic-only"
+            },
+            {
+              "name": "node-13",
+              "type": "ss",
+              "server": "192.0.2.1",
+              "port": 443,
+              "cipher": "aes-128-gcm",
+              "password": "synthetic-only"
+            }
+          ]
+        }
+      },
+      "proxy-groups": [
+        {
+          "name": "select",
+          "type": "select",
+          "use": [
+            "ecy-panel-nodes"
+          ],
+          "proxies": [
+            "DIRECT"
+          ]
+        },
+        {
+          "name": "streaming",
+          "type": "url-test",
+          "use": [
+            "ecy-panel-nodes"
+          ],
+          "url": "https://example.test",
+          "interval": 300
+        }
+      ],
+      "rules": [
+        "MATCH,select"
+      ]
+    },
+    "node_labels": {
+      "node-12": "测试节点 · 正常",
+      "node-13": "测试节点 · 超时"
+    },
+    "group_labels": {
+      "select": "节点选择",
+      "streaming": "流媒体"
+    },
+    "group_icons": {
+      "select": "https://site.example.test/review.gif",
+      "streaming": "https://site.example.test/review.svg"
+    }
+  },
+  "/auth/options": {
+    "reg_mode": "open",
+    "enable_change_email": true,
+    "enable_kill": true,
+    "enable_password_change_reset_subscription": false,
+    "email_verify": true,
+    "api_origin": "https://config.example.test",
+    "site_origin": "https://site.example.test"
+  },
+  "/user/account-status": {
+    "enable": 1,
+    "email": "member@example.test",
+    "deletion_time": null,
+    "ban_reason": "",
+    "ban_time_text": null,
+    "support_email": "support@example.test"
+  },
+  "/user/profile": {
+    "id": 7,
+    "email": "member@example.test",
+    "user_name": "测试账户",
+    "class": 2,
+    "class_expire": "2099-01-01 00:00:00",
+    "expire_in": "2099-01-01 00:00:00",
+    "upload": 100,
+    "download": 300,
+    "transfer_enable": 1000,
+    "last_day_t": 150,
+    "node_speedlimit": 100,
+    "node_connector": 3,
+    "online_client_count": 1,
+    "money": 12.5,
+    "traffic_reset": "每月重置",
+    "plan": null,
+    "config_revision": "revision-1",
+    "api_origin": "https://config.example.test",
+    "site_origin": "https://site.example.test"
+  },
+  "/announcements": {
+    "announcements": [
+      {
+        "id": 2,
+        "title": "原生界面离线检查",
+        "date": "2026-10-20",
+        "updated_at": "2026-10-20",
+        "content": "<p>这些是独立渲染检查使用的虚构数据。<strong>没有连接真实账户或服务。</strong></p>"
+      }
+    ],
+    "popup": null
+  },
+  "/tickets": {
+    "tickets": [
+      {
+        "id": 12,
+        "status": 1,
+        "title": "离线检查：节点连接说明",
+        "status_text": "待回复",
+        "datetime": "2026-10-20 12:00",
+        "last_reply_time": "2026-10-20 12:30"
+      }
+    ],
+    "banned": false,
+    "enable_ticket": true,
+    "current_page": 1,
+    "last_page": 1,
+    "total": 1,
+    "per_page": 10
+  },
+  "/tickets/12": {
+    "id": 12,
+    "title": "离线检查：节点连接说明",
+    "status": 1,
+    "status_text": "待回复",
+    "datetime": "2026-10-20 12:00",
+    "banned": false,
+    "enable_ticket": true,
+    "message_count": 2,
+    "messages": [
+      {
+        "id": 13,
+        "is_admin": true,
+        "user_name": "客服",
+        "content": "<p>请提供遇到问题时的错误提示。</p>",
+        "datetime": "2026-10-20 12:30"
+      },
+      {
+        "id": 12,
+        "is_admin": false,
+        "user_name": "测试账户",
+        "content": "<p>这是一条虚构的测试工单。</p>",
+        "datetime": "2026-10-20 12:00"
+      }
+    ]
+  },
+  "/shop/products": {
+    "money": 12.5,
+    "plan_cooldown_remaining": 0,
+    "default_duration": 30,
+    "notice": "<p>请在购买前核对套餐有效期与流量。此处为离线虚构商品。</p>",
+    "products": [
+      {
+        "id": 1,
+        "name": "虚构月度套餐",
+        "type": "plan",
+        "price": "12.00",
+        "base_price": "15.00",
+        "stock": "不限量",
+        "in_stock": true,
+        "has_limited_sale": false,
+        "purchase_limit": 0,
+        "new_user_days_limit": 0,
+        "min_registration_days": 0,
+        "countdowns": [],
+        "bandwidth": 100,
+        "class": 1,
+        "class_expire": 30,
+        "speedlimit": 100,
+        "connector": 3,
+        "auto_renew": 1,
+        "content_extra": [
+          "虚构商品，仅用于离线检查"
+        ]
+      },
+      {
+        "id": 2,
+        "name": "虚构季度套餐",
+        "type": "plan",
+        "price": "30.00",
+        "base_price": "15.00",
+        "stock": "不限量",
+        "in_stock": true,
+        "has_limited_sale": false,
+        "purchase_limit": 0,
+        "new_user_days_limit": 0,
+        "min_registration_days": 0,
+        "countdowns": [],
+        "bandwidth": 100,
+        "class": 1,
+        "class_expire": 60,
+        "speedlimit": 100,
+        "connector": 3,
+        "auto_renew": 1,
+        "content_extra": [
+          "虚构商品，仅用于离线检查"
+        ]
+      },
+      {
+        "id": 3,
+        "name": "虚构年度套餐",
+        "type": "plan",
+        "price": "100.00",
+        "base_price": "15.00",
+        "stock": "不限量",
+        "in_stock": true,
+        "has_limited_sale": false,
+        "purchase_limit": 0,
+        "new_user_days_limit": 0,
+        "min_registration_days": 0,
+        "countdowns": [],
+        "bandwidth": 100,
+        "class": 1,
+        "class_expire": 90,
+        "speedlimit": 100,
+        "connector": 3,
+        "auto_renew": 1,
+        "content_extra": [
+          "虚构商品，仅用于离线检查"
+        ]
+      }
+    ]
+  },
+  "/shop/order-status": {
+    "name": "虚构月度套餐",
+    "base_price": "12.00",
+    "total": "10.00",
+    "stock": "不限量",
+    "has_stock_limit": false,
+    "plan_cooldown": false,
+    "hasValidOrder": 0,
+    "couponApplied": true,
+    "couponMsg": "测试优惠已应用",
+    "credit": 2
+  },
+  "/user/subscription-config": {
+    "customizable_groups": [
+      "select",
+      "streaming"
+    ],
+    "all_group_names": [
+      "select",
+      "streaming"
+    ],
+    "available_proxy_names": [
+      "DIRECT",
+      "REJECT",
+      "node-12"
+    ],
+    "group_labels": {
+      "select": "节点选择",
+      "streaming": "流媒体"
+    },
+    "allow_custom_hosts": true,
+    "allow_custom_rules": true,
+    "allow_custom_groups": true,
+    "allow_custom_rule_providers": true,
+    "max_custom_hosts": 20,
+    "max_custom_rules": 20,
+    "max_custom_groups": 5,
+    "max_custom_rule_providers": 5,
+    "disabled_groups": [],
+    "custom_hosts": "example.test: 192.0.2.1",
+    "custom_rules": "DOMAIN,example.test,DIRECT",
+    "custom_groups": [],
+    "custom_rule_providers": []
+  },
+  "/user/edit-options": {
+    "ga_enable": 1,
+    "ga_token": "",
+    "ga_url": "",
+    "enable_telegram": true,
+    "telegram_unbind_kick": true,
+    "telegram_bot": "synthetic_bot",
+    "im_value": "虚构绑定",
+    "bind_token": "synthetic-bind",
+    "telegram_id": 123,
+    "mail_notify_settings": {
+      "notify_limit_mode": true,
+      "notify_exhaust_mode": true,
+      "mail_ticket": true
+    },
+    "mail_notify_preferences": {
+      "account_expire": true,
+      "vip_expire": true,
+      "traffic_low": true,
+      "announcement": true,
+      "marketing": false
+    }
+  },
+  "/user/traffic-log": {
+    "traffic": {
+      "2026-10-20": {
+        "total_usage": "120 MB",
+        "total_upload": "20 MB",
+        "total_download": "100 MB",
+        "rate_info": "1 倍"
+      }
+    },
+    "node_traffic": {},
+    "total_upload": "20 MB",
+    "total_download": "100 MB",
+    "total_usage": "120 MB",
+    "total_rate_info": "1 倍",
+    "log_keep_days": 30
+  },
+  "/user/speed-test": {
+    "allowed": [
+      "node-12",
+      "node-13"
+    ],
+    "denied": []
+  },
+  "/user/node-speed": {},
+  "/user/node-latency": {}
+}

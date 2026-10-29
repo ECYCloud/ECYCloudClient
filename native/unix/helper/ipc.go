@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -23,7 +24,8 @@ const (
 )
 
 type request struct {
-	Command string `json:"command"`
+	Command  string `json:"command"`
+	CacheKey string `json:"cache_key"`
 	// 调用方自填，不可信；各分支用套接字对端 PID
 	PID       int      `json:"pid"`
 	Config    string   `json:"config"`
@@ -50,8 +52,11 @@ type server struct {
 	kernel *kernelManager
 	proxy  *proxyManager
 
-	mu      sync.Mutex
-	watched int
+	mu        sync.RWMutex
+	owner     string
+	watched   int
+	closing   bool
+	operation sync.Mutex
 
 	slots chan struct{}
 
@@ -127,7 +132,7 @@ func (s *server) handle(conn net.Conn) {
 		return
 	}
 
-	pid, err := peerPID(unixConn)
+	pid, user, err := peerIdentity(unixConn)
 	if err != nil {
 		logf("识别套接字客户端失败: %v", err)
 		writeResponse(conn, response{Error: err.Error()})
@@ -139,7 +144,7 @@ func (s *server) handle(conn net.Conn) {
 		return
 	}
 
-	data, err := s.dispatch(req, pid)
+	data, err := s.dispatch(req, pid, user)
 	if err != nil {
 		logf("命令 %s 失败: %v", req.Command, err)
 		writeResponse(conn, response{Error: err.Error()})
@@ -148,8 +153,32 @@ func (s *server) handle(conn net.Conn) {
 	writeResponse(conn, response{OK: true, Data: data})
 }
 
-func (s *server) dispatch(req request, pid int) (any, error) {
+func (s *server) dispatch(req request, pid int, user string) (any, error) {
+	if err := s.lockSession(pid, user); err != nil {
+		return nil, err
+	}
+	defer s.mu.RUnlock()
+	if req.Command == "kernel.upgrade.progress" {
+		return s.upgradeProgress(), nil
+	}
+	s.operation.Lock()
+	defer s.operation.Unlock()
 	switch req.Command {
+	case "kernel.upgrade.commit":
+		if err := commitKernelUpgrade(); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+
+	case "kernel.upgrade.rollback":
+		if err := s.kernel.stop(); err != nil {
+			return nil, fmt.Errorf("停止候选内核失败，不能回滚: %w", err)
+		}
+		if err := rollbackKernelUpgrade(); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+
 	case "ping":
 		return map[string]any{
 			"version":     helperVersion,
@@ -161,6 +190,12 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		ready, reason := ensureTunReady()
 		return map[string]any{"ready": ready, "reason": reason}, nil
 
+	case "kernel.bind":
+		if err := s.bindCache(req.CacheKey, user); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+
 	case "kernel.start":
 		if strings.TrimSpace(req.Config) == "" {
 			return nil, fmt.Errorf("缺少配置内容")
@@ -168,11 +203,18 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if err := s.kernel.start(req.Config); err != nil {
 			return nil, err
 		}
-		s.watchClient(pid)
 		return map[string]any{}, nil
 
 	case "kernel.stop":
-		s.kernel.stop()
+		if err := s.kernel.stop(); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+
+	case "kernel.clear":
+		if err := s.clearRuntime(); err != nil {
+			return nil, err
+		}
 		return map[string]any{}, nil
 
 	case "kernel.status":
@@ -210,9 +252,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		}
 		return map[string]any{"version": version}, nil
 
-	case "kernel.upgrade.progress":
-		return s.upgradeProgress(), nil
-
 	case "proxy.set":
 		if req.Port <= 0 || req.Port > 65535 {
 			return nil, fmt.Errorf("非法端口 %d", req.Port)
@@ -220,7 +259,6 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 		if err := s.proxy.set(req.Port, pid, req.Bypass); err != nil {
 			return nil, err
 		}
-		s.watchClient(pid)
 		return map[string]any{}, nil
 
 	case "proxy.restore":
@@ -237,43 +275,170 @@ func (s *server) dispatch(req request, pid int) (any, error) {
 	}
 }
 
-// GUI 被强杀时没人下达停止指令，只能由 helper 代为收尾
-func (s *server) watchClient(pid int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// 返回时持有读锁，清理必须等本账号正在执行的请求全部结束。
+func (s *server) lockSession(pid int, user string) error {
+	if pid <= 0 || user == "" {
+		return fmt.Errorf("无法识别客户端系统账号")
+	}
+	for {
+		s.mu.RLock()
+		if s.closing {
+			s.mu.RUnlock()
+			return fmt.Errorf("后台服务正在停止")
+		}
+		if s.owner != "" && s.owner != user {
+			s.mu.RUnlock()
+			return fmt.Errorf("另一系统账号正在使用客户端，请先退出该账号的客户端")
+		}
+		if s.owner == user && s.watched == pid {
+			return nil
+		}
+		s.mu.RUnlock()
 
-	if pid <= 0 || pid == s.watched {
-		return
+		s.mu.Lock()
+		if !s.closing && (s.owner == "" || s.owner == user) {
+			root, err := os.OpenRoot(dataDir())
+			if err == nil {
+				marker, readErr := root.ReadFile(".cache-owner")
+				root.Close()
+				if readErr == nil && !strings.HasPrefix(string(marker), user+"\n") {
+					if err := s.clearRuntime(); err != nil {
+						s.mu.Unlock()
+						return err
+					}
+				} else if readErr != nil && !os.IsNotExist(readErr) {
+					s.mu.Unlock()
+					return readErr
+				}
+			} else if !os.IsNotExist(err) {
+				s.mu.Unlock()
+				return err
+			}
+			if err := watchProcess(pid, func() { s.onClientGone(pid) }); err != nil {
+				s.mu.Unlock()
+				return fmt.Errorf("监听 GUI 进程失败: %w", err)
+			}
+			s.owner, s.watched = user, pid
+		}
+		s.mu.Unlock()
 	}
-	if err := watchProcess(pid, func() { s.onClientGone(pid) }); err != nil {
-		logf("监听 GUI 进程失败: %v", err)
-		return
+}
+
+func (s *server) initialize() error {
+	if err := prepareRunDir(); err != nil {
+		return err
 	}
-	s.watched = pid
+	return s.resetSession()
+}
+
+func (s *server) resetSession() error {
+	if err := s.clearRuntime(true); err != nil {
+		return err
+	}
+	s.owner, s.watched = "", 0
+	return nil
+}
+
+func (s *server) clearRuntime(preserveCache ...bool) error {
+	if err := s.kernel.stop(); err != nil {
+		return fmt.Errorf("停止旧内核失败，不能释放会话: %w", err)
+	}
+	if s.kernel.status(0).Running {
+		return fmt.Errorf("旧内核尚未退出，不能释放会话")
+	}
+	if err := s.proxy.restore(); err != nil {
+		return fmt.Errorf("还原系统代理失败，不能释放会话: %w", err)
+	}
+	if err := clearSessionFiles(dataDir(), preserveCache...); err != nil {
+		return fmt.Errorf("清理旧运行数据失败，不能释放会话: %w", err)
+	}
+	s.kernel = newKernelManager()
+	return nil
+}
+
+func (s *server) bindCache(key, user string) error {
+	if len(key) != 64 {
+		return fmt.Errorf("缓存身份格式错误")
+	}
+	if _, err := hex.DecodeString(key); err != nil {
+		return fmt.Errorf("缓存身份格式错误")
+	}
+	if err := prepareRunDir(); err != nil {
+		return err
+	}
+	identity := user + "\n" + key
+	root, err := os.OpenRoot(dataDir())
+	if err != nil {
+		return err
+	}
+	old, readErr := root.ReadFile(".cache-owner")
+	root.Close()
+	if readErr == nil && string(old) == identity {
+		return nil
+	}
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	if err := s.clearRuntime(); err != nil {
+		return err
+	}
+	if err := prepareRunDir(); err != nil {
+		return err
+	}
+	root, err = os.OpenRoot(dataDir())
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.WriteFile(".cache-owner", []byte(identity), 0600)
+}
+
+func clearSessionFiles(base string, preserveCache ...bool) error {
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if len(preserveCache) > 0 && preserveCache[0] {
+		if marker, err := root.ReadFile(".cache-owner"); err == nil && len(marker) > 0 {
+			for _, name := range []string{"config.json", "config.check.json", "proxy-snapshot.json"} {
+				if err := root.Remove("run/" + name); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	if err := root.RemoveAll("run"); err != nil {
+		return err
+	}
+	if err := root.Remove(".cache-owner"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (s *server) onClientGone(pid int) {
 	defer guard("GUI 退出后的收尾")
 
 	s.mu.Lock()
-	if s.watched != pid {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.watched != pid || s.closing {
 		return
 	}
-	s.watched = 0
-	s.mu.Unlock()
 
 	logf("GUI 进程 %d 已退出，开始收尾", pid)
-	s.kernel.stop()
-	if err := s.proxy.restore(); err != nil {
-		logf("兜底还原系统代理失败: %v", err)
+	if err := s.resetSession(); err != nil {
+		logf("会话收尾失败: %v", err)
 	}
 }
 
 func (s *server) shutdown() {
-	s.kernel.stop()
-	if err := s.proxy.restore(); err != nil {
-		logf("停止服务时还原系统代理失败: %v", err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closing = true
+	if err := s.resetSession(); err != nil {
+		logf("停止服务时清理会话失败: %v", err)
 	}
 	os.Remove(socketPath)
 }

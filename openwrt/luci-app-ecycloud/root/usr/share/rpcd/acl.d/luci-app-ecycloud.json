@@ -3,13 +3,13 @@
 		"description": "Grant access to the ECY Cloud client",
 		"read": {
 			"ubus": {
-				"luci.ecycloud": [ "status", "groups", "logs", "delay", "connections", "online_devices", "devices" ]
+				"luci.ecycloud": [ "status", "groups", "logs", "connections" ]
 			},
 			"uci": [ "ecycloud" ]
 		},
 		"write": {
 			"ubus": {
-				"luci.ecycloud": [ "login", "send_login_verify", "login_code", "logout", "start", "stop", "update", "select", "reselect", "mode", "set", "test_group", "speed_test", "test_group_speed", "refresh_account", "device_reclaim", "device_kick_ack", "kick_device", "ensure_kernel" ]
+				"luci.ecycloud": [ "login", "send_login_verify", "login_code", "logout", "start", "stop", "update", "select", "reselect", "mode", "set", "delay", "test_group", "speed_test", "test_group_speed", "refresh_account", "checkin", "online_devices", "devices", "device_reclaim", "device_kick_ack", "kick_device", "ensure_kernel", "close_connection" ]
 			},
 			"uci": [ "ecycloud" ]
 		}

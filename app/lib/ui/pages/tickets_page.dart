@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
@@ -23,8 +24,10 @@ import '../widgets/rich_html_view.dart';
 import '../widgets/video_viewer.dart';
 import '../widgets/tag_chip.dart';
 import '../widgets/multiline_content_field.dart';
-import '../widgets/overlay_scroll_view.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_text_field.dart';
 
 class TicketsPage extends StatefulWidget {
   const TicketsPage({super.key, this.showBackButton = false});
@@ -53,7 +56,7 @@ class _TicketsPageState extends State<TicketsPage>
     super.didChangeDependencies();
     if (!_started) {
       _started = true;
-      startAutoRefresh(() => _load(silent: true));
+      startAutoRefresh(() => _load(silent: true), revision: 'tickets');
       unawaited(_load());
     }
   }
@@ -167,7 +170,19 @@ class _TicketsPageState extends State<TicketsPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final ListToolbar toolbar = ListToolbar(
+      currentPage: _page,
+      lastPage: _lastPage,
+      total: _total,
+      showSearch: false,
+      searchHint: L10n.t('标题 / 工单号'),
+      onSearchChanged: _onSearch,
+      onPageChanged: (int page) {
+        _page = page;
+        unawaited(_load());
+      },
+    );
+    return AppScaffold(
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -182,113 +197,100 @@ class _TicketsPageState extends State<TicketsPage>
                 RefreshButton(tooltip: L10n.t('刷新工单'), onRefresh: _load),
               ],
             ),
-            ListToolbar(
-              currentPage: _page,
-              lastPage: _lastPage,
-              total: _total,
-              searchHint: L10n.t('标题 / 工单号'),
-              onSearchChanged: _onSearch,
-              onPageChanged: (int page) {
-                _page = page;
-                unawaited(_load());
-              },
-            ),
+            toolbar.buildSearch(),
             if (_banned)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
                 child: Text(
                   L10n.t('您已被禁止发起或回复工单'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               ),
             Padding(
               padding: EdgeInsets.only(left: AppTheme.pageScrollPadding.left),
-              child: SelectionArea(
-                contextMenuBuilder: AppTheme.selectableRegionMenu,
-                child: Column(
-                  children: <Widget>[
-                    SectionCard(
-                      padding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              L10n.t('如需与我们沟通，请点击创建工单按钮。'),
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(fontSize: AppTheme.pageHintSize),
-                            ),
+              child: Column(
+                children: <Widget>[
+                  SectionCard(
+                    padding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            L10n.t('如需与我们沟通，请点击创建工单按钮。'),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontSize: AppTheme.pageHintSize),
                           ),
-                          const SizedBox(width: 12),
-                          FilledButton.icon(
-                            onPressed: _busy || _banned ? null : _create,
-                            icon: const Icon(Icons.add, size: 16),
-                            label: Text(L10n.t('创建工单')),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_busy && _tickets.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 80),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (_error != null && _tickets.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 80),
-                        child: Column(
-                          children: <Widget>[
-                            Icon(
-                              Icons.error_outline,
-                              size: 40,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(_error!, textAlign: TextAlign.center),
-                          ],
                         ),
-                      )
-                    else
-                      SimpleDataTable(
-                        columns: <String>[
-                          L10n.t('操作'),
-                          L10n.t('标题'),
-                          L10n.t('状态'),
-                          L10n.t('创建时间'),
-                          L10n.t('最后回复时间'),
-                        ],
-                        emptyText: _search.isEmpty
-                            ? L10n.t('您目前还没有工单沟通记录')
-                            : L10n.t('没有匹配结果'),
-                        rows: <List<Widget>>[
-                          for (final TicketSummary ticket in _tickets)
-                            <Widget>[
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: FilledButton(
-                                  onPressed: () =>
-                                      unawaited(_openDetail(ticket.id)),
-                                  child: Text(L10n.t('查看')),
-                                ),
-                              ),
-                              TableText('${ticket.title} (#${ticket.id})'),
-                              TableText(ticket.statusText),
-                              TableText(ticket.datetime, muted: true),
-                              TableText(
-                                ticket.lastReplyTime.isEmpty
-                                    ? L10n.t('无回复')
-                                    : ticket.lastReplyTime,
-                                muted: true,
-                              ),
-                            ],
+                        const SizedBox(width: 12),
+                        FilledButton.icon(
+                          onPressed: _busy || _banned ? null : _create,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: Text(L10n.t('创建工单')),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_busy && _tickets.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 80),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_error != null && _tickets.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 80),
+                      child: Column(
+                        children: <Widget>[
+                          Icon(
+                            Icons.error_outline,
+                            size: 40,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(_error!, textAlign: TextAlign.center),
                         ],
                       ),
-                  ],
-                ),
+                    )
+                  else
+                    SimpleDataTable(
+                      columns: <String>[
+                        L10n.t('操作'),
+                        L10n.t('标题'),
+                        L10n.t('状态'),
+                        L10n.t('创建时间'),
+                        L10n.t('最后回复时间'),
+                      ],
+                      emptyText: _search.isEmpty
+                          ? L10n.t('您目前还没有工单沟通记录')
+                          : L10n.t('没有匹配结果'),
+                      rows: <List<Widget>>[
+                        for (final TicketSummary ticket in _tickets)
+                          <Widget>[
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: FilledButton(
+                                onPressed: () =>
+                                    unawaited(_openDetail(ticket.id)),
+                                child: Text(L10n.t('查看')),
+                              ),
+                            ),
+                            TableText('${ticket.title} (#${ticket.id})'),
+                            TableText(ticket.statusText),
+                            TableText(ticket.datetime, muted: true),
+                            TableText(
+                              ticket.lastReplyTime.isEmpty
+                                  ? L10n.t('无回复')
+                                  : ticket.lastReplyTime,
+                              muted: true,
+                            ),
+                          ],
+                      ],
+                    ),
+                ],
               ),
             ),
+            toolbar,
           ],
         ),
       ),
@@ -318,7 +320,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
     super.didChangeDependencies();
     if (!_started) {
       _started = true;
-      startAutoRefresh(() => _load(silent: true));
+      startAutoRefresh(() => _load(silent: true), revision: 'tickets');
       unawaited(_load());
     }
   }
@@ -397,7 +399,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
     }
     final bool? ok = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('关闭工单')),
         content: Text(L10n.t('确定关闭此工单？')),
         actions: <Widget>[
@@ -439,9 +441,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
         detail?.messages ?? const <TicketMessage>[];
     final int msgLastPage = allMessages.isEmpty
         ? 1
-        : ((allMessages.length + ListToolbar.pageSize - 1) /
-                  ListToolbar.pageSize)
-              .ceil();
+        : (allMessages.length / ListToolbar.pageSize).ceil();
     final int safeMsgPage = _msgPage.clamp(1, msgLastPage);
     final int msgStart = (safeMsgPage - 1) * ListToolbar.pageSize;
     final List<TicketMessage> pageMessages = allMessages.isEmpty
@@ -459,7 +459,7 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
             detail.messages.map((TicketMessage m) => m.content),
           );
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -516,6 +516,107 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
                         ],
                       ),
                     ),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: AppTheme.pageScrollPadding.left,
+                    ),
+                    child: Column(
+                      children: <Widget>[
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            TagChip(label: detail.statusText),
+                            Text(
+                              L10n.t('创建 {0}', <Object>[detail.datetime]),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                            Text(
+                              L10n.t('共 {0} 条消息', <Object>[
+                                detail.messageCount,
+                              ]),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                        if (detail.banned) ...<Widget>[
+                          const SizedBox(height: 8),
+                          Text(
+                            L10n.t('您已被禁止回复工单'),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        if (pageMessages.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 40),
+                            child: Center(child: Text(L10n.t('暂无消息'))),
+                          )
+                        else
+                          for (final TicketMessage message
+                              in pageMessages) ...<Widget>[
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: message.isAdmin
+                                    ? theme.colorScheme.surfaceContainerHighest
+                                    : theme.colorScheme.surface,
+                                borderRadius: BorderRadius.circular(
+                                  AppTheme.cardRadius,
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: <Widget>[
+                                        Flexible(
+                                          child: Text(
+                                            message.userName,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleSmall
+                                                ?.copyWith(
+                                                  color: message.isAdmin
+                                                      ? AppTheme.warning
+                                                      : theme
+                                                            .colorScheme
+                                                            .primary,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: Text(
+                                            message.datetime,
+                                            textAlign: TextAlign.right,
+                                            style: theme.textTheme.bodySmall,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    RichHtmlView(
+                                      message.content,
+                                      imageAlbum: imageAlbum,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                      ],
+                    ),
+                  ),
                   ListToolbar(
                     currentPage: safeMsgPage,
                     lastPage: msgLastPage,
@@ -525,113 +626,6 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
                     onPageChanged: (int page) {
                       setState(() => _msgPage = page);
                     },
-                  ),
-                  SelectionArea(
-                    contextMenuBuilder: AppTheme.selectableRegionMenu,
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        left: AppTheme.pageScrollPadding.left,
-                      ),
-                      child: Column(
-                        children: <Widget>[
-                          Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 8,
-                            runSpacing: 6,
-                            children: <Widget>[
-                              TagChip(label: detail.statusText),
-                              Text(
-                                L10n.t('创建 {0}', <Object>[detail.datetime]),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                              Text(
-                                L10n.t('共 {0} 条消息', <Object>[
-                                  detail.messageCount,
-                                ]),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                          if (detail.banned) ...<Widget>[
-                            const SizedBox(height: 8),
-                            Text(
-                              L10n.t('您已被禁止回复工单'),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.error,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          if (pageMessages.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 40),
-                              child: Center(child: Text(L10n.t('暂无消息'))),
-                            )
-                          else
-                            for (final TicketMessage message
-                                in pageMessages) ...<Widget>[
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: message.isAdmin
-                                      ? theme
-                                            .colorScheme
-                                            .surfaceContainerHighest
-                                      : theme.colorScheme.surface,
-                                  borderRadius: BorderRadius.circular(
-                                    AppTheme.cardRadius,
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: <Widget>[
-                                          Flexible(
-                                            child: Text(
-                                              L10n.t(message.userName),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.titleSmall
-                                                  ?.copyWith(
-                                                    color: message.isAdmin
-                                                        ? AppTheme.warning
-                                                        : theme
-                                                              .colorScheme
-                                                              .primary,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Flexible(
-                                            child: Text(
-                                              message.datetime,
-                                              textAlign: TextAlign.right,
-                                              style: theme.textTheme.bodySmall,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      RichHtmlView(
-                                        message.content,
-                                        imageAlbum: imageAlbum,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                            ],
-                        ],
-                      ),
-                    ),
                   ),
                 ],
               ],
@@ -698,12 +692,14 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
     }
     for (final _TicketAttachment item in _attachments) {
       if (item.kind == 'image') {
-        buf.write('<p><img src="${item.url}" alt="${_attr(item.name)}"></p>');
+        buf.write(
+          '<p><img src="${_attr(item.url)}" alt="${_attr(item.name)}"></p>',
+        );
       } else if (item.kind == 'video') {
-        buf.write('<p><video src="${item.url}" controls></video></p>');
+        buf.write('<p><video src="${_attr(item.url)}" controls></video></p>');
       } else {
         buf.write(
-          '<p><a href="${item.url}">${const HtmlEscape().convert(item.name)}</a></p>',
+          '<p><a href="${_attr(item.url)}">${const HtmlEscape().convert(item.name)}</a></p>',
         );
       }
     }
@@ -714,15 +710,19 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
       const HtmlEscape(HtmlEscapeMode.attribute).convert(value);
 
   Future<void> _pickMedia({required bool video}) async {
-    final List<PlatformFile> result = await FilePicker.pickFiles(
-      type: video ? FileType.video : FileType.image,
-    );
-    if (result.isEmpty) {
-      return;
+    try {
+      final List<PlatformFile> result = await FilePicker.pickFiles(
+        type: video ? FileType.video : FileType.image,
+      );
+      if (!mounted || result.isEmpty) {
+        return;
+      }
+      await _uploadPaths(
+        result.map((PlatformFile f) => f.path).whereType<String>().toList(),
+      );
+    } on PlatformException catch (error) {
+      _toast(error.message ?? L10n.t('上传失败'));
     }
-    await _uploadPaths(
-      result.map((PlatformFile f) => f.path).whereType<String>().toList(),
-    );
   }
 
   Future<void> _uploadRuntimeLog() async {
@@ -842,73 +842,70 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(widget.titleLabel),
       content: SizedBox(
         width: 460,
-        child: OverlayScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (widget.requireTitle) ...<Widget>[
-                TextField(
-                  contextMenuBuilder: AppTheme.editableTextMenu,
-                  controller: _title,
-                  decoration: InputDecoration(labelText: L10n.t('标题')),
-                ),
-                const SizedBox(height: 12),
-              ],
-              MultilineContentField(
-                controller: _content,
-                labelText: L10n.t('内容'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (widget.requireTitle) ...<Widget>[
+              AppTextField(
+                controller: _title,
+                decoration: InputDecoration(labelText: L10n.t('标题')),
               ),
+              const SizedBox(height: 12),
+            ],
+            MultilineContentField(
+              controller: _content,
+              labelText: L10n.t('内容'),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                TextButton.icon(
+                  onPressed: _uploading
+                      ? null
+                      : () => _pickMedia(video: false),
+                  icon: const Icon(Icons.image_outlined, size: 16),
+                  label: Text(L10n.t('图片')),
+                ),
+                TextButton.icon(
+                  onPressed: _uploading
+                      ? null
+                      : () => _pickMedia(video: true),
+                  icon: const Icon(Icons.videocam_outlined, size: 16),
+                  label: Text(L10n.t('视频')),
+                ),
+                TextButton.icon(
+                  onPressed: _uploading ? null : _uploadRuntimeLog,
+                  icon: const Icon(Icons.bug_report_outlined, size: 16),
+                  label: Text(L10n.t('运行日志')),
+                ),
+                if (_uploading)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            if (_attachments.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6,
+                runSpacing: 6,
                 children: <Widget>[
-                  TextButton.icon(
-                    onPressed: _uploading
-                        ? null
-                        : () => _pickMedia(video: false),
-                    icon: const Icon(Icons.image_outlined, size: 16),
-                    label: Text(L10n.t('图片')),
-                  ),
-                  TextButton.icon(
-                    onPressed: _uploading
-                        ? null
-                        : () => _pickMedia(video: true),
-                    icon: const Icon(Icons.videocam_outlined, size: 16),
-                    label: Text(L10n.t('视频')),
-                  ),
-                  TextButton.icon(
-                    onPressed: _uploading ? null : _uploadRuntimeLog,
-                    icon: const Icon(Icons.bug_report_outlined, size: 16),
-                    label: Text(L10n.t('运行日志')),
-                  ),
-                  if (_uploading)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
+                  for (int i = 0; i < _attachments.length; i++)
+                    _attachmentTile(i),
                 ],
               ),
-              if (_attachments.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    for (int i = 0; i < _attachments.length; i++)
-                      _attachmentTile(i),
-                  ],
-                ),
-              ],
             ],
-          ),
+          ],
         ),
       ),
       actions: <Widget>[

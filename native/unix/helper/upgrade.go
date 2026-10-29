@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -72,6 +73,13 @@ func (s *server) upgradeKernel(version string, proxyPort int) (string, error) {
 	}
 
 	dir := updateDir()
+	if err := ensureDataDir(); err != nil {
+		return "", err
+	}
+	// 旧版暂存目录归内核用户；废弃其中内容后重建，不能接管后继续执行。
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("清理升级目录失败: %w", err)
+	}
 	if err := ensureRestrictedDir(dir); err != nil {
 		return "", fmt.Errorf("准备升级目录失败: %w", err)
 	}
@@ -96,7 +104,9 @@ func (s *server) upgradeKernel(version string, proxyPort int) (string, error) {
 
 	// 下载走本地 mixed 出网，内核必须撑到校验通过后才停
 	s.setUpgradeProgress("installing", 0)
-	s.kernel.stop()
+	if err := s.kernel.stop(); err != nil {
+		return "", fmt.Errorf("停止旧内核失败，已放弃升级: %w", err)
+	}
 	if err := installKernel(staged); err != nil {
 		return "", err
 	}
@@ -290,24 +300,69 @@ func extractOne(source io.Reader, path string, mode os.FileMode) error {
 func installKernel(source string) error {
 	path := kernelPath()
 	backup := path + kernelBackupExt
-	os.Remove(backup)
+	if _, err := os.Stat(backup); err == nil {
+		return fmt.Errorf("存在尚未提交的旧内核备份，拒绝覆盖升级")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("检查旧内核备份失败: %w", err)
+	}
 
-	if _, err := os.Stat(path); err == nil {
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("现有内核不是普通文件，拒绝替换")
+		}
 		if err := os.Rename(path, backup); err != nil {
 			return fmt.Errorf("移走旧的 %s 失败: %w", kernelExeName, err)
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("检查现有内核失败: %w", err)
 	}
 
 	// 不能用 os.Rename：安装目录与升级目录可能不在同一个文件系统上
 	if err := copyFile(source, path); err != nil {
 		os.Remove(path)
 		if restoreErr := os.Rename(backup, path); restoreErr != nil {
-			logf("回滚 %s 失败: %v", kernelExeName, restoreErr)
+			return errors.Join(err, fmt.Errorf("回滚 %s 失败: %w", kernelExeName, restoreErr))
 		}
 		return err
 	}
 
-	os.Remove(backup)
+	return nil
+}
+
+func commitKernelUpgrade() error {
+	backup := kernelPath() + kernelBackupExt
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("清理旧内核备份失败: %w", err)
+	}
+	return nil
+}
+
+func rollbackKernelUpgrade() error {
+	path := kernelPath()
+	backup := path + kernelBackupExt
+	info, err := os.Lstat(backup)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("检查旧内核备份失败: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("旧内核备份不是普通文件，拒绝回滚")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("候选内核不是普通文件，拒绝回滚")
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("删除候选内核失败: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("检查候选内核失败: %w", err)
+	}
+	if err := os.Rename(backup, path); err != nil {
+		return fmt.Errorf("恢复旧内核失败: %w", err)
+	}
 	return nil
 }
 

@@ -3,9 +3,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // LaunchDaemon 由 root 常驻，装一次后 GUI 不再弹密码
@@ -35,13 +37,17 @@ func install() error {
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>AbandonProcessGroup</key>
+	<false/>
 	<key>ProcessType</key>
 	<string>Interactive</string>
 </dict>
 </plist>
 `, daemonLabel, exe)
 
-	uninstall()
+	if err := uninstall(); err != nil {
+		return err
+	}
 	if err := os.WriteFile(daemonPlist, []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("写入 %s 失败: %w", daemonPlist, err)
 	}
@@ -52,8 +58,12 @@ func install() error {
 }
 
 func uninstall() error {
-	// 未加载时 bootout 会报错，卸载流程不该因此中断
-	exec.Command("/bin/launchctl", "bootout", "system/"+daemonLabel).Run()
+	if out, err := exec.Command("/bin/launchctl", "bootout", "system/"+daemonLabel).CombinedOutput(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != int(syscall.ESRCH) {
+			return fmt.Errorf("停止后台服务失败: %s", trimOutput(out, err))
+		}
+	}
 	if err := os.Remove(daemonPlist); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("删除 %s 失败: %w", daemonPlist, err)
 	}

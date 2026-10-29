@@ -23,6 +23,10 @@ import 'network_segments_page.dart';
 import 'per_app_proxy_page.dart';
 import 'rule_providers_page.dart';
 import 'text_viewer_page.dart';
+import 'privacy_policy_page.dart';
+import 'tos_page.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_text_field.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -147,9 +151,8 @@ class SettingsPage extends StatelessWidget {
                       ListTile(
                         title: Text(L10n.t('语言')),
                         trailing: OptionDropdown<String>(
-                          value: AppLanguage.resolve(
-                            stored: settings.locale,
-                          ).code,
+                          value: AppLanguage.resolve(stored: settings.locale)
+                              .code,
                           options: <String, String>{
                             for (final AppLanguage language
                                 in AppLanguage.values)
@@ -301,7 +304,7 @@ class SettingsPage extends StatelessWidget {
                       children: <Widget>[
                         ListTile(
                           title: Text(L10n.t('当前版本')),
-                          subtitle: Text(AppConfig.siteHost),
+                          subtitle: _SiteLink(site: scope.auth.siteOrigin),
                           trailing: Text(
                             AppConfig.appVersion,
                             style: Theme.of(context).textTheme.bodyMedium,
@@ -309,6 +312,24 @@ class SettingsPage extends StatelessWidget {
                         ),
                         _AppUpdateTile(update: scope.update),
                         _KernelTile(update: scope.update),
+                        ListTile(
+                          title: Text(L10n.t('服务条款')),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const TosPage(),
+                            ),
+                          ),
+                        ),
+                        ListTile(
+                          title: Text(L10n.t('隐私政策')),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const PrivacyPolicyPage(),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -333,6 +354,32 @@ class SettingsPage extends StatelessWidget {
       };
 }
 
+class _SiteLink extends StatelessWidget {
+  const _SiteLink({required this.site});
+
+  final String site;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle style = DefaultTextStyle.of(context).style;
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: InkWell(
+        onTap: () => unawaited(AppScope.of(context).platform.openUrl(site)),
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(Uri.parse(site).host),
+            const SizedBox(width: 4),
+            Icon(Icons.open_in_new, size: style.fontSize, color: style.color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AppUpdateTile extends StatelessWidget {
   const _AppUpdateTile({required this.update});
 
@@ -354,9 +401,8 @@ class _AppUpdateTile extends StatelessWidget {
               : update.appManualOnly
               ? TextButton(
                   onPressed: () => unawaited(
-                    AppScope.of(
-                      context,
-                    ).platform.openUrl(AppUpdate.releasesUrl),
+                    AppScope.of(context).platform
+                        .openUrl(AppUpdate.releasesUrl),
                   ),
                   child: Text('${L10n.t('打开发布页')} ›'),
                 )
@@ -456,9 +502,8 @@ class _KernelTile extends StatelessWidget {
 }
 
 Future<void> _openLogsDirectory(BuildContext context) async {
-  final bool opened = await AppScope.of(
-    context,
-  ).platform.openDirectory(AppPaths.logs.path);
+  final bool opened = await AppScope.of(context).platform
+      .openDirectory(AppPaths.logs.path);
   if (opened || !context.mounted) {
     return;
   }
@@ -486,7 +531,7 @@ Future<bool> _confirm(
 }) async {
   final bool? confirmed = await showDialog<bool>(
     context: context,
-    builder: (BuildContext context) => AlertDialog(
+    builder: (BuildContext context) => AppAlertDialog(
       title: Text(title),
       content: Text(detail),
       actions: <Widget>[
@@ -533,7 +578,9 @@ class _PanelConfigTileState extends State<_PanelConfigTile> {
     }
     setState(() => _busy = true);
     try {
-      final String? message = await widget.connection.refreshProfileFromPanel();
+      final String? message = await widget.connection.refreshProfileFromPanel(
+        force: true,
+      );
       if (!mounted || message == null) {
         return;
       }
@@ -634,8 +681,7 @@ class _PortTile extends StatelessWidget {
       trailing: SizedBox(
         width: AppTheme.controlWidth,
         height: AppTheme.controlHeight,
-        child: TextFormField(
-          contextMenuBuilder: AppTheme.editableTextMenu,
+        child: AppTextFormField(
           initialValue: '$port',
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,

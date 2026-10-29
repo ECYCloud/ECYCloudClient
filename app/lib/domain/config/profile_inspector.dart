@@ -35,15 +35,34 @@ class ProfileInspector {
     final Set<String> names = <String>{};
     final Set<String> providers = <String>{};
 
-    _inspectProxies(remote['proxies'], issues, names);
-    _inspectGroups(remote['proxy-groups'], issues, names);
+    final Object? proxyProviders = remote['proxy-providers'];
+    final Object? panelNodes = proxyProviders is Map
+        ? proxyProviders['ecy-panel-nodes']
+        : null;
+    _inspectProxies(
+      panelNodes is Map ? panelNodes['payload'] : remote['proxies'],
+      issues,
+      names,
+    );
+    final Set<String> nodeProviders = <String>{};
+    _inspectProviders(
+      remote['proxy-providers'],
+      'proxy-providers',
+      issues,
+      nodeProviders,
+    );
+    _inspectGroups(remote['proxy-groups'], issues, names, nodeProviders);
     if (names.contains(SpeedProbeConfig.groupName)) {
       issues.add(
         L10n.t('面板配置占用了客户端测速名称：{0}', <Object>[SpeedProbeConfig.groupName]),
       );
     }
-    _inspectProviders(remote['rule-providers'], 'rule-providers', issues, providers);
-    _inspectProviders(remote['proxy-providers'], 'proxy-providers', issues, null);
+    _inspectProviders(
+      remote['rule-providers'],
+      'rule-providers',
+      issues,
+      providers,
+    );
     _inspectRules(remote['rules'], issues, names, providers);
     _inspectDns(remote['dns'], issues);
 
@@ -70,11 +89,7 @@ class ProfileInspector {
     Set<String> names,
   ) {
     if (raw is! List) {
-      issues.add(
-        raw == null
-            ? L10n.t('面板未下发任何可用节点')
-            : L10n.t('节点列表格式不对'),
-      );
+      issues.add(raw == null ? L10n.t('面板未下发任何可用节点') : L10n.t('节点列表格式不对'));
       return;
     }
     if (raw.isEmpty) {
@@ -108,13 +123,10 @@ class ProfileInspector {
     Object? raw,
     List<String> issues,
     Set<String> names,
+    Set<String> providers,
   ) {
     if (raw is! List) {
-      issues.add(
-        raw == null
-            ? L10n.t('面板配置缺少策略组')
-            : L10n.t('策略组列表格式不对'),
-      );
+      issues.add(raw == null ? L10n.t('面板配置缺少策略组') : L10n.t('策略组列表格式不对'));
       return;
     }
     if (raw.isEmpty) {
@@ -145,7 +157,18 @@ class ProfileInspector {
         issues.add(L10n.t('第 {0} 个策略组没有类型', <Object>[i + 1]));
       }
       final Object? members = item['proxies'];
-      if (members is! List || members.isEmpty) {
+      final Object? use = item['use'];
+      if (use is List) {
+        for (final Object? provider in use) {
+          if (provider is! String || !providers.contains(provider)) {
+            issues.add(
+              L10n.t('策略组「{0}」的成员「{1}」不存在', <Object>[name, '$provider']),
+            );
+          }
+        }
+      }
+      if ((members is! List || members.isEmpty) &&
+          (use is! List || use.isEmpty)) {
         issues.add(
           L10n.t('策略组「{0}」没有成员', <Object>[
             name.isEmpty ? L10n.t('第 {0} 个', <Object>[i + 1]) : name,
@@ -153,14 +176,20 @@ class ProfileInspector {
         );
         continue;
       }
-      groups.add((index: i, name: name, members: members));
+      groups.add((
+        index: i,
+        name: name,
+        members: members is List ? members : <Object?>[],
+      ));
     }
 
     for (final ({int index, String name, List<Object?> members}) group
         in groups) {
       for (final Object? member in group.members) {
         final String ref = '$member'.trim();
-        if (ref.isEmpty || names.contains(ref) || _builtins.contains(ref.toLowerCase())) {
+        if (ref.isEmpty ||
+            names.contains(ref) ||
+            _builtins.contains(ref.toLowerCase())) {
           continue;
         }
         issues.add(
@@ -187,9 +216,7 @@ class ProfileInspector {
     if (raw is! Map) {
       issues.add(
         L10n.t(
-          section == 'proxy-providers'
-              ? '节点订阅这一段不是一组完整设置'
-              : '规则集这一段不是一组完整设置',
+          section == 'proxy-providers' ? '节点订阅这一段不是一组完整设置' : '规则集这一段不是一组完整设置',
         ),
       );
       return;
@@ -216,15 +243,27 @@ class ProfileInspector {
       if (type.isEmpty) {
         issues.add(
           L10n.t(
-            section == 'proxy-providers'
-                ? '节点订阅「{0}」没有类型'
-                : '规则集「{0}」没有类型',
+            section == 'proxy-providers' ? '节点订阅「{0}」没有类型' : '规则集「{0}」没有类型',
             <Object>[name],
           ),
         );
       }
-      if (section == 'rule-providers' && '${value['path'] ?? ''}'.trim().isEmpty) {
+      if (section == 'rule-providers' &&
+          '${value['path'] ?? ''}'.trim().isEmpty) {
         issues.add(L10n.t('规则集「{0}」没有保存路径', <Object>[name]));
+      }
+      if (value.containsKey('path') && !_safeProviderPath(value['path'])) {
+        issues.add(L10n.t('「{0}」的保存路径必须位于运行目录内，且不能覆盖客户端文件', <Object>[name]));
+      }
+      if (section == 'proxy-providers' &&
+          name.startsWith('ecy-panel-') &&
+          ((name != 'ecy-panel-nodes' &&
+                  !RegExp(r'^ecy-panel-[a-f0-9]{64}$').hasMatch(name)) ||
+              value['type'] != 'file' ||
+              value['path'] != '$name.json' ||
+              value['payload'] is! List ||
+              (value['payload'] as List).isEmpty)) {
+        issues.add(L10n.t('节点订阅「{0}」不是一条完整配置', <Object>[name]));
       }
       if (type == 'http' && '${value['url'] ?? ''}'.trim().isEmpty) {
         issues.add(
@@ -239,11 +278,40 @@ class ProfileInspector {
       final String format = '${value['format'] ?? ''}'.trim().toLowerCase();
       final String behavior = '${value['behavior'] ?? ''}'.trim().toLowerCase();
       if (format == 'mrs' && behavior == 'classical') {
-        issues.add(
-          L10n.t('「{0}」把逐条规则存成了 mrs 格式，这样无法使用', <Object>[name]),
-        );
+        issues.add(L10n.t('「{0}」把逐条规则存成了 mrs 格式，这样无法使用', <Object>[name]));
       }
     });
+  }
+
+  static bool _safeProviderPath(Object? path) {
+    if (path is! String ||
+        path.isEmpty ||
+        path.startsWith('/') ||
+        RegExp(r'[\\:\x00-\x1f\x7f]').hasMatch(path)) {
+      return false;
+    }
+    final List<String> parts = path
+        .split('/')
+        .where((String part) => part != '.')
+        .toList();
+    if (parts.isEmpty ||
+        parts.any(
+          (String part) =>
+              part.isEmpty ||
+              part == '..' ||
+              part.endsWith('.') ||
+              part.endsWith(' ') ||
+              RegExp(
+                r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)',
+                caseSensitive: false,
+              ).hasMatch(part),
+        )) {
+      return false;
+    }
+    return !RegExp(
+      r'^(config\.json|config\.check\.json|cache\.db|proxy-snapshot\.json|geoip\.metadb|geosite\.dat|geoip\.dat|asn\.mmdb|bundlemrs\.7z)(\.|$)|^\.validate-',
+      caseSensitive: false,
+    ).hasMatch(parts.first);
   }
 
   static void _inspectRules(
@@ -253,11 +321,7 @@ class ProfileInspector {
     Set<String> providers,
   ) {
     if (raw is! List) {
-      issues.add(
-        raw == null
-            ? L10n.t('面板配置缺少分流规则')
-            : L10n.t('分流规则列表格式不对'),
-      );
+      issues.add(raw == null ? L10n.t('面板配置缺少分流规则') : L10n.t('分流规则列表格式不对'));
       return;
     }
     if (raw.isEmpty) {
@@ -311,10 +375,9 @@ class ProfileInspector {
         issues.add(L10n.t('第 {0} 条分流规则写错了：{1}', <Object>[i + 1, line]));
         continue;
       }
-      if (!names.contains(target) && !_builtins.contains(target.toLowerCase())) {
-        issues.add(
-          L10n.t('规则「{0}」指向了不存在的策略：{1}', <Object>[line, target]),
-        );
+      if (!names.contains(target) &&
+          !_builtins.contains(target.toLowerCase())) {
+        issues.add(L10n.t('规则「{0}」指向了不存在的策略：{1}', <Object>[line, target]));
       }
     }
 

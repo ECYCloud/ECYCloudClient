@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_status">連線狀態</string>
+    <string name="notification_starting">正在啟動核心</string>
+    <string name="notification_running">已連線</string>
+    <string name="notification_disconnect">中斷連線</string>
+    <string name="documents_root_logs">記錄</string>
+    <string name="documents_session_ending">帳戶工作階段正在清理</string>
+    <string name="documents_session_expired">記錄工作階段已失效</string>
+</resources>

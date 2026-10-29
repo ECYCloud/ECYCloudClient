@@ -12,9 +12,6 @@
 
 namespace {
 
-// 普通用户无 SeCreateGlobalPrivilege，不能用 Global\ 前缀
-constexpr const wchar_t kInstanceMutexName[] = L"Local\\ECYCloud.SingleInstance";
-
 // 不能按窗口标题 FindWindow：标题含版本号，覆盖安装后新旧实例标题不一致
 void ActivateExistingInstance() {
   ::PostMessageW(HWND_BROADCAST, ShowWindowMessageId(), 0, 0);
@@ -43,7 +40,8 @@ Win32Window::Point CenteredOrigin(const Win32Window::Size& size) {
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  HANDLE instance_mutex = ::CreateMutexW(nullptr, TRUE, kInstanceMutexName);
+  HANDLE instance_mutex =
+      ::CreateMutexW(nullptr, TRUE, gpu_watchdog::kInstanceMutexName);
   if (instance_mutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
     ActivateExistingInstance();
     ::CloseHandle(instance_mutex);
@@ -83,6 +81,5 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
-  gpu_watchdog::CloseInstanceMutex();
   return EXIT_SUCCESS;
 }

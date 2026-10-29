@@ -14,6 +14,7 @@ class SwitchTile extends StatelessWidget {
     this.contentPadding,
     this.onSettings,
     this.settingsTooltip,
+    this.toggleOnTap = false,
   });
 
   final String title;
@@ -24,6 +25,7 @@ class SwitchTile extends StatelessWidget {
   final EdgeInsetsGeometry? contentPadding;
   final VoidCallback? onSettings;
   final String? settingsTooltip;
+  final bool toggleOnTap;
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +33,7 @@ class SwitchTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: contentPadding,
+      onTap: toggleOnTap && onChanged != null ? () => onChanged!(!value) : null,
       leading: icon == null
           ? null
           : Icon(

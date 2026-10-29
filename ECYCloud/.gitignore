@@ -1,0 +1,9 @@
+**/xcuserdata/
+**/*.xcuserstate
+**/.build/
+**/.swiftpm/
+**/DerivedData/
+**/*.mobileprovision
+**/*.provisionprofile
+**/*.p12
+.DS_Store

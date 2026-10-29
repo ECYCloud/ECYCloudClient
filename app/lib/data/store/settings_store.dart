@@ -37,7 +37,7 @@ class AppSettings {
       systemProxyEnabled = true,
       mixedPort = 10203,
       allowLan = false,
-      ipv6Enabled = true,
+      ipv6Enabled = false,
       logLevel = LogLevel.warn,
       routeMode = 'rule',
       autoConnect = false,
@@ -117,9 +117,10 @@ class AppSettings {
       !listEquals(perAppPackages, other.perAppPackages) ||
       !listEquals(tunExcludeAddresses, other.tunExcludeAddresses);
 
-  // 内核至少按 info 输出；logLevel 只作落盘门槛，warning 级看不到规则集下载进度
-  String get kernelLogLevel =>
-      (logLevel.index < LogLevel.info.index ? logLevel : LogLevel.info).label;
+  // 内核日志固定 info：低于 info（warning/error/silent）看不到规则集下载进度；
+  // debug 会让内核在控制面端口挂上不鉴权的 /debug/pprof（安全审计 AUD-21），
+  // 该端点无法单独关闭，故一律不把 debug 下发给内核
+  String get kernelLogLevel => LogLevel.info.label;
 
   /// takeover 为假时内核常驻但不接管出口：关掉 TUN，只留控制面与 mixed 口
   LocalTemplateOptions toTemplateOptions({

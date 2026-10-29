@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
 )
 
 const unitName = "ecycloud-helper.service"
@@ -30,6 +31,7 @@ Type=simple
 ExecStart=%s run
 Restart=on-failure
 RestartSec=3
+KillMode=control-group
 ProtectSystem=full
 ProtectHome=read-only
 
@@ -47,8 +49,15 @@ WantedBy=multi-user.target
 }
 
 func uninstall() error {
-	// 未启用时 disable 会报错，卸载流程不该因此中断
-	exec.Command("systemctl", "disable", "--now", unitName).Run()
+	out, err := exec.Command("systemctl", "show", "--property=LoadState", "--value", unitName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("查询后台服务失败: %s", trimOutput(out, err))
+	}
+	if strings.TrimSpace(string(out)) != "not-found" {
+		if err := systemctl("disable", "--now", unitName); err != nil {
+			return err
+		}
+	}
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("删除 %s 失败: %w", unitPath, err)
 	}

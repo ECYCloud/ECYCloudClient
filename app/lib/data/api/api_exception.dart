@@ -1,3 +1,5 @@
+import '../../l10n/l10n.dart';
+
 class ApiException implements Exception {
   ApiException(
     this.message, {
@@ -5,6 +7,7 @@ class ApiException implements Exception {
     this.ret,
     this.retryAfterSeconds,
     this.connectFailed = false,
+    this.transportFailure = false,
   });
 
   final String message;
@@ -13,6 +16,7 @@ class ApiException implements Exception {
 
   /// 连接就没建起来，请求肯定没到服务端。非幂等请求只有在这种失败下才敢换条路重发
   final bool connectFailed;
+  final bool transportFailure;
 
   /// 面板 429 的 Retry-After（秒）；客户端按此退避，避免瞎重试
   final int? retryAfterSeconds;
@@ -23,6 +27,12 @@ class ApiException implements Exception {
 
   bool get rateLimited => statusCode == 429;
 
+  bool get transient =>
+      connectFailed ||
+      transportFailure ||
+      rateLimited ||
+      (statusCode != null && statusCode! >= 500 && statusCode! <= 599);
+
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }

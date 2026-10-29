@@ -1,10 +1,11 @@
 'use strict';
 
-import { access, unlink, writefile } from 'fs';
+import { access, open, popen, unlink, writefile } from 'fs';
 import { cursor } from 'uci';
 
-import { NETWORK_FILE, NFT_DIR, NFT_TABLE, ROUTE_TABLE, ROUTING_MARK, TPROXY_MARK,
-         appendNets, ensureDir, isIpNet, lanDevices, log, readJson, uciList, writeJson } from 'ecycloud.common';
+import { NETWORK_FILE, NFT_DIR, NFT_TABLE, ROUTE_TABLE, ROUTING_MARK, STATE_DIR, TPROXY_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX,
+         appendNets, coreRunning, ensureDir, ensurePrivateDir, isIpNet, lanDevices, log, panelDirectNets, readJson, settings,
+         uciList, writeJson } from 'ecycloud.common';
 
 const RULESET_FILE = `${NFT_DIR}/ruleset-post/${NFT_TABLE}.nft`;
 const DSTNAT_FILE = `${NFT_DIR}/chain-pre/dstnat/${NFT_TABLE}.nft`;
@@ -23,7 +24,7 @@ const RESERVED6 = [ '::1/128', '100::/64', 'fc00::/7', 'fe80::/10', 'ff00::/8' ]
 function bypassNets(cfg, v6) {
 	const extra = [];
 
-	for (let net in (cfg.bypass ?? [])) {
+	for (let net in [ ...(cfg.bypass ?? []), ...panelDirectNets() ]) {
 		if (!isIpNet(net))
 			continue;
 		if ((index(net, ':') >= 0) == v6)
@@ -53,6 +54,7 @@ function ruleset(cfg, devices) {
 		'\tset reserved4 {',
 		'\t\ttype ipv4_addr',
 		'\t\tflags interval',
+		'\t\tauto-merge',
 		`\t\telements = { ${join(', ', reserved4(cfg))} }`,
 		'\t}'
 	];
@@ -63,6 +65,7 @@ function ruleset(cfg, devices) {
 			'\tset reserved6 {',
 			'\t\ttype ipv6_addr',
 			'\t\tflags interval',
+			'\t\tauto-merge',
 			`\t\telements = { ${join(', ', reserved6(cfg))} }`,
 			'\t}');
 
@@ -76,13 +79,13 @@ function ruleset(cfg, devices) {
 		cfg.ipv6 ? '\t\tip6 daddr @reserved6 accept' : '\t\tmeta nfproto ipv6 accept');
 
 	if (cfg.routerProxy)
-		push(lines, `\t\tmeta mark ${TPROXY_MARK} jump tproxy`);
+		push(lines, `\t\tmeta mark ${TPROXY_MARK} jump ecycloud_tproxy`);
 
 	push(lines,
-		`\t\tiifname ${deviceSet(devices)} jump tproxy`,
+		`\t\tiifname ${deviceSet(devices)} jump ecycloud_tproxy`,
 		'\t}',
 		'',
-		'\tchain tproxy {',
+		'\tchain ecycloud_tproxy {',
 		`\t\tmeta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to :${cfg.tproxyPort} meta mark set ${TPROXY_MARK} accept`);
 
 	if (cfg.ipv6)
@@ -115,10 +118,12 @@ function routing(cfg, add) {
 		system(`${ip} route del local default dev lo table ${ROUTE_TABLE} 2>/dev/null`);
 
 		if (add) {
-			system(`${ip} rule add fwmark ${TPROXY_MARK} lookup ${ROUTE_TABLE}`);
-			system(`${ip} route add local default dev lo table ${ROUTE_TABLE}`);
+			if (system(`${ip} rule add fwmark ${TPROXY_MARK} lookup ${ROUTE_TABLE}`) != 0 ||
+			    system(`${ip} route add local default dev lo table ${ROUTE_TABLE}`) != 0)
+				return false;
 		}
 	}
+	return true;
 };
 
 function dnsmasqSection() {
@@ -142,9 +147,7 @@ function dnsmasqConfDir(section) {
 };
 
 /* conf-dir 在 tmpfs 上：意外重启后自动失效，dnsmasq 回到原本的上游，不留失联状态 */
-function applyDnsmasq(cfg) {
-	const section = dnsmasqSection();
-	const dir = dnsmasqConfDir(section);
+function applyDnsmasq(cfg, section, dir) {
 	if (!length(dir))
 		return null;
 
@@ -159,97 +162,177 @@ function applyDnsmasq(cfg) {
 	if (length(extra))
 		log('warning', `dnsmasq still has upstream servers ${join(', ', extra)}, DNS may bypass the kernel`);
 
-	system('/etc/init.d/dnsmasq restart >/dev/null 2>&1');
-
-	return path;
+	return system('/etc/init.d/dnsmasq restart >/dev/null 2>&1') == 0 ? path : null;
 };
 
 function revertDnsmasq(path) {
-	if (!length(path) || !access(path))
-		return;
+	if (!length(path))
+		return true;
 
-	unlink(path);
-	system('/etc/init.d/dnsmasq restart >/dev/null 2>&1');
+	if (access(path) && !unlink(path))
+		return false;
+	return system('/etc/init.d/dnsmasq restart >/dev/null 2>&1') == 0;
+};
+
+function query(command) {
+	const proc = popen(command);
+	if (!proc)
+		return { ok: false, text: '' };
+	const text = proc.read('all') ?? '';
+	return { ok: proc.close() == 0, text };
 };
 
 export function applied() {
 	return readJson(NETWORK_FILE);
 };
 
-/* 25.12 的 export function 不提升，apply 要调它，必须写在 apply 前面 */
-export function revert() {
+function withNetworkLock(action) {
+	ensurePrivateDir(STATE_DIR);
+	const lock = open(`${STATE_DIR}/network.lock`, 'ae', 0600);
+	if (!lock)
+		die('无法打开网络操作锁');
+	if (!lock.lock('x')) {
+		lock.close();
+		die('无法锁定网络操作');
+	}
+	let result;
+	try {
+		result = action();
+	} catch (e) {
+		lock.close();
+		die(e.message);
+	}
+	lock.close();
+	return result;
+};
+
+function revertNetwork() {
 	const record = applied();
 	let removed = false;
+	let ok = true;
 
 	for (let path in [ RULESET_FILE, INPUT_FILE, FORWARD_FILE, DSTNAT_FILE ])
 		if (access(path)) {
-			unlink(path);
-			removed = true;
+			if (!unlink(path))
+				ok = false;
+			else
+				removed = true;
 		}
 
-	if (removed) {
-		system('fw4 reload >/dev/null 2>&1');
-		/* fw4 只 flush 自己那张表，不再被 include 的 ecycloud 表得自己删 */
-		system(`nft delete table inet ${NFT_TABLE} 2>/dev/null`);
-	}
+	if ((removed || record != null) && system('fw4 reload >/dev/null 2>&1') != 0)
+		ok = false;
+	const tables = query('nft list tables 2>/dev/null');
+	if (!tables.ok || (match(tables.text, /table inet ecycloud([[:space:]]|$)/) &&
+	    system(`nft delete table inet ${NFT_TABLE} 2>/dev/null`) != 0))
+		ok = false;
 
 	routing({ ipv6: true }, false);
-	revertDnsmasq(record?.dnsmasq);
-	unlink(NETWORK_FILE);
+	const tunStopped = !coreRunning() || readJson(`${settings().runDir}/config.json`)?.tun?.enable === false;
+	for (let ip in [ 'ip', 'ip -6' ]) {
+		if (tunStopped) {
+			/* sing-tun 的 auto-route 规则占用起始优先级到起始值 + 10，强杀不会撤销这些规则。 */
+			for (let priority = TUN_RULE_INDEX; priority <= TUN_RULE_INDEX + 10; priority++)
+				if (system(`${ip} rule flush pref ${priority} 2>/dev/null`) != 0)
+					ok = false;
+			system(`${ip} route flush table ${TUN_ROUTE_TABLE} 2>/dev/null`);
+		}
+		const rules = query(`${ip} -N rule show 2>/dev/null`);
+		const routes = query(`${ip} -N route show table all 2>/dev/null`);
+		if (!rules.ok || !routes.ok || match(rules.text, /lookup 1936([[:space:]]|$)/) ||
+		    match(routes.text, /table 1936([[:space:]]|$)/))
+			ok = false;
+		if (tunStopped) {
+			for (let line in split(rules.text, '\n')) {
+				const priority = +split(line, ':')[0];
+				if (priority >= TUN_RULE_INDEX && priority <= TUN_RULE_INDEX + 10)
+					ok = false;
+			}
+			if (match(routes.text, /table 1937([[:space:]]|$)/))
+				ok = false;
+		}
+	}
+	if (!revertDnsmasq(record?.dnsmasq))
+		ok = false;
+	if (ok && access(NETWORK_FILE) && !unlink(NETWORK_FILE))
+		ok = false;
+	return ok;
 };
 
-export function apply(cfg) {
+export function revert() {
+	return withNetworkLock(revertNetwork);
+};
+
+function applyNetwork(cfg) {
+	if (!settings().enabled)
+		return { ok: false, error: '连接已关闭，取消网络接管' };
 	const devices = lanDevices();
 	if (!length(devices))
 		return { ok: false, error: '取不到 LAN 接口设备名，请在设置里确认「LAN 接口」' };
 
-	revert();
+	if (!revertNetwork())
+		return { ok: false, error: '旧网络设置恢复失败，未应用新的代理规则' };
 
-	const record = { dnsmasq: null };
-
-	if (cfg.mode == 'tproxy') {
-		ensureDir(`${NFT_DIR}/ruleset-post`);
-		if (writefile(RULESET_FILE, ruleset(cfg, devices)) == null)
-			return { ok: false, error: `无法写入 ${RULESET_FILE}` };
-
-		/* TPROXY 后包目的地仍是外网地址却走本机投递，区域 input 策略是 REJECT 时会被拦掉 */
-		ensureDir(`${NFT_DIR}/chain-pre/input`);
-		if (writefile(INPUT_FILE, `\t\tmeta mark ${TPROXY_MARK} accept comment "!ecycloud: tproxy delivery"\n`) == null)
-			return { ok: false, error: `无法写入 ${INPUT_FILE}` };
-	} else {
-		ensureDir(`${NFT_DIR}/chain-pre/forward`);
-		const accept = [
-			`\t\tiifname "${cfg.tunDevice}" accept comment "!ecycloud: tun ingress"`,
-			`\t\toifname "${cfg.tunDevice}" accept comment "!ecycloud: tun egress"`,
-			''
-		];
-		if (writefile(FORWARD_FILE, join('\n', accept)) == null)
-			return { ok: false, error: `无法写入 ${FORWARD_FILE}` };
-	}
-
-	if (cfg.dnsHijack) {
-		ensureDir(`${NFT_DIR}/chain-pre/dstnat`);
-		const hijack = [
-			`\t\tiifname ${deviceSet(devices)} meta l4proto { tcp, udp } th dport 53 redirect to :53 comment "!ecycloud: DNS hijack"`,
-			''
-		];
-		if (writefile(DSTNAT_FILE, join('\n', hijack)) == null)
-			return { ok: false, error: `无法写入 ${DSTNAT_FILE}` };
-	}
-
-	if (system('fw4 reload >/dev/null 2>&1') != 0)
-		return { ok: false, error: 'fw4 reload 失败，防火墙规则未生效' };
-
-	if (cfg.mode == 'tproxy')
-		routing(cfg, true);
-
-	if (cfg.dnsHijack)
-		record.dnsmasq = applyDnsmasq(cfg);
-
-	writeJson(NETWORK_FILE, record);
-
-	if (cfg.dnsHijack && !length(record.dnsmasq))
+	const section = cfg.dnsHijack ? dnsmasqSection() : null;
+	const dir = cfg.dnsHijack ? dnsmasqConfDir(section) : null;
+	if (cfg.dnsHijack && !length(dir))
 		return { ok: false, error: 'dnsmasq 配置目录不可用，DNS 未接入内核' };
+	const record = { active: false, dnsmasq: cfg.dnsHijack ? `${dir}/ecycloud.conf` : null };
+	if (!writeJson(NETWORK_FILE, record))
+		return { ok: false, error: '无法保存网络恢复记录' };
+
+	try {
+		if (cfg.mode == 'tproxy') {
+			ensureDir(`${NFT_DIR}/ruleset-post`);
+			if (writefile(RULESET_FILE, ruleset(cfg, devices)) == null)
+				die(`无法写入 ${RULESET_FILE}`);
+		} else {
+			ensureDir(`${NFT_DIR}/chain-pre/forward`);
+			const accept = [
+				`\t\tiifname "${cfg.tunDevice}" accept comment "!ecycloud: tun ingress"`,
+				`\t\toifname "${cfg.tunDevice}" accept comment "!ecycloud: tun egress"`,
+				''
+			];
+			if (writefile(FORWARD_FILE, join('\n', accept)) == null)
+				die(`无法写入 ${FORWARD_FILE}`);
+		}
+		/* TPROXY 与 TUN system/mixed 的 TCP 均投递到本机内核监听口，不能只放行 forward。 */
+		ensureDir(`${NFT_DIR}/chain-pre/input`);
+		const input = cfg.mode == 'tproxy'
+			? `meta mark ${TPROXY_MARK} accept comment "!ecycloud: tproxy delivery"`
+			: `iifname "${cfg.tunDevice}" accept comment "!ecycloud: tun delivery"`;
+		if (writefile(INPUT_FILE, `\t\t${input}\n`) == null)
+			die(`无法写入 ${INPUT_FILE}`);
+
+		if (cfg.dnsHijack) {
+			ensureDir(`${NFT_DIR}/chain-pre/dstnat`);
+			const hijack = [
+				`\t\tiifname ${deviceSet(devices)} meta l4proto { tcp, udp } th dport 53 redirect to :53 comment "!ecycloud: DNS hijack"`,
+				''
+			];
+			if (writefile(DSTNAT_FILE, join('\n', hijack)) == null)
+				die(`无法写入 ${DSTNAT_FILE}`);
+		}
+
+		if (system('fw4 check >/dev/null 2>&1') != 0 ||
+		    system('fw4 reload >/dev/null 2>&1') != 0)
+			die('防火墙规则校验或加载失败，规则未生效');
+
+		if (cfg.mode == 'tproxy' && !routing(cfg, true))
+			die('策略路由设置失败');
+
+		if (cfg.dnsHijack && !length(applyDnsmasq(cfg, section, dir)))
+			die('dnsmasq 配置或重启失败，DNS 未接入内核');
+		record.active = true;
+		if (!writeJson(NETWORK_FILE, record))
+			die('无法保存网络接管状态');
+	} catch (e) {
+		const restored = revertNetwork();
+		return { ok: false, error: restored ? e.message : `${e.message}；网络恢复失败，将继续重试` };
+	}
 
 	return { ok: true };
+};
+
+export function apply(cfg) {
+	return withNetworkLock(() => applyNetwork(cfg));
 };

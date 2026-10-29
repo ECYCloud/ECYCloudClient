@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
@@ -16,6 +18,28 @@ class HtmlVideoView extends StatefulWidget {
 
   final String src;
   final VoidCallback? onRemove;
+
+  static final Map<Player, Future<void>?> _players = <Player, Future<void>?>{};
+
+  static void resumeSession() => _HtmlVideoCache._clearing = false;
+
+  static Future<void> clearSession() async {
+    _HtmlVideoCache._cancelDownloads();
+    await Future.wait(<Future<void>>[
+      for (final Player player in _players.keys.toList())
+        _disposePlayer(player),
+    ]);
+    await _HtmlVideoCache.clearSession();
+  }
+
+  static Future<void> _disposePlayer(Player player) {
+    if (!_players.containsKey(player)) {
+      return Future<void>.value();
+    }
+    return _players[player] ??= player.dispose().then((_) {
+      _players.remove(player);
+    });
+  }
 
   @override
   State<HtmlVideoView> createState() => _HtmlVideoViewState();
@@ -54,13 +78,34 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
   }
 
   void _attach(String src) {
+    if (_HtmlVideoCache._clearing) {
+      return;
+    }
+    final int generation = _HtmlVideoCache._generation;
     try {
       MediaKit.ensureInitialized();
-      final Player player = Player();
+      final Player player = Player(
+        configuration: const PlayerConfiguration(
+          protocolWhitelist: <String>['http', 'https', 'tcp', 'tls', 'crypto'],
+        ),
+      );
+      HtmlVideoView._players[player] = null;
+      final PlatformPlayer? backend = player.platform;
+      if (backend is NativePlayer) {
+        // media_kit 自己用 loadlist；仅限制实际媒体，防止缓存播放列表读取本地文件。
+        backend.onLoadHooks.add(
+          () =>
+              backend.setProperty('file-local-options/access-references', 'no'),
+        );
+      }
       _player = player;
       _controller = VideoController(player);
       _sizeSub = player.stream.width.listen((int? width) {
-        if (!mounted || width == null || width <= 0) {
+        if (!mounted ||
+            !identical(player, _player) ||
+            generation != _HtmlVideoCache._generation ||
+            width == null ||
+            width <= 0) {
           return;
         }
         if (!_ready) {
@@ -78,35 +123,48 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
   }
 
   Future<void> _open(Player player, String src) async {
+    final int generation = _HtmlVideoCache._generation;
+    bool isCurrent() =>
+        mounted &&
+        identical(player, _player) &&
+        generation == _HtmlVideoCache._generation;
     try {
       final File? cached = _HtmlVideoCache.videoOf(src);
       try {
         // 网站 <video preload="metadata">：停在首帧当封面，禁止自动播放
         await player.open(Media(cached?.uri.toString() ?? src), play: false);
       } catch (_) {
+        if (!isCurrent()) {
+          return;
+        }
         if (cached == null) {
           rethrow;
         }
         cached.deleteSync();
         await player.open(Media(src), play: false);
       }
-      if (cached == null) {
+      if (isCurrent() && cached == null) {
         unawaited(_HtmlVideoCache.prefetch(src));
       }
     } catch (_) {
-      if (mounted) {
+      if (isCurrent()) {
         setState(() => _failed = true);
       }
     }
   }
 
   Future<void> _capturePoster(Player player, String src) async {
+    final int generation = _HtmlVideoCache._generation;
     if (_HtmlVideoCache.posterOf(src) != null) {
       return;
     }
     try {
       final Uint8List? bytes = await player.screenshot();
-      if (bytes == null || bytes.isEmpty) {
+      if (!mounted ||
+          !identical(player, _player) ||
+          generation != _HtmlVideoCache._generation ||
+          bytes == null ||
+          bytes.isEmpty) {
         return;
       }
       await _HtmlVideoCache.savePoster(src, bytes);
@@ -116,7 +174,10 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
   void _detach() {
     unawaited(_sizeSub?.cancel());
     _sizeSub = null;
-    unawaited(_player?.dispose());
+    final Player? player = _player;
+    if (player != null) {
+      unawaited(HtmlVideoView._disposePlayer(player).catchError((Object _) {}));
+    }
     _player = null;
     _controller = null;
   }
@@ -221,15 +282,56 @@ class _HtmlVideoCache {
   static const int _maxTotal = 200 << 20;
 
   static final Map<String, Future<void>> _jobs = <String, Future<void>>{};
+  static final Set<Future<void>> _posters = <Future<void>>{};
+  static final Set<Completer<void>> _downloads = <Completer<void>>{};
+  static int _generation = 0;
+  static bool _clearing = false;
 
-  static File? videoOf(String url) => _existing(_videoFile(url));
+  static void _cancelDownloads() {
+    _clearing = true;
+    _generation++;
+    for (final Completer<void> abort in _downloads) {
+      if (!abort.isCompleted) {
+        abort.complete();
+      }
+    }
+  }
 
-  static File? posterOf(String url) => _existing(_posterFile(url));
+  static Future<void> clearSession() async {
+    await Future.wait(<Future<void>>[..._jobs.values, ..._posters]);
+    final Directory directory = AppPaths.videoCache;
+    if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      throw FileSystemException(L10n.t('视频缓存目录类型异常'), directory.path);
+    }
+    directory.deleteSync(recursive: true);
+  }
+
+  static File? videoOf(String url) =>
+      _clearing ? null : _existing(_videoFile(url));
+
+  static File? posterOf(String url) =>
+      _clearing ? null : _existing(_posterFile(url));
 
   static Future<void> savePoster(String url, Uint8List bytes) async {
+    if (_clearing) {
+      return;
+    }
+    final int generation = _generation;
     final File file = _posterFile(url);
-    await file.writeAsBytes(bytes, flush: true);
-    _evict(keep: file);
+    final Future<void> pending = file.writeAsBytes(bytes, flush: true).then((
+      _,
+    ) {
+      if (generation == _generation) {
+        _evict(keep: file);
+      }
+    });
+    _posters.add(pending);
+    try {
+      await pending;
+    } finally {
+      _posters.remove(pending);
+    }
   }
 
   static Future<void> prefetch(String url) => _jobs.putIfAbsent(url, () async {
@@ -241,6 +343,10 @@ class _HtmlVideoCache {
   });
 
   static Future<void> _download(String url) async {
+    if (_clearing) {
+      return;
+    }
+    final int generation = _generation;
     final File dest = _videoFile(url);
     if (_existing(dest) != null) {
       return;
@@ -251,9 +357,16 @@ class _HtmlVideoCache {
     }
     final File part = File('${dest.path}.part');
     final http.Client client = http.Client();
+    final Completer<void> abort = Completer<void>();
+    _downloads.add(abort);
+    final Timer timer = Timer(const Duration(seconds: 120), () {
+      if (!abort.isCompleted) {
+        abort.complete();
+      }
+    });
     try {
       final http.StreamedResponse response = await client
-          .send(http.Request('GET', uri))
+          .send(http.AbortableRequest('GET', uri, abortTrigger: abort.future))
           .timeout(const Duration(seconds: 120));
       if (response.statusCode != 200) {
         return;
@@ -281,7 +394,7 @@ class _HtmlVideoCache {
         _delete(part);
         rethrow;
       }
-      if (written == 0) {
+      if (written == 0 || generation != _generation) {
         _delete(part);
         return;
       }
@@ -292,8 +405,12 @@ class _HtmlVideoCache {
       _evict(keep: dest);
     } on Object catch (e) {
       _delete(part);
-      Logger.instance.warn('video', '视频缓存失败：$url（$e）');
+      if (generation == _generation) {
+        Logger.instance.warn('video', '视频缓存失败：$url（$e）');
+      }
     } finally {
+      timer.cancel();
+      _downloads.remove(abort);
       client.close();
     }
   }
@@ -340,11 +457,5 @@ class _HtmlVideoCache {
     '${AppPaths.videoCache.path}${Platform.pathSeparator}${_key(url)}.jpg',
   );
 
-  static String _key(String url) {
-    int hash = 0x811C9DC5;
-    for (final int unit in url.codeUnits) {
-      hash = ((hash ^ unit) * 0x01000193) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
-  }
+  static String _key(String url) => sha256.convert(utf8.encode(url)).toString();
 }

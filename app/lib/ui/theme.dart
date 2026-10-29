@@ -38,10 +38,13 @@ class AppTheme {
       defaultTargetPlatform == TargetPlatform.iOS ||
       defaultTargetPlatform == TargetPlatform.fuchsia;
 
+  // 鼠标点击尺寸。节点卡右侧两枚操作键上下叠放时两端都用这个高度。
+  static const double pointerTapTarget = 32;
+
   // 小图标键与头像的可点盒子。配 BoxConstraints.tightFor 用时 visualDensity
   // 必须显式给 standard：VisualDensity 只把约束的 min 减 8、max 不动，本主题的
   // 全局 compact 会让紧约束退化成松约束，盒子按内容缩小并脱离右侧那一列。
-  static double get minTapTarget => isTouch ? 48 : 32;
+  static double get minTapTarget => isTouch ? 48 : pointerTapTarget;
 
   static ButtonStyle _tonalPill(Color cta) =>
       FilledButton.styleFrom(
@@ -50,28 +53,26 @@ class AppTheme {
         disabledBackgroundColor: Colors.transparent,
         disabledForegroundColor: cta.withValues(alpha: 0.38),
         shape: pillShape,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         textStyle: _componentText(13, weight: FontWeight.w600),
       ).copyWith(
-        side: WidgetStateProperty<BorderSide>.fromMap(<
-          WidgetStatesConstraint,
-          BorderSide
-        >{
-          WidgetState.disabled: BorderSide(color: cta.withValues(alpha: 0.12)),
-          WidgetState.any: BorderSide(color: cta),
-        }),
+        side: WidgetStateProperty<BorderSide>.fromMap(
+          <WidgetStatesConstraint, BorderSide>{
+            WidgetState.disabled: BorderSide(
+              color: cta.withValues(alpha: 0.12),
+            ),
+            WidgetState.any: BorderSide(color: cta),
+          },
+        ),
       );
 
   static const double cardRadius = 20;
   static const double tileRadius = 9;
   static const double menuRadius = 16;
-  static const double authPanelRadius = 28;
   static const double pageHintSize = 14;
   static const double pageTitleSize = 22;
   static const double pageTitleSizeNarrow = 22;
   static const double navLabelSize = 15;
-  static const double authTitleSize = 24;
-  static const double authTitleSizeNarrow = 22;
   static const double headerHeight = 48;
   static const double sidebarWidth = 192;
   static const double wideBreakpoint = 640;
@@ -115,48 +116,11 @@ class AppTheme {
     );
   }
 
-  static Widget selectableRegionMenu(
-    BuildContext context,
-    SelectableRegionState state,
-  ) {
-    return _menuWithoutSelectAll(
-      state.contextMenuButtonItems,
-      state.contextMenuAnchors,
-    );
-  }
-
-  static Widget editableTextMenu(
-    BuildContext context,
-    EditableTextState state,
-  ) {
-    return _menuWithoutSelectAll(
-      state.contextMenuButtonItems,
-      state.contextMenuAnchors,
-    );
-  }
-
-  static Widget _menuWithoutSelectAll(
-    List<ContextMenuButtonItem> items,
-    TextSelectionToolbarAnchors anchors,
-  ) {
-    final List<ContextMenuButtonItem> kept = <ContextMenuButtonItem>[
-      for (final ContextMenuButtonItem item in items)
-        if (item.type != ContextMenuButtonType.selectAll) item,
-    ];
-    if (kept.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return _ThemedSelectionToolbar(anchors: anchors, items: kept);
-  }
-
   static bool isWide(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= wideBreakpoint;
 
   static double pageTitleSizeOf(BuildContext context) =>
       isWide(context) ? pageTitleSize : pageTitleSizeNarrow;
-
-  static double authTitleSizeOf(BuildContext context) =>
-      isWide(context) ? authTitleSize : authTitleSizeNarrow;
 
   // overlay 滚动条不占布局（厚度 7 + crossAxisMargin 2）。滚动区内侧至少留这段，否则文字会被拇指盖住。
   static const double overlayScrollGutter = 16;
@@ -187,6 +151,26 @@ class AppTheme {
     return base.right >= overlayScrollGutter
         ? base
         : base.copyWith(right: overlayScrollGutter);
+  }
+
+  // 拇指贴容器右缘。两端离容器端太近会落进圆角，被裁掉（菜单 antiAlias）
+  // 或压到描边外（多行输入框）。端头半径 3.5（厚度 7）时，两端各让
+  // cornerRadius - 3.5 才能整条落在弧内。带描边的容器传 inset 让开描边，
+  // 否则拇指会盖住那一段描边。
+  static ScrollbarThemeData scrollbarInsideRadius(
+    ThemeData theme,
+    double cornerRadius, {
+    double inset = 0,
+  }) {
+    final ScrollbarThemeData bar = theme.scrollbarTheme;
+    final double thickness = bar.thickness!.resolve(const <WidgetState>{})!;
+    final double cap = bar.radius!.x < thickness / 2
+        ? bar.radius!.x
+        : thickness / 2;
+    return bar.copyWith(
+      crossAxisMargin: inset,
+      mainAxisMargin: cornerRadius - cap,
+    );
   }
 
   // 24 是 ListTile 的 trailing 内边距；图标被触摸盒（minTapTarget）居中后会内缩，
@@ -362,11 +346,15 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: const BorderRadius.all(Radius.circular(999)),
-          borderSide: BorderSide(color: scheme.primary, width: 3),
+          borderSide: BorderSide(color: scheme.primary),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         constraints: const BoxConstraints(minHeight: controlHeight),
+        suffixIconConstraints: const BoxConstraints.tightFor(
+          width: controlHeight,
+          height: controlHeight,
+        ),
         hintStyle: _componentText(12, color: scheme.onSurfaceVariant),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
@@ -379,11 +367,12 @@ class AppTheme {
         mainAxisMargin: 4,
         crossAxisMargin: 2,
         interactive: true,
-        thumbColor:
-            WidgetStateProperty<Color>.fromMap(<WidgetStatesConstraint, Color>{
-              WidgetState.hovered: scheme.outline.withValues(alpha: 0.6),
-              WidgetState.any: scheme.outlineVariant,
-            }),
+        thumbColor: WidgetStateProperty<Color>.fromMap(
+          <WidgetStatesConstraint, Color>{
+            WidgetState.hovered: scheme.outline.withValues(alpha: 0.6),
+            WidgetState.any: scheme.outlineVariant,
+          },
+        ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -441,9 +430,6 @@ class AppTheme {
               // 描边改成和填色同一实色，尺寸/密度都不动。
               side: BorderSide(color: cta),
             ).copyWith(
-              overlayColor: const WidgetStatePropertyAll<Color>(
-                Colors.transparent,
-              ),
               splashFactory: NoSplash.splashFactory,
               animationDuration: Duration.zero,
             ),
@@ -460,26 +446,28 @@ class AppTheme {
         // M3 开关状态层半径固定 20，套在缩小后的开关上会盖住滑块。
         // hover / press 也不改轨道和滑块颜色，避免整颗变成一块纯色。
         overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-        trackColor:
-            WidgetStateProperty<Color>.fromMap(<WidgetStatesConstraint, Color>{
-              WidgetState.disabled & WidgetState.selected: cta.withValues(
-                alpha: 0.38,
-              ),
-              WidgetState.selected: cta,
-              WidgetState.disabled: scheme.surfaceContainerHighest.withValues(
-                alpha: 0.38,
-              ),
-              WidgetState.any: scheme.surfaceContainerHighest,
-            }),
-        thumbColor:
-            WidgetStateProperty<Color>.fromMap(<WidgetStatesConstraint, Color>{
-              WidgetState.disabled & WidgetState.selected: ctaText.withValues(
-                alpha: 0.38,
-              ),
-              WidgetState.selected: ctaText,
-              WidgetState.disabled: scheme.outline.withValues(alpha: 0.38),
-              WidgetState.any: scheme.outline,
-            }),
+        trackColor: WidgetStateProperty<Color>.fromMap(
+          <WidgetStatesConstraint, Color>{
+            WidgetState.disabled & WidgetState.selected: cta.withValues(
+              alpha: 0.38,
+            ),
+            WidgetState.selected: cta,
+            WidgetState.disabled: scheme.surfaceContainerHighest.withValues(
+              alpha: 0.38,
+            ),
+            WidgetState.any: scheme.surfaceContainerHighest,
+          },
+        ),
+        thumbColor: WidgetStateProperty<Color>.fromMap(
+          <WidgetStatesConstraint, Color>{
+            WidgetState.disabled & WidgetState.selected: ctaText.withValues(
+              alpha: 0.38,
+            ),
+            WidgetState.selected: ctaText,
+            WidgetState.disabled: scheme.outline.withValues(alpha: 0.38),
+            WidgetState.any: scheme.outline,
+          },
+        ),
         trackOutlineColor: const WidgetStatePropertyAll<Color>(
           Colors.transparent,
         ),
@@ -562,135 +550,15 @@ class AppTheme {
     system.bottom < televisionOverscan ? televisionOverscan : system.bottom,
   );
 
-  static ButtonStyle _televisionFocusStyle(
-    ButtonStyle? current,
-    ColorScheme scheme,
-  ) {
-    final BorderSide focused = BorderSide(color: scheme.primary, width: 2);
-    return (current ?? const ButtonStyle()).copyWith(
-      side: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
-        if (states.contains(WidgetState.focused)) {
-          return focused;
-        }
-        return current?.side?.resolve(states);
-      }),
-      overlayColor: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
-        if (states.contains(WidgetState.focused)) {
-          return scheme.primary.withValues(alpha: 0.16);
-        }
-        return current?.overlayColor?.resolve(states);
-      }),
-    );
-  }
-
+  // 焦点轮廓统一由 TelevisionNavigation 按当前焦点位置画一圈，不再逐个组件主题加描边：
+  // ListTile / InkWell / TabBar 的主题没有随焦点态变化的边框属性，只靠主题必然漏掉它们
   static ThemeData withTelevisionFocus(ThemeData base) {
     final ColorScheme scheme = base.colorScheme;
     return base.copyWith(
       focusColor: scheme.primary.withValues(alpha: 0.28),
-      filledButtonTheme: FilledButtonThemeData(
-        style: _televisionFocusStyle(base.filledButtonTheme.style, scheme),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: _televisionFocusStyle(base.outlinedButtonTheme.style, scheme),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: _televisionFocusStyle(base.textButtonTheme.style, scheme),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: _televisionFocusStyle(base.elevatedButtonTheme.style, scheme),
-      ),
-      iconButtonTheme: IconButtonThemeData(
-        style: _televisionFocusStyle(base.iconButtonTheme.style, scheme),
-      ),
       listTileTheme: base.listTileTheme.copyWith(
         selectedColor: scheme.primary,
         selectedTileColor: scheme.primary.withValues(alpha: 0.14),
-      ),
-    );
-  }
-}
-
-class _ThemedSelectionToolbar extends StatelessWidget {
-  const _ThemedSelectionToolbar({required this.anchors, required this.items});
-
-  static const double _screenPadding = 8;
-
-  final TextSelectionToolbarAnchors anchors;
-  final List<ContextMenuButtonItem> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final PopupMenuThemeData popup = theme.popupMenuTheme;
-    final double paddingAbove =
-        MediaQuery.paddingOf(context).top + _screenPadding;
-    final Offset origin = Offset(_screenPadding, paddingAbove);
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        _screenPadding,
-        paddingAbove,
-        _screenPadding,
-        _screenPadding,
-      ),
-      child: CustomSingleChildLayout(
-        delegate: DesktopTextSelectionToolbarLayoutDelegate(
-          anchor: anchors.primaryAnchor - origin,
-        ),
-        child: Material(
-          color: popup.color ?? theme.colorScheme.surface,
-          elevation: popup.elevation ?? 8,
-          shadowColor: theme.shadowColor,
-          shape:
-              popup.shape ??
-              RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.menuRadius),
-              ),
-          clipBehavior: Clip.antiAlias,
-          child: IntrinsicWidth(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                for (final ContextMenuButtonItem item in items)
-                  TextButton(
-                    style: ButtonStyle(
-                      visualDensity: AppTheme._density,
-                      side: const WidgetStatePropertyAll<BorderSide>(
-                        BorderSide.none,
-                      ),
-                      alignment: Alignment.centerLeft,
-                      padding: const WidgetStatePropertyAll<EdgeInsets>(
-                        EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      ),
-                      shape: WidgetStatePropertyAll<OutlinedBorder>(
-                        RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            AppTheme.tileRadius,
-                          ),
-                        ),
-                      ),
-                      overlayColor: WidgetStatePropertyAll<Color>(
-                        theme.colorScheme.primary.withValues(alpha: 0.08),
-                      ),
-                      foregroundColor: WidgetStatePropertyAll<Color>(
-                        theme.colorScheme.onSurface,
-                      ),
-                      textStyle: WidgetStatePropertyAll<TextStyle>(
-                        theme.textTheme.bodyMedium!,
-                      ),
-                    ),
-                    onPressed: item.onPressed,
-                    child: Text(
-                      AdaptiveTextSelectionToolbar.getButtonLabel(
-                        context,
-                        item,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

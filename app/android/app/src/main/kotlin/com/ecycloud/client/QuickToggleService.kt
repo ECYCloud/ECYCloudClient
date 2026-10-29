@@ -36,7 +36,8 @@ class QuickToggleService : TileService() {
         if (KernelService.requestToggle()) {
             return
         }
-        if (BoxState.starting || !BoxState.configFile(this).isFile) {
+        if (BoxState.sessionCleanupPending(this) ||
+            BoxState.starting || !BoxState.configFile(this).isFile) {
             return
         }
         // 已获 VPN 授权时 API 31+ 允许后台起前台服务（REASON_OP_ACTIVATE_VPN）；授权被抢走仍会抛

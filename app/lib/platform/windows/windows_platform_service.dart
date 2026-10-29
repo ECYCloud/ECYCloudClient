@@ -191,11 +191,11 @@ class WindowsPlatformService implements PlatformService {
 
   @override
   Future<String> protectSecret(String name, String plaintext) =>
-      Future<String>.value(_dpapiProtect(name, plaintext));
+      Isolate.run(() => _dpapiProtect(name, plaintext));
 
   @override
   Future<String?> unprotectSecret(String name, String blob) =>
-      Future<String?>.value(_dpapiUnprotect(name, blob));
+      Isolate.run(() => _dpapiUnprotect(name, blob));
 
   @override
   Future<void> deleteSecret(String name) async {}

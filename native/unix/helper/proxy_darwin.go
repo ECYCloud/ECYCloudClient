@@ -124,9 +124,10 @@ func (p *proxyManager) restore() error {
 		return err
 	}
 
+	var failures []error
 	for _, service := range snapshot.Services {
 		for index, proxy := range managedProxies {
-			restoreEntry(service.Name, proxy.set, proxy.state, service.Proxies[index])
+			failures = append(failures, restoreEntry(service.Name, proxy.set, proxy.state, service.Proxies[index]))
 		}
 		// 原本没有例外域名时要清空，networksetup 用空串表示清空
 		bypass := service.Bypass
@@ -134,8 +135,11 @@ func (p *proxyManager) restore() error {
 			bypass = []string{""}
 		}
 		if err := networksetup(append([]string{"-setproxybypassdomains", service.Name}, bypass...)...); err != nil {
-			logf("还原 %s 的代理例外失败: %v", service.Name, err)
+			failures = append(failures, fmt.Errorf("还原 %s 的代理例外失败: %w", service.Name, err))
 		}
+	}
+	if err := errors.Join(failures...); err != nil {
+		return err
 	}
 
 	return os.Remove(snapshotPath())
@@ -172,11 +176,12 @@ func (p *proxyManager) state(_ int) (proxyState, error) {
 	return state, nil
 }
 
-func restoreEntry(service, setter, stateSetter string, entry proxyEntry) {
+func restoreEntry(service, setter, stateSetter string, entry proxyEntry) error {
+	var failures []error
 	// networksetup 不接受空服务器地址，原本就没配过的只能关掉状态
 	if entry.Server != "" {
 		if err := networksetup(setter, service, entry.Server, strconv.Itoa(entry.Port)); err != nil {
-			logf("还原 %s 的 %s 失败: %v", service, setter, err)
+			failures = append(failures, fmt.Errorf("还原 %s 的 %s 失败: %w", service, setter, err))
 		}
 	}
 	state := "off"
@@ -184,8 +189,9 @@ func restoreEntry(service, setter, stateSetter string, entry proxyEntry) {
 		state = "on"
 	}
 	if err := networksetup(stateSetter, service, state); err != nil {
-		logf("还原 %s 的 %s 失败: %v", service, stateSetter, err)
+		failures = append(failures, fmt.Errorf("还原 %s 的 %s 失败: %w", service, stateSetter, err))
 	}
+	return errors.Join(failures...)
 }
 
 func captureSnapshot(services []string, pid int) (proxySnapshot, error) {

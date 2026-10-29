@@ -21,10 +21,16 @@ class SafeUrl {
   };
 
   static bool _schemeIn(String url, Set<String> schemes) {
+    if (RegExp(r'[\x00-\x1f\x7f\\]').hasMatch(url)) {
+      return false;
+    }
     final Uri? uri = Uri.tryParse(url.trim());
     if (uri == null || uri.scheme.isEmpty) {
       return false;
     }
-    return schemes.contains(uri.scheme.toLowerCase());
+    final String scheme = uri.scheme.toLowerCase();
+    return schemes.contains(scheme) &&
+        (!_web.contains(scheme) ||
+            (uri.host.isNotEmpty && uri.userInfo.isEmpty));
   }
 }

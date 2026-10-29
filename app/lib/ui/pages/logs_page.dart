@@ -4,10 +4,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/logger.dart';
 import '../../l10n/l10n.dart';
+import '../../state/connection_controller.dart';
+import '../app_scope.dart';
 import '../node_labels.dart';
 import '../theme.dart';
+import '../widgets/gapped_sliver_list.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
+import '../widgets/tag_chip.dart';
 
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
@@ -21,45 +25,75 @@ class _LogsPageState extends State<LogsPage> {
   // 攒够这个间隔再整体刷新，滚动期间的帧预算留给列表本身
   static const Duration _refreshInterval = Duration(milliseconds: 400);
 
-  final ScrollController _scroll = ScrollController();
   List<LogEntry> _visible = const <LogEntry>[];
 
   LogLevel? _level;
   String _keyword = '';
   Timer? _pending;
+  late ConnectionController _connection;
 
   @override
   void initState() {
     super.initState();
-    _visible = _filter();
     Logger.instance.addListener(_onEntry);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _connection = AppScope.of(context).connection;
+    _visible = _filter();
   }
 
   @override
   void dispose() {
     Logger.instance.removeListener(_onEntry);
     _pending?.cancel();
-    _scroll.dispose();
     super.dispose();
   }
 
-  List<LogEntry> _filter() => Logger.instance.entries
-      .where(
-        (LogEntry entry) =>
-            (_level == null || entry.level == _level) &&
-            (_keyword.isEmpty ||
-                entry.source.toLowerCase().contains(_keyword) ||
-                entry.message.toLowerCase().contains(_keyword) ||
-                NodeLabels.annotateText(
-                  entry.message,
-                ).toLowerCase().contains(_keyword)),
-      )
-      .toList(growable: false)
-      .reversed
-      .toList(growable: false);
+  // 搜索范围与行内显示一致：级别、时间、来源、正文（含节点显示名）与入站类型
+  List<LogEntry> _filter() {
+    final Map<String, String> inbound = _keyword.isEmpty
+        ? const <String, String>{}
+        : _inboundTypes(_connection);
+    return Logger.instance.entries
+        .where(
+          (LogEntry entry) =>
+              (_level == null || entry.level == _level) &&
+              (_keyword.isEmpty ||
+                  '${entry.level.label} ${_time(entry.time)} ${entry.source} '
+                          '${entry.message} ${_shown(entry)} '
+                          '${inbound[_inboundKey(entry)] ?? ''}'
+                      .toLowerCase()
+                      .contains(_keyword)),
+        )
+        .toList(growable: false)
+        .reversed
+        .toList(growable: false);
+  }
+
+  static String? _inboundKey(LogEntry entry) =>
+      _connectionSource.firstMatch(entry.message)?.group(1);
 
   static String _shown(LogEntry entry) =>
       NodeLabels.annotateText(entry.message);
+
+  // 内核连接日志形如 `[TCP] 198.18.0.1:61593(进程) --> 目标`，只带源地址
+  static final RegExp _connectionSource = RegExp(
+    r'^\[(?:TCP|UDP)\] (\[[^\]]+\]:\d+|[^\s(]+:\d+)',
+  );
+
+  static Map<String, String> _inboundTypes(ConnectionController connection) =>
+      <String, String>{
+        for (final Map<String, dynamic> item in <Map<String, dynamic>>[
+          ...connection.closedConnections.reversed,
+          ...connection.connections,
+        ])
+          if (item['metadata'] case final Map<String, dynamic> meta
+              when '${meta['type'] ?? ''}'.isNotEmpty)
+            ConnectionController.connectionSource(item): '${meta['type']}',
+      };
 
   void _refresh() {
     _pending?.cancel();
@@ -136,13 +170,12 @@ class _LogsPageState extends State<LogsPage> {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final List<LogEntry> visible = _visible;
-
     final Widget filter = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool narrow = constraints.maxWidth < 640;
         if (narrow) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+            padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -154,7 +187,7 @@ class _LogsPageState extends State<LogsPage> {
           );
         }
         return Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
           child: Row(
             children: <Widget>[
               _levelFilter(compact: false),
@@ -166,85 +199,129 @@ class _LogsPageState extends State<LogsPage> {
       },
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        PageHeader(title: L10n.t('日志'), showUserAvatar: false),
-        filter,
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              14,
-              2,
-              AppTheme.overlayScrollGutter,
-              14,
+    return ListenableBuilder(
+      listenable: _connection,
+      builder: (BuildContext context, _) =>
+          _list(theme, scheme, visible, filter, _inboundTypes(_connection)),
+    );
+  }
+
+  Widget _list(
+    ThemeData theme,
+    ColorScheme scheme,
+    List<LogEntry> visible,
+    Widget filter,
+    Map<String, String> inboundTypes,
+  ) {
+    return CustomScrollView(
+      slivers: <Widget>[
+        PinnedHeaderSliver(
+          child: ColoredBox(
+            color: theme.scaffoldBackgroundColor,
+            child: Column(
+              children: <Widget>[
+                PageHeader(title: L10n.t('日志'), showUserAvatar: false),
+                filter,
+              ],
             ),
-            child: Card(
-              child: visible.isEmpty
-                  ? Center(child: Text(L10n.t('没有符合条件的日志')))
-                  : ListView.separated(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      itemCount: visible.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 2),
-                      itemBuilder: (BuildContext context, int index) {
-                        final LogEntry entry = visible[index];
-                        final TextStyle messageStyle = theme
-                            .textTheme
-                            .bodyMedium!
-                            .copyWith(color: _color(entry.level, scheme));
-                        final double lineSize = messageStyle.fontSize!;
-                        return SelectionArea(
-                          contextMenuBuilder: AppTheme.selectableRegionMenu,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 7),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                SizedBox(
-                                  width: 72,
-                                  child: Text(
-                                    entry.level.label,
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      fontSize: lineSize,
-                                      fontWeight: FontWeight.w600,
-                                      color: _color(entry.level, scheme),
-                                    ),
-                                  ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(
+            14,
+            2,
+            AppTheme.overlayScrollGutter,
+            2,
+          ),
+          sliver: DecoratedSliver(
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+            ),
+            sliver: visible.isEmpty
+                ? SliverFillRemaining(
+                    child: Center(child: Text(L10n.t('没有符合条件的日志'))),
+                  )
+                : GappedSliverList(
+                    itemCount: visible.length,
+                    gap: 2,
+                    // 一行正文加上下内边距
+                    rowEstimate:
+                        14 +
+                        MediaQuery.textScalerOf(context)
+                            .scale(theme.textTheme.bodyMedium!.fontSize!),
+                    itemBuilder: (BuildContext context, int index) {
+                      final LogEntry entry = visible[index];
+                      final TextStyle messageStyle = theme.textTheme.bodyMedium!
+                          .copyWith(color: _color(entry.level, scheme));
+                      final double lineSize = messageStyle.fontSize!;
+                      final String? inbound = inboundTypes[_inboundKey(entry)];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 7,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            SizedBox(
+                              width: 72,
+                              child: Text(
+                                entry.level.label,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontSize: lineSize,
+                                  fontWeight: FontWeight.w600,
+                                  color: _color(entry.level, scheme),
                                 ),
-                                const SizedBox(width: 6),
-                                SizedBox(
-                                  width: 62,
-                                  child: Text(
-                                    _time(entry.time),
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      fontSize: lineSize,
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 82,
-                                  child: Text(
-                                    entry.source,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      fontSize: lineSize,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    _shown(entry),
-                                    style: messageStyle,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
+                            const SizedBox(width: 6),
+                            SizedBox(
+                              width: 62,
+                              child: Text(
+                                _time(entry.time),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: lineSize,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 82,
+                              child: Text(
+                                entry.source,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: lineSize,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: inbound == null
+                                  ? Text(_shown(entry), style: messageStyle)
+                                  : Text.rich(
+                                      TextSpan(
+                                        children: <InlineSpan>[
+                                          WidgetSpan(
+                                            alignment:
+                                                PlaceholderAlignment.middle,
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 6,
+                                              ),
+                                              child: TagChip(label: inbound),
+                                            ),
+                                          ),
+                                          TextSpan(text: _shown(entry)),
+                                        ],
+                                      ),
+                                      style: messageStyle,
+                                    ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ),
       ],

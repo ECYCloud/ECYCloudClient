@@ -25,6 +25,11 @@ class ServiceKernelController implements KernelController {
   static const String _source = 'kernel';
   static const Duration _pollInterval = Duration(seconds: 1);
 
+  /// 内核是独立进程，特权侧被强杀或重启期间它照旧转发流量（macOS 上 launchd 还会按
+  /// KeepAlive 立刻把 helper 拉回来）。因此「问不到状态」不等于「内核退出」，
+  /// 连续问不到这么多次才算真失联。
+  static const int _statusFailureLimit = 3;
+
   final ServiceTransport _service;
   final String? _tunProbeCommand;
   final bool _upgradable;
@@ -37,6 +42,8 @@ class ServiceKernelController implements KernelController {
 
   Timer? _poller;
   bool _polling = false;
+  int _statusFailures = 0;
+  int _generation = 0;
   ClashApiClient? _logClient;
   StreamSubscription<String>? _logSubscription;
   KernelStatus _status = const KernelStatus.stopped();
@@ -84,13 +91,20 @@ class ServiceKernelController implements KernelController {
   Future<String> upgrade(String version, {int? proxyPort}) async {
     // 服务替换文件前会停内核，轮询留着只会把这次停机报成「内核异常退出」
     _stopPolling();
+    final int generation = _generation;
     await _closeTunIfRunning();
+    if (generation != _generation) {
+      throw KernelException('内核会话已变化');
+    }
 
     try {
       final Map<String, dynamic> result = await _service.request(
         'kernel.upgrade',
         <String, dynamic>{'version': version, 'port': ?proxyPort},
       );
+      if (generation != _generation) {
+        throw KernelException('内核会话已变化');
+      }
       _clashApi = null;
       _update(const KernelStatus.stopped());
       return result['version'] as String? ?? version;
@@ -114,6 +128,30 @@ class ServiceKernelController implements KernelController {
       );
     } on ServiceException {
       return (stage: '', percent: 0);
+    }
+  }
+
+  @override
+  Future<void> commitKernelUpgrade() async {
+    if (!_upgradable) {
+      return;
+    }
+    try {
+      await _service.request('kernel.upgrade.commit');
+    } on ServiceException catch (e) {
+      throw KernelException('提交内核升级失败：$e');
+    }
+  }
+
+  @override
+  Future<void> rollbackKernelUpgrade() async {
+    if (!_upgradable) {
+      return;
+    }
+    try {
+      await _service.request('kernel.upgrade.rollback');
+    } on ServiceException catch (e) {
+      throw KernelException('回滚内核升级失败：$e');
     }
   }
 
@@ -149,21 +187,29 @@ class ServiceKernelController implements KernelController {
 
   @override
   Future<ClashApiOptions?> attach() async {
+    _stopPolling();
+    final int generation = _generation;
     final Map<String, dynamic> result;
     try {
       result = await _service.request('kernel.status', <String, dynamic>{
         'log_cursor': _logCursor,
       });
     } on ServiceException catch (e) {
+      if (generation != _generation) {
+        return null;
+      }
       Logger.instance.warn(_source, '查询内核状态失败: $e');
       return null;
     }
 
-    if (result['running'] != true) {
+    if (generation != _generation || result['running'] != true) {
       return null;
     }
 
     final ClashApiOptions? clashApi = await _liveClashApi();
+    if (generation != _generation) {
+      return null;
+    }
     if (clashApi == null) {
       Logger.instance.warn(_source, '内核在跑但读不出它的控制面参数，停掉重来');
       await stop();
@@ -209,7 +255,12 @@ class ServiceKernelController implements KernelController {
     required String configJson,
     required ClashApiOptions clashApi,
   }) async {
+    _stopPolling();
+    final int generation = _generation;
     await _closeTunIfRunning();
+    if (generation != _generation) {
+      return;
+    }
     _clashApi = clashApi;
     _update(const KernelStatus(state: KernelState.starting));
 
@@ -218,10 +269,16 @@ class ServiceKernelController implements KernelController {
         'config': configJson,
       });
     } on ServiceException catch (e) {
+      if (generation != _generation) {
+        return;
+      }
       _update(KernelStatus(state: KernelState.failed, message: e.toString()));
       throw KernelException('内核启动失败：$e');
     }
 
+    if (generation != _generation) {
+      return;
+    }
     _startLogStream(clashApi);
     _startPolling();
   }
@@ -236,26 +293,83 @@ class ServiceKernelController implements KernelController {
     final ClashApiClient client = ClashApiClient(clashApi);
     _logClient = client;
     // 取最啰嗦的级别，界面自己按级别过滤；mihomo 不认 trace
-    _logSubscription = client
-        .logStream(LogLevel.debug.label)
-        .listen(_logController.add);
+    _logSubscription = client.logStream(LogLevel.debug.label).listen((
+      String line,
+    ) {
+      if (identical(client, _logClient)) {
+        _logController.add(line);
+      }
+    });
   }
 
   @override
   Future<void> stop() async {
+    _stopPolling();
+    final int generation = _generation;
     _update(const KernelStatus(state: KernelState.stopping));
     await _closeTunIfRunning();
+    if (generation != _generation) {
+      return;
+    }
 
     try {
       await _service.request('kernel.stop');
     } on ServiceException catch (e) {
+      if (generation != _generation) {
+        return;
+      }
       Logger.instance.warn(_source, '停止内核失败: $e');
+      _update(KernelStatus(state: KernelState.failed, message: '$e'));
+      throw KernelException('停止内核失败：$e');
     }
 
-    _stopPolling();
+    if (generation != _generation) {
+      return;
+    }
     _clashApi = null;
     _startedAt = null;
     _update(const KernelStatus.stopped());
+  }
+
+  @override
+  Future<void> clearSession() async {
+    _stopPolling();
+    final int generation = _generation;
+    _update(const KernelStatus(state: KernelState.stopping));
+    await _closeTunIfRunning();
+    if (generation != _generation) {
+      throw KernelException('内核会话已变化');
+    }
+    try {
+      await _service.request('kernel.clear');
+    } on ServiceException catch (e) {
+      if (generation == _generation) {
+        _update(KernelStatus(state: KernelState.failed, message: '$e'));
+      }
+      throw KernelException('清理内核会话失败：$e');
+    }
+    if (generation != _generation) {
+      throw KernelException('内核会话已变化');
+    }
+    _clashApi = null;
+    _startedAt = null;
+    _logCursor = 0;
+    _cacheReady = false;
+    _update(const KernelStatus.stopped());
+  }
+
+  @override
+  Future<void> bindSession(String cacheKey) async {
+    if (cacheKey.isEmpty) {
+      return;
+    }
+    try {
+      await _service.request('kernel.bind', <String, dynamic>{
+        'cache_key': cacheKey,
+      });
+    } on ServiceException catch (e) {
+      throw KernelException('绑定配置缓存失败：$e');
+    }
   }
 
   // 停进程前先关闭 Windows TUN，避免 NLA 留下同名网络档案。
@@ -331,11 +445,13 @@ class ServiceKernelController implements KernelController {
 
   void _startPolling() {
     _poller?.cancel();
+    _statusFailures = 0;
     _poller = Timer.periodic(_pollInterval, (_) => unawaited(_poll()));
     unawaited(_poll());
   }
 
   void _stopPolling() {
+    _generation++;
     _poller?.cancel();
     _poller = null;
     _stopLogStream();
@@ -363,17 +479,33 @@ class ServiceKernelController implements KernelController {
   }
 
   Future<void> _pollOnce() async {
+    final int generation = _generation;
     late Map<String, dynamic> result;
     try {
       result = await _service.request('kernel.status', <String, dynamic>{
         'log_cursor': _logCursor,
       });
     } on ServiceException catch (e) {
+      if (generation != _generation) {
+        return;
+      }
+      _statusFailures++;
+      if (_statusFailures < _statusFailureLimit) {
+        Logger.instance.warn(
+          _source,
+          '查询内核状态失败（$_statusFailures/$_statusFailureLimit），继续轮询：$e',
+        );
+        return;
+      }
       _stopPolling();
       _update(KernelStatus(state: KernelState.failed, message: '与后台服务失联：$e'));
       return;
     }
 
+    if (generation != _generation) {
+      return;
+    }
+    _statusFailures = 0;
     _drainLog(result);
 
     if (result['running'] == true) {

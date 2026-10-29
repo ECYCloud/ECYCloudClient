@@ -1,0 +1,34 @@
+{
+  "mpv-android Copyright": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/f4d13e1c2c91f3a56e589aef9cb44cbc02e26e47/Copyright",
+    "sha256": "bfe9ee4cceabcb8ecbfadf208d04156f73d801e6a57369a5606bb8341e204a23"
+  },
+  "mpv GPL": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/f4d13e1c2c91f3a56e589aef9cb44cbc02e26e47/LICENSE.GPL",
+    "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+  },
+  "mpv LGPL": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/f4d13e1c2c91f3a56e589aef9cb44cbc02e26e47/LICENSE.LGPL",
+    "sha256": "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
+  },
+  "FFmpeg-android Copyright": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/LICENSE.md",
+    "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+  },
+  "FFmpeg GPL-3.0": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.GPLv3",
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+  },
+  "FFmpeg LGPL-2.1": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.LGPLv2.1",
+    "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+  },
+  "FFmpeg LGPL-3.0": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.LGPLv3",
+    "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+  },
+  "media-kit-android-helper": {
+    "url": "https://raw.githubusercontent.com/media-kit/media-kit-android-helper/42054e5d479f39ccbb0ae604862e2bcaf59b74c2/LICENSE",
+    "sha256": "2e3000f38718f050869d57540c288c661a446f64df1ba4ea4764df552b04a331"
+  }
+}

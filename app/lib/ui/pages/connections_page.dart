@@ -1,10 +1,15 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
+import '../../core/logger.dart';
 import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../format.dart';
 import '../node_labels.dart';
 import '../theme.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/gapped_sliver_list.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
 import '../widgets/tag_chip.dart';
@@ -31,8 +36,11 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
       listenable: connection,
       builder: (BuildContext context, _) => CustomScrollView(
         slivers: <Widget>[
-          SliverToBoxAdapter(
-            child: PageHeader(title: L10n.t('连接'), showUserAvatar: false),
+          PinnedHeaderSliver(
+            child: ColoredBox(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              child: PageHeader(title: L10n.t('连接'), showUserAvatar: false),
+            ),
           ),
           if (connection.state != ConnectionPhase.connected)
             SliverFillRemaining(
@@ -46,12 +54,18 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   }
 
   List<Widget> _bodySlivers(ConnectionController connection) {
-    final List<_Row> rows = _rows(connection);
-    final int activeCount = _matchCount(connection.connections, active: true);
-    final int closedCount = _matchCount(
+    final List<_Row> active = _matching(connection.connections, active: true);
+    final List<_Row> closed = _matching(
       connection.closedConnections,
       active: false,
     );
+    final List<_Row> rows = switch (_scope) {
+      _Scope.all => <_Row>[...active, ...closed],
+      _Scope.active => active,
+      _Scope.closed => closed,
+    };
+    final int activeCount = active.length;
+    final int closedCount = closed.length;
 
     final SegmentedButton<_Scope> scopeFilter = SegmentedButton<_Scope>(
       segments: <ButtonSegment<_Scope>>[
@@ -82,34 +96,43 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     );
 
     return <Widget>[
-      SliverToBoxAdapter(
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final bool narrow = constraints.maxWidth < 640;
-            if (narrow) {
+      PinnedHeaderSliver(
+        child: ColoredBox(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final bool narrow = constraints.maxWidth < 640;
+              if (narrow) {
+                return Padding(
+                  padding: AppTheme.pageScrollPadding.copyWith(
+                    top: 10,
+                    bottom: 10,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      scopeFilter,
+                      const SizedBox(height: 8),
+                      searchActions,
+                    ],
+                  ),
+                );
+              }
               return Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                padding: AppTheme.pageScrollPadding.copyWith(
+                  top: 10,
+                  bottom: 10,
+                ),
+                child: Row(
                   children: <Widget>[
                     scopeFilter,
-                    const SizedBox(height: 8),
-                    searchActions,
+                    const SizedBox(width: 10),
+                    Expanded(child: searchActions),
                   ],
                 ),
               );
-            }
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-              child: Row(
-                children: <Widget>[
-                  scopeFilter,
-                  const SizedBox(width: 10),
-                  Expanded(child: searchActions),
-                ],
-              ),
-            );
-          },
+            },
+          ),
         ),
       ),
       if (rows.isEmpty)
@@ -122,28 +145,42 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
             AppTheme.overlayScrollGutter,
             2,
           ),
-          sliver: SliverList.separated(
+          sliver: GappedSliverList(
             itemCount: rows.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 2),
-            itemBuilder: (BuildContext context, int index) => SelectionArea(
-              contextMenuBuilder: AppTheme.selectableRegionMenu,
-              child: _ConnectionRow(row: rows[index]),
+            gap: 2,
+            // 地址行与标签行两行文字，加卡片内外边距
+            rowEstimate:
+                32 +
+                2 *
+                    MediaQuery.textScalerOf(
+                      context,
+                    ).scale(Theme.of(context).textTheme.bodyMedium!.fontSize!),
+            itemBuilder: (BuildContext context, int index) => _ConnectionRow(
+              row: rows[index],
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (BuildContext context) => _ConnectionDetailDialog(
+                  connection: connection,
+                  row: rows[index],
+                ),
+              ),
             ),
           ),
         ),
     ];
   }
 
-  List<_Row> _rows(ConnectionController connection) {
-    final List<_Row> rows = <_Row>[
-      if (_scope != _Scope.closed)
-        for (final Map<String, dynamic> item in connection.connections)
-          _Row(item, active: true),
-      if (_scope != _Scope.active)
-        for (final Map<String, dynamic> item in connection.closedConnections)
-          _Row(item, active: false),
-    ];
+  // 轮询每秒整体重建，连接条目在快照或关闭时整份替换，按条目缓存解析结果与搜索串
+  static final Expando<_Row> _rowCache = Expando<_Row>();
 
+  List<_Row> _matching(
+    List<Map<String, dynamic>> items, {
+    required bool active,
+  }) {
+    final List<_Row> rows = <_Row>[
+      for (final Map<String, dynamic> item in items)
+        _rowCache[item] ??= _Row(item, active: active),
+    ];
     if (_keyword.isEmpty) {
       return rows;
     }
@@ -151,40 +188,34 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         .where((_Row row) => row.haystack.contains(_keyword))
         .toList(growable: false);
   }
-
-  int _matchCount(List<Map<String, dynamic>> items, {required bool active}) {
-    if (_keyword.isEmpty) {
-      return items.length;
-    }
-    int count = 0;
-    for (final Map<String, dynamic> item in items) {
-      if (_Row(item, active: active).haystack.contains(_keyword)) {
-        count++;
-      }
-    }
-    return count;
-  }
 }
 
 class _Row {
-  _Row(Map<String, dynamic> item, {required this.active})
-    : meta = item['metadata'] is Map<String, dynamic>
+  _Row(this.item, {required this.active})
+    : id = '${item['id']}',
+      source = ConnectionController.connectionSource(item),
+      meta = item['metadata'] is Map<String, dynamic>
           ? item['metadata'] as Map<String, dynamic>
           : const <String, dynamic>{},
       upload = (item['upload'] as num?)?.toInt() ?? 0,
       download = (item['download'] as num?)?.toInt() ?? 0,
       rule = _text(item['rule']),
+      rulePayload = _text(item['rulePayload']),
       chains = item['chains'] is List
           ? (item['chains'] as List).whereType<String>().toList(growable: false)
           : const <String>[],
       startedAt = DateTime.tryParse(_text(item['start'])),
       closedAt = DateTime.tryParse(_text(item['closedAt']));
 
+  final Map<String, dynamic> item;
+  final String id;
+  final String source;
   final bool active;
   final Map<String, dynamic> meta;
   final int upload;
   final int download;
   final String rule;
+  final String rulePayload;
   final List<String> chains;
   final DateTime? startedAt;
   final DateTime? closedAt;
@@ -218,6 +249,9 @@ class _Row {
 
   String get outbound => chains.isEmpty ? '' : chains.first;
 
+  String get chainLabel =>
+      chains.reversed.map(NodeLabels.displayName).join(' → ');
+
   String get lifetime {
     final DateTime? start = startedAt;
     if (start == null) {
@@ -240,9 +274,10 @@ class _Row {
 }
 
 class _ConnectionRow extends StatelessWidget {
-  const _ConnectionRow({required this.row});
+  const _ConnectionRow({required this.row, required this.onTap});
 
   final _Row row;
+  final VoidCallback onTap;
 
   static const double _markerWidth = 12;
   static const double _markerGap = 8;
@@ -256,106 +291,294 @@ class _ConnectionRow extends StatelessWidget {
       opacity: row.active ? 1 : 0.65,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
+        child: Material(
+          color: theme.colorScheme.surface,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          SizedBox(
-                            width: _markerWidth,
-                            height: _markerWidth,
-                            child: Center(
-                              child: Icon(
-                                row.active
-                                    ? Icons.circle
-                                    : Icons.remove_circle_outline,
-                                size: row.active ? 8 : 12,
-                                color: row.active ? AppTheme.success : faded,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: _markerGap),
-                          Expanded(
-                            child: Text(
-                              row.target,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Padding(
-                        padding: const EdgeInsets.only(
-                          left: _markerWidth + _markerGap,
-                        ),
-                        child: Wrap(
-                          spacing: 5,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            mouseCursor: SystemMouseCursors.click,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
                           children: <Widget>[
-                            if (row.network.isNotEmpty)
-                              TagChip(label: row.network),
-                            if (row.outbound.isNotEmpty)
-                              TagChip(
-                                icon: Icons.call_made,
-                                label: row.chains.reversed
-                                    .map(NodeLabels.displayName)
-                                    .join(' → '),
-                              ),
-                            if (row.process.isNotEmpty)
-                              TagChip(icon: Icons.memory, label: row.process),
-                            if (row.rule.isNotEmpty)
-                              Text(
-                                row.rule,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: faded,
+                            SizedBox(
+                              width: _markerWidth,
+                              height: _markerWidth,
+                              child: Center(
+                                child: Icon(
+                                  row.active
+                                      ? Icons.circle
+                                      : Icons.remove_circle_outline,
+                                  size: row.active ? 8 : 12,
+                                  color: row.active ? AppTheme.success : faded,
                                 ),
                               ),
+                            ),
+                            const SizedBox(width: _markerGap),
+                            Expanded(
+                              child: Text(
+                                row.target,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            ),
                           ],
+                        ),
+                        const SizedBox(height: 3),
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: _markerWidth + _markerGap,
+                          ),
+                          child: Wrap(
+                            spacing: 5,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: <Widget>[
+                              if (row.inbound.isNotEmpty)
+                                TagChip(label: row.inbound),
+                              if (row.network.isNotEmpty)
+                                TagChip(label: row.network),
+                              if (row.outbound.isNotEmpty)
+                                TagChip(
+                                  icon: Icons.call_made,
+                                  label: row.chainLabel,
+                                ),
+                              if (row.process.isNotEmpty)
+                                TagChip(icon: Icons.memory, label: row.process),
+                              if (row.rule.isNotEmpty)
+                                Text(
+                                  row.rule,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: faded,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: <Widget>[
+                      Text(
+                        '↑ ${Format.bytes(row.upload)}　↓ ${Format.bytes(row.download)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFeatures: const <FontFeature>[
+                            FontFeature.tabularFigures(),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        row.active
+                            ? row.lifetime
+                            : L10n.t('已关闭 · {0}', <Object>[row.lifetime]),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: faded,
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    Text(
-                      '↑ ${Format.bytes(row.upload)}　↓ ${Format.bytes(row.download)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontFeatures: const <FontFeature>[
-                          FontFeature.tabularFigures(),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      row.active
-                          ? row.lifetime
-                          : L10n.t('已关闭 · {0}', <Object>[row.lifetime]),
-                      style: theme.textTheme.bodySmall?.copyWith(color: faded),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ConnectionDetailDialog extends StatefulWidget {
+  const _ConnectionDetailDialog({required this.connection, required this.row});
+
+  final ConnectionController connection;
+  final _Row row;
+
+  @override
+  State<_ConnectionDetailDialog> createState() =>
+      _ConnectionDetailDialogState();
+}
+
+class _ConnectionDetailDialogState extends State<_ConnectionDetailDialog> {
+  late _Row _row = widget.row;
+  List<Map<String, dynamic>>? _snapshot;
+  DateTime? _sampledAt;
+  int _uploadSpeed = 0;
+  int _downloadSpeed = 0;
+  bool _closing = false;
+  String? _closeError;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.connection.addListener(_onUpdate);
+  }
+
+  @override
+  void dispose() {
+    widget.connection.removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  // 速率按相邻两次连接快照的计数差分；快照列表只在轮询落地时整体替换
+  void _onUpdate() {
+    final List<Map<String, dynamic>> snapshot = widget.connection.connections;
+    if (!mounted || identical(snapshot, _snapshot) || !_row.active) {
+      return;
+    }
+    final DateTime now = DateTime.now();
+    final DateTime? last = _sampledAt;
+    _snapshot = snapshot;
+    _sampledAt = now;
+    final Map<String, dynamic>? live = _find(snapshot);
+    if (live == null) {
+      final Map<String, dynamic>? closed = _find(
+        widget.connection.closedConnections,
+      );
+      setState(() {
+        _row = _Row(closed ?? _row.item, active: false);
+        _uploadSpeed = 0;
+        _downloadSpeed = 0;
+      });
+      return;
+    }
+    final _Row next = _Row(live, active: true);
+    final double seconds = last == null
+        ? 0
+        : now.difference(last).inMilliseconds / 1000;
+    setState(() {
+      if (seconds > 0) {
+        _uploadSpeed = (max(0, next.upload - _row.upload) / seconds).round();
+        _downloadSpeed = (max(0, next.download - _row.download) / seconds)
+            .round();
+      }
+      _row = next;
+    });
+  }
+
+  Map<String, dynamic>? _find(List<Map<String, dynamic>> items) {
+    for (final Map<String, dynamic> item in items) {
+      if ('${item['id']}' == _row.id) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _close() async {
+    setState(() {
+      _closing = true;
+      _closeError = null;
+    });
+    try {
+      await widget.connection.clash?.closeConnection(_row.id);
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } on Object catch (e) {
+      Logger.instance.warn('connections', '关闭连接失败: $e');
+      if (mounted) {
+        setState(() {
+          _closing = false;
+          _closeError = L10n.t('关闭连接失败：{0}', <Object>['$e']);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final _Row row = _row;
+    final DateTime? start = row.startedAt?.toLocal();
+    final String processPath = _Row._text(row.meta['processPath']);
+    final String remote = _Row._text(row.meta['remoteDestination']);
+    final String network = _Row._text(row.meta['network']);
+    final List<(String, String)> fields = <(String, String)>[
+      (L10n.t('主机'), row.target),
+      (L10n.t('下载量'), Format.bytes(row.download)),
+      (L10n.t('上传量'), Format.bytes(row.upload)),
+      (L10n.t('下载速度'), Format.speed(_downloadSpeed)),
+      (L10n.t('上传速度'), Format.speed(_uploadSpeed)),
+      (L10n.t('链路'), row.chainLabel),
+      (
+        L10n.t('规则'),
+        row.rulePayload.isEmpty ? row.rule : '${row.rule}(${row.rulePayload})',
+      ),
+      (
+        L10n.t('进程'),
+        processPath.isEmpty || processPath == row.process
+            ? row.process
+            : '${row.process} ($processPath)',
+      ),
+      (
+        L10n.t('连接时间'),
+        start == null ? '' : '${Format.date(start)} ${Format.clock(start)}',
+      ),
+      (L10n.t('源地址'), row.source),
+      (
+        L10n.t('目标地址'),
+        remote.isNotEmpty ? remote : _Row._text(row.meta['destinationIP']),
+      ),
+      (L10n.t('目标端口'), _Row._text(row.meta['destinationPort'])),
+      (
+        L10n.t('类型'),
+        network.isEmpty ? row.inbound : '${row.inbound}($network)',
+      ),
+    ];
+
+    return AppAlertDialog(
+      title: Text(L10n.t('连接详情')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 6,
+        children: <Widget>[
+          for (final (String label, String value) in fields)
+            Text.rich(
+              TextSpan(
+                children: <InlineSpan>[
+                  TextSpan(
+                    text: '$label: ',
+                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  TextSpan(text: value.isEmpty ? '—' : value),
+                ],
+              ),
+              textAlign: TextAlign.start,
+            ),
+          if (_closeError != null)
+            Text(
+              _closeError!,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+        ],
+      ),
+      actions: <Widget>[
+        if (row.active)
+          FilledButton(
+            onPressed: _closing ? null : _close,
+            child: Text(L10n.t('关闭连接')),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(L10n.t('关闭')),
+        ),
+      ],
     );
   }
 }

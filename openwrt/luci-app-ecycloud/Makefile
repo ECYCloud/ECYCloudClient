@@ -24,7 +24,7 @@ LUCI_TITLE:=ECY Cloud client for OpenWrt (mihomo transparent proxy)
 LUCI_URL:=https://github.com/ECYCloud/ECYCloudClient
 LUCI_DESCRIPTION:=LuCI interface, configuration assembly, procd service and nftables \
 	transparent proxy rules for the ECY Cloud panel on top of the mihomo kernel.
-LUCI_DEPENDS:=+luci-base +mihomo +firewall4 +curl +ca-bundle +ip-full +kmod-tun \
+LUCI_DEPENDS:=+luci-base +mihomo +firewall4 +curl +ca-bundle +resolveip +ip-full +kmod-tun \
 	+kmod-nft-tproxy +kmod-nft-socket +rpcd-mod-ucode +ucode-mod-fs +ucode-mod-uci \
 	+ucode-mod-ubus
 LUCI_PKGARCH:=all
@@ -49,6 +49,11 @@ define Build/Prepare/luci-app-ecycloud
 	fi
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/ecycloud \
 		$(PKG_BUILD_DIR)/root/usr/libexec/ecycloud-ctl
+	mkdir -p $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags
+	cp -f $(CURDIR)/../../app/assets/flags/*.svg $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags/
+	cp -f $(CURDIR)/../../app/assets/regions.json $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/regions.json
+	test -s $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/flags/xx.svg
+	test -s $(PKG_BUILD_DIR)/htdocs/luci-static/resources/ecycloud/regions.json
 endef
 
 include $(TOPDIR)/feeds/luci/luci.mk

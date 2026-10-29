@@ -30,6 +30,8 @@ return view.extend({
 
 	fetch: function(freshAccount) {
 		var page = this.page || 1;
+		var search = this.keyword || '';
+		var generation = this.requestGeneration = (this.requestGeneration || 0) + 1;
 
 		return api.status().then(function(status) {
 			if (!api.signedIn(status))
@@ -44,19 +46,22 @@ return view.extend({
 				: Promise.resolve(status);
 
 			return start.then(function(next) {
-				return api.devices(page, 100).then(function(res) {
-					return { status: next, usage: res || emptyUsage() };
+				return api.devices(page, 25, search).then(function(res) {
+					return { status: next, usage: res || emptyUsage(), generation: generation };
 				}, function() {
-					return { status: next, usage: emptyUsage() };
+					return { status: next, usage: emptyUsage(), generation: generation };
 				});
 			});
 		});
 	},
 
 	update: function(data) {
+		if (data.generation && data.generation != this.requestGeneration)
+			return;
 		this.status = Object.assign({ session: {}, account: {} }, data.status || data);
 		if (data.usage)
 			this.usage = data.usage;
+		this.page = this.usage && this.usage.current_page || 1;
 		if (!this.usage)
 			this.usage = emptyUsage();
 		this.paint();
@@ -67,8 +72,8 @@ return view.extend({
 		var label = item.device || item.ip;
 
 		return api.dialog({
-			title: _('Remove this device?'),
-			text: _('The client on %s will be told to disconnect, within 60 seconds.').format(label),
+			title: _('Disconnect this device?'),
+			text: _('The client on %s will be told to disconnect.').format(label),
 			cancel: true,
 			ok: _('OK')
 		}).then(function(ok) {
@@ -99,7 +104,7 @@ return view.extend({
 			var kickable = !!(official && item.online && item.device_id);
 			var current = !!(official && item.device_id && item.device_id === selfId);
 			var action = kickable
-				? api.pressable('ecycloud-jump is-danger', {}, [ _('Remove') ])
+				? api.pressable('ecycloud-jump is-danger', {}, [ _('Take offline') ])
 				: E('span', { 'class': 'ecycloud-row-sub' }, [
 					official ? '' : _('Not supported')
 				]);
@@ -147,6 +152,19 @@ return view.extend({
 		var usage = this.usage || emptyUsage();
 		var self = this;
 		var signedIn = !!(status.session && status.session.logged_in);
+		var focused = this.search.getRootNode().activeElement === this.search;
+		var searchInput = this.search.shadowRoot.querySelector('input');
+		var selection = focused ? [ searchInput.selectionStart, searchInput.selectionEnd ] : null;
+		var previous = api.pressable('ecycloud-jump', { disabled: usage.current_page <= 1, click: function() {
+			self.page = Math.max(1, usage.current_page - 1);
+			self.refresh();
+		} }, [ _('Previous page') ]);
+		var next = api.pressable('ecycloud-jump', { disabled: usage.current_page >= usage.last_page, click: function() {
+			self.page = Math.min(usage.last_page, usage.current_page + 1);
+			self.refresh();
+		} }, [ _('Next page') ]);
+		var searchButton = api.pressable('ecycloud-jump', {}, [ _('Search') ]);
+		searchButton.addEventListener('click', L.bind(this.searchDevices, this));
 		var refreshBtn = api.pressable('ecycloud-icon-btn' + (this.refreshingProfile ? ' is-refreshing' : ''), {
 			title: _('Refresh profile'),
 			'aria-label': _('Refresh profile')
@@ -220,13 +238,27 @@ return view.extend({
 				E('div', { 'class': 'ecycloud-hint' }, [
 					_('Confirm these IPs are yours. Change your password if anything looks wrong.')
 				]),
-				this.renderDevices()
+				E('div', { 'class': 'ecycloud-toolbar' }, [ this.search, searchButton ]),
+				this.renderDevices(),
+				usage.last_page > 1 ? E('div', { 'class': 'ecycloud-toolbar' }, [ previous,
+					E('span', { 'class': 'ecycloud-row-sub' }, [ _('%d / %d · %d items').format(
+						usage.current_page, usage.last_page, usage.total) ]), next ]) : ''
 			])));
 
 		dom.content(this.body, E('div', {}, [
 			E('div', { 'class': 'ecycloud-toolbar is-end' }, [ refreshBtn ]),
 			E('div', { 'class': 'ecycloud-home' }, cards)
 		]));
+		if (focused) {
+			this.search.focus();
+			searchInput.setSelectionRange(selection[0], selection[1]);
+		}
+	},
+
+	searchDevices: function() {
+		this.keyword = this.search.value.trim();
+		this.page = 1;
+		return this.refresh();
 	},
 
 	render: function(data) {
@@ -237,6 +269,13 @@ return view.extend({
 				return api.shell([ api.signedOut() ], true);
 
 			self.body = E('div', {});
+			self.search = api.input({ placeholder: _('Search IP, device, location, version') });
+			self.search.addEventListener('keydown', function(event) {
+				if (event.key == 'Enter') {
+					event.preventDefault();
+					self.searchDevices();
+				}
+			});
 			self.update(data);
 			poll.add(L.bind(self.refresh, self), 30);
 			return api.shell([ self.body ]);

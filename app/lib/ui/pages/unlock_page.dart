@@ -40,7 +40,7 @@ class _UnlockPageState extends State<UnlockPage>
     super.didChangeDependencies();
     if (!_started) {
       _started = true;
-      startAutoRefresh(() => _load(silent: true));
+      startAutoRefresh(() => _load(silent: true), revision: 'unlock');
       unawaited(_load());
     }
   }
@@ -123,7 +123,10 @@ class _UnlockPageState extends State<UnlockPage>
     }
     if (status.startsWith('仅限自制') ||
         status.startsWith('仅限网页') ||
-        status.startsWith('仅限App')) {
+        status.startsWith('仅限App') ||
+        status.startsWith(L10n.t('仅限自制')) ||
+        status.startsWith(L10n.t('仅限网页')) ||
+        status.startsWith(L10n.t('仅限App'))) {
       return const Color(0xFF9C27B0);
     }
     return null;
@@ -136,6 +139,18 @@ class _UnlockPageState extends State<UnlockPage>
 
   @override
   Widget build(BuildContext context) {
+    final ListToolbar toolbar = ListToolbar(
+      currentPage: _page,
+      lastPage: _lastPage,
+      total: _total,
+      showSearch: false,
+      searchHint: L10n.t('搜索节点'),
+      onSearchChanged: _onSearch,
+      onPageChanged: (int page) {
+        _page = page;
+        unawaited(_load());
+      },
+    );
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return RefreshIndicator(
@@ -151,17 +166,7 @@ class _UnlockPageState extends State<UnlockPage>
               RefreshButton(tooltip: L10n.t('刷新'), onRefresh: _load),
             ],
           ),
-          ListToolbar(
-            currentPage: _page,
-            lastPage: _lastPage,
-            total: _total,
-            searchHint: L10n.t('搜索节点'),
-            onSearchChanged: _onSearch,
-            onPageChanged: (int page) {
-              _page = page;
-              unawaited(_load());
-            },
-          ),
+          toolbar.buildSearch(),
           if (_busy && _results.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 80),
@@ -254,6 +259,7 @@ class _UnlockPageState extends State<UnlockPage>
                 ],
               ),
             ),
+          toolbar,
         ],
       ),
     );

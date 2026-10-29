@@ -11,6 +11,8 @@ import '../widgets/page_header.dart';
 import '../widgets/section_card.dart';
 import 'tickets_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
 
 class AccountStatusPage extends StatefulWidget {
   const AccountStatusPage({super.key});
@@ -25,7 +27,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
   Future<void> _cancelDeletion(AuthController auth) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('确认取消删除请求吗？')),
         content: Text(L10n.t('取消后，您的账户将恢复正常状态。')),
         actions: <Widget>[
@@ -50,16 +52,14 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     } on ApiException catch (e) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -71,6 +71,15 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     setState(() => _busy = true);
     try {
       await auth.logout();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -86,7 +95,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
       listenable: auth,
       builder: (BuildContext context, _) {
         final AccountStatus? status = auth.accountStatus;
-        return Scaffold(
+        return AppScaffold(
           body: Column(
             children: <Widget>[
               SafeArea(
@@ -128,9 +137,9 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                               side: BorderSide(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.outlineVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant,
                               ),
                             ),
                             iconColor: Theme.of(context).colorScheme.error,
@@ -186,9 +195,8 @@ class _PendingDeletionCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             L10n.t('状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。'),
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontSize: AppTheme.pageHintSize),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(fontSize: AppTheme.pageHintSize),
           ),
           const SizedBox(height: 12),
           Align(
@@ -284,9 +292,8 @@ class _BannedCard extends StatelessWidget {
                 ),
                 TextButton(
                   onPressed: () => unawaited(
-                    AppScope.of(
-                      context,
-                    ).platform.openUrl('mailto:${status.supportEmail}'),
+                    AppScope.of(context).platform
+                        .openUrl('mailto:${status.supportEmail}'),
                   ),
                   child: Text(status.supportEmail),
                 ),

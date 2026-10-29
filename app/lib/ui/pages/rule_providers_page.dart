@@ -8,6 +8,7 @@ import '../app_scope.dart';
 import '../theme.dart';
 import 'text_viewer_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_scaffold.dart';
 
 class RuleProvidersPage extends StatelessWidget {
   const RuleProvidersPage({super.key});
@@ -23,7 +24,7 @@ class RuleProvidersPage extends StatelessWidget {
         final String rulesDir =
             '${AppPaths.kernelRunDir}${Platform.pathSeparator}ECYCloud-Rules';
 
-        return Scaffold(
+        return AppScaffold(
           appBar: AppBar(title: Text(L10n.t('分流规则'))),
           body: items.isEmpty
               ? Center(

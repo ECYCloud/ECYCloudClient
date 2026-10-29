@@ -9,7 +9,7 @@ arch="${2:?用法: build-helper.sh <macos|linux> <x64|arm64>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(dirname "$script_dir")"
 source_dir="$root_dir/native/unix/helper"
-out_dir="$root_dir/build/deps/$platform-$arch"
+out_dir="${ECYCLOUD_BUILD_DIR:-$root_dir/build}/deps/$platform-$arch"
 mkdir -p "$out_dir"
 
 case "$platform" in

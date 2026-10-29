@@ -13,6 +13,9 @@
     纯图形，与 Windows / Linux 托盘同一张；Android：按 mipmap 密度输出，
     并生成 Android TV 主屏 banner（`drawable-*/ic_banner.png`，xhdpi 为 320×180）；
     Linux：按 hicolor 档位输出，随 deb 装进 /usr/share/icons。
+    Apple 原生（ECYCloud/）：AppIcon.appiconset 的 macOS 档位与 Flutter macOS 同图，iOS 用主图原样；
+    tvOS 的 TVAppIcon.brandassets 输出纯色背景层、图形前景层与 Top Shelf 横幅（与 Android TV banner 同版式）；
+    visionOS 的 VisionAppIcon.solidimagestack 按同一底色与占比输出 1024 px 背景层与前景层。
 #>
 [CmdletBinding()]
 param(
@@ -166,11 +169,12 @@ function Save-IconLayerPng {
         [System.Drawing.Image]$Image,
         [int]$Size,
         [double]$Coverage,
-        [string]$Path
+        [string]$Path,
+        [int]$Height = $Size
     )
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
-    $bitmap = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bitmap = New-Object System.Drawing.Bitmap($Size, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
@@ -179,9 +183,36 @@ function Save-IconLayerPng {
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
         $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $graphics.Clear([System.Drawing.Color]::Transparent)
-        $inner = [int][Math]::Round($Size * $Coverage)
-        $offset = [int][Math]::Round(($Size - $inner) / 2)
-        $graphics.DrawImage($Image, (New-Object System.Drawing.Rectangle($offset, $offset, $inner, $inner)))
+        $inner = [int][Math]::Round($Height * $Coverage)
+        $left = [int][Math]::Round(($Size - $inner) / 2)
+        $top = [int][Math]::Round(($Height - $inner) / 2)
+        $graphics.DrawImage($Image, (New-Object System.Drawing.Rectangle($left, $top, $inner, $inner)))
+    }
+    finally {
+        $graphics.Dispose()
+    }
+    try {
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
+
+# tvOS 图标背景层必须不透明
+function Save-SolidPng {
+    param(
+        [int]$Width,
+        [int]$Height,
+        [System.Drawing.Color]$Color,
+        [string]$Path
+    )
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $bitmap = New-Object System.Drawing.Bitmap($Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.Clear($Color)
     }
     finally {
         $graphics.Dispose()
@@ -247,6 +278,20 @@ $macGlassDir = Join-Path $rootDir 'app\macos\Runner\AppIcon.icon'
 # 主图铺满画布会略顶圆角遮罩，收 8% 留一圈边
 $macGlassCoverage = 0.92
 $androidResDir = Join-Path $rootDir 'app\android\app\src\main\res'
+$appleAssetsDir = Join-Path $rootDir 'ECYCloud\ECYCloud\Assets.xcassets'
+$appleIconDir = Join-Path $appleAssetsDir 'AppIcon.appiconset'
+$tvIconDir = Join-Path $appleAssetsDir 'TVAppIcon.brandassets'
+$visionIconDir = Join-Path $appleAssetsDir 'VisionAppIcon.solidimagestack'
+# 与 TVAppIcon.brandassets 各 Contents.json 的 filename 一致
+$tvIconStacks = @(
+    @{ Stack = 'App Icon.imagestack'; Sizes = @(@(400, 240), @(800, 480)) }
+    @{ Stack = 'App Icon - App Store.imagestack'; Sizes = @(, @(1280, 768)) }
+)
+$tvTopShelves = @(
+    @{ Set = 'Top Shelf Image.imageset'; Sizes = @(@(1920, 720), @(3840, 1440)) }
+    @{ Set = 'Top Shelf Image Wide.imageset'; Sizes = @(@(2320, 720), @(4640, 1440)) }
+)
+$tvIconCoverage = 0.62
 $linuxIconDir = Join-Path $scriptDir 'installer\linux\icons'
 
 $master = [System.Drawing.Image]::FromFile($Source)
@@ -282,7 +327,30 @@ try {
     }
 
     foreach ($size in $macSizes) {
-        Save-MacPng -Image $master -Size $size -Path (Join-Path $macIconDir "app_icon_$size.png")
+        foreach ($dir in @($macIconDir, $appleIconDir)) {
+            Save-MacPng -Image $master -Size $size -Path (Join-Path $dir "app_icon_$size.png")
+        }
+    }
+    Copy-Item -LiteralPath $Source -Destination (Join-Path $appleIconDir 'app_icon_ios.png') -Force
+    foreach ($stack in $tvIconStacks) {
+        foreach ($size in $stack.Sizes) {
+            $name = "$($size[0])x$($size[1]).png"
+            Save-IconLayerPng -Image $master -Size $size[0] -Height $size[1] -Coverage $tvIconCoverage `
+                -Path (Join-Path $tvIconDir "$($stack.Stack)\Front.imagestacklayer\Content.imageset\front_$name")
+            Save-SolidPng -Width $size[0] -Height $size[1] -Color $bannerColor `
+                -Path (Join-Path $tvIconDir "$($stack.Stack)\Back.imagestacklayer\Content.imageset\back_$name")
+        }
+    }
+    Save-IconLayerPng -Image $master -Size 1024 -Coverage $tvIconCoverage `
+        -Path (Join-Path $visionIconDir 'Front.solidimagestacklayer\Content.imageset\front_1024.png')
+    Save-SolidPng -Width 1024 -Height 1024 -Color $bannerColor `
+        -Path (Join-Path $visionIconDir 'Back.solidimagestacklayer\Content.imageset\back_1024.png')
+    foreach ($shelf in $tvTopShelves) {
+        foreach ($size in $shelf.Sizes) {
+            Save-Banner -Image $master -BannerWidth $size[0] -BannerHeight $size[1] `
+                -Path (Join-Path $tvIconDir "$($shelf.Set)\top_shelf_$($size[0])x$($size[1]).png") `
+                -Label $bannerLabel
+        }
     }
     foreach ($size in $macMenuBarSizes) {
         Save-Png -Image $master -Size $size -Path (Join-Path $macMenuBarDir "menu_bar_icon_$size.png")
@@ -348,3 +416,6 @@ Write-Host "macOS 分层图标图形已生成：$macGlassDir（1024 px，占比 
 Write-Host "Linux 图标已生成：$linuxIconDir（$($linuxSizes -join '/') px）"
 Write-Host "Android 图标已生成：$androidResDir（$($androidSizes.Values -join '/') px）"
 Write-Host "Android TV banner 已生成：$androidResDir（xhdpi 320x180）"
+Write-Host "Apple 原生图标已生成：$appleIconDir（macOS $($macSizes -join '/') px，iOS 主图）"
+Write-Host "tvOS 图标与 Top Shelf 已生成：$tvIconDir"
+Write-Host "visionOS 分层图标已生成：$visionIconDir"

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'app_text_selection.dart';
 
 // TextField / EditableText 自带滚动条会盖住文字，且悬停是 I 形光标
 class OverlayScrollView extends StatelessWidget {
@@ -27,23 +28,24 @@ class OverlayScrollView extends StatelessWidget {
       padding,
       axis: scrollDirection,
     );
-    if (shrinkWrap) {
-      return ListView(
-        controller: controller,
-        scrollDirection: scrollDirection,
-        padding: pad,
-        physics: physics,
-        shrinkWrap: true,
-        primary: false,
-        children: <Widget>[child],
-      );
-    }
-    return SingleChildScrollView(
-      controller: controller,
-      scrollDirection: scrollDirection,
-      padding: pad,
-      physics: physics,
-      child: child,
+    return AppTextSelection(
+      child: shrinkWrap
+          ? ListView(
+              controller: controller,
+              scrollDirection: scrollDirection,
+              padding: pad,
+              physics: physics,
+              shrinkWrap: true,
+              primary: false,
+              children: <Widget>[child],
+            )
+          : SingleChildScrollView(
+              controller: controller,
+              scrollDirection: scrollDirection,
+              padding: pad,
+              physics: physics,
+              child: child,
+            ),
     );
   }
 }

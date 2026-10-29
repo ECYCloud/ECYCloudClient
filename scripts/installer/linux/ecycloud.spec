@@ -30,7 +30,18 @@ cp -a %{payload}/. %{buildroot}/
 /usr/share/applications/com.ecycloud.client.desktop
 /usr/share/icons/hicolor/*/apps/com.ecycloud.client.png
 
+%pre
+set -e
+if [ -x /opt/ecycloud/ecycloud-helper ]; then
+    state="$(systemctl show --property=LoadState --value ecycloud-helper.service)"
+    if [ "$state" != not-found ]; then
+        systemctl stop ecycloud-helper.service
+    fi
+    /opt/ecycloud/ecycloud-helper uninstall
+fi
+
 %post
+set -e
 if [ -x /opt/ecycloud/link-libmpv.sh ]; then
     /opt/ecycloud/link-libmpv.sh
 fi
@@ -40,8 +51,13 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 
 %preun
+set -e
 # 升级时 $1 为 1，此刻新包的安装脚本已经跑过，不判断就会把刚注册好的服务停掉
 # 卸包默认保留数据；要清数据须先 sudo /opt/ecycloud/purge-data.sh
 if [ "$1" = 0 ] && [ -x /opt/ecycloud/ecycloud-helper ]; then
-    /opt/ecycloud/ecycloud-helper uninstall || true
+    state="$(systemctl show --property=LoadState --value ecycloud-helper.service)"
+    if [ "$state" != not-found ]; then
+        systemctl stop ecycloud-helper.service
+    fi
+    /opt/ecycloud/ecycloud-helper uninstall
 fi

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../../l10n/l10n.dart';
 import '../theme.dart';
 import '../widgets/overlay_scroll_view.dart';
+import '../widgets/app_scaffold.dart';
 
 class TextViewerPage extends StatefulWidget {
   const TextViewerPage({
@@ -34,7 +36,7 @@ class _TextViewerPageState extends State<TextViewerPage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
 
-    return Scaffold(
+    return AppScaffold(
       appBar: AppBar(
         title: Text(widget.title),
         actions: <Widget>[
@@ -105,9 +107,9 @@ class _TextViewerPageState extends State<TextViewerPage> {
                     AppTheme.overlayScrollGutter,
                     AppTheme.overlayScrollGutter,
                   ),
-                  child: SelectableText(
+                  child: Text(
                     text,
-                    contextMenuBuilder: AppTheme.editableTextMenu,
+
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontFamily: AppTheme.monoFontFamily,
                       fontSize: 12,

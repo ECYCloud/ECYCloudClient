@@ -6,9 +6,11 @@ import '../data/api/api_exception.dart';
 import '../data/api/panel_api_client.dart';
 import '../data/models/announcement.dart';
 import '../data/store/json_file_store.dart';
+import '../l10n/l10n.dart';
 
 class AnnouncementController extends ChangeNotifier {
-  AnnouncementController();
+  AnnouncementController({JsonFileStore? store})
+    : _store = store ?? JsonFileStore(AppPaths.announcementState, _source);
 
   static const String _source = 'announcement';
   static const String _readMaxIdKey = 'read_max_id';
@@ -16,10 +18,7 @@ class AnnouncementController extends ChangeNotifier {
   static const String _dismissedPopupIdKey = 'dismissed_popup_id';
   static const String _dismissedPopupAtKey = 'dismissed_popup_updated_at';
 
-  final JsonFileStore _store = JsonFileStore(
-    AppPaths.announcementState,
-    _source,
-  );
+  final JsonFileStore _store;
 
   PanelApiClient? _api;
   List<Announcement> _items = const <Announcement>[];
@@ -27,6 +26,7 @@ class AnnouncementController extends ChangeNotifier {
   String? _error;
   bool _busy = false;
   bool _loaded = false;
+  int _requestGeneration = 0;
 
   List<Announcement> get items => _items;
   Announcement? get popup => _popup;
@@ -113,11 +113,14 @@ class AnnouncementController extends ChangeNotifier {
     return best;
   }
 
-  Map<String, String> _seenRevisions() =>
-      decodeSeen(_store.read()[_seenKey]);
+  Map<String, String> _seenRevisions() => decodeSeen(_store.read()[_seenKey]);
 
   void attachApi(PanelApiClient? api) {
+    if (identical(api, _api)) {
+      return;
+    }
     _api = api;
+    _busy = false;
     if (api == null) {
       _items = const <Announcement>[];
       _popup = null;
@@ -133,17 +136,29 @@ class AnnouncementController extends ChangeNotifier {
       return;
     }
 
+    final int generation = ++_requestGeneration;
+    final String language = L10n.current.contentLanguage;
     _busy = true;
     _error = null;
     notifyListeners();
 
     try {
       final AnnouncementBundle bundle = await api.fetchAnnouncements();
+      if (!identical(api, _api) ||
+          generation != _requestGeneration ||
+          language != L10n.current.contentLanguage) {
+        return;
+      }
       _items = bundle.items;
       _popup = bundle.popup;
       _loaded = true;
       _migrateSeenIfNeeded();
     } on ApiException catch (e) {
+      if (!identical(api, _api) ||
+          generation != _requestGeneration ||
+          language != L10n.current.contentLanguage) {
+        return;
+      }
       if (e.rateLimited) {
         Logger.instance.debug(_source, '拉取公告限流，稍后重试');
       } else {
@@ -151,9 +166,21 @@ class AnnouncementController extends ChangeNotifier {
         Logger.instance.warn(_source, '拉取公告失败: $e');
       }
     } finally {
-      _busy = false;
-      notifyListeners();
+      if (identical(api, _api) && generation == _requestGeneration) {
+        _busy = false;
+        notifyListeners();
+      }
     }
+  }
+
+  void languageChanged() {
+    ++_requestGeneration;
+    _items = const <Announcement>[];
+    _popup = null;
+    _loaded = false;
+    _busy = false;
+    _error = null;
+    notifyListeners();
   }
 
   void dismissPopup(Announcement announcement) {
@@ -226,5 +253,11 @@ class AnnouncementController extends ChangeNotifier {
     if (dirty) {
       _store.write(data);
     }
+  }
+
+  @override
+  void dispose() {
+    _api = null;
+    super.dispose();
   }
 }

@@ -27,12 +27,12 @@ class ConnectionStatusVisual {
     ),
     ConnectionPhase.connecting => ConnectionStatusVisual(
       color: AppTheme.warning,
-      icon: Icons.sync,
+      icon: Icons.shield_outlined,
       label: L10n.t('正在连接'),
     ),
     ConnectionPhase.disconnecting => ConnectionStatusVisual(
       color: AppTheme.warning,
-      icon: Icons.sync,
+      icon: Icons.shield_outlined,
       label: L10n.t('正在断开连接'),
     ),
     ConnectionPhase.failed => ConnectionStatusVisual(
@@ -76,8 +76,8 @@ class _ConnectionStatusBadgeState extends State<ConnectionStatusBadge>
   );
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _syncAnimation();
   }
 
@@ -94,7 +94,7 @@ class _ConnectionStatusBadgeState extends State<ConnectionStatusBadge>
   }
 
   void _syncAnimation() {
-    if (widget.spinning) {
+    if (widget.spinning && !MediaQuery.disableAnimationsOf(context)) {
       if (!_controller.isAnimating) {
         _controller.repeat();
       }
@@ -106,14 +106,11 @@ class _ConnectionStatusBadgeState extends State<ConnectionStatusBadge>
 
   @override
   Widget build(BuildContext context) {
-    final Widget icon = Icon(
-      widget.icon,
-      size: widget.iconSize,
-      color: widget.color,
-    );
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
       height: widget.size,
       width: widget.size,
       decoration: BoxDecoration(
@@ -121,10 +118,43 @@ class _ConnectionStatusBadgeState extends State<ConnectionStatusBadge>
         color: widget.color.withValues(alpha: 0.12),
         border: Border.all(color: widget.color.withValues(alpha: 0.22)),
       ),
-      child: Center(
-        child: widget.spinning
-            ? RotationTransition(turns: _controller, child: icon)
-            : icon,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.all(widget.size * 0.06),
+              child: ExcludeSemantics(
+                child: AnimatedOpacity(
+                  opacity: widget.spinning ? 1 : 0,
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 200),
+                  child: RotationTransition(
+                    turns: _controller,
+                    child: CircularProgressIndicator(
+                      value: 0.75,
+                      strokeWidth: 2,
+                      strokeCap: StrokeCap.round,
+                      color: widget.color,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedSwitcher(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            child: Icon(
+              widget.icon,
+              key: ValueKey<IconData>(widget.icon),
+              size: widget.iconSize,
+              color: widget.color,
+            ),
+          ),
+        ],
       ),
     );
   }

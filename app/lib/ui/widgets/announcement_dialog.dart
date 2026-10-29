@@ -4,10 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/announcement.dart';
 import '../../state/announcement_controller.dart';
-import 'clipped_scroll_body.dart';
-import 'overlay_scroll_view.dart';
 import 'rich_html_view.dart';
 import '../../l10n/l10n.dart';
+import 'app_alert_dialog.dart';
 
 Future<void> showAnnouncementPopup(
   BuildContext context, {
@@ -19,25 +18,23 @@ Future<void> showAnnouncementPopup(
   return showDialog<void>(
     context: context,
     barrierDismissible: dismissible,
-    builder: (BuildContext context) => AlertDialog(
+    builder: (BuildContext context) => AppAlertDialog(
       title: Text(announcement.title, textAlign: TextAlign.center),
-      content: OverlayScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (announcement.id != 1 && announcement.date.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  announcement.date,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (announcement.id != 1 && announcement.date.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                announcement.date,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-            RichHtmlView(announcement.content),
-          ],
-        ),
+            ),
+          RichHtmlView(announcement.content),
+        ],
       ),
       actions: <Widget>[
         FilledButton(
@@ -67,7 +64,7 @@ Future<void> showAnnouncementBrowser(
       builder: (BuildContext context, _) {
         final List<Announcement> items = controller.items;
         if (items.isEmpty && !controller.loaded && controller.busy) {
-          return AlertDialog(
+          return AppAlertDialog(
             title: Text(L10n.t('网站公告')),
             content: const SizedBox(
               height: 96,
@@ -82,7 +79,7 @@ Future<void> showAnnouncementBrowser(
           );
         }
         if (items.isEmpty) {
-          return AlertDialog(
+          return AppAlertDialog(
             title: Text(L10n.t('网站公告')),
             content: Text(
               controller.error ??
@@ -153,7 +150,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
     final Announcement current = widget.items[_index];
     final bool multi = widget.items.length > 1;
 
-    return AlertDialog(
+    return AppAlertDialog(
       title: Text(current.title, textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -168,10 +165,14 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-          ClippedScrollBody(child: RichHtmlView(current.content)),
-          if (multi) ...<Widget>[
-            const SizedBox(height: 16),
-            Row(
+          RichHtmlView(current.content),
+        ],
+      ),
+      actions: <Widget>[
+        if (multi)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 24),
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 TextButton(
@@ -182,9 +183,12 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                   }),
                   child: Text(L10n.t('上一条')),
                 ),
-                Text(
-                  '${_index + 1} / ${widget.items.length}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                Flexible(
+                  child: Text(
+                    '${_index + 1} / ${widget.items.length}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
                 TextButton(
                   onPressed: () => setState(() {
@@ -194,10 +198,7 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
                 ),
               ],
             ),
-          ],
-        ],
-      ),
-      actions: <Widget>[
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(L10n.t('关闭')),

@@ -1,6 +1,7 @@
 package com.ecycloud.client
 
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -11,6 +12,8 @@ import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
 import java.io.File
+import java.io.FileNotFoundException
+import java.util.UUID
 
 // 应用私有目录只能由自家 DocumentsProvider 对外暴露：FileProvider 的契约里只有单个
 // 文件的读写，没有列目录，系统「文件」应用无从进入 filesDir
@@ -18,36 +21,38 @@ class LogDocumentsProvider : DocumentsProvider() {
 
     override fun onCreate(): Boolean = true
 
-    override fun queryRoots(projection: Array<String>?): Cursor {
+    override fun queryRoots(projection: Array<String>?): Cursor = synchronized(sessionLock) {
         val cursor = MatrixCursor(projection ?: ROOT_PROJECTION)
-        val resources = requireNotNull(context).resources
+        val app = requireNotNull(context)
+        if (BoxState.sessionCleanupPending(app)) return@synchronized cursor
+        val resources = NativeLanguage.resources(app)
         cursor.newRow()
             .add(Root.COLUMN_ROOT_ID, ROOT_ID)
-            .add(Root.COLUMN_DOCUMENT_ID, ROOT_ID)
+            .add(Root.COLUMN_DOCUMENT_ID, documentRoot(app))
             .add(Root.COLUMN_TITLE, resources.getString(R.string.app_name))
             .add(Root.COLUMN_SUMMARY, resources.getString(R.string.documents_root_logs))
             .add(Root.COLUMN_FLAGS, Root.FLAG_LOCAL_ONLY)
             .add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
             .add(Root.COLUMN_MIME_TYPES, MIME_LOG)
-        return cursor
+        cursor
     }
 
-    override fun queryDocument(documentId: String, projection: Array<String>?): Cursor {
+    override fun queryDocument(documentId: String, projection: Array<String>?): Cursor = synchronized(sessionLock) {
         val cursor = MatrixCursor(projection ?: DOCUMENT_PROJECTION)
         cursor.addDocument(documentId, fileFor(documentId))
-        return cursor
+        cursor
     }
 
     override fun queryChildDocuments(
         parentDocumentId: String,
         projection: Array<String>?,
         sortOrder: String?,
-    ): Cursor {
+    ): Cursor = synchronized(sessionLock) {
         val cursor = MatrixCursor(projection ?: DOCUMENT_PROJECTION)
         fileFor(parentDocumentId).listFiles()?.sortedBy { it.name }?.forEach {
             cursor.addDocument("$parentDocumentId/${it.name}", it)
         }
-        return cursor
+        cursor
     }
 
     // COLUMN_FLAGS 里没有写入位，据此只开只读句柄
@@ -55,17 +60,20 @@ class LogDocumentsProvider : DocumentsProvider() {
         documentId: String,
         mode: String,
         signal: CancellationSignal?,
-    ): ParcelFileDescriptor = ParcelFileDescriptor.open(
-        fileFor(documentId),
-        ParcelFileDescriptor.MODE_READ_ONLY,
-    )
+    ): ParcelFileDescriptor = synchronized(sessionLock) {
+        ParcelFileDescriptor.open(fileFor(documentId), ParcelFileDescriptor.MODE_READ_ONLY)
+    }
 
     private fun fileFor(documentId: String): File {
-        val root = logsDir(requireNotNull(context))
-        if (documentId == ROOT_ID) {
+        val app = requireNotNull(context)
+        if (BoxState.sessionCleanupPending(app)) throw FileNotFoundException(NativeLanguage.resources(app).getString(R.string.documents_session_ending))
+        val rootId = documentRoot(app)
+        val root = logsDir(app)
+        if (documentId == rootId) {
             return root
         }
-        return BoxState.resolveWithin(root, documentId.removePrefix("$ROOT_ID/"))
+        if (!documentId.startsWith("$rootId/")) throw FileNotFoundException(NativeLanguage.resources(app).getString(R.string.documents_session_expired))
+        return BoxState.resolveWithin(root, documentId.removePrefix("$rootId/"))
     }
 
     private fun MatrixCursor.addDocument(documentId: String, file: File) {
@@ -82,8 +90,29 @@ class LogDocumentsProvider : DocumentsProvider() {
     }
 
     companion object {
+        private val sessionLock = Any()
         private const val ROOT_ID = "logs"
         private const val MIME_LOG = "text/plain"
+
+        private fun documentRoot(context: Context): String {
+            val generation = context.getSharedPreferences("log-session", Context.MODE_PRIVATE)
+                .getString("generation", "initial")
+            return "$ROOT_ID/$generation"
+        }
+
+        fun clearSession(context: Context) {
+            synchronized(sessionLock) {
+                check(BoxState.sessionCleanupPending(context)) { "缺少会话清理标记" }
+                check(context.getSharedPreferences("log-session", Context.MODE_PRIVATE).edit()
+                    .putString("generation", UUID.randomUUID().toString()).commit()) {
+                    "无法使旧日志文档失效"
+                }
+            }
+            context.revokeUriPermission(
+                Uri.parse("content://${context.packageName}.documents"),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
 
         private val ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID,

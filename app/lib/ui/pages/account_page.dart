@@ -26,6 +26,8 @@ import 'subscription_strategy_page.dart';
 import 'traffic_log_page.dart';
 import 'devices_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
 
 Future<void> togglePurchaseAutoRenewDialog(
   BuildContext context, {
@@ -35,7 +37,7 @@ Future<void> togglePurchaseAutoRenewDialog(
 }) async {
   final bool? confirmed = await showDialog<bool>(
     context: context,
-    builder: (BuildContext context) => AlertDialog(
+    builder: (BuildContext context) => AppAlertDialog(
       title: Text(enable ? L10n.t('确认开启自动续费？') : L10n.t('确认关闭自动续费？')),
       content: Text(
         enable ? L10n.t('开启后将在套餐到期时自动续费。') : L10n.t('关闭后，您可以随时重新开启自动续费。'),
@@ -109,9 +111,8 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   Future<void> _loadKillFlag() async {
-    final AuthOptions? options = await AppScope.of(
-      context,
-    ).auth.fetchAuthOptions();
+    final AuthOptions? options = await AppScope.of(context).auth
+        .fetchAuthOptions();
     if (!mounted || options == null) {
       return;
     }
@@ -122,7 +123,7 @@ class _AccountPageState extends State<AccountPage> {
   Widget build(BuildContext context) {
     final AuthController auth = AppScope.of(context).auth;
 
-    return Scaffold(
+    return AppScaffold(
       body: ListenableBuilder(
         listenable: auth,
         builder: (BuildContext context, _) {
@@ -164,128 +165,122 @@ class _AccountPageState extends State<AccountPage> {
                             title: L10n.t('更多'),
                             children: <Widget>[
                               ListTile(
-                                    leading: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('修改信息')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const EditAccountPage(),
-                                      ),
-                                    ),
+                                leading: const Icon(
+                                  Icons.edit_outlined,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('修改信息')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const EditAccountPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(Icons.tune, size: 20),
-                                    title: Text(L10n.t('自定义策略')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const SubscriptionStrategyPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.tune, size: 20),
+                                title: Text(L10n.t('自定义策略')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const SubscriptionStrategyPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.data_usage,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('流量记录')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const TrafficLogPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.data_usage, size: 20),
+                                title: Text(L10n.t('流量记录')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const TrafficLogPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.lan_outlined,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('在线客户端')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const DevicesPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.lan_outlined,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('在线客户端')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const DevicesPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.history,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('登录记录')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const LoginLogsPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.history, size: 20),
+                                title: Text(L10n.t('登录记录')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const LoginLogsPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.manage_history,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('操作记录')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const OperationLogsPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.manage_history,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('操作记录')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const OperationLogsPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.currency_yen,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('余额充值')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const RechargePage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.currency_yen,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('余额充值')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const RechargePage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.receipt_long_outlined,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('余额记录')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const BalanceRecordsPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.receipt_long_outlined,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('余额记录')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const BalanceRecordsPage(),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.shopping_bag_outlined,
-                                      size: 20,
-                                    ),
-                                    title: Text(L10n.t('购买记录')),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (BuildContext context) =>
-                                            const PurchasesPage(),
-                                      ),
-                                    ),
+                                ),
+                              ),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.shopping_bag_outlined,
+                                  size: 20,
+                                ),
+                                title: Text(L10n.t('购买记录')),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (BuildContext context) =>
+                                        const PurchasesPage(),
                                   ),
+                                ),
+                              ),
                             ],
                           ),
                         ],

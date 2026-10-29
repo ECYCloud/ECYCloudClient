@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -15,37 +16,83 @@ const clientPollInterval = time.Second
 // Linux 上内核跑受限用户，macOS 上才是 root；运行目录须归这个身份
 var kernelUID, kernelGID = resolveKernelUser()
 
-// 含 Clash API 密钥。软链接一律拒绝：/Library/Application Support 对 admin 可写
 func ensureRestrictedDir(path string) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("目录 %s 是软链接，拒绝使用", path)
-	}
-	// MkdirAll 会把 0700 一路盖到上级，受限用户穿不过就打不开 run/
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensureDataDir(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
+	uid, gid := 0, 0
+	if path == runDir() {
+		uid, gid = kernelUID, kernelGID
 	}
-	if err := os.Chmod(path, 0o700); err != nil {
-		return err
-	}
-	return os.Chown(path, kernelUID, kernelGID)
+	return ensureOwnedDir(path, uid, gid, 0o700)
 }
 
-func writeKernelFile(path string, content string) error {
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+func ensureDataDir() error {
+	return ensureOwnedDir(dataDir(), 0, 0, 0o755)
+}
+
+func ensureOwnedDir(path string, uid, gid int, mode os.FileMode) error {
+	if uid < 0 || gid < 0 {
+		return fmt.Errorf("内核专用账户不可用，请重新安装后台服务")
+	}
+	if err := os.Mkdir(path, mode); err != nil && !os.IsExist(err) {
 		return err
 	}
-	return os.Chown(path, kernelUID, kernelGID)
+	dir, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	info, err := dir.Stat()
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || (stat.Uid != 0 && stat.Uid != uint32(uid)) {
+		return fmt.Errorf("目录 %s 的类型或属主不可信，拒绝使用", path)
+	}
+	if err := dir.Chmod(mode); err != nil {
+		return err
+	}
+	return dir.Chown(uid, gid)
+}
+
+func writeKernelFile(path string, content io.Reader) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	file, err := root.OpenFile(filepath.Base(path), os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !ok || stat.Nlink != 1 {
+		return fmt.Errorf("文件 %s 的类型或链接数不可信", path)
+	}
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, content); err != nil {
+		return err
+	}
+	return file.Chown(kernelUID, kernelGID)
 }
 
 // 属主不归到内核身份，内核就打不开这些库
 func copyKernelFile(source, path string) error {
-	if err := copyFile(source, path); err != nil {
+	content, err := os.Open(source)
+	if err != nil {
 		return err
 	}
-	return os.Chown(path, kernelUID, kernelGID)
+	defer content.Close()
+	return writeKernelFile(path, content)
 }
 
 // 套接字权限管不到哪个进程；两侧都解软链，避免 /opt 或 /Applications 被绕过

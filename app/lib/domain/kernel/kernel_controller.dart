@@ -1,4 +1,5 @@
 import '../config/local_template.dart';
+import '../../l10n/l10n.dart';
 
 enum KernelState { stopped, starting, running, stopping, failed }
 
@@ -36,7 +37,7 @@ class KernelException implements Exception {
   final String message;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }
 
 abstract class KernelController {
@@ -56,6 +57,12 @@ abstract class KernelController {
 
   Future<({String stage, int percent})> upgradeProgress();
 
+  /// 升级文件保留旧内核，控制面确认就绪后才提交删除备份。
+  Future<void> commitKernelUpgrade() async {}
+
+  /// 控制面启动失败时恢复升级前的旧内核。
+  Future<void> rollbackKernelUpgrade() async {}
+
   Future<List<String>> preflight();
 
   Future<ClashApiOptions?> attach();
@@ -68,6 +75,10 @@ abstract class KernelController {
   });
 
   Future<void> stop();
+
+  Future<void> clearSession();
+
+  Future<void> bindSession(String cacheKey);
 
   Future<void> persistConfig(String configJson);
 

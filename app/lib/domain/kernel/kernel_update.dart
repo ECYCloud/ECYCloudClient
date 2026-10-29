@@ -16,9 +16,8 @@ class KernelUpdate {
     String current, {
     http.Client? client,
   }) async {
-    // mihomo 的 Prerelease-Alpha 常年占着 tip，内核只跟正式版
     final GithubRelease? release = GithubRelease.newestStable(
-      await GithubRelease.list(repo, client: client),
+      await GithubRelease.list(repo, client: client, latestStableOnly: true),
     );
     if (release == null) {
       throw GithubReleaseException('GitHub 未给出版本号');

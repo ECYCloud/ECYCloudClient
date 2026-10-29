@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
+import android.os.Process
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -24,6 +26,8 @@ object KernelClient {
 
     @Volatile
     private var bound = false
+
+    private var application: Context? = null
 
     private val callback = object : IUiCallback.Stub() {
         override fun requestToggle(): Boolean = MainActivity.requestToggle()
@@ -46,6 +50,7 @@ object KernelClient {
 
     @Synchronized
     fun bind(context: Context) {
+        application = context.applicationContext
         if (bound) {
             return
         }
@@ -58,6 +63,7 @@ object KernelClient {
     }
 
     fun <T> call(block: (IKernelService) -> T): T {
+        check(!BoxState.sessionCleanupPending(requireNotNull(application))) { "账户会话正在清理" }
         val remote = handle(COMMAND_WAIT_MS) ?: error("内核进程未就绪")
         return try {
             block(remote)
@@ -67,9 +73,33 @@ object KernelClient {
     }
 
     fun <T> poll(block: (IKernelService) -> T): T? = try {
-        handle(STATUS_WAIT_MS)?.let(block)
+        if (BoxState.sessionCleanupPending(requireNotNull(application))) null
+        else handle(STATUS_WAIT_MS)?.let(block)
     } catch (e: RemoteException) {
         null
+    }
+
+    fun clearSession(context: Context) {
+        check(BoxState.sessionCleanupPending(context)) { "缺少会话清理标记" }
+        LogDocumentsProvider.clearSession(context)
+        val remote = handle(COMMAND_WAIT_MS) ?: error("内核进程未就绪")
+        val binder = remote.asBinder()
+        val died = CountDownLatch(1)
+        val death = IBinder.DeathRecipient { died.countDown() }
+        binder.linkToDeath(death, 0)
+        try {
+            val pid = remote.clearSession()
+            check(pid > 0 && pid != Process.myPid()) { "内核进程身份异常" }
+            context.stopService(Intent(context, BoxService::class.java))
+            Process.killProcess(pid)
+            check(died.await(5, TimeUnit.SECONDS)) { "旧内核进程尚未退出" }
+            lock.withLock {
+                if (service?.asBinder() == binder) service = null
+            }
+            BoxState.clearRunFiles(context)
+        } finally {
+            binder.unlinkToDeath(death, 0)
+        }
     }
 
     private fun handle(timeoutMs: Long): IKernelService? {

@@ -1,4 +1,5 @@
 import '../../core/logger.dart';
+import '../../l10n/l10n.dart';
 import '../service/service_transport.dart';
 import 'named_pipe_client.dart';
 import 'service_control.dart';
@@ -7,8 +8,10 @@ import 'service_control.dart';
 class ServicePipe implements ServiceTransport {
   const ServicePipe(this._pipe, this._service);
 
-  factory ServicePipe.production() =>
-      const ServicePipe(NamedPipeClient(pipeName), ServiceControl(serviceName));
+  factory ServicePipe.production() => const ServicePipe(
+    NamedPipeClient(pipeName, serviceName),
+    ServiceControl(serviceName),
+  );
 
   static const String pipeName = r'\\.\pipe\ECYCloudService';
   static const String serviceName = 'ECYCloudService';
@@ -50,10 +53,14 @@ class ServicePipe implements ServiceTransport {
   }
 
   static String describe(ServiceProbe probed) => switch (probed.state) {
-    WindowsServiceState.missing => '后台服务未安装，请重新运行安装包',
-    WindowsServiceState.denied => '当前账户无权访问后台服务，请以管理员身份运行一次客户端',
+    WindowsServiceState.missing => L10n.t('后台服务未安装，请重新运行安装包'),
+    WindowsServiceState.denied => L10n.t('当前账户无权访问后台服务，请以管理员身份运行一次客户端'),
     _ =>
-      '后台服务${probed.label}，无法连接'
-          '${probed.detail == null ? '' : '：${probed.detail}'}',
+      probed.detail == null
+          ? L10n.t('后台服务{0}，无法连接', <Object>[probed.label])
+          : L10n.t('后台服务{0}，无法连接：{1}', <Object>[
+              probed.label,
+              L10n.message(probed.detail!),
+            ]),
   };
 }

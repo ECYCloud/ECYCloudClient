@@ -58,7 +58,7 @@ msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs s
 msgstr "geoip.metadb 与 GeoSite.dat 的下载地址前缀，留空则沿用面板下发的地址。不懂就请不要乱修改，地址无效会导致无法使用！"
 
 msgid "Connection details"
-msgstr "连接"
+msgstr "连接详情"
 
 msgid "Config URL"
 msgstr "配置地址"
@@ -447,8 +447,8 @@ msgstr "我知道了"
 msgid "Notice"
 msgstr "提示"
 
-msgid "Remember email and password"
-msgstr "记住账号密码"
+msgid "Remember email"
+msgstr "记住邮箱"
 
 msgid "Sign in with your %s account to load available nodes"
 msgstr "使用 %s 账号登录，登录后自动获取可用节点"
@@ -516,6 +516,12 @@ msgstr "刷新节点"
 msgid "Locate selected node"
 msgstr "定位到当前节点"
 
+msgid "Search node name"
+msgstr "搜索节点名称"
+
+msgid "No matching nodes"
+msgstr "没有符合条件的节点"
+
 msgid "This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately"
 msgstr "本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选"
 
@@ -567,8 +573,26 @@ msgstr "下次重置已使用流量日期"
 msgid "Last used"
 msgstr "上次使用时间"
 
+msgid "Last check-in"
+msgstr "上次签到时间"
+
+msgid "Never checked in"
+msgstr "从未签到"
+
+msgid "Check-in grants %d–%d MB at random"
+msgstr "签到可随机获得 %d~%d MB 流量"
+
+msgid "Check in"
+msgstr "点我签到"
+
+msgid "Checked in today"
+msgstr "今日已签到"
+
 msgid "Never used"
 msgstr "从未使用"
+
+msgid "No reset"
+msgstr "不重置"
 
 msgid "Used only while running"
 msgstr "仅连接后占用，当前未生效"
@@ -669,17 +693,20 @@ msgstr "设备已下线"
 msgid "A new client connected after the online client limit was reached, so this device was disconnected."
 msgstr "由于超出在线客户端数量限制，有新客户端请求连接，已将您的设备踢下线。"
 
-msgid "This device was removed from the usage list, so it was disconnected."
-msgstr "该设备已从使用记录中被移除下线。"
+msgid "This device was disconnected."
+msgstr "该设备已被下线。"
 
 msgid "Remove"
 msgstr "移除"
 
-msgid "Remove this device?"
-msgstr "确认移除该设备？"
+msgid "Take offline"
+msgstr "下线"
 
-msgid "The client on %s will be told to disconnect, within 60 seconds."
-msgstr "将通知 %s 上的客户端下线，最长 60 秒后生效。"
+msgid "Disconnect this device?"
+msgstr "确认将该设备下线？"
+
+msgid "The client on %s will be told to disconnect."
+msgstr "将通知 %s 上的客户端下线。"
 
 msgid "Not supported"
 msgstr "不支持"
@@ -825,6 +852,9 @@ msgstr "mihomo 内核"
 msgid "Announcements"
 msgstr "网站公告"
 
+msgid "Announcement"
+msgstr "公告"
+
 msgid "No announcements"
 msgstr "暂无公告"
 
@@ -849,6 +879,9 @@ msgstr "仅支持 IPv4/IPv6 CIDR"
 msgid "Traffic ranking"
 msgstr "流量排行"
 
+msgid "Statistics are stored locally for the last two days, cover only this device, and are not synchronized between devices."
+msgstr "统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。"
+
 msgid "Policy groups"
 msgstr "策略组"
 
@@ -863,3 +896,552 @@ msgstr "昨日"
 
 msgid "No ranking data yet"
 msgstr "暂无排行数据"
+
+msgid "Account session changed. Please retry."
+msgstr "账户会话已改变，请重新操作。"
+
+msgid "Search"
+msgstr "搜索"
+
+msgid "Client"
+msgstr "客户端"
+
+msgid "Search IP, device, location, version"
+msgstr "搜索 IP、设备、位置、版本"
+
+msgid "%d / %d · %d items"
+msgstr "%d / %d · 共 %d 条"
+
+msgid "Copy all"
+msgstr "复制全部"
+
+msgid "Copied"
+msgstr "已复制"
+
+msgid "Copy failed"
+msgstr "复制失败"
+
+msgid "Loading rule providers: %d/%d"
+msgstr "正在加载规则集：%d/%d"
+
+msgid "Update available: %s %s. See About for installation."
+msgstr "发现新版本：%s %s，请到关于页面查看安装方式。"
+
+msgid "Client log level; kernel uses info for connection diagnostics."
+msgstr "客户端日志级别；内核固定使用 info 记录连接诊断。"
+
+msgid "Session expired. Sign in again."
+msgstr "登录已过期，请重新登录。"
+
+msgid "Previous page"
+msgstr "上一页"
+
+msgid "Next page"
+msgstr "下一页"
+
+msgid "Need more traffic? Open "
+msgstr "流量不够用？前往 "
+
+msgid "Shop"
+msgstr "商店"
+
+msgid " to buy a traffic pack"
+msgstr " 选购流量包"
+
+msgid "The kernel control interface is not ready"
+msgstr "内核控制面未就绪"
+
+msgid "Invalid HTTP URL"
+msgstr "无效的 HTTP 地址"
+
+msgid "Invalid HTTP header"
+msgstr "无效的 HTTP 请求头"
+
+msgid "Disconnected; network takeover canceled"
+msgstr "连接已关闭，取消网络接管"
+
+msgid "Could not determine the LAN device. Check LAN interfaces in Settings."
+msgstr "取不到 LAN 接口设备名，请在设置里确认「LAN 接口」"
+
+msgid "Could not restore the previous network settings. New proxy rules were not applied."
+msgstr "旧网络设置恢复失败，未应用新的代理规则"
+
+msgid "The dnsmasq config directory is unavailable. DNS is not routed through the kernel."
+msgstr "dnsmasq 配置目录不可用，DNS 未接入内核"
+
+msgid "Could not save network recovery data"
+msgstr "无法保存网络恢复记录"
+
+msgid "Panel URL is missing. Enter it in Settings or reinstall the plugin."
+msgstr "面板地址缺失，请重装插件或在设置里填写"
+
+msgid "Sign-in required"
+msgstr "尚未登录"
+
+msgid "Not signed in to the panel"
+msgstr "尚未登录面板"
+
+msgid "Your session has expired. Sign in again."
+msgstr "登录已失效，请重新登录"
+
+msgid "The panel is busy. Try again in about %d seconds."
+msgstr "面板繁忙，请约 %d 秒后再试"
+
+msgid "Your account session has changed. Try again."
+msgstr "账户会话已改变，请重新操作"
+
+msgid "The panel returned HTTP %d"
+msgstr "面板返回 HTTP %d"
+
+msgid "The control interface returned HTTP %d"
+msgstr "控制面返回 HTTP %d"
+
+msgid "The panel did not return a sign-in token"
+msgstr "面板未返回登录令牌"
+
+msgid "Signed in, but could not save the session"
+msgstr "登录成功但未能保存会话"
+
+msgid "Invalid language"
+msgstr "语言不合法"
+
+msgid "Invalid panel profile:"
+msgstr "面板配置不规范："
+
+msgid "The panel did not provide a complete profile"
+msgstr "面板下发的不是一份完整配置"
+
+msgid "The speed test inbound password is missing. Cannot generate the profile."
+msgstr "测速入站口令缺失，不能生成配置"
+
+msgid "Could not back up %s"
+msgstr "无法备份 %s"
+
+msgid "Could not write %s"
+msgstr "无法写入 %s"
+
+msgid "The node storage path must be a regular directory"
+msgstr "节点保存目录必须是普通目录"
+
+msgid "Node provider \"%s\" has an invalid local file format"
+msgstr "节点订阅「%s」的本地文件格式无效"
+
+msgid "Node provider \"%s\" must use a separate regular file"
+msgstr "节点订阅「%s」的保存路径不是独立普通文件"
+
+msgid "Node provider \"%s\" exceeds 8 MiB"
+msgstr "节点订阅「%s」超过 8 MiB"
+
+msgid "Could not save node provider \"%s\""
+msgstr "无法保存节点订阅「%s」"
+
+msgid "Could not read the profile for validation"
+msgstr "无法读取待校验配置"
+
+msgid "Could not write the profile for validation"
+msgstr "无法写入待校验配置"
+
+msgid "Could not run mihomo"
+msgstr "无法执行 mihomo"
+
+msgid "mihomo -t exited with code %d"
+msgstr "mihomo -t 退出码 %d"
+
+msgid "Only regular files up to 8 MiB can be viewed"
+msgstr "只能查看不超过 8 MiB 的普通文件"
+
+msgid "Could not read the file"
+msgstr "无法读取"
+
+msgid "The file exceeds 8 MiB"
+msgstr "文件超过 8 MiB"
+
+msgid "This is a binary rule set and cannot be viewed as text"
+msgstr "该文件为二进制规则集，无法以文本查看"
+
+msgid "GitHub rate limit reached (HTTP %d)"
+msgstr "GitHub 请求过于频繁（HTTP %d）"
+
+msgid "GitHub returned HTTP %d"
+msgstr "GitHub 返回 HTTP %d"
+
+msgid "Could not parse the GitHub response"
+msgstr "GitHub 返回内容无法解析"
+
+msgid "GitHub did not provide a version number"
+msgstr "GitHub 未给出版本号"
+
+msgid "Could not determine the device architecture"
+msgstr "无法识别本机架构"
+
+msgid "The Nikki feed does not support this device's OpenWrt version (%s)"
+msgstr "Nikki 源不支持本机 OpenWrt %s"
+
+msgid "The Nikki feed returned HTTP %d"
+msgstr "Nikki 源返回 HTTP %d"
+
+msgid "Could not parse the Nikki feed response"
+msgstr "Nikki 源返回内容无法解析"
+
+msgid "The Nikki feed did not provide a mihomo-meta version"
+msgstr "Nikki 源未给出 mihomo-meta 版本"
+
+msgid "The profile failed kernel validation: {message}"
+msgstr "配置未通过内核校验：{message}"
+
+msgid "Profile validation failed: {message}"
+msgstr "配置校验未通过：{message}"
+
+msgid "{message}; could not restore the previous profile"
+msgstr "{message}；恢复旧配置失败"
+
+msgid "{message}; could not restore the previous node configuration"
+msgstr "{message}；恢复旧节点配置失败"
+
+msgid "{message}; network recovery failed, retrying"
+msgstr "{message}；网络恢复失败，将继续重试"
+
+msgid "Could not open the account switching lock"
+msgstr "无法打开账户切换锁"
+
+msgid "Account switching is in progress. Try again shortly."
+msgstr "账户正在切换，请稍后重试"
+
+msgid "Offline profile authorization is invalid. Refresh the profile."
+msgstr "配置离线授权无效，请刷新配置"
+
+msgid "Could not stage the validated profile. Try again."
+msgstr "无法暂存已校验配置，请重试"
+
+msgid "Speed test limit reached"
+msgstr "测速次数已达上限"
+
+msgid "Speed test limit reached. Try again in %d minutes."
+msgstr "测速次数已达上限，请在 %d 分钟后再试"
+
+msgid "Skipped %d nodes that reached the speed test limit"
+msgstr "已跳过 %d 个达到测速次数上限的节点"
+
+msgid "Sign in to the panel on the LuCI Overview page first"
+msgstr "尚未登录面板，请先在 LuCI 的「概览」页登录"
+
+msgid "Preparing the kernel profile"
+msgstr "正在准备内核配置"
+
+msgid "Failed to fetch the profile: {message}"
+msgstr "拉取配置失败：{message}"
+
+msgid "Validating the profile. The kernel needs to download GeoIP / GeoSite data on first start; this may take several minutes."
+msgstr "正在校验配置：首次启动需由内核下载 GeoIP / GeoSite 数据，可能耗时数分钟"
+
+msgid "Validating the profile"
+msgstr "正在校验配置"
+
+msgid "Starting the kernel"
+msgstr "正在启动内核"
+
+msgid "Your session or offline profile authorization has expired. Sign in again or refresh the profile."
+msgstr "配置离线授权或登录已失效，请重新登录或刷新配置"
+
+msgid "Transparent proxy rules were not applied: {message}"
+msgstr "透明代理规则未生效：{message}"
+
+msgid "TUN takeover failed. Network settings have been restored."
+msgstr "TUN 接管失败，已恢复网络设置"
+
+msgid "TUN mode is handling forwarding"
+msgstr "TUN 模式已接管转发"
+
+msgid "TPROXY mode is handling forwarding"
+msgstr "TPROXY 模式已接管转发"
+
+msgid "Could not restore network settings"
+msgstr "网络设置恢复失败"
+
+msgid "Panel nodes updated; existing connections are unchanged"
+msgstr "面板节点已更新，连接保持不变"
+
+msgid "Profile updated. Restarting the kernel to preserve DNS mappings."
+msgstr "配置已更新，正在重启内核以保留 DNS 映射"
+
+msgid "Panel profile reloaded"
+msgstr "面板配置已热载"
+
+msgid "Could not commit the loaded profile. Refresh the profile."
+msgstr "无法提交已加载配置，请刷新配置"
+
+msgid "Offline profile authorization has expired. Refresh the profile."
+msgstr "配置离线授权已到期，请刷新配置"
+
+msgid "The kernel is not responding. Network recovery failed; retrying."
+msgstr "内核未响应，网络设置恢复失败，将继续重试"
+
+msgid "The kernel is not responding. Transparent proxy rules were removed to keep the LAN available."
+msgstr "内核未响应，已撤下透明代理规则以保证局域网可用"
+
+msgid "The kernel was not ready within 300 seconds. Check the Logs page."
+msgstr "内核 300 秒内未就绪，请查看「日志」页"
+
+msgid "Could not open the test task lock"
+msgstr "无法打开测试任务锁"
+
+msgid "Could not lock the test task"
+msgstr "无法锁定测试任务"
+
+msgid "Could not save the test task"
+msgstr "无法保存测试任务"
+
+msgid "Sign out of the current account first"
+msgstr "请先退出当前账户"
+
+msgid "Could not block new background tasks"
+msgstr "无法阻止新的后台任务"
+
+msgid "Could not close the previous account's connections"
+msgstr "无法关闭旧账户连接"
+
+msgid "Could not stop the previous account's service"
+msgstr "无法停止旧账户服务"
+
+msgid "Could not open the session lock"
+msgstr "无法打开会话锁"
+
+msgid "Could not stop the previous account's service completely"
+msgstr "旧账户服务停止失败"
+
+msgid "Some tasks for the previous account are still running. Try again shortly."
+msgstr "旧账户任务尚未全部退出，请稍后重试"
+
+msgid "The previous account's network settings have not been restored"
+msgstr "旧账户网络设置尚未恢复"
+
+msgid "Could not clear the previous account's runtime directory"
+msgstr "无法清除旧账户运行目录"
+
+msgid "Could not clear the previous account's runtime data"
+msgstr "无法清除旧账户运行数据"
+
+msgid "Could not clear the previous account's request cache"
+msgstr "无法清除旧账户请求缓存"
+
+msgid "Could not finish switching accounts"
+msgstr "无法结束账户切换"
+
+msgid "Could not clear the previous account's cache"
+msgstr "无法清除旧账户缓存"
+
+msgid "Could not clear the previous account's credentials"
+msgstr "无法清除旧账户凭据"
+
+msgid "Could not open the account cache lock"
+msgstr "无法打开账户缓存锁"
+
+msgid "Could not lock the account cache"
+msgstr "无法锁定账户缓存"
+
+msgid "Could not save the account cache"
+msgstr "无法保存账户缓存"
+
+msgid "Could not save node usage data"
+msgstr "无法保存节点使用记录"
+
+msgid "Could not save the speed test inbound password"
+msgstr "无法保存测速入站口令"
+
+msgid "Could not open the network operation lock"
+msgstr "无法打开网络操作锁"
+
+msgid "Could not lock the network operation"
+msgstr "无法锁定网络操作"
+
+msgid "Firewall rule validation or loading failed. Rules were not applied."
+msgstr "防火墙规则校验或加载失败，规则未生效"
+
+msgid "Could not configure policy routing"
+msgstr "策略路由设置失败"
+
+msgid "dnsmasq configuration or restart failed. DNS is not routed through the kernel."
+msgstr "dnsmasq 配置或重启失败，DNS 未接入内核"
+
+msgid "Could not save the network takeover state"
+msgstr "无法保存网络接管状态"
+
+msgid "Could not read secure system random data"
+msgstr "无法读取系统安全随机数"
+
+msgid "The runtime directory must be %s/run"
+msgstr "运行目录必须为 %s/run"
+
+msgid "The TUN interface name must be 1–15 letters, digits, underscores, periods, or hyphens"
+msgstr "TUN 网卡名只能包含 1 到 15 个字母、数字、下划线、点或连字符"
+
+msgid "The panel did not provide any usable nodes"
+msgstr "面板未下发任何可用节点"
+
+msgid "Invalid node list format"
+msgstr "节点列表格式不对"
+
+msgid "Node %d has an incomplete configuration"
+msgstr "第 %d 个节点不是一条完整配置"
+
+msgid "Node %d has no name"
+msgstr "第 %d 个节点没有名称"
+
+msgid "Duplicate node name: %s"
+msgstr "节点名重复：%s"
+
+msgid "Node %d has no type"
+msgstr "第 %d 个节点没有类型"
+
+msgid "The panel profile has no proxy groups"
+msgstr "面板配置缺少策略组"
+
+msgid "Invalid proxy group list format"
+msgstr "策略组列表格式不对"
+
+msgid "Proxy group %d has an incomplete configuration"
+msgstr "第 %d 个策略组不是一条完整配置"
+
+msgid "Proxy group %d has no name"
+msgstr "第 %d 个策略组没有名称"
+
+msgid "Duplicate proxy group name: %s"
+msgstr "策略组名重复：%s"
+
+msgid "Proxy group %d has no type"
+msgstr "第 %d 个策略组没有类型"
+
+msgid "Proxy group \"%s\" has an invalid member list"
+msgstr "策略组「%s」的成员格式不对"
+
+msgid "Proxy group \"%s\" has an invalid node provider list"
+msgstr "策略组「%s」的节点订阅格式不对"
+
+msgid "Proxy group \"%s\" has no members"
+msgstr "策略组「%s」没有成员"
+
+msgid "Proxy group \"%s\" references missing node provider \"%s\""
+msgstr "策略组「%s」的节点订阅「%s」不存在"
+
+msgid "Proxy group \"%s\" references missing member \"%s\""
+msgstr "策略组「%s」的成员「%s」不存在"
+
+msgid "The node provider section is incomplete"
+msgstr "节点订阅这一段不是一组完整设置"
+
+msgid "The rule provider section is incomplete"
+msgstr "规则集这一段不是一组完整设置"
+
+msgid "Node provider \"%s\" has an incomplete configuration"
+msgstr "节点订阅「%s」不是一条完整配置"
+
+msgid "Rule provider \"%s\" has an incomplete configuration"
+msgstr "规则集「%s」不是一条完整配置"
+
+msgid "Node provider \"%s\" must use a valid client local file format"
+msgstr "节点订阅「%s」必须使用有效的客户端本地文件格式"
+
+msgid "Node provider \"%s\" has no type"
+msgstr "节点订阅「%s」没有类型"
+
+msgid "Rule provider \"%s\" has no type"
+msgstr "规则集「%s」没有类型"
+
+msgid "Rule provider \"%s\" has no storage path"
+msgstr "规则集「%s」没有保存路径"
+
+msgid "The storage path for \"%s\" must be inside the runtime directory and must not overwrite client files"
+msgstr "「%s」的保存路径必须位于运行目录内，且不能覆盖客户端文件"
+
+msgid "Node provider \"%s\" uses online downloads but has no URL"
+msgstr "节点订阅「%s」是在线下载，但没有地址"
+
+msgid "Rule provider \"%s\" uses online downloads but has no URL"
+msgstr "规则集「%s」是在线下载，但没有地址"
+
+msgid "\"%s\" stores inline rules in mrs format, which is not supported"
+msgstr "「%s」把逐条规则存成了 mrs 格式，这样无法使用"
+
+msgid "The panel profile has no routing rules"
+msgstr "面板配置缺少分流规则"
+
+msgid "Invalid routing rule list format"
+msgstr "分流规则列表格式不对"
+
+msgid "Routing rule %d must be a single line of text"
+msgstr "第 %d 条分流规则不是一行文字"
+
+msgid "Routing rule %d is invalid: %s"
+msgstr "第 %d 条分流规则写错了：%s"
+
+msgid "Routing rule %d references missing rule provider \"%s\""
+msgstr "第 %d 条分流规则用到了规则集「%s」，但配置里没有这份规则集"
+
+msgid "Rule \"%s\" points to a policy that does not exist: %s"
+msgstr "规则「%s」指向了不存在的策略：%s"
+
+msgid "Routing rules are missing a final fallback rule"
+msgstr "分流规则缺少最后一条兜底规则"
+
+msgid "The name \"%s\" is reserved for client speed tests. Rename the matching node or proxy group in the panel."
+msgstr "名称「%s」保留给客户端测速，请修改面板中的同名节点或策略组"
+
+msgid "The DNS settings are incomplete"
+msgstr "DNS 设置不是一组完整配置"
+
+msgid "%d additional issues are not shown"
+msgstr "另有 %d 项问题未列出"
+
+msgid "Account deletion is pending. Cancel deletion on the website before signing in."
+msgstr "账号正在等待删除，请先到网站取消删除再登录"
+
+msgid "Your account has been banned: %s"
+msgstr "账号已被封禁：%s"
+
+msgid "Your account has been banned. Check the website for details."
+msgstr "账号已被封禁，请到网站查看详情"
+
+msgid "Could not save traffic data for the current account"
+msgstr "无法保存当前账户流量记录"
+
+msgid "Could not clear traffic data for the previous account"
+msgstr "无法清除旧账户流量记录"
+
+msgid "Privacy Policy"
+msgstr "隐私政策"
+
+msgid "Terms of Service"
+msgstr "服务条款"
+
+msgid "Downloaded"
+msgstr "下载量"
+
+msgid "Uploaded"
+msgstr "上传量"
+
+msgid "Download speed"
+msgstr "下载速度"
+
+msgid "Upload speed"
+msgstr "上传速度"
+
+msgid "Chain"
+msgstr "链路"
+
+msgid "Process"
+msgstr "进程"
+
+msgid "Connected at"
+msgstr "连接时间"
+
+msgid "Source address"
+msgstr "源地址"
+
+msgid "Destination address"
+msgstr "目标地址"
+
+msgid "Destination port"
+msgstr "目标端口"
+
+msgid "Close connection"
+msgstr "关闭连接"

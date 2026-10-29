@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 构建 Linux 客户端完整产物：内核 + 特权 helper + Flutter 应用，可选打包 deb / rpm / tar.gz。
-# 用法: build-linux.sh [--arch x64|arm64] [--version 1.0.1] [--channel last|pre] [--panel-url https://站点域名] [--sub-url https://订阅域名] [--package] [--format deb,rpm,tar]
+# 构建 Linux 客户端完整产物：内核 + 特权 helper + Flutter 应用，可选打包 deb / rpm / tar.gz / AppImage。
+# 用法: build-linux.sh [--arch x64|arm64] [--version 1.0.1] [--channel last|pre] [--panel-url https://站点域名] [--sub-url https://订阅域名] [--package] [--format deb,rpm,tar,appimage]
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ channel='last'
 panel_url=''
 sub_url=''
 package=0
-formats='deb rpm tar'
+formats='deb rpm tar appimage'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -46,12 +46,12 @@ fi
 if [[ -z "$sub_url" ]]; then
     sub_url="$(jq -er '.subUrl' "$root_dir/config/panel.json")"
 fi
-if [[ ! "$panel_url" =~ ^https?:// ]]; then
-    echo "站点域名不是合法的 http(s) 地址：$panel_url" >&2
+if [[ ! "$panel_url" =~ ^https:// ]]; then
+    echo "站点域名必须是 https 地址：$panel_url" >&2
     exit 1
 fi
-if [[ ! "$sub_url" =~ ^https?:// ]]; then
-    echo "订阅域名不是合法的 http(s) 地址：$sub_url" >&2
+if [[ ! "$sub_url" =~ ^https:// ]]; then
+    echo "订阅域名必须是 https 地址：$sub_url" >&2
     exit 1
 fi
 
@@ -165,11 +165,78 @@ package_tar() {
         "$out_dir/$tree_name.tar.gz" "$tree_name"
 }
 
+# 只认带版本号的官方发布，SHA-256 取自 GitHub 发布资产的 digest；不用会被重发的 continuous
+appimagetool_tag='1.9.1'
+appimage_runtime_tag='20251108'
+case "$rpm_arch" in
+    x86_64)
+        appimagetool_sha256='ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0'
+        appimage_runtime_sha256='2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d'
+        ;;
+    aarch64)
+        appimagetool_sha256='f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158'
+        appimage_runtime_sha256='00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444'
+        ;;
+esac
+
+fetch_pinned() {
+    local url="$1" want="$2" file="$3"
+    if [[ ! -f "$file" ]]; then
+        echo "下载 $url"
+        curl -fsSL -o "$file" "$url"
+    fi
+    local got
+    got="$(sha256sum "$file" | cut -d' ' -f1)"
+    if [[ "$got" != "$want" ]]; then
+        rm -f "$file"
+        echo "校验失败：$url" >&2
+        echo "  期望 $want" >&2
+        echo "  实际 $got" >&2
+        exit 1
+    fi
+}
+
+package_appimage() {
+    mark_format AppImage
+    local cache_dir="$root_dir/build/cache"
+    local tool_dir="$root_dir/build/linux/$arch/appimagetool"
+    local appimage_dir="$root_dir/build/linux/$arch/AppDir"
+    local tool="$cache_dir/appimagetool-$appimagetool_tag-$rpm_arch.AppImage"
+    local runtime="$cache_dir/appimage-runtime-$appimage_runtime_tag-$rpm_arch"
+    mkdir -p "$cache_dir"
+    fetch_pinned "https://github.com/AppImage/appimagetool/releases/download/$appimagetool_tag/appimagetool-$rpm_arch.AppImage" \
+        "$appimagetool_sha256" "$tool"
+    fetch_pinned "https://github.com/AppImage/type2-runtime/releases/download/$appimage_runtime_tag/runtime-$rpm_arch" \
+        "$appimage_runtime_sha256" "$runtime"
+
+    # CI 容器里没有 FUSE，appimagetool 自身只能解包后运行
+    rm -rf "$tool_dir"
+    mkdir -p "$tool_dir"
+    install -m 0755 "$tool" "$tool_dir/appimagetool.AppImage"
+    (cd "$tool_dir" && ./appimagetool.AppImage --appimage-extract >/dev/null)
+
+    rm -rf "$appimage_dir"
+    mkdir -p "$appimage_dir"
+    cp -a "$stage_dir/." "$appimage_dir/"
+    install -m 0755 "$script_dir/installer/linux/AppRun" "$appimage_dir/AppRun"
+    install -m 0755 "$script_dir/installer/linux/install.sh" "$appimage_dir/install.sh"
+    install -m 0755 "$script_dir/installer/linux/uninstall.sh" "$appimage_dir/uninstall.sh"
+    install -m 0755 "$script_dir/installer/linux/purge-data.sh" "$appimage_dir/purge-data.sh"
+    install -m 0644 "$script_dir/installer/linux/com.ecycloud.client.desktop" \
+        "$appimage_dir/com.ecycloud.client.desktop"
+    install -m 0644 "$script_dir/installer/linux/icons/256.png" "$appimage_dir/com.ecycloud.client.png"
+    ln -s com.ecycloud.client.png "$appimage_dir/.DirIcon"
+
+    ARCH="$rpm_arch" "$tool_dir/squashfs-root/AppRun" --no-appstream \
+        --runtime-file "$runtime" "$appimage_dir" "$out_dir/ECYCloud-$version-linux-$arch.AppImage"
+}
+
 for format in $formats; do
     case "$format" in
         deb) package_deb ;;
         rpm) package_rpm ;;
         tar) package_tar ;;
+        appimage) package_appimage ;;
         *) echo "未知打包形态 $format" >&2; exit 1 ;;
     esac
 done

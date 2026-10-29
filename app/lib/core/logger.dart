@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../l10n/l10n.dart';
 import 'app_paths.dart';
 
 /// 取值与 mihomo 的合法级别一一对应：label 同时用作内核配置的 `log-level`、
@@ -225,6 +226,25 @@ class Logger {
     _sink?.flush();
   }
 
+  void clearSession({Directory? directory}) {
+    _sink?.close();
+    _sink = null;
+    _sinkDate = null;
+    _ring.clear();
+    final Directory logs = directory ?? AppPaths.logs;
+    final FileSystemEntityType type = FileSystemEntity.typeSync(
+      logs.path,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) {
+      return;
+    }
+    if (type != FileSystemEntityType.directory) {
+      throw FileSystemException(L10n.t('日志目录不是普通目录'), logs.path);
+    }
+    logs.deleteSync(recursive: true);
+  }
+
   Future<void> dispose() async {
     _sink?.close();
     _sink = null;
@@ -287,9 +307,8 @@ class LogFileSink {
     close();
     try {
       // 追加句柄的写入位置固定在末尾，长度只需在开的时候读一次
-      final RandomAccessFile handle = fileFor(
-        date,
-      ).openSync(mode: FileMode.append);
+      final RandomAccessFile handle = fileFor(date)
+          .openSync(mode: FileMode.append);
       _handle = handle;
       _bytes = handle.lengthSync();
       _date = date;

@@ -16,7 +16,8 @@ import '../widgets/section_card.dart';
 import '../widgets/simple_data_table.dart';
 import '../../l10n/l10n.dart';
 import '../theme.dart';
-import '../widgets/overlay_scroll_view.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
 
 enum _TrafficSortCol { date, upload, download, rate, usage, nodeName }
 
@@ -198,45 +199,43 @@ class _TrafficLogPageState extends State<TrafficLogPage>
   Future<void> _showTrafficInfo() async {
     await showDialog<void>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('流量记录说明')),
-        content: OverlayScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                L10n.t(
-                  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。',
-                ),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              L10n.t(
+                '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。',
               ),
-              const SizedBox(height: 8),
-              Text.rich(
-                TextSpan(
-                  children: <InlineSpan>[
-                    TextSpan(text: L10n.t('如需关闭自动测试可在本客户端的 ')),
-                    WidgetSpan(
-                      alignment: PlaceholderAlignment.middle,
-                      child: TextButton(
-                        onPressed: () {
-                          final NavigatorState nav = Navigator.of(context);
-                          nav.pop();
-                          nav.push(
-                            MaterialPageRoute<void>(
-                              builder: (BuildContext context) =>
-                                  const SubscriptionStrategyPage(),
-                            ),
-                          );
-                        },
-                        child: Text('${L10n.t('分组策略')} ›'),
-                      ),
+            ),
+            const SizedBox(height: 8),
+            Text.rich(
+              TextSpan(
+                children: <InlineSpan>[
+                  TextSpan(text: L10n.t('如需关闭自动测试可在本客户端的 ')),
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: TextButton(
+                      onPressed: () {
+                        final NavigatorState nav = Navigator.of(context);
+                        nav.pop();
+                        nav.push(
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext context) =>
+                                const SubscriptionStrategyPage(),
+                          ),
+                        );
+                      },
+                      child: Text('${L10n.t('分组策略')} ›'),
                     ),
-                    TextSpan(text: L10n.t(' 关闭 自动选择 和 故障转移 策略组。')),
-                  ],
-                ),
+                  ),
+                  TextSpan(text: L10n.t(' 关闭 自动选择 和 故障转移 策略组。')),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
         actions: <Widget>[
           FilledButton(
@@ -261,7 +260,7 @@ class _TrafficLogPageState extends State<TrafficLogPage>
         : null;
     final int keepDays = bundle?.logKeepDays ?? 30;
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -611,20 +610,18 @@ class _TrafficDayTableState extends State<_TrafficDayTable> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               segment(<TableRow>[
-                cells(
-                  <Widget>[
-                    for (final (_TrafficSortCol, String) h in _dayHeaders)
-                      _sortLabel(
-                        theme: theme,
-                        scheme: scheme,
-                        title: L10n.t(h.$2),
-                        col: h.$1,
-                        activeCol: widget.daySortCol,
-                        asc: widget.daySortAsc,
-                        onTap: () => widget.onDaySort(h.$1),
-                      ),
-                  ],
-                ),
+                cells(<Widget>[
+                  for (final (_TrafficSortCol, String) h in _dayHeaders)
+                    _sortLabel(
+                      theme: theme,
+                      scheme: scheme,
+                      title: L10n.t(h.$2),
+                      col: h.$1,
+                      activeCol: widget.daySortCol,
+                      asc: widget.daySortAsc,
+                      onTap: () => widget.onDaySort(h.$1),
+                    ),
+                ]),
               ]),
               for (final String day in days) ...<Widget>[
                 Material(

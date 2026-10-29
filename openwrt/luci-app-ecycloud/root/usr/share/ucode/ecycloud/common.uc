@@ -1,10 +1,11 @@
 'use strict';
 
-import { access, chmod, lsdir, open, popen, readfile, unlink, writefile } from 'fs';
+import { access, chmod, lsdir, open, popen, readfile, rename, unlink, writefile } from 'fs';
 import { cursor } from 'uci';
 
 export const CONF_DIR = '/etc/ecycloud';
 export const STATE_DIR = '/var/run/ecycloud';
+export const SESSION_CHANGE = `${STATE_DIR}/session-changing`;
 export const BUILD_FILE = '/usr/share/ecycloud/build.json';
 export const CRED_FILE = `${CONF_DIR}/credentials.json`;
 export const ANNOUNCE_FILE = `${CONF_DIR}/announcement.json`;
@@ -17,12 +18,15 @@ export const DELAY_FILE = `${STATE_DIR}/delay.json`;
 export const SPEED_FILE = `${STATE_DIR}/speed.json`;
 export const ANNOUNCE_CACHE = `${STATE_DIR}/announcements.json`;
 export const KICK_FILE = `${STATE_DIR}/device_kicked`;
+const PANEL_ADDRESS_FILE = `${STATE_DIR}/panel-addresses.json`;
 
 export const NFT_DIR = '/usr/share/nftables.d';
 export const NFT_TABLE = 'ecycloud';
 export const TPROXY_MARK = 502;
 export const ROUTING_MARK = 503;
 export const ROUTE_TABLE = 1936;
+export const TUN_ROUTE_TABLE = 1937;
+export const TUN_RULE_INDEX = 1937;
 export const CONTROLLER_PORT = 19090;
 
 const FILE_MODE = int('600', 8);
@@ -32,8 +36,8 @@ export function shellquote(value) {
 	return `'${replace(`${value}`, "'", "'\\''")}'`;
 };
 
-export function log(level, message) {
-	system(`logger -t ecycloud -p daemon.${level} ${shellquote(message)}`);
+function curlquote(value) {
+	return '"' + replace(replace(replace(replace(replace(`${value}`, '\\', '\\\\'), '"', '\\"'), '\n', '\\n'), '\r', '\\r'), '\t', '\\t') + '"';
 };
 
 export function ensureDir(path) {
@@ -44,6 +48,21 @@ export function ensureDir(path) {
 export function ensurePrivateDir(path) {
 	ensureDir(path);
 	chmod(path, DIR_MODE);
+};
+
+export function sessionLease() {
+	ensurePrivateDir(STATE_DIR);
+	if (access(SESSION_CHANGE))
+		return null;
+	/* curl 子进程也须持有共享锁，避免父任务退出后仍在写旧会话响应。 */
+	const lock = open(`${STATE_DIR}/session.lock`, 'a', 0600);
+	if (!lock)
+		die('无法打开会话锁');
+	if (!lock.lock('sn') || access(SESSION_CHANGE)) {
+		lock.close();
+		return null;
+	}
+	return lock;
 };
 
 export function readJson(path) {
@@ -57,8 +76,32 @@ export function readJson(path) {
 	}
 };
 
+export function randomHex(bytes) {
+	const fd = open('/dev/urandom', 'r');
+	let out = '';
+
+	if (fd) {
+		const raw = fd.read(bytes) ?? '';
+		fd.close();
+		for (let i = 0; i < length(raw); i++)
+			out += sprintf('%02x', ord(raw, i));
+	}
+
+	if (length(out) != bytes * 2)
+		die('无法读取系统安全随机数');
+	return out;
+};
+
+export function writeAtomic(path, text) {
+	const temporary = `${path}.${randomHex(6)}.tmp`;
+	if (writefile(temporary, text) == length(text) && chmod(temporary, FILE_MODE) && rename(temporary, path))
+		return true;
+	unlink(temporary);
+	return false;
+};
+
 export function writeJson(path, value) {
-	return writefile(path, sprintf('%J', value)) != null;
+	return writeAtomic(path, sprintf('%J', value));
 };
 
 export function writePrivateJson(path, value) {
@@ -111,6 +154,13 @@ export function appendNets(base, extra) {
 
 export function settings() {
 	const raw = cursor().get_all('ecycloud', 'config') ?? {};
+	const runDir = raw.run_dir ?? `${CONF_DIR}/run`;
+	if (runDir != `${CONF_DIR}/run`)
+		die(`运行目录必须为 ${CONF_DIR}/run`);
+	const tunDevice = raw.tun_device || 'ECYCloud';
+	if (index(tunDevice, '\0') >= 0 || match(tunDevice, /[[:cntrl:][:space:]]/) ||
+	    !match(tunDevice, /^[A-Za-z0-9_.-]{1,15}$/))
+		die('TUN 网卡名只能包含 1 到 15 个字母、数字、下划线、点或连字符');
 
 	return {
 		enabled: raw.enabled == '1',
@@ -121,19 +171,26 @@ export function settings() {
 		mixedPort: +(raw.mixed_port ?? 10203),
 		dnsPort: +(raw.dns_port ?? 10201),
 		allowLan: (raw.allow_lan ?? '1') == '1',
-		ipv6: (raw.ipv6 ?? '1') == '1',
+		ipv6: raw.ipv6 == '1',
 		dnsHijack: (raw.dns_hijack ?? '1') == '1',
 		routerProxy: raw.router_proxy == '1',
-		tunDevice: raw.tun_device || 'ECYCloud',
+		tunDevice,
 		tunStack: raw.tun_stack ?? 'mixed',
 		tunExclude: uciList(raw.tun_exclude),
 		bypass: uciList(raw.bypass),
-		runDir: raw.run_dir ?? `${CONF_DIR}/run`,
+		runDir,
 		geoxBase: replace(trim(raw.geox_base ?? ''), /\/+$/, ''),
 		refreshInterval: +(raw.refresh_interval ?? 5),
 		autoConnect: raw.auto_connect == '1',
 		lanInterfaces: length(uciList(raw.lan_interface)) ? uciList(raw.lan_interface) : [ 'lan' ]
 	};
+};
+
+export function log(level, message) {
+	const levels = { debug: 0, info: 1, notice: 1, warning: 2, err: 3, error: 3, silent: 4 };
+	if ((levels[level] ?? 2) < (levels[settings().logLevel] ?? 2))
+		return;
+	system(`logger -t ecycloud -p daemon.${level} ${shellquote(message)}`);
 };
 
 export function build() {
@@ -144,14 +201,42 @@ export function creds() {
 	return readJson(CRED_FILE) ?? {};
 };
 
+export function timestamp(value) {
+	if (type(value) == 'int' || type(value) == 'double')
+		return +value > 0 ? +value : 0;
+	const m = match(`${value ?? ''}`, /^(\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(Z|([+-])(\d{2}):(\d{2}))$/);
+	if (!m)
+		return 0;
+	const parts = { year: +m[1], mon: +m[2], mday: +m[3], hour: +m[4], min: +m[5], sec: +m[6] };
+	const utc = timegm(parts);
+	const checked = gmtime(utc);
+	for (let key, field in parts)
+		if (checked[key] != field)
+			return 0;
+	if (m[7] != 'Z' && (+m[9] > 23 || +m[10] > 59))
+		return 0;
+	return utc - (m[7] == 'Z' ? 0 : (m[8] == '+' ? 1 : -1) * (+m[9] * 3600 + +m[10] * 60));
+};
+
+export function sessionValid() {
+	const saved = creds();
+	return length(saved.token) > 0 && timestamp(saved.expires_at) > time();
+};
+
 export function saveCreds(next) {
 	ensurePrivateDir(CONF_DIR);
 	return writePrivateJson(CRED_FILE, next);
 };
 
+/* 只认 https：这个 origin 承载此后全部带 token 的面板请求，http 等于把会话交给链路上任何人 */
 function originOf(url) {
-	const m = match(trim(`${url ?? ''}`), /^(https?):\/\/([^\/?#]+)/);
-	return m ? `${m[1]}://${m[2]}` : '';
+	const value = `${url ?? ''}`;
+	if (index(value, '\0') >= 0 || match(value, /[[:cntrl:][:space:]"'\\]/))
+		return '';
+	const m = match(value, /^https:\/\/([^\/?#@]+)/);
+	if (m && index(value, '@') >= 0)
+		return '';
+	return m ? `https://${m[1]}` : '';
 };
 
 export function origins() {
@@ -163,7 +248,76 @@ export function origins() {
 	return { site, sub: length(sub) ? sub : site };
 };
 
-/* 面板下发的 origin 必须是 https，http 一律丢弃：落盘后此后带 token 的请求都打这里 */
+function isPanelDirectAddress(address) {
+	return type(address) == 'string' && isIpNet(address) && index(address, '/') < 0 && !match(address, /^198\.(18|19)\./);
+};
+
+export function panelDirectHosts(refresh) {
+	const current = origins();
+	const binding = sprintf('%J', current);
+	const saved = readJson(PANEL_ADDRESS_FILE);
+	const previous = saved?.binding == binding && type(saved.hosts) == 'object' ? saved.hosts : {};
+	const expired = saved?.binding != binding || time() - +(saved.resolved_at ?? 0) >= 300;
+
+	const hosts = {};
+	for (let origin in [ current.site, current.sub ]) {
+		if (hosts[origin] != null)
+			continue;
+		const target = match(origin, /^https:\/\/(\[[0-9A-Fa-f:]+\]|[^:/?#]+)(:([0-9]+))?$/);
+		if (!target)
+			continue;
+		const host = replace(target[1], /^\[|\]$/g, '');
+		const cached = previous[origin]?.addresses;
+		let addresses = type(cached) == 'array' ? filter(cached, isPanelDirectAddress) : [];
+		if (isPanelDirectAddress(host)) {
+			addresses = [ host ];
+		} else if (refresh && expired) {
+			const next = [];
+			const proc = popen(`resolveip -t 3 -- ${shellquote(host)} 2>/dev/null`);
+			const text = proc?.read('all') ?? '';
+			const status = proc?.close();
+			if (status == 0)
+				for (let line in split(text, '\n')) {
+					const address = trim(line);
+					if (isPanelDirectAddress(address) && !(address in next))
+						push(next, address);
+				}
+			if (length(next))
+				addresses = next;
+		}
+		hosts[origin] = { host: target[1], port: +(target[3] ?? 443), addresses };
+	}
+	if (refresh && expired) {
+		ensurePrivateDir(STATE_DIR);
+		writeJson(PANEL_ADDRESS_FILE, { binding, hosts, resolved_at: time() });
+	}
+	return hosts;
+};
+
+export function panelDirectNets() {
+	const nets = [];
+	for (let origin, target in panelDirectHosts(false))
+		for (let address in target.addresses) {
+			const net = `${address}/${index(address, ':') >= 0 ? 128 : 32}`;
+			if (!(net in nets))
+				push(nets, net);
+		}
+	return nets;
+};
+
+export function sha256File(path) {
+	const proc = popen(`sha256sum ${shellquote(path)} 2>/dev/null`);
+	const digest = trim(proc?.read('all') ?? '');
+	const status = proc?.close();
+	const m = match(digest, /^([a-f0-9]{64})\s/);
+	return status == 0 && m ? m[1] : '';
+};
+
+export function sessionBinding() {
+	const digest = sessionValid() ? sha256File(CRED_FILE) : '';
+	return length(digest) ? sprintf('%J', { digest, ...origins() }) : '';
+};
+
 export function saveOrigins(site, sub) {
 	const uci = cursor();
 	const current = origins();
@@ -171,7 +325,7 @@ export function saveOrigins(site, sub) {
 
 	for (let entry in [ [ 'site_url', site, current.site ], [ 'sub_url', sub, current.sub ] ]) {
 		const next = originOf(entry[1]);
-		if (!length(next) || substr(next, 0, 8) != 'https://' || next == entry[2])
+		if (!length(next) || next == entry[2])
 			continue;
 		uci.set('ecycloud', 'config', entry[0], next);
 		changed = true;
@@ -192,20 +346,6 @@ function osRelease() {
 function hostname() {
 	const name = cursor().get('system', '@system[0]', 'hostname');
 	return length(name) ? name : trim(readfile('/proc/sys/kernel/hostname') ?? 'OpenWrt');
-};
-
-export function randomHex(bytes) {
-	const fd = open('/dev/urandom', 'r');
-	let out = '';
-
-	if (fd) {
-		const raw = fd.read(bytes) ?? '';
-		fd.close();
-		for (let i = 0; i < length(raw); i++)
-			out += sprintf('%02x', ord(raw, i));
-	}
-
-	return out;
 };
 
 export function device() {
@@ -288,13 +428,16 @@ export function state() {
 	return readJson(STATE_FILE) ?? { stage: 'stopped', message: '', error: '', updated: 0 };
 };
 
-export function setState(stage, message, error) {
+export function setState(stage, message, error, retryable) {
 	ensurePrivateDir(STATE_DIR);
+	const previous = state();
 	writeJson(STATE_FILE, {
 		stage,
 		message: message ?? '',
 		error: error ?? '',
-		updated: time()
+		updated: time(),
+		connected_at: stage == 'running' ? (+previous.connected_at || time()) : 0,
+		retryable: retryable == true
 	});
 };
 
@@ -325,6 +468,11 @@ export function kickReason() {
 
 /* 令牌与请求体不进 argv：一律经 0700 目录下的 curl 配置文件传递 */
 export function httpRequest(opts) {
+	if (!match(`${opts.url ?? ''}`, /^https?:\/\//) || index(opts.url, '\0') >= 0 || match(opts.url, /[[:cntrl:][:space:]]/))
+		return { status: 0, text: '', data: null, error: '无效的 HTTP 地址' };
+	for (let header in (opts.headers ?? []))
+		if (index(`${header}`, '\0') >= 0 || match(`${header}`, /[[:cntrl:]]/))
+			return { status: 0, text: '', data: null, error: '无效的 HTTP 请求头' };
 	ensurePrivateDir(STATE_DIR);
 
 	const tag = randomHex(6);
@@ -332,25 +480,37 @@ export function httpRequest(opts) {
 	const bodyFile = `${STATE_DIR}/req-${tag}.json`;
 	const respFile = `${STATE_DIR}/resp-${tag}.json`;
 	const errFile = `${STATE_DIR}/resp-${tag}.err`;
+	const headerFile = `${STATE_DIR}/resp-${tag}.headers`;
 
 	const conf = [
 		'silent',
 		'show-error',
-		`url = "${opts.url}"`,
+		'globoff',
+		'proto = "=http,https"',
+		'max-filesize = 8388608',
+		`url = ${curlquote(opts.url)}`,
 		`max-time = ${opts.timeout ?? 20}`,
 		`connect-timeout = ${opts.connectTimeout ?? 10}`,
 		`output = "${respFile}"`,
+		`dump-header = "${headerFile}"`,
 		'write-out = "%{http_code}"'
 	];
 
-	if (length(opts.proxy))
-		push(conf, `proxy = "${opts.proxy}"`);
+	if (length(opts.proxy)) {
+		push(conf, `proxy = ${curlquote(opts.proxy)}`);
+		if (opts.direct)
+			push(conf, 'noproxy = ""');
+	} else if (opts.direct) {
+		push(conf, 'proxy = ""', 'noproxy = "*"');
+		if (length(opts.resolve))
+			push(conf, `resolve = ${curlquote(opts.resolve)}`);
+	}
 
 	if (length(opts.method))
-		push(conf, `request = "${opts.method}"`);
+		push(conf, `request = ${curlquote(opts.method)}`);
 
 	for (let header in (opts.headers ?? []))
-		push(conf, `header = "${header}"`);
+		push(conf, `header = ${curlquote(header)}`);
 
 	if (opts.body != null) {
 		writefile(bodyFile, opts.body);
@@ -360,17 +520,37 @@ export function httpRequest(opts) {
 	writefile(confFile, `${join('\n', conf)}\n`);
 
 	let written = '';
-	const proc = popen(`curl -K ${shellquote(confFile)} 2>${shellquote(errFile)}`);
+	let exitCode = -1;
+	const proc = popen(`curl -q -K ${shellquote(confFile)} 2>${shellquote(errFile)}`);
 	if (proc) {
 		written = proc.read('all') ?? '';
-		proc.close();
+		exitCode = proc.close();
 	}
 
 	const status = +trim(written) || 0;
 	const text = readfile(respFile) ?? '';
 	const failure = trim(readfile(errFile) ?? '');
+	let retryAfter = null;
+	let rateRemaining = null;
+	let rateReset = null;
+	for (let line in split(readfile(headerFile, 8192) ?? '', '\n')) {
+		if (match(line, /^HTTP\//i)) {
+			retryAfter = null;
+			rateRemaining = null;
+			rateReset = null;
+		}
+		const header = match(line, /^Retry-After:\s*([+]?[0-9]+)\s*$/i);
+		if (header && +header[1] > 0)
+			retryAfter = +header[1];
+		const remaining = match(line, /^X-RateLimit-Remaining:\s*([0-9]+)\s*$/i);
+		const reset = match(line, /^X-RateLimit-Reset:\s*([0-9]+)\s*$/i);
+		if (remaining)
+			rateRemaining = +remaining[1];
+		if (reset)
+			rateReset = +reset[1];
+	}
 
-	for (let path in [ confFile, bodyFile, respFile, errFile ])
+	for (let path in [ confFile, bodyFile, respFile, errFile, headerFile ])
 		unlink(path);
 
 	let data = null;
@@ -384,6 +564,10 @@ export function httpRequest(opts) {
 
 	return {
 		status,
+		exit_code: exitCode,
+		retry_after: retryAfter,
+		rate_limit_reset: rateRemaining == 0 ? rateReset : null,
+		rate_limited: rateRemaining == 0,
 		text,
 		data,
 		error: status ? null : (length(failure) ? failure : 'connection failed')
@@ -433,7 +617,9 @@ export function lanDevices() {
 
 	for (let name in settings().lanInterfaces) {
 		const device = uci.get('network', name, 'device') ?? uci.get('network', name, 'ifname');
-		if (length(device) && !(device in devices))
+		// 设备名会直接拼进 nftables 规则集，仅允许合法网卡名字符，防止被篡改的 network 配置注入 nft
+		if (length(device) && index(device, '\0') < 0 && !match(device, /[[:cntrl:][:space:]]/) &&
+		    match(device, /^[A-Za-z0-9_.-]{1,15}$/) && !(device in devices))
 			push(devices, device);
 	}
 

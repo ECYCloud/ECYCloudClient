@@ -53,13 +53,8 @@ function Get-GeoData {
     param([string]$Url, [string]$Target, [int]$MinBytes)
 
     $path = Join-Path $cacheDir $Target
-    if ($Force -and (Test-Path $path)) {
-        Remove-Item $path -Force
-    }
-    if (-not (Test-Path $path)) {
-        Write-Host "下载 $Url"
-        Invoke-WebRequest -Uri $Url -OutFile $path -UseBasicParsing
-    }
+    Write-Host "下载 $Url"
+    Invoke-WebRequest -Uri $Url -OutFile $path -UseBasicParsing
 
     $size = (Get-Item $path).Length
     if ($size -lt $MinBytes) {

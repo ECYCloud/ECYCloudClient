@@ -1,0 +1,23 @@
+{
+  "package": "android_file_picker",
+  "version": "2.0.0",
+  "archive": "https://pub.dev/api/archives/android_file_picker-2.0.0.tar.gz",
+  "sha256": "14ab27769b54c48d5a8a71aa9858372b7a3ae77572ea0a8aee744643c5d8c53d",
+  "originalFiles": {
+    "LICENSE": "12f7222de745bab3710ba88b59f33484ca423aa5e1deac9e56ed946706d5abab",
+    "pubspec.yaml": "5178731d45399f33c2e9f2405a68d977f5d9dabb46b5882b16fbfc56708b70a4",
+    "android/src/main/AndroidManifest.xml": "462d8fe7e34a80e24230080b759e2f627f7b01b5f15b65c291837cff088f391a",
+    "android/src/main/kotlin/com/mr/flutter/plugin/filepicker/FilePickerDelegate.kt": "0f948ee976701aafc4aba11ffed3aa03dd2f2a506bb9410caeb9d6a14561da79",
+    "android/src/main/kotlin/com/mr/flutter/plugin/filepicker/FilePickerPlugin.kt": "9eabde7656ea25e7bf80144c0a5273a52bf497c96aac0c7a7c19b2af2a0adf84",
+    "android/src/main/kotlin/com/mr/flutter/plugin/filepicker/MethodResultWrapper.kt": "16168decfc389023eb2105a6b5616a053e199b25ab7752bf01c1c88984087a2f",
+    "android/src/main/kotlin/com/mr/flutter/plugin/filepicker/FileUtils.kt": "743c605acef3ed919e5de83846f1299fb39a74934a06e9a8445db0507e495a08",
+    "android/src/main/kotlin/com/mr/flutter/plugin/filepicker/FileInfo.kt": "2d1fc1e16b6e0fbae81c32cbc8c66462d9d54ef52e3bc6d0cc295242a6d49f5e",
+    "android/build.gradle.kts": "8b4684f1490e8637de59378d31676bfe9b2c71d50ffceffc4276a8702f724a3f",
+    "android/proguard-rules.pro": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lib/android_file_picker.dart": "991631773801439a3a8f3538c80dfaa456d801bdd9a113de5f12b74112a4d990",
+    "lib/src/android_saf_handle.dart": "eea327711521fa55ef977438d73c1f44dc0a04bffeacc2fc3332bdf1f99cd4b6",
+    "lib/src/file_picker_android_options.dart": "a912ac25005de4ac3e7fccc3e10b4ddab488543d821fc6353c738d58e8846540",
+    "lib/src/file_picker_android.dart": "39348bfb552bc3a1c290c00a309d9da949666940287da99461bcfa722cbd7af7",
+    "lib/src/android_platform_file.dart": "d53a172a8f3f006d632c34f74390e1201bc36b8b5abecb69805b139263a37db6"
+  }
+}

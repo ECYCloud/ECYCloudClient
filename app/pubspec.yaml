@@ -5,12 +5,12 @@ version: 0.1.0+1
 
 environment:
   sdk: ^3.13.0
-  flutter: ">=3.47.4"
+  flutter: ">=3.47.5"
 
 dependencies:
-  crypto: ^3.0.6
+  crypto: ^3.0.7
   ffi: ^2.2.0
-  file_picker: ^13.0.0
+  file_picker: ^13.1.0
   flutter:
     sdk: flutter
   flutter_localizations:
@@ -25,11 +25,20 @@ dependencies:
   media_kit_libs_video: ^1.0.7
   media_kit_video: ^2.0.1
   qr_flutter: ^4.1.0
+  super_sliver_list: ^0.4.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+dependency_overrides:
+  media_kit_libs_android_video:
+    path: ../native/plugins/media_kit_libs_android_video
+  android_file_picker:
+    path: ../native/plugins/android_file_picker
+  media_kit_libs_windows_video:
+    path: ../native/plugins/media_kit_libs_windows_video
 
 flutter:
   uses-material-design: true

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../../l10n/l10n.dart';
 import '../theme.dart';
+import 'app_text_field.dart';
 
 class SearchField extends StatefulWidget {
   const SearchField({
@@ -8,22 +10,36 @@ class SearchField extends StatefulWidget {
     required this.onChanged,
     this.hintText,
     this.width = 220,
+    this.controller,
+    this.focusNode,
   });
 
   final ValueChanged<String> onChanged;
   final String? hintText;
   final double width;
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
 
   @override
   State<SearchField> createState() => _SearchFieldState();
 }
 
 class _SearchFieldState extends State<SearchField> {
-  final TextEditingController _controller = TextEditingController();
+  TextEditingController? _owned;
+
+  TextEditingController get _controller => widget.controller ?? _owned!;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller == null) {
+      _owned = TextEditingController();
+    }
+  }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _owned?.dispose();
     super.dispose();
   }
 
@@ -41,9 +57,9 @@ class _SearchFieldState extends State<SearchField> {
       width: widget.width,
       height: 30,
       child: AppTheme.withControlDensity(
-        TextField(
-          contextMenuBuilder: AppTheme.editableTextMenu,
+        AppTextField(
           controller: _controller,
+          focusNode: widget.focusNode,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
           onChanged: (String value) {
             widget.onChanged(value);

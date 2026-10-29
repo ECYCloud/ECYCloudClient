@@ -1,16 +1,17 @@
 'use strict';
 
-import { open, unlink } from 'fs';
+import { access, open, unlink } from 'fs';
 
-import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, creds, device,
-         ensurePrivateDir, httpRequest, log, origins, readJson, saveCreds, saveOrigins,
-         STATE_DIR, urlencode, userAgent, writeJson, writePrivateJson } from 'ecycloud.common';
+import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, PROFILE_FILE, creds, device,
+		 ensurePrivateDir, httpRequest, log, origins, panelDirectHosts, randomHex, readJson, saveCreds, saveOrigins,
+		 STATE_DIR, coreRunning, sessionBinding, sessionValid, settings, urlencode, userAgent, writeJson, writePrivateJson } from 'ecycloud.common';
+import { PENDING_FILE, cached } from 'ecycloud.profile';
 
 const API_PATH = '/api/client/v1';
 
-/* 面板按路径滑动窗口限流，窗口 60 秒（Website 的 ClientApiRateLimit）：撞上就整窗退避，别连打 */
 const RATE_WINDOW = 60;
 const COOLDOWN_FILE = `${STATE_DIR}/cooldown.json`;
+const NODE_USED_FILE = `${STATE_DIR}/node-used.json`;
 
 function routeKey(path) {
 	return split(`${path}`, '?')[0];
@@ -21,19 +22,21 @@ function cooldownLeft(path) {
 	return until > time() ? until - time() : 0;
 };
 
-function noteCooldown(path) {
+function noteCooldown(path, retryAfter) {
 	const saved = readJson(COOLDOWN_FILE) ?? {};
-	saved[routeKey(path)] = time() + RATE_WINDOW;
+	const limit = path in [ '/config/clash', '/config/revision' ] && cached() != null ? 86400 : RATE_WINDOW;
+	saved[routeKey(path)] = time() + min(limit, max(1, retryAfter ?? 6));
 	ensurePrivateDir(STATE_DIR);
 	writeJson(COOLDOWN_FILE, saved);
 };
 
 export function session() {
 	const saved = creds();
-	if (!length(saved.token))
-		return { email: '', expires_at: '', logged_in: false };
+	if (!sessionValid())
+		return { email: '', expires_at: '', logged_in: false, expired: length(saved.token) > 0 };
 
 	return {
+		id: saved.session_id ?? `legacy:${saved.email ?? ''}:${saved.expires_at ?? ''}`,
 		email: saved.email ?? '',
 		expires_at: saved.expires_at ?? '',
 		logged_in: true,
@@ -41,11 +44,17 @@ export function session() {
 	};
 };
 
+export function clearCache() {
+	for (let path in [ ACCOUNT_FILE, COOLDOWN_FILE, ANNOUNCE_CACHE, PROFILE_FILE, PENDING_FILE, NODE_USED_FILE ])
+		if (access(path) && !unlink(path))
+			die('无法清除旧账户缓存');
+};
+
 export function clearToken() {
 	log('notice', 'session cleared');
-	saveCreds({ device_id: creds().device_id });
-	unlink(ACCOUNT_FILE);
-	unlink(COOLDOWN_FILE);
+	if (!saveCreds({ device_id: creds().device_id }))
+		die('无法清除旧账户凭据');
+	clearCache();
 };
 
 function headers(token, hasBody, connected, nodeUsed) {
@@ -78,36 +87,55 @@ export function call(path, opts) {
 	if (!length(origin))
 		return { ok: false, ret: 0, status: 0, msg: '面板地址缺失，请重装插件或在设置里填写', data: null };
 
-	const token = opts?.anonymous ? '' : creds().token;
-	if (!opts?.anonymous && !length(token))
-		return { ok: false, ret: 0, status: 401, msg: '尚未登录', data: null };
+	const sessionToken = creds().token ?? '';
+	const token = opts?.anonymous ? '' : sessionToken;
+	if (!opts?.anonymous && !sessionValid())
+		return { ok: false, ret: 0, status: 401, msg: length(token) ? '登录已失效，请重新登录' : '尚未登录', data: null };
 
 	const waiting = cooldownLeft(path);
 	if (waiting > 0)
 		return { ok: false, ret: 0, status: 429, msg: `面板繁忙，请约 ${waiting} 秒后再试`, data: null };
 
 	const body = opts?.body != null ? sprintf('%J', opts.body) : null;
-	const res = httpRequest({
+	const pending = !opts?.anonymous ? readJson(NODE_USED_FILE) : null;
+	const nodeUsed = pending?.binding == sessionBinding();
+	const direct = panelDirectHosts(true)[origin];
+	const addresses = direct?.addresses ?? [];
+	const address = filter(addresses, ip => index(ip, ':') < 0)[0] ?? addresses[0];
+	const request = {
 		url: `${origin}${API_PATH}${path}`,
+		direct: true,
+		resolve: length(address) && direct.host != address && direct.host != `[${address}]`
+			? `${direct.host}:${direct.port}:${index(address, ':') >= 0 ? `[${address}]` : address}` : null,
 		method: opts?.method,
-		headers: headers(token, body != null, opts?.connected == true, opts?.node_used == true),
+		headers: [ ...headers(token, body != null, opts?.connected == true,
+			opts?.connected == true || opts?.node_used == true || nodeUsed), ...(opts?.headers ?? []) ],
 		body,
 		timeout: opts?.timeout
-	});
+	};
+	let res = httpRequest(request);
+	const repeatable = (opts?.method ?? 'GET') in [ 'GET', 'HEAD' ];
+	if (res.status == 0 && coreRunning() && (opts?.anonymous || sessionValid()) && (creds().token ?? '') == sessionToken &&
+	    (repeatable || res.exit_code in [ 5, 6, 7 ]))
+		res = httpRequest({ ...request, proxy: `http://127.0.0.1:${settings().mixedPort}` });
+
+	if ((creds().token ?? '') != sessionToken)
+		return { ok: false, ret: 0, status: 409, msg: '账户会话已改变，请重新操作', data: null };
+	if (!opts?.anonymous && !sessionValid())
+		return { ok: false, ret: 0, status: 401, msg: '登录已失效，请重新登录', data: null };
 
 	const payload = res.data;
 	const ret = +(payload?.ret ?? 0);
 
 	if (res.status == 429)
-		noteCooldown(path);
+		noteCooldown(path, res.retry_after);
 
-	if (res.status == 401 && ret != 2 && !opts?.anonymous && creds().token == token &&
-	    payload?.msg == '登录已失效，请重新登录') {
+	if (res.status == 401 && ret != 2 && !opts?.anonymous && creds().token == token) {
 		log('notice', `session cleared: ${path} HTTP 401`);
 		clearToken();
 	}
 
-	if (ret != 1)
+	if (ret != 1 || res.status < 200 || res.status >= 300)
 		return {
 			ok: false,
 			ret,
@@ -116,11 +144,31 @@ export function call(path, opts) {
 			data: payload?.data
 		};
 
+	if (nodeUsed && pending.id == readJson(NODE_USED_FILE)?.id)
+		unlink(NODE_USED_FILE);
 	return { ok: true, ret, status: res.status, msg: payload?.msg ?? '', data: payload?.data ?? {} };
+};
+
+/* 面板对封禁（enable=0）与待删除（enable=-1）账号同样签发 token，只放行状态、资料与工单接口，
+   /config/clash 会被拒；路由端没有账户状态页，存下这种会话只会让拉配置反复失败 */
+export function restrictedReason(data) {
+	const status = data?.account_status;
+	if (type(status) != 'object')
+		return '';
+
+	const enable = +(status.enable ?? 1);
+	if (enable == 1)
+		return '';
+	if (enable == -1)
+		return '账号正在等待删除，请先到网站取消删除再登录';
+
+	const reason = trim(`${status.ban_reason ?? ''}`);
+	return length(reason) ? `账号已被封禁：${reason}` : '账号已被封禁，请到网站查看详情';
 };
 
 function storeSession(email, data, deviceId) {
 	saveCreds({
+		session_id: randomHex(16),
 		device_id: deviceId,
 		email,
 		token: data.token,
@@ -147,6 +195,10 @@ export function login(email, password, code) {
 
 	if (!length(res.data?.token))
 		return { ok: false, msg: '面板未返回登录令牌' };
+
+	const restricted = restrictedReason(res.data);
+	if (length(restricted))
+		return { ok: false, msg: restricted };
 
 	storeSession(email, res.data, info.device_id);
 	if (!length(creds().token))
@@ -177,6 +229,10 @@ export function loginWithVerifyCode(email, code) {
 	if (!length(res.data?.token))
 		return { ok: false, msg: '面板未返回登录令牌' };
 
+	const restricted = restrictedReason(res.data);
+	if (length(restricted))
+		return { ok: false, msg: restricted };
+
 	storeSession(email, res.data, info.device_id);
 	if (!length(creds().token))
 		return { ok: false, msg: '登录成功但未能保存会话' };
@@ -185,8 +241,10 @@ export function loginWithVerifyCode(email, code) {
 };
 
 export function logout() {
+	const token = creds().token ?? '';
 	const res = call('/auth/logout', { method: 'POST', timeout: 8 });
-	clearToken();
+	if ((creds().token ?? '') == token)
+		clearToken();
 	return res;
 };
 
@@ -224,6 +282,11 @@ function writeAccount(update) {
 };
 
 export function reportNodeUsed() {
+	if (!sessionValid())
+		return call('/user/account-status');
+	ensurePrivateDir(STATE_DIR);
+	if (!writePrivateJson(NODE_USED_FILE, { binding: sessionBinding(), id: randomHex(6) }))
+		die('无法保存节点使用记录');
 	return call('/user/account-status', { node_used: true });
 };
 
@@ -245,10 +308,32 @@ export function reportSpeedTest(name, bytesPerSecond) {
 	});
 };
 
-export function refreshAccount(connected, nodeUsed) {
+export function checkin() {
+	const res = call('/user/checkin', { method: 'POST', body: {} });
+	if (!res.ok || type(res.data) != 'object')
+		return res;
+
+	writeAccount(() => res.data);
+	saveOrigins(res.data.site_origin, res.data.api_origin);
+	return res;
+};
+
+export function contentLanguage(locale) {
+	const language = locale in [ 'zh-CN', 'zh-TW', 'en-US', 'en' ] ? locale : (cached()?.locale ?? 'zh-CN');
+	return language == 'en' ? 'en-US' : language;
+};
+
+export function refreshAccount(connected, nodeUsed, locale) {
+	const headers = [ `Accept-Language: ${contentLanguage(locale)}` ];
+	const status = call('/user/account-status', { connected: connected == true, node_used: nodeUsed == true, headers });
+	if (!status.ok)
+		return status;
+	const reason = restrictedReason({ account_status: status.data });
+	if (length(reason))
+		return { ok: false, status: 403, restricted: true, msg: reason, data: null };
 	while (true) {
 		const revision = writeAccount();
-		const res = call('/user/profile', { connected: connected == true, node_used: nodeUsed == true });
+		const res = call('/user/profile', { connected: connected == true, node_used: nodeUsed == true, headers });
 		if (!res.ok)
 			return res;
 
@@ -260,12 +345,12 @@ export function refreshAccount(connected, nodeUsed) {
 	}
 };
 
-export function clashProfile() {
-	return call('/config/clash', { origin: origins().sub, timeout: 90 });
+export function clashProfile(locale) {
+	return call('/config/clash', { origin: origins().sub, timeout: 90, headers: [ 'X-ECY-Node-Providers: 1', `Accept-Language: ${contentLanguage(locale)}` ] });
 };
 
-export function touchIdentity() {
-	return call('/config/revision', { origin: origins().sub, timeout: 8, connected: true });
+export function touchIdentity(connected) {
+	return call('/config/revision', { origin: origins().sub, timeout: 8, connected: connected == true, headers: [ `Accept-Language: ${contentLanguage()}` ] });
 };
 
 export function onlineDevices() {
@@ -286,12 +371,12 @@ export function onlineDevices() {
 	return { ok: res.ok == true, msg: res.msg ?? '', devices };
 };
 
-export function devices(page, length) {
+export function devices(page, length, search) {
 	page = page > 0 ? +page : 1;
 	length = +length;
 	if (length != 10 && length != 25 && length != 50 && length != 100)
 		length = 100;
-	const res = call(`/user/devices?page=${page}&length=${length}`);
+	const res = call(`/user/devices?page=${page}&length=${length}&search=${urlencode(substr(trim(`${search ?? ''}`), 0, 256))}`);
 	const items = [];
 	const data = res.data ?? {};
 
@@ -449,14 +534,19 @@ function announceView(items, popup, state, extra) {
 	};
 };
 
-function announceCache() {
-	return readJson(ANNOUNCE_CACHE);
+function announceCache(locale) {
+	const cached = readJson(ANNOUNCE_CACHE);
+	return (cached?.locale ?? 'zh-CN') == locale ? cached : null;
 };
 
-export function announcements(path) {
+export function announcements(path, locale) {
+	let language = locale == null || locale == '' ? 'zh-CN' : locale;
+	if (!(language in [ 'zh-CN', 'zh-TW', 'en-US', 'en' ]))
+		return { ok: false, msg: '语言不合法' };
+	language = contentLanguage(language);
 	const action = `${path ?? ''}`;
 	let state = readJson(ANNOUNCE_FILE) ?? {};
-	const cache = announceCache();
+	const cache = announceCache(language);
 	const cachedItems = cache?.items ?? [];
 	const cachedPopup = cache?.popup ?? null;
 
@@ -494,7 +584,7 @@ export function announcements(path) {
 	if (action != 'refresh' && cache != null)
 		return announceView(cachedItems, cachedPopup, state, { ok: true, loaded: true });
 
-	const res = call('/announcements');
+	const res = call('/announcements', { headers: [ `Accept-Language: ${language}` ] });
 	if (res.status == 429)
 		return announceView(cachedItems, cachedPopup, state, {
 			ok: true,
@@ -517,7 +607,7 @@ export function announcements(path) {
 
 	const popup = res.data?.popup ? announceItem(res.data.popup) : null;
 	ensurePrivateDir(STATE_DIR);
-	writeJson(ANNOUNCE_CACHE, { items, popup });
+	writeJson(ANNOUNCE_CACHE, { locale: language, items, popup });
 
 	if (type(state.seen_revisions) != 'object') {
 		const maxId = +(state.read_max_id ?? 0);

@@ -24,25 +24,21 @@ import android.app.Notification as AndroidNotification
 class BoxService : VpnService() {
 
     private var tun: ParcelFileDescriptor? = null
+    private var notificationLanguage = ""
 
     // 内核出站的 socket 不 protect 就会被本服务自己建的 TUN 再吸一遍，直接成环
     private val protector = Protector { fd -> protect(fd) }
 
     override fun onCreate() {
         super.onCreate()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_STATUS,
-                    getString(R.string.notification_channel_status),
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-        }
         instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (BoxState.sessionCleanupPending(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_DISCONNECT) {
             stopByUser("已从通知断开连接")
             return START_NOT_STICKY
@@ -50,7 +46,7 @@ class BoxService : VpnService() {
         BoxState.starting = true
         QuickToggleService.refresh()
         try {
-            foreground(getString(R.string.notification_starting))
+            foreground(R.string.notification_starting)
         } catch (e: Exception) {
             // API 31+ 后台起前台服务、API 34+ specialUse 准入失败都在主线程抛，不接住会带崩进程
             Thread { fail("系统拒绝前台服务（${e.message ?: e}）") }.start()
@@ -90,6 +86,10 @@ class BoxService : VpnService() {
     // 独立后两者会真的并发；同时进两次 Mihomo.start 会把内核搞成半启动状态
     @Synchronized
     private fun launch() {
+        if (BoxState.sessionCleanupPending(this)) {
+            startResult.offer("账户会话正在清理")
+            return
+        }
         BoxState.revoked = false
         BoxState.stoppedByUser = false
         val raw = runCatching { BoxState.configFile(this).readText() }.getOrNull()
@@ -100,16 +100,13 @@ class BoxService : VpnService() {
 
         // VpnService 路径必然接管出口。落盘配置可能仍是常驻时的 tun.enable=false
         // （界面断开后的 standby），不改过来内核不会接 fd
-        val configJson = runCatching { JSONObject(raw) }.getOrElse {
-            fail(it.message ?: it.toString())
-            return
-        }
-        configJson.getJSONObject("tun").put("enable", true)
-        // AOSP JSONObject 会把 / 编成 \/，mihomo 的 yaml.v3 不认该转义
-        val config = configJson.toString().replace("\\/", "/")
-        BoxState.configFile(this).writeText(config)
-
         try {
+            val configJson = JSONObject(raw)
+            configJson.getJSONObject("tun").put("enable", true)
+            // AOSP JSONObject 会把 / 编成 \/，mihomo 的 yaml.v3 不认该转义
+            val config = configJson.toString(2).replace("\\/", "/")
+            BoxState.writeConfig(this, config)
+
             ensureSetup(this)
             Mihomo.setProtector(protector)
 
@@ -119,21 +116,20 @@ class BoxService : VpnService() {
 
             // 内核把 fd 包成 os.File 并在停止时关掉，必须 dup 后再 detach，避免与 shutdown 重复 close
             Mihomo.start(config, descriptor.dup().detachFd())
+
+            BoxState.error = null
+            BoxState.exitCode = null
+            BoxState.startedAt = System.currentTimeMillis()
+            BoxState.starting = false
+            BoxState.running = true
+            BoxState.takeover = true
+            note(LEVEL_INFO, "内核已启动")
+            foreground(R.string.notification_running)
+            QuickToggleService.refresh()
+            startResult.offer("")
         } catch (e: Exception) {
             fail(e.message ?: e.toString())
-            return
         }
-
-        BoxState.error = null
-        BoxState.exitCode = null
-        BoxState.startedAt = System.currentTimeMillis()
-        BoxState.starting = false
-        BoxState.running = true
-        BoxState.takeover = true
-        note(LEVEL_INFO, "内核已启动")
-        foreground(getString(R.string.notification_running))
-        QuickToggleService.refresh()
-        startResult.offer("")
     }
 
     private fun establish(config: JSONObject): ParcelFileDescriptor {
@@ -227,7 +223,7 @@ class BoxService : VpnService() {
         QuickToggleService.refresh()
     }
 
-    private fun foreground(text: String) {
+    private fun foreground(text: Int) {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
@@ -240,11 +236,22 @@ class BoxService : VpnService() {
         )
     }
 
-    private fun notification(text: String): AndroidNotification =
-        NotificationCompat.Builder(this, CHANNEL_STATUS)
+    private fun notification(text: Int): AndroidNotification {
+        val resources = NativeLanguage.resources(this)
+        notificationLanguage = resources.configuration.locales.toLanguageTags()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_STATUS,
+                    resources.getString(R.string.notification_channel_status),
+                    NotificationManager.IMPORTANCE_LOW,
+                ),
+            )
+        }
+        return NotificationCompat.Builder(this, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(text)
+            .setContentText(resources.getString(text))
             .setOngoing(true)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
@@ -261,7 +268,7 @@ class BoxService : VpnService() {
             )
             .addAction(
                 0,
-                getString(R.string.notification_disconnect),
+                resources.getString(R.string.notification_disconnect),
                 PendingIntent.getService(
                     this,
                     1,
@@ -270,6 +277,7 @@ class BoxService : VpnService() {
                 ),
             )
             .build()
+    }
 
     // Dart 侧按内核的行内级别解析日志，级别缺失会一律当成 info
     private fun note(level: String, message: String) {
@@ -298,6 +306,16 @@ class BoxService : VpnService() {
     }
 
     companion object {
+        fun refreshLanguage() {
+            val service = instance ?: return
+            if (BoxState.takeover && service.notificationLanguage != NativeLanguage.resources(service).configuration.locales.toLanguageTags()) {
+                service.getSystemService(NotificationManager::class.java).notify(
+                    NOTIFICATION_ID,
+                    service.notification(R.string.notification_running),
+                )
+            }
+        }
+
         private const val CHANNEL_STATUS = "ecycloud-status"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_DISCONNECT = "com.ecycloud.client.action.DISCONNECT"
@@ -351,8 +369,9 @@ class BoxService : VpnService() {
         }
 
         fun start(context: Context, config: String) {
+            check(!BoxState.sessionCleanupPending(context)) { "账户会话正在清理" }
             ensureSetup(context)
-            BoxState.configFile(context).writeText(config)
+            BoxState.writeConfig(context, config)
 
             if (!BoxState.takesOverExit(config)) {
                 standby(config)

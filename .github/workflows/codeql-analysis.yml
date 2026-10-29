@@ -24,11 +24,17 @@ jobs:
             build-mode: manual
           - language: actions
             build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          # Android 原生层只能 buildless 扫：编它要 Flutter SDK 与现编的 libmihomo.aar，
+          # 二者都不在 CodeQL 作业里，换成 autobuild 会直接失败
+          - language: java-kotlin
+            build-mode: none
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: native/unix/helper/go.mod
           cache-dependency-path: |
@@ -36,7 +42,7 @@ jobs:
             native/windows/service/go.sum
             native/android/mihomo/go.sum
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -52,6 +58,6 @@ jobs:
           (cd native/android/mihomo && go build ./...)
           (cd native/android/mihomo && go build -tags tools ./...)
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: "/language:${{ matrix.language }}"

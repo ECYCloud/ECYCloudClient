@@ -171,8 +171,14 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
         result(FlutterError(code: "argument", message: "缺少参数", details: nil))
         return
       }
-      deleteSecret(name)
-      result(nil)
+      do {
+        try deleteSecret(name)
+        result(nil)
+      } catch {
+        result(
+          FlutterError(
+            code: "secret", message: error.localizedDescription, details: nil))
+      }
     case "cursor.create":
       createCursor(call.arguments, result: result)
     case "cursor.set":
@@ -563,7 +569,7 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
   private static let secretService = "com.ecycloud.client"
 
   private func storeSecret(_ name: String, _ password: String) throws {
-    deleteSecret(name)
+    try deleteSecret(name)
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: Self.secretService,
@@ -596,12 +602,15 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     return String(data: data, encoding: .utf8)
   }
 
-  private func deleteSecret(_ name: String) {
+  private func deleteSecret(_ name: String) throws {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: Self.secretService,
       kSecAttrAccount as String: name,
     ]
-    SecItemDelete(query as CFDictionary)
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
   }
 }

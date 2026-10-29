@@ -1,0 +1,45 @@
+{
+  "mpv": {
+    "url": "https://github.com/mpv-android/mpv-android/releases/download/2026-09-17/app-default-universal-release.apk",
+    "sha256": "c3b505e45b919b767b9867e7f0d16fd823d77bc7c9a6e6b181b80ea60c018a70",
+    "file": "mpv-android-20260917.apk",
+    "source": "https://github.com/mpv-android/mpv-android/tree/2026-09-17/buildscripts",
+    "release": "https://github.com/mpv-android/mpv-android/releases/tag/2026-09-17"
+  },
+  "abis": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86_64"
+  ],
+  "libraries": [
+    "libmpv.so",
+    "libavcodec.so",
+    "libavdevice.so",
+    "libavfilter.so",
+    "libavformat.so",
+    "libavutil.so",
+    "libswresample.so",
+    "libswscale.so",
+    "libc++_shared.so"
+  ],
+  "helpers": {
+    "arm64-v8a": {
+      "url": "https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.1.11/default-arm64-v8a.jar",
+      "sha256": "2a906875af68be8c98c4a83c236bc24053f46e0accf62b115993ef1d740e98cc",
+      "file": "default-arm64-v8a.jar",
+      "source": "https://github.com/media-kit/media-kit-android-helper/tree/42054e5d479f39ccbb0ae604862e2bcaf59b74c2"
+    },
+    "armeabi-v7a": {
+      "url": "https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.1.11/default-armeabi-v7a.jar",
+      "sha256": "a9926cb4f8f42032769d411390b812f08a10a8048c67518e1e325803468da047",
+      "file": "default-armeabi-v7a.jar",
+      "source": "https://github.com/media-kit/media-kit-android-helper/tree/42054e5d479f39ccbb0ae604862e2bcaf59b74c2"
+    },
+    "x86_64": {
+      "url": "https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.1.11/default-x86_64.jar",
+      "sha256": "afe9aed06498a04b9b9655b0ad812dd29f864dcb6f735ab7df3900082bcb713d",
+      "file": "default-x86_64.jar",
+      "source": "https://github.com/media-kit/media-kit-android-helper/tree/42054e5d479f39ccbb0ae604862e2bcaf59b74c2"
+    }
+  }
+}

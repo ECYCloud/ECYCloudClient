@@ -22,6 +22,7 @@ class KernelService : Service() {
         }
 
         override fun status(logCursor: Int): Bundle {
+            BoxService.refreshLanguage()
             val (lines, cursor) = BoxState.logs.since(logCursor)
             return Bundle().apply {
                 putBoolean("running", BoxState.running)
@@ -62,7 +63,7 @@ class KernelService : Service() {
                 error("缺少配置内容")
             }
             BoxService.ensureSetup(this@KernelService)
-            BoxState.configFile(this@KernelService).writeText(raw)
+            BoxState.writeConfig(this@KernelService, raw)
             Mihomo.reload(raw)
         }
 
@@ -72,6 +73,12 @@ class KernelService : Service() {
 
         override fun stop() = guarded {
             BoxService.stop()
+        }
+
+        override fun clearSession(): Int = guarded {
+            check(BoxState.sessionCleanupPending(this@KernelService)) { "缺少会话清理标记" }
+            BoxService.stop()
+            Process.myPid()
         }
 
         override fun registerUi(callback: IUiCallback?) {

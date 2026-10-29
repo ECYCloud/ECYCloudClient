@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,15 +22,20 @@ const serviceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)" +
 	"(A;;CCLCSWRPLOCRRC;;;IU)" +
 	"(A;;CCLCSWLOCRRC;;;SU)"
 
-func install() error {
+func install() (resultErr error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("定位可执行文件失败: %w", err)
 	}
 
-	// 不支持 ACL 的卷（exFAT 等）上会失败，只记录，不拦住安装
+	if err := ensureOwnedDir(filepath.Dir(installDir())); err != nil {
+		return err
+	}
+	if err := ensureOwnedDir(installDir()); err != nil {
+		return err
+	}
 	if err := applyDACL(filepath.Dir(installDir()), installDirSDDL); err != nil {
-		logf("收紧安装目录权限失败: %v", err)
+		return fmt.Errorf("收紧安装目录权限失败，拒绝安装特权服务: %w", err)
 	}
 
 	manager, err := mgr.Connect()
@@ -53,6 +59,18 @@ func install() error {
 		return fmt.Errorf("创建服务失败: %w", err)
 	}
 	defer service.Close()
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		if err := stopService(service); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("清理未完成安装时停止服务失败: %w", err))
+			return
+		}
+		if err := service.Delete(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("清理未完成安装时删除服务失败: %w", err))
+		}
+	}()
 
 	recovery := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
@@ -69,6 +87,20 @@ func install() error {
 
 	if err := service.Start("run"); err != nil {
 		return fmt.Errorf("启动服务失败: %w", err)
+	}
+	deadline := time.Now().Add(stopTimeout)
+	for {
+		status, err := service.Query()
+		if err != nil {
+			return fmt.Errorf("查询新服务状态失败: %w", err)
+		}
+		if status.State == svc.Running {
+			break
+		}
+		if status.State == svc.Stopped || time.Now().After(deadline) {
+			return fmt.Errorf("新服务未能正常运行，状态 %d，错误码 %d", status.State, status.Win32ExitCode)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	fmt.Printf("服务 %s 安装并启动完成\n", serviceName)

@@ -13,6 +13,7 @@ import '../widgets/page_header.dart';
 import '../widgets/refresh_button.dart';
 import '../widgets/simple_data_table.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_scaffold.dart';
 
 class LoginLogsPage extends StatefulWidget {
   const LoginLogsPage({super.key});
@@ -105,8 +106,20 @@ class _LoginLogsPageState extends State<LoginLogsPage>
 
   @override
   Widget build(BuildContext context) {
+    final ListToolbar toolbar = ListToolbar(
+      currentPage: _page,
+      lastPage: _lastPage,
+      total: _total,
+      showSearch: false,
+      searchHint: L10n.t('IP / 归属地 / 设备'),
+      onSearchChanged: _onSearch,
+      onPageChanged: (int page) {
+        _page = page;
+        unawaited(_load());
+      },
+    );
     final ThemeData theme = Theme.of(context);
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -143,17 +156,7 @@ class _LoginLogsPageState extends State<LoginLogsPage>
                       ),
                     ),
                   ),
-                  ListToolbar(
-                    currentPage: _page,
-                    lastPage: _lastPage,
-                    total: _total,
-                    searchHint: L10n.t('IP / 归属地 / 设备'),
-                    onSearchChanged: _onSearch,
-                    onPageChanged: (int page) {
-                      _page = page;
-                      unawaited(_load());
-                    },
-                  ),
+                  toolbar.buildSearch(),
                   if (_busy && _items.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 80),
@@ -194,6 +197,7 @@ class _LoginLogsPageState extends State<LoginLogsPage>
                         ],
                       ),
                     ),
+                  toolbar,
                 ],
               ),
             ),

@@ -56,11 +56,11 @@ if (-not $PanelUrl) {
     $PanelUrl = $panelConfig.panelUrl
 }
 
-if ($PanelUrl -notmatch '^https?://') {
-    throw "站点域名不是合法的 http(s) 地址：$PanelUrl"
+if ($PanelUrl -notmatch '^https://') {
+    throw "站点域名必须是 https 地址：$PanelUrl"
 }
-if ($SubUrl -notmatch '^https?://') {
-    throw "订阅域名不是合法的 http(s) 地址：$SubUrl"
+if ($SubUrl -notmatch '^https://') {
+    throw "订阅域名必须是 https 地址：$SubUrl"
 }
 
 # 本机仓库在 D 盘，临时文件不落 C 盘；CI 机器上没有 D 盘，用默认位置
@@ -69,6 +69,15 @@ if (Test-Path 'D:\') {
     $env:TMP = 'D:\tmp'
     New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 }
+
+# eSigner 凭据与 CodeSignTool 齐全才签名，全部缺省时照常出未签名包
+$signNames = @('ES_USERNAME', 'ES_PASSWORD', 'ES_CREDENTIAL_ID', 'ES_TOTP_SECRET', 'CODE_SIGN_TOOL_PATH')
+$signMissing = @($signNames | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
+if ($signMissing.Count -gt 0 -and $signMissing.Count -lt $signNames.Count) {
+    throw "代码签名环境变量不完整，缺少：$($signMissing -join ', ')"
+}
+$sign = $signMissing.Count -eq 0
+$signScript = Join-Path $scriptDir 'sign-windows.ps1'
 
 & (Join-Path $scriptDir 'fetch-kernel.ps1') -Arch $Arch
 & (Join-Path $scriptDir 'build-service.ps1') -Arch $Arch
@@ -118,6 +127,12 @@ foreach ($name in @('ecycloud-service.exe', 'mihomo.exe', 'LICENSE.mihomo.txt', 
 
 Copy-Item (Join-Path $rootDir 'LICENSE') (Join-Path $stageDir 'LICENSE.txt') -Force
 
+# mihomo.exe 不签：在线升级会换成官方未签名的版本
+if ($sign) {
+    & $signScript -Path (Join-Path $stageDir 'ECYCloud.exe')
+    & $signScript -Path (Join-Path $serviceDir 'ecycloud-service.exe')
+}
+
 Write-Host ""
 Write-Host "客户端产物已就绪：$stageDir"
 
@@ -130,12 +145,19 @@ if (-not $iscc) {
     throw '未找到 iscc.exe，请安装 Inno Setup 7 并加入 PATH'
 }
 
-& $iscc.Source `
-    "/DAppVersion=$Version" `
-    "/DAppArch=$Arch" `
-    "/DStageDir=$stageDir" `
-    "/DOutputDir=$(Join-Path $rootDir 'build\installer')" `
-    (Join-Path $scriptDir 'installer\ecycloud.iss')
+$isccArgs = @(
+    "/DAppVersion=$Version",
+    "/DAppArch=$Arch",
+    "/DStageDir=$stageDir",
+    "/DOutputDir=$(Join-Path $rootDir 'build\installer')"
+)
+if ($sign) {
+    # 卸载程序只能在 ISCC 编译期间经 SignTool 签名；$q / $f 由 Inno 展开为引号与待签文件，凭据留在环境变量里不进命令行日志
+    $hostExe = (Get-Process -Id $PID).Path
+    $isccArgs += '/DSignInstaller'
+    $isccArgs += '/Sesigner=$q' + $hostExe + '$q -NoProfile -ExecutionPolicy Bypass -File $q' + $signScript + '$q -Path $f'
+}
+& $iscc.Source @isccArgs (Join-Path $scriptDir 'installer\ecycloud.iss')
 if ($LASTEXITCODE -ne 0) { throw '安装器打包失败' }
 
 Write-Host "安装器已生成：$(Join-Path $rootDir 'build\installer')"

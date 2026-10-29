@@ -102,11 +102,8 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
                 runCatching { (get.invoke(null, key) as? String)?.trim() }.getOrNull()
             }.firstOrNull { it.isNotEmpty() && !it.equals(Build.UNKNOWN, ignoreCase = true) }
         }.getOrNull()
-        if (marketingName != null) {
-            return@lazy marketingName
-        }
-        val brand = Build.BRAND.orEmpty().trim().ifEmpty { Build.MANUFACTURER.orEmpty().trim() }
-        val model = Build.MODEL.orEmpty().trim()
+        val brand = Build.MANUFACTURER.orEmpty().trim()
+        val model = marketingName ?: Build.MODEL.orEmpty().trim()
         if (brand.isEmpty() || model.startsWith(brand, ignoreCase = true)) model else "$brand $model"
     }
 

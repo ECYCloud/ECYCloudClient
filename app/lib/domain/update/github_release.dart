@@ -1,6 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http/retry.dart';
+
+import '../../l10n/l10n.dart';
 
 /// version 只保留 X.Y.Z；通道由 prerelease 表达，tag 后缀不进版本号
 class GithubRelease {
@@ -12,6 +18,7 @@ class GithubRelease {
   });
 
   static const Duration _timeout = Duration(seconds: 10);
+  static const int _maxResponseBytes = 4 * 1024 * 1024;
 
   final String version;
   final bool prerelease;
@@ -23,17 +30,11 @@ class GithubRelease {
 
   static Future<bool> reachable(http.Client client) async {
     try {
-      final http.Response response = await client
-          .get(
-            Uri.parse('https://api.github.com'),
-            headers: const <String, String>{
-              'Accept': 'application/vnd.github+json',
-            },
-          )
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode != 200) {
-        return false;
-      }
+      final http.Response response = await _get(
+        client,
+        Uri.parse('https://api.github.com'),
+        const Duration(seconds: 5),
+      );
       // 挡劫持/错误页：必须是 GitHub API 根文档
       return response.body.contains('"current_user_url"');
     } on Object {
@@ -41,38 +42,39 @@ class GithubRelease {
     }
   }
 
-  /// 按 published_at 从新到旧列出全部正式发布，草稿与号段不合法的 tag 不计。
-  /// 只走 /releases：/releases/latest 不返回 Pre-release，表达不了通道规则。
+  // 软件通道必须读取 /releases；仅内核可使用只返回正式版的 /releases/latest。
   static Future<List<GithubRelease>> list(
     String repo, {
     http.Client? client,
+    bool latestStableOnly = false,
   }) async {
     final http.Client httpClient = client ?? http.Client();
     final bool owned = client == null;
     try {
-      final http.Response response = await httpClient
-          .get(
-            Uri.parse(
-              'https://api.github.com/repos/$repo/releases?per_page=30',
-            ),
-            headers: const <String, String>{
-              'Accept': 'application/vnd.github+json',
-            },
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode != 200) {
-        throw GithubReleaseException('GitHub 返回 HTTP ${response.statusCode}');
-      }
+      final http.Response response = await _get(
+        httpClient,
+        Uri.parse(
+          'https://api.github.com/repos/$repo/releases'
+          '${latestStableOnly ? '/latest' : '?per_page=30'}',
+        ),
+        _timeout,
+      );
 
       final Object? payload = jsonDecode(utf8.decode(response.bodyBytes));
-      if (payload is! List<Object?>) {
+      final List<Object?> entries;
+      if (latestStableOnly && payload is Map<String, dynamic>) {
+        entries = <Object?>[payload];
+      } else if (!latestStableOnly && payload is List<Object?>) {
+        entries = payload;
+      } else {
         throw GithubReleaseException('GitHub 返回内容无法解析');
       }
 
       final List<GithubRelease> releases = <GithubRelease>[];
-      for (final Object? entry in payload) {
-        if (entry is! Map<String, dynamic> || entry['draft'] == true) {
+      for (final Object? entry in entries) {
+        if (entry is! Map<String, dynamic> ||
+            entry['draft'] == true ||
+            (latestStableOnly && entry['prerelease'] == true)) {
           continue;
         }
         final GithubRelease? release = _fromJson(entry);
@@ -93,6 +95,80 @@ class GithubRelease {
         httpClient.close();
       }
     }
+  }
+
+  static Future<http.Response> _get(
+    http.Client client,
+    Uri uri,
+    Duration timeout,
+  ) async {
+    final Completer<void> abort = Completer<void>();
+    final Timer deadline = Timer(timeout, abort.complete);
+    final http.Client retryClient = RetryClient(
+      client,
+      retries: timeout.inSeconds,
+      delay: (_) => const Duration(seconds: 1),
+      when: (_) => false,
+      whenError: (error, _) =>
+          error is HandshakeException &&
+          error.message == 'Connection terminated during handshake',
+    );
+    try {
+      return await (() async {
+        final http.StreamedResponse response = await retryClient.send(
+          http.AbortableRequest('GET', uri, abortTrigger: abort.future)
+            ..followRedirects = false
+            ..headers['Accept'] = 'application/vnd.github+json',
+        );
+        if (response.statusCode != 200 ||
+            (response.contentLength ?? 0) > _maxResponseBytes) {
+          await response.stream.listen(null).cancel();
+          if (response.statusCode != 200) {
+            final bool rateLimited =
+                response.statusCode == 429 ||
+                (response.statusCode == 403 &&
+                    (response.headers['x-ratelimit-remaining'] == '0' ||
+                        response.headers.containsKey('retry-after')));
+            if (rateLimited) {
+              final DateTime retryAt = _rateLimitRetryAt(response.headers);
+              throw GithubReleaseException(
+                'GitHub 请求过于频繁（HTTP ${response.statusCode}），'
+                '${retryAt.toString().split('.').first} 后重试',
+                retryAt: retryAt,
+              );
+            }
+            throw GithubReleaseException(
+              'GitHub 返回 HTTP ${response.statusCode}',
+            );
+          }
+          throw GithubReleaseException('GitHub 响应超过 4 MiB 限制');
+        }
+        final BytesBuilder body = BytesBuilder(copy: false);
+        await for (final List<int> chunk in response.stream) {
+          if (body.length + chunk.length > _maxResponseBytes) {
+            throw GithubReleaseException('GitHub 响应超过 4 MiB 限制');
+          }
+          body.add(chunk);
+        }
+        return http.Response.bytes(body.takeBytes(), response.statusCode);
+      })().timeout(timeout);
+    } finally {
+      deadline.cancel();
+      if (!abort.isCompleted) abort.complete();
+    }
+  }
+
+  static DateTime _rateLimitRetryAt(Map<String, String> headers) {
+    final DateTime now = DateTime.now();
+    int seconds = int.tryParse(headers['retry-after'] ?? '') ?? 0;
+    if (headers['x-ratelimit-remaining'] == '0') {
+      final int? reset = int.tryParse(headers['x-ratelimit-reset'] ?? '');
+      if (reset != null) {
+        final int remaining = reset - now.millisecondsSinceEpoch ~/ 1000;
+        if (remaining > seconds) seconds = remaining;
+      }
+    }
+    return now.add(Duration(seconds: seconds > 0 ? seconds : 60));
   }
 
   static GithubRelease? newestStable(List<GithubRelease> releases) {
@@ -142,10 +218,12 @@ class GithubAsset {
   GithubAsset.fromJson(Map<String, dynamic> json)
     : name = json['name'] as String? ?? '',
       url = json['browser_download_url'] as String? ?? '',
+      size = json['size'] is int ? json['size'] as int : 0,
       _digest = json['digest'] as String? ?? '';
 
   final String name;
   final String url;
+  final int size;
 
   // 形如 sha256:…，与二进制同源：挡的是传输损坏与镜像替换
   final String _digest;
@@ -155,10 +233,11 @@ class GithubAsset {
 }
 
 class GithubReleaseException implements Exception {
-  GithubReleaseException(this.message);
+  GithubReleaseException(this.message, {this.retryAt});
 
   final String message;
+  final DateTime? retryAt;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }

@@ -7,6 +7,9 @@
 // Flutter 引擎对 ANGLE D3D 设备丢失没有恢复路径（flutter#111151），只能重启进程
 namespace gpu_watchdog {
 
+// 普通用户无 SeCreateGlobalPrivilege，不能用 Global\ 前缀。
+inline constexpr wchar_t kInstanceMutexName[] = L"Local\\ECYCloud.SingleInstance";
+
 // 重启前必须先关掉单实例互斥体，否则新进程会把自己当重复实例
 void HoldInstanceMutex(HANDLE mutex);
 void CloseInstanceMutex();

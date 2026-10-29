@@ -1,11 +1,68 @@
 'use strict';
 
-import { access, chmod, popen, readfile, stat, unlink, writefile } from 'fs';
+import { access, lstat, popen, readfile, realpath, stat, unlink } from 'fs';
 
-import { PROFILE_FILE, ROUTING_MARK, appendNets, creds, ensureDir, mihomoBin, randomHex, readJson, settings,
-         shellquote, writePrivateJson } from 'ecycloud.common';
+import { PROFILE_FILE, STATE_DIR, ROUTING_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX, appendNets, creds, ensureDir, mihomoBin, panelDirectNets, randomHex, readJson, settings, sessionBinding, timestamp,
+		 ensurePrivateDir, instances, shellquote, writeAtomic, writePrivateJson } from 'ecycloud.common';
 
 export const SPEED_GROUP = 'ecy-speed';
+export const NODE_PROVIDER = 'ecy-panel-nodes';
+export const PENDING_FILE = `${STATE_DIR}/profile-pending.json`;
+
+export function nodeProviderNames(config) {
+	return filter(keys(config?.['proxy-providers'] ?? {}), name => index(name, 'ecy-panel-') == 0);
+};
+
+export function nodesOf(config) {
+	return config?.['proxy-providers']?.[NODE_PROVIDER]?.payload ?? config?.proxies ?? [];
+};
+
+export function membersOf(config, group) {
+	const members = [ ...(group.proxies ?? []) ];
+	for (let name in (group.use ?? []))
+		for (let node in (config?.['proxy-providers']?.[name]?.payload ?? []))
+			if (length(node?.name) && node.name != 'ecy-panel-empty')
+				push(members, node.name);
+	if (type(group.filter) != 'string' || index(group.filter, '`') < 0)
+		return members;
+	const ordered = [];
+	const patterns = map(split(group.filter, '`'), pattern => {
+		const exact = substr(pattern, 0, 1) == '^' && substr(pattern, -1) == '$'
+			? replace(replace(substr(pattern, 1, length(pattern) - 2), '\\x60', '`'), /\\(.)/g, '$1') : null;
+		const nodeFilter = index(pattern, '^(?!(?:') == 0;
+		return { exact, nodeFilter, re: exact != null || nodeFilter ? null : regexp(pattern) };
+	});
+	const fixed = filter(map(patterns, pattern => pattern.exact), name => name != null);
+	for (let pattern in patterns) {
+		for (let member in members)
+			if (!(member in ordered) && (pattern.exact != null ? member == pattern.exact :
+			    pattern.nodeFilter ? !(member in fixed) : match(member, pattern.re)))
+				push(ordered, member);
+	}
+	for (let member in members)
+		if (!(member in ordered))
+			push(ordered, member);
+	return ordered;
+};
+
+function nodeSignature(config) {
+	const copy = { ...config, 'proxy-providers': { ...config['proxy-providers'] } };
+	for (let name in nodeProviderNames(config)) {
+		copy['proxy-providers'][name] = { ...config['proxy-providers'][name] };
+		delete copy['proxy-providers'][name].payload;
+	}
+	copy['proxy-groups'] = map(config['proxy-groups'], group => {
+		const next = { ...group };
+		delete next['default-selected'];
+		return next;
+	});
+	return sprintf('%J', copy);
+};
+
+export function canUpdateNodes(before, after) {
+	return before?.['proxy-providers']?.[NODE_PROVIDER] != null &&
+		after?.['proxy-providers']?.[NODE_PROVIDER] != null && nodeSignature(before) == nodeSignature(after);
+};
 
 export function speedPort(mixedPort) {
 	return mixedPort < 65535 ? mixedPort + 1 : mixedPort - 1;
@@ -24,29 +81,46 @@ const EXCLUDED_ROUTES = [
 	'ff00::/8'
 ];
 
-/* 分组顺序只存在于面板配置里：这份缓存取不到，界面就会退到内核 /proxies 的 map 序
-   （json.Marshal 按键名字母序），分组排列整个变样。因此旧版没有 account 标记的缓存
-   必须照用——它只可能属于本机登录过的账号，下一次 store 会补上标记 */
-export function cached() {
-	const saved = readJson(PROFILE_FILE);
+export function authorized(saved, margin) {
+	const issued = timestamp(saved?.offline_authorization?.issued_at);
+	const until = timestamp(saved?.offline_authorization?.valid_until);
+	const binding = sessionBinding();
+	return length(binding) > 0 && saved?.binding == binding && issued > 0 &&
+		issued <= time() && until > issued && until > time() + +(margin ?? 0);
+};
+
+export function cached(pending) {
+	const saved = readJson(pending ? PENDING_FILE : PROFILE_FILE);
 	if (type(saved) != 'object')
 		return null;
 
-	if (!exists(saved, 'account'))
-		return saved;
-
 	const account = lc(trim(creds().email ?? ''));
-	return length(account) && saved.account == account ? saved : null;
+	return length(account) && saved.account == account && authorized(saved) ? saved : null;
 };
 
-export function store(remote) {
-	return writePrivateJson(PROFILE_FILE, {
+export function store(remote, pending) {
+	const binding = sessionBinding();
+	if (!length(binding) || !authorized({ ...remote, binding }))
+		return false;
+	const ok = writePrivateJson(pending ? PENDING_FILE : PROFILE_FILE, {
+		...(pending ? { pending_pid: +(instances().core?.pid ?? 0) } : {}),
 		account: lc(trim(creds().email ?? '')),
+		binding,
+		offline_authorization: remote.offline_authorization,
 		revision: remote.revision ?? '',
+		locale: remote.locale ?? 'zh-CN',
 		config: remote.config,
 		node_labels: remote.node_labels ?? {},
+		group_labels: remote.group_labels ?? {},
+		group_icons: type(remote.group_icons) == 'object' ? remote.group_icons : null,
+		flag_regex: type(remote.flag_regex) == 'string' ? remote.flag_regex : '',
 		fetched_at: time()
 	});
+	if (ok && !pending) {
+		unlink(PENDING_FILE);
+		system('trap "" HUP; /usr/libexec/ecycloud-ctl icons >/dev/null 2>&1 &');
+	}
+	return ok;
 };
 
 function tunExcludes(cfg) {
@@ -57,7 +131,7 @@ function tunExcludes(cfg) {
 	for (let net in (cfg.bypass ?? []))
 		push(extra, net);
 
-	return appendNets(EXCLUDED_ROUTES, extra);
+	return appendNets(EXCLUDED_ROUTES, [ ...extra, ...panelDirectNets() ]);
 };
 
 function tunSection(cfg) {
@@ -66,6 +140,8 @@ function tunSection(cfg) {
 		stack: cfg.tunStack,
 		device: cfg.tunDevice,
 		'auto-route': true,
+		'iproute2-table-index': TUN_ROUTE_TABLE,
+		'iproute2-rule-index': TUN_RULE_INDEX,
 		'auto-detect-interface': true,
 		/* strict-route 会一并阻断旁路由与 LAN 直连流量，路由器上必须关闭 */
 		'strict-route': false,
@@ -89,9 +165,13 @@ function overrides(cfg, api) {
 		'allow-lan': cfg.allowLan,
 		'bind-address': cfg.allowLan ? '*' : '127.0.0.1',
 		authentication: [],
+		'ss-config': '',
+		'vmess-config': '',
+		'tuic-server': { enable: false },
+		'iptables': { enable: false },
 		listeners: [],
 		tunnels: [],
-		'log-level': cfg.logLevel,
+		'log-level': 'info',
 		'routing-mark': ROUTING_MARK,
 		'external-controller': `127.0.0.1:${api.port}`,
 		secret: api.secret,
@@ -201,7 +281,7 @@ function inspectProxies(raw, issues, names) {
 	}
 };
 
-function inspectGroups(raw, issues, names) {
+function inspectGroups(raw, issues, names, providers) {
 	if (type(raw) != 'array') {
 		push(issues, raw == null ? '面板配置缺少策略组' : '策略组列表格式不对');
 		return;
@@ -234,10 +314,17 @@ function inspectGroups(raw, issues, names) {
 		if (!length(kind))
 			push(issues, `第 ${i + 1} 个策略组没有类型`);
 
-		if (type(item.proxies) != 'array' || !length(item.proxies))
+		if (item.proxies != null && type(item.proxies) != 'array')
+			push(issues, `策略组「${name}」的成员格式不对`);
+		if (item.use != null && type(item.use) != 'array')
+			push(issues, `策略组「${name}」的节点订阅格式不对`);
+		if (!length(item.proxies) && !length(item.use))
 			push(issues, `策略组「${length(name) ? name : itemLabel(i)}」没有成员`);
-		else
+		else if (type(item.proxies) == 'array')
 			push(groups, { index: i, name, members: item.proxies });
+		for (let provider in (type(item.use) == 'array' ? item.use : []))
+			if (type(provider) != 'string' || !exists(providers, provider))
+				push(issues, `策略组「${name}」的节点订阅「${provider}」不存在`);
 		i++;
 	}
 
@@ -249,6 +336,20 @@ function inspectGroups(raw, issues, names) {
 			push(issues, `策略组「${length(group.name) ? group.name : itemLabel(group.index)}」的成员「${ref}」不存在`);
 		}
 	}
+};
+
+function runRelative(path) {
+	if (type(path) != 'string' || !length(path) || index(path, '\0') >= 0 || substr(path, 0, 1) == '/' || match(path, /[\\:[:cntrl:]]/))
+		return '';
+	const parts = [];
+	for (let part in split(path, '/')) {
+		if (part == '.')
+			continue;
+		if (!length(part) || part == '..' || match(part, /[. ]$/) || match(lc(part), /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/))
+			return '';
+		push(parts, part);
+	}
+	return join('/', parts);
 };
 
 function inspectProviders(raw, section, issues, names) {
@@ -273,10 +374,19 @@ function inspectProviders(raw, section, issues, names) {
 		}
 
 		const kind = trim(`${spec.type ?? ''}`);
+		if (section == 'proxy-providers' && index(name, 'ecy-panel-') == 0 &&
+		    ((name != NODE_PROVIDER && !match(name, /^ecy-panel-[a-f0-9]{64}$/)) ||
+		     kind != 'file' || spec.path != `${name}.json` || type(spec.payload) != 'array' || !length(spec.payload)))
+			push(issues, `节点订阅「${label}」必须使用有效的客户端本地文件格式`);
 		if (!length(kind))
 			push(issues, `${providerTitle(section)}「${label}」没有类型`);
 		if (section == 'rule-providers' && !length(trim(`${spec.path ?? ''}`)))
 			push(issues, `规则集「${label}」没有保存路径`);
+		if (exists(spec, 'path')) {
+			const path = runRelative(spec.path);
+			if (!length(path) || match(lc(split(path, '/')[0]), /^(config\.json|config\.check\.json|cache\.db|proxy-snapshot\.json|geoip\.metadb|geosite\.dat|geoip\.dat|asn\.mmdb|bundlemrs\.7z)(\.|$)|^\.validate-/))
+				push(issues, `「${label}」的保存路径必须位于运行目录内，且不能覆盖客户端文件`);
+		}
 		if (kind == 'http' && !length(trim(`${spec.url ?? ''}`)))
 			push(issues, `${providerTitle(section)}「${label}」是在线下载，但没有地址`);
 		if (lc(trim(`${spec.format ?? ''}`)) == 'mrs' && lc(trim(`${spec.behavior ?? ''}`)) == 'classical')
@@ -366,12 +476,13 @@ export function inspect(remote) {
 	const names = {};
 	const providers = {};
 
-	inspectProxies(remote.proxies, issues, names);
-	inspectGroups(remote['proxy-groups'], issues, names);
+	const nodeProviders = {};
+	inspectProxies(nodesOf(remote), issues, names);
+	inspectProviders(remote['proxy-providers'], 'proxy-providers', issues, nodeProviders);
+	inspectGroups(remote['proxy-groups'], issues, names, nodeProviders);
 	if (exists(names, SPEED_GROUP))
 		push(issues, `名称「${SPEED_GROUP}」保留给客户端测速，请修改面板中的同名节点或策略组`);
 	inspectProviders(remote['rule-providers'], 'rule-providers', issues, providers);
-	inspectProviders(remote['proxy-providers'], 'proxy-providers', issues, null);
 	inspectRules(remote.rules, issues, names, providers);
 	if (exists(remote, 'dns') && type(remote.dns) != 'object')
 		push(issues, 'DNS 设置不是一组完整配置');
@@ -393,10 +504,12 @@ export function inspect(remote) {
 	return { ok: false, error: `面板配置不规范：\n${join('\n', shown)}` };
 };
 
-export function assemble(remote, cfg, api) {
+export function assemble(remote, cfg, api, selectorDefaults) {
 	const checked = inspect(remote);
 	if (!checked.ok)
 		return checked;
+	if (!length(api?.speed))
+		return { ok: false, error: '测速入站口令缺失，不能生成配置' };
 
 	const config = { ...remote };
 
@@ -405,19 +518,33 @@ export function assemble(remote, cfg, api) {
 			config[key] = value;
 
 	const merged = { ...config, ...overrides(cfg, api) };
+	if (type(merged.ntp) == 'object' && exists(merged.ntp, 'write-to-system'))
+		merged.ntp = { ...merged.ntp, 'write-to-system': false };
 	merged['proxy-groups'] = [ ...config['proxy-groups'], {
 		name: SPEED_GROUP,
 		type: 'select',
 		hidden: true,
-		proxies: map(config.proxies, proxy => proxy.name)
+		...(config['proxy-providers']?.[NODE_PROVIDER] != null
+			? { use: [ NODE_PROVIDER ] } : { proxies: map(config.proxies, proxy => proxy.name) })
 	} ];
+	let restored = false;
+	merged['proxy-groups'] = map(merged['proxy-groups'], group => {
+		const name = selectorDefaults?.[group.name];
+		if (group.type != 'select' || !length(name) || !(name in membersOf(config, group)))
+			return group;
+		restored = true;
+		return { ...group, 'default-selected': name };
+	});
+	if (restored)
+		merged.profile['store-selected'] = false;
 	merged.listeners = [{
 		name: SPEED_GROUP,
 		type: 'mixed',
 		listen: '127.0.0.1',
 		port: speedPort(cfg.mixedPort),
 		udp: false,
-		users: [],
+		// 该入站界面上不存在却常驻回环，proxy 字段绕开 rules；口令随 api.speed 随机
+		users: [ { username: SPEED_GROUP, password: api.speed } ],
 		proxy: SPEED_GROUP
 	}];
 
@@ -445,20 +572,44 @@ export function write(runDir, config) {
 	const path = `${runDir}/config.json`;
 	const previous = readfile(path);
 
-	if (previous != null)
-		writefile(`${path}.bak`, previous);
+	if (previous != null && !writeAtomic(`${path}.bak`, previous))
+		return { ok: false, error: `无法备份 ${path}` };
 
-	if (writefile(path, sprintf('%J', config)) == null)
+	if (!writePrivateJson(path, config))
 		return { ok: false, error: `无法写入 ${path}` };
-
-	chmod(path, int('600', 8));
 
 	return { ok: true, path };
 };
 
+export function writeNodeProviders(runDir, config) {
+	const names = nodeProviderNames(config);
+	if (!length(names))
+		return { ok: true };
+	ensureDir(runDir);
+	if (lstat(runDir)?.type != 'directory')
+		return { ok: false, error: '节点保存目录必须是普通目录' };
+	ensurePrivateDir(runDir);
+	for (let name in names) {
+		const spec = config['proxy-providers'][name];
+		if ((name != NODE_PROVIDER && !match(name, /^ecy-panel-[a-f0-9]{64}$/)) ||
+		    spec?.type != 'file' || spec.path != `${name}.json` || type(spec.payload) != 'array' || !length(spec.payload))
+			return { ok: false, error: `节点订阅「${name}」的本地文件格式无效` };
+		const path = `${runDir}/${spec.path}`;
+		const info = lstat(path);
+		if (info != null && (info.type != 'file' || info.nlink != 1))
+			return { ok: false, error: `节点订阅「${name}」的保存路径不是独立普通文件` };
+		const text = sprintf('%J', { proxies: spec.payload });
+		if (length(text) > 8 * 1024 * 1024)
+			return { ok: false, error: `节点订阅「${name}」超过 8 MiB` };
+		if (readfile(path) != text && !writeAtomic(path, text))
+			return { ok: false, error: `无法保存节点订阅「${name}」` };
+	}
+	return { ok: true };
+};
+
 export function rollback(runDir) {
 	const previous = readfile(`${runDir}/config.json.bak`);
-	return previous != null && writefile(`${runDir}/config.json`, previous) != null;
+	return previous != null && writeNodeProviders(runDir, json(previous)).ok && writeAtomic(`${runDir}/config.json`, previous);
 };
 
 /* procd respawn 不重跑 prepare，切模式只 PATCH 控制面会让内核按磁盘上的旧 mode 起来 */
@@ -469,6 +620,14 @@ export function setRunMode(runDir, mode) {
 
 	config.mode = mode;
 	return write(runDir, config).ok == true;
+};
+
+export function setRunTun(runDir, enabled) {
+	const config = readJson(`${runDir}/config.json`);
+	if (type(config?.tun) != 'object')
+		return false;
+	config.tun.enable = enabled;
+	return writeAtomic(`${runDir}/config.json`, sprintf('%J', config));
 };
 
 export function geodataMissing(runDir) {
@@ -482,6 +641,8 @@ export function validate(runDir) {
 
 	const path = `${runDir}/.validate-${randomHex(6)}.json`;
 	config.profile = { ...config.profile, 'store-fake-ip': false };
+	for (let name in nodeProviderNames(config))
+		config['proxy-providers'][name] = { ...config['proxy-providers'][name], type: 'inline' };
 	if (!writePrivateJson(path, config))
 		return { ok: false, error: '无法写入待校验配置' };
 
@@ -506,24 +667,6 @@ export function validate(runDir) {
 			reason = trim(line);
 
 	return { ok: false, error: length(reason) ? reason : `mihomo -t 退出码 ${code}` };
-};
-
-function runRelative(path) {
-	let normalized = replace(trim(`${path ?? ''}`), '\\', '/');
-
-	while (index(normalized, '//') >= 0)
-		normalized = replace(normalized, '//', '/');
-
-	while (index(normalized, './') == 0)
-		normalized = substr(normalized, 2);
-
-	while (index(normalized, '/') == 0)
-		normalized = substr(normalized, 1);
-
-	if (!length(normalized) || index(normalized, '..') >= 0)
-		return '';
-
-	return normalized;
 };
 
 export function runtimeConfig() {
@@ -566,13 +709,20 @@ export function readRunFile(rel) {
 	if (!safe)
 		return { ok: false, error: '无效路径' };
 
-	const path = `${settings().runDir}/${safe}`;
-	if (!access(path))
+	const root = realpath(settings().runDir);
+	const path = realpath(`${settings().runDir}/${safe}`);
+	if (!root || !path)
 		return { ok: false, error: '文件不存在' };
-
-	const raw = readfile(path);
+	if (index(path, `${root}/`) != 0)
+		return { ok: false, error: '无效路径' };
+	const info = stat(path);
+	if (info?.type != 'file' || info.size > 8 * 1024 * 1024)
+		return { ok: false, error: '只能查看不超过 8 MiB 的普通文件' };
+	const raw = readfile(path, 8 * 1024 * 1024 + 1);
 	if (raw == null)
 		return { ok: false, error: '无法读取' };
+	if (length(raw) > 8 * 1024 * 1024)
+		return { ok: false, error: '文件超过 8 MiB' };
 	if (index(raw, '\0') >= 0)
 		return { ok: false, error: '该文件为二进制规则集，无法以文本查看' };
 

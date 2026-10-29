@@ -3,12 +3,36 @@
 'require rpc';
 
 function declare(method, params, expect) {
-	return rpc.declare({
+	var call = rpc.declare({
 		object: 'luci.ecycloud',
 		method: method,
 		params: params,
-		expect: expect || { '': {} }
+		expect: { '': {} }
 	});
+	return function() {
+		if (sessionReloading)
+			return Promise.reject(new Error(_('Account session changed. Please retry.')));
+		if (method == 'login' || method == 'login_code' || method == 'logout') {
+			sessionGeneration++;
+			sessionKey = null;
+		}
+		var generation = sessionGeneration;
+		return call.apply(null, arguments).then(function(data) {
+			var session = data.session;
+			if (!session)
+				throw new Error(_('Request failed'));
+			var key = session.logged_in ? session.id : '';
+			if (sessionReloading || typeof key != 'string' || (key != sessionKey && generation != sessionGeneration))
+				throw new Error(_('Account session changed. Please retry.'));
+			if (key != sessionKey && !bindSession(key))
+				throw new Error(_('Account session changed. Please retry.'));
+			if (method == 'status')
+				runtimeStatus = data;
+			if (method == 'connections')
+				runtimeConnections = data;
+			return expect ? (typeof data.log == 'string' ? data.log : '') : data;
+		});
+	};
 }
 
 var stages = {
@@ -29,7 +53,12 @@ var CLOSED_KEY = 'ecycloud.closed';
 var ALIVE_KEY = 'ecycloud.alive';
 var SINCE_KEY = 'ecycloud.connectedAt';
 var RANK_KEY = 'ecycloud.trafficRank';
-var CLOSED_LIMIT = 1000;
+var SESSION_KEY = 'ecycloud.session';
+var sessionKey = null;
+var sessionGeneration = 0;
+var sessionReloading = false;
+var runtimeStatus = {};
+var runtimeConnections = {};
 var RANK_LIMIT = 10;
 var kickWatch = false;
 var kickBusy = false;
@@ -41,6 +70,48 @@ var groupsData;
 var stopRpc = declare('stop');
 var connectGeneration = 0;
 var connectPending = null;
+var statusRpc = declare('status');
+var updateRpc = declare('update', [ 'what', 'path', 'locale' ]);
+var languageRefresh = null;
+var languageRetryAfter = 0;
+
+function bindSession(key) {
+	var changed = sessionKey !== null && key != sessionKey;
+	sessionKey = key;
+	sessionGeneration++;
+	connectGeneration++;
+	connectPending = null;
+	groupsData = null;
+	runtimeStatus = {};
+	runtimeConnections = {};
+	groupsResponse = ++groupsRequest;
+	groupTests = { testing: new Map(), speed_testing: new Map() };
+	if (!key || sessionStorage.getItem(SESSION_KEY) != key) {
+		[ CLOSED_KEY, ALIVE_KEY, SINCE_KEY, 'ecycloud.updatesSeen' ].forEach(function(name) { sessionStorage.removeItem(name); });
+		sessionStorage.setItem(SESSION_KEY, key);
+	}
+	if (!key || localStorage.getItem(SESSION_KEY) != key) {
+		localStorage.removeItem(RANK_KEY);
+		localStorage.setItem(SESSION_KEY, key);
+	}
+	var roots = document.querySelectorAll('#ecycloud-root, .ecycloud-modal');
+	if (changed && roots.length) {
+		sessionReloading = true;
+		roots.forEach(function(node) { node.remove(); });
+		location.reload();
+		return false;
+	}
+	return true;
+}
+
+window.addEventListener('storage', function(event) {
+	if (event.storageArea != localStorage || (event.key != SESSION_KEY && event.key !== null)
+		|| sessionKey === null || sessionReloading)
+		return;
+	var key = localStorage.getItem(SESSION_KEY) || '';
+	if (key != sessionKey)
+		bindSession(key);
+});
 
 function loadJson(key, fallback) {
 	try {
@@ -56,29 +127,6 @@ function saveJson(key, value) {
 	sessionStorage.setItem(key, JSON.stringify(value));
 }
 
-function loadLocal(key, fallback) {
-	try {
-		var value = JSON.parse(localStorage.getItem(key) || '');
-		return value == null ? fallback : value;
-	}
-	catch (e) {
-		return fallback;
-	}
-}
-
-function saveLocal(key, value) {
-	localStorage.setItem(key, JSON.stringify(value));
-}
-
-function dayKey(date) {
-	return date.getFullYear() + '-' + two(date.getMonth() + 1) + '-' + two(date.getDate());
-}
-
-function neighborDay(date, delta) {
-	var next = new Date(date.getTime());
-	next.setDate(next.getDate() + delta);
-	return next;
-}
 
 function topRank(map, skip) {
 	return Object.keys(map || {}).map(function(name) {
@@ -113,8 +161,150 @@ function svgEl(name, attrs) {
 	return node;
 }
 
+var flagRegions = null;
+var flagRegionsLoad = null;
+var flagCache = {};
+var flagWarmKey = '';
+var flagWarmPromise = null;
+
+function emojiRegion(name) {
+	var chars = Array.from(String(name || ''));
+	var i;
+
+	for (i = 0; i < chars.length - 1; i++) {
+		var a = chars[i].codePointAt(0);
+		var b = chars[i + 1].codePointAt(0);
+		if (a >= 0x1F1E6 && a <= 0x1F1FF && b >= 0x1F1E6 && b <= 0x1F1FF)
+			return String.fromCharCode(0x61 + a - 0x1F1E6, 0x61 + b - 0x1F1E6);
+	}
+
+	return '';
+}
+
+function phpRegExp(raw) {
+	raw = String(raw || '').trim();
+	if (raw.length < 2)
+		return null;
+
+	var delim = raw.charAt(0);
+	var end = raw.lastIndexOf(delim);
+	var flags;
+	var pattern;
+
+	if (end <= 0)
+		return null;
+
+	pattern = raw.slice(1, end);
+	flags = 'g';
+	raw.slice(end + 1).split('').forEach(function(mark) {
+		if (mark == 'i' || mark == 'm' || mark == 's' || mark == 'u')
+			flags += mark;
+	});
+
+	try {
+		return { pattern: pattern, flags: flags };
+	} catch (e) {
+		return null;
+	}
+}
+
+function loadFlagRegions() {
+	if (flagRegions)
+		return Promise.resolve(flagRegions);
+	if (!flagRegionsLoad)
+		flagRegionsLoad = fetch(L.resource('ecycloud/regions.json'), { cache: 'force-cache' }).then(function(res) {
+			return res.ok ? res.json() : {};
+		}).then(function(data) {
+			var map = {};
+			var iso = /^[A-Z]{2}$/;
+			Object.keys(data || {}).forEach(function(key) {
+				if (key.charAt(0) == '_' || typeof data[key] != 'string')
+					return;
+				map[key] = data[key];
+				if (iso.test(data[key]))
+					map[data[key]] = data[key];
+			});
+			flagRegions = map;
+			return map;
+		}).catch(function() {
+			flagRegions = {};
+			return flagRegions;
+		});
+	return flagRegionsLoad;
+}
+
+function warmFlagWorker(names, compiled, regions) {
+	return new Promise(function(resolve) {
+		var worker;
+		var timer;
+		var source = [
+			'onmessage=function(ev){',
+			'var data=ev.data||{},out={},re;',
+			'try{re=new RegExp(data.pattern,data.flags);}catch(e){postMessage({error:String(e)});return;}',
+			'(data.names||[]).forEach(function(name){',
+			'var subject=String(name).slice(0,128),match;',
+			're.lastIndex=0;',
+			'while((match=re.exec(subject))){',
+			'var code=data.regions[match[0]];',
+			'if(code){out[name]=String(code).toLowerCase();break;}',
+			'if(!match[0])break;',
+			'}',
+			'});',
+			'postMessage({map:out});',
+			'}'
+		].join('');
+		var blob = new Blob([ source ], { type: 'text/javascript' });
+		var url = URL.createObjectURL(blob);
+
+		function finish(map) {
+			if (timer)
+				clearTimeout(timer);
+			if (worker)
+				worker.terminate();
+			URL.revokeObjectURL(url);
+			resolve(map || {});
+		}
+
+		try {
+			worker = new Worker(url);
+		} catch (e) {
+			finish({});
+			return;
+		}
+
+		worker.onmessage = function(ev) {
+			finish(ev.data && ev.data.map);
+		};
+		worker.onerror = function() {
+			finish({});
+		};
+		timer = setTimeout(function() {
+			finish({});
+		}, 2000);
+		worker.postMessage({
+			pattern: compiled.pattern,
+			flags: compiled.flags,
+			names: names,
+			regions: regions
+		});
+	});
+}
+
 return baseclass.extend({
-	status: declare('status'),
+	status: function() {
+		var self = this;
+		return statusRpc().then(function(data) {
+			var language = self.resolveLang().replace('_', '-');
+			if (data.session.logged_in && data.profile && data.profile.fetched_at &&
+				data.profile.locale != language && !languageRefresh && Date.now() >= languageRetryAfter) {
+				languageRefresh = self.update('language', '', language).catch(function() {}).finally(function() {
+					languageRefresh = null;
+					languageRetryAfter = Date.now() + 60000;
+				});
+			}
+			return data;
+		});
+	},
 	groups: function() {
 		var request = ++groupsRequest;
 		var ready = {};
@@ -157,7 +347,12 @@ return baseclass.extend({
 		connectGeneration++;
 		return stopRpc();
 	},
-	update: declare('update', [ 'what', 'path' ]),
+	connectInFlight: function() {
+		return connectPending != null;
+	},
+	update: function(what, path, locale) {
+		return updateRpc(what, path, locale || this.resolveLang().replace('_', '-'));
+	},
 	selectRpc: declare('select', [ 'group', 'name' ]),
 	delay: declare('delay', [ 'name' ]),
 	test_group: declare('test_group', [ 'group' ]),
@@ -167,9 +362,88 @@ return baseclass.extend({
 	mode: declare('mode', [ 'mode' ]),
 	set: declare('set', [ 'name', 'value' ]),
 	connections: declare('connections'),
-	refreshAccount: declare('refresh_account'),
+	closeConnection: declare('close_connection', [ 'id' ]),
+	refreshAccount: declare('refresh_account', [ 'use_cache' ]),
+	checkin: declare('checkin'),
+
+	flagCode: function(name) {
+		var emoji = emojiRegion(name);
+		var code;
+
+		if (emoji)
+			return emoji;
+
+		code = flagCache[name];
+		return /^[a-z]{2}$/.test(code || '') ? code : '';
+	},
+
+	flagImg: function(code) {
+		var img;
+
+		if (!/^[a-z]{2}$/.test(code || ''))
+			return null;
+
+		img = E('img', {
+			'class': 'ecycloud-flag',
+			'alt': '',
+			'src': L.resource('ecycloud/flags/' + code + '.svg'),
+			'data-fallback': L.resource('ecycloud/flags/xx.svg')
+		});
+		img.setAttribute('onerror', 'if(!this.dataset.flagFallback){this.dataset.flagFallback="1";this.src=this.getAttribute("data-fallback");}');
+		return img;
+	},
+
+	nodeLabel: function(name) {
+		name = String(name || '');
+		var stripped = name.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\uFE0F?/gu, '').trim();
+		return stripped || name;
+	},
+
+	groupMark: function(src, selectable) {
+		if (typeof src == 'string' && /^\/luci-static\/resources\/ecycloud\/icons\/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp|svg)$/.test(src))
+			return E('img', { 'class': 'ecycloud-group-icon', 'alt': '', 'src': src, 'data-ecy-key': 'mark' });
+
+		return E('span', {
+			'class': 'ecycloud-ico ecycloud-group-mark',
+			'data-ico': selectable ? 'tune' : 'auto',
+			'data-ecy-key': 'mark'
+		});
+	},
+
+	warmFlags: function(names, regex) {
+		var pending = [];
+		var compiled;
+		var key;
+
+		(names || []).forEach(function(name) {
+			if (!name || emojiRegion(name) || Object.prototype.hasOwnProperty.call(flagCache, name))
+				return;
+			pending.push(name);
+		});
+
+		compiled = phpRegExp(regex);
+		if (!pending.length || !compiled)
+			return Promise.resolve(false);
+
+		key = regex + '\n' + pending.join('\n');
+		if (flagWarmKey == key && flagWarmPromise)
+			return flagWarmPromise;
+		flagWarmKey = key;
+
+		flagWarmPromise = loadFlagRegions().then(function(regions) {
+			return warmFlagWorker(pending, compiled, regions);
+		}).then(function(map) {
+			pending.forEach(function(name) {
+				flagCache[name] = map[name] || '';
+			});
+			return pending.some(function(name) {
+				return /^[a-z]{2}$/.test(flagCache[name] || '');
+			});
+		});
+		return flagWarmPromise;
+	},
 	onlineDevices: declare('online_devices'),
-	devices: declare('devices', [ 'page', 'length' ]),
+	devices: declare('devices', [ 'page', 'length', 'search' ]),
 	ensureKernel: declare('ensure_kernel'),
 
 	updateGeo: function() {
@@ -194,7 +468,7 @@ return baseclass.extend({
 
 	appUpdateText: function(res) {
 		if (!res || !res.ok)
-			return _('Check failed: %s').format((res && res.msg) || _('Request failed'));
+			return _('Check failed: %s').format(this.messageText((res && res.msg) || _('Request failed')));
 		if (!res.outdated)
 			return _('Up to date (%s)').format(res.latest || res.current);
 		return _('Update available (%s). This page cannot install it. Open the releases page, extract the OpenWrt package, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk').format(res.latest);
@@ -245,19 +519,27 @@ return baseclass.extend({
 	},
 
 	fetchAnnouncements: function(force) {
-		return this.update('announcements', force ? 'refresh' : '');
+		return this.announcementRequest(force ? 'refresh' : '');
+	},
+
+	announcementRequest: function(action) {
+		var self = this;
+		var language = this.resolveLang().replace('_', '-');
+		return this.update('announcements', action, language).then(function(data) {
+			return language == self.resolveLang().replace('_', '-') ? data : self.fetchAnnouncements(true);
+		});
 	},
 
 	markAnnouncementsSeen: function() {
-		return this.update('announcements', 'seen');
+		return this.announcementRequest('seen');
 	},
 
 	markAnnouncementSeen: function(id) {
-		return this.update('announcements', 'seen:' + id);
+		return this.announcementRequest('seen:' + id);
 	},
 
 	dismissAnnouncementPopup: function() {
-		return this.update('announcements', 'popup');
+		return this.announcementRequest('popup');
 	},
 	reclaimDeviceSlot: declare('device_reclaim', [ 'target_device_id' ]),
 	ackDeviceKick: declare('device_kick_ack'),
@@ -443,6 +725,10 @@ return baseclass.extend({
 	isolate: function(host) {
 		if (!host)
 			return host;
+		if (sessionReloading) {
+			host.remove();
+			return host;
+		}
 		if (host.getAttribute('data-ecy-shadow') == '1' && host.shadowRoot)
 			return this.sealShadow(host);
 
@@ -538,20 +824,51 @@ return baseclass.extend({
 			return this._i18n = Promise.resolve();
 		}
 
-		if (!name) {
-			this.installI18n({});
-			return this._i18n = Promise.resolve();
-		}
-
 		var self = this;
+		var files = [ 'i18n.zh-cn.json' ];
+		if (name && name != files[0])
+			files.push(name);
 
-		this._i18n = fetch(L.resource('view/ecycloud/' + name)).then(function(res) {
-			return res.ok ? res.json() : {};
-		}).then(function(map) {
-			self.installI18n(map);
+		this._i18n = Promise.all(files.map(function(file) {
+			return fetch(L.resource('view/ecycloud/' + file)).then(function(res) {
+				return res.ok ? res.json() : {};
+			});
+		})).then(function(maps) {
+			self._messageSource = maps[0];
+			self.installI18n(name ? maps[maps.length - 1] : {});
 		}).catch(function() {});
 
 		return this._i18n;
+	},
+
+	messageText: function(message) {
+		if (typeof message != 'string' || this.resolveLang() == 'zh_CN')
+			return message;
+		var self = this;
+		if (!this._messagePatterns) {
+			this._messagePatterns = Object.keys(this._messageSource || {}).map(function(key) {
+				var source = self._messageSource[key];
+				var pattern = source.split(/(%[sd]|\{message\})/).map(function(part, i) {
+					return i % 2 ? (part == '%d' ? '([0-9]+)' : '([\\s\\S]+?)')
+						: part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+				}).join('');
+				return { key: key, source: source, pattern: new RegExp('^' + pattern + '$') };
+			}).sort(function(a, b) { return b.source.length - a.source.length; });
+		}
+		for (var i = 0; i < this._messagePatterns.length; i++) {
+			var entry = this._messagePatterns[i];
+			var match = entry.pattern.exec(message);
+			if (!match)
+				continue;
+			var index = 0;
+			return _(entry.key).replace(/%[sd]|\{message\}/g, function(token) {
+				var value = match[++index];
+				return token == '{message}' ? self.messageText(value) : value;
+			});
+		}
+		return message.indexOf('\n') >= 0
+			? message.split('\n').map(function(line) { return self.messageText(line); }).join('\n')
+			: _(message);
 	},
 
 	luciGlobals: function() {
@@ -559,11 +876,17 @@ return baseclass.extend({
 	},
 
 	uiLang: function() {
+		var lang = '';
 		try {
-			return window.localStorage.getItem('ecycloud-lang') || '';
+			lang = window.localStorage.getItem('ecycloud-lang') || '';
+			if (lang == 'en') {
+				lang = 'en-US';
+				window.localStorage.setItem('ecycloud-lang', lang);
+			}
+			return lang;
 		}
 		catch (e) {
-			return '';
+			return lang;
 		}
 	},
 
@@ -597,12 +920,12 @@ return baseclass.extend({
 		if (catalog.Home == '首页' || catalog.Settings == '设置' || catalog.Connect == '连接')
 			return 'zh_CN';
 
-		return 'en';
+		return 'en-US';
 	},
 
 	resolveLang: function() {
 		var stored = this.uiLang();
-		if (stored == 'zh_CN' || stored == 'zh_TW' || stored == 'en')
+		if (stored == 'zh_CN' || stored == 'zh_TW' || stored == 'en-US')
 			return stored;
 		return this.detectLang();
 	},
@@ -634,7 +957,7 @@ return baseclass.extend({
 			window._ = function(msg) {
 				if (extra[msg] != null)
 					return extra[msg];
-				if (self.resolveLang() == 'en')
+				if (self.resolveLang() == 'en-US')
 					return msg;
 				return typeof orig == 'function' ? orig.apply(this, arguments) : msg;
 			};
@@ -708,7 +1031,7 @@ return baseclass.extend({
 
 	profileNotice: function(res) {
 		if (!res || !res.ok)
-			return (res && res.msg) || _('Update failed');
+			return this.messageText((res && res.msg) || _('Update failed'));
 		if (res.reloaded)
 			return _('Update succeeded');
 		if (res.changed)
@@ -728,7 +1051,7 @@ return baseclass.extend({
 		this._lastFormatError = message;
 		return this.dialog({
 			title: _('Clash profile is invalid'),
-			text: message,
+			text: this.messageText(message),
 			ok: _('Got it')
 		});
 	},
@@ -778,8 +1101,9 @@ return baseclass.extend({
 
 	inputCss: function() {
 		return ':host{all:initial;display:block;width:100%;max-width:100%;line-height:0;font:inherit;color:inherit}'
-			+ 'input{box-sizing:border-box;width:100%;min-width:0;height:36px;margin:0;padding:0 12px;'
-			+ 'border:1px solid var(--ecy-input-line);border-radius:999px;background:var(--ecy-card);'
+			+ 'input{box-sizing:border-box;width:100%;min-width:0;height:var(--ecy-input-h,36px);margin:0;'
+			+ 'padding:0 var(--ecy-input-pad,12px);border:1px solid var(--ecy-input-border,var(--ecy-input-line));'
+			+ 'border-radius:var(--ecy-input-radius,999px);background:var(--ecy-input-bg,var(--ecy-card));'
 			+ 'color:var(--ecy-fg);font:inherit;line-height:1.4;outline:none;box-shadow:none;appearance:none}'
 			+ 'input:focus{border-color:var(--ecy-primary);'
 			+ 'box-shadow:0 0 0 3px color-mix(in srgb,var(--ecy-primary) 28%,transparent)}'
@@ -1634,14 +1958,16 @@ return baseclass.extend({
 				menu.removeChild(menu.firstChild);
 			items.forEach(function(item) {
 				var row = [];
+				if (multiple)
+					row.push(E('span', { 'class': 'ecycloud-drop-check', 'aria-hidden': 'true' }));
 				if (item.icon)
 					row.push(item.icon.cloneNode(true));
 				row.push(E('span', { 'class': 'ecycloud-drop-item-label' }, [ item.label ]));
 				row.push(self.delayHint(item));
-				menu.appendChild(self.pressable(
+				var choice = self.pressable(
 					'ecycloud-drop-item' + (picked(item.value) ? ' is-on' : ''),
 					{
-						role: 'option',
+						role: multiple ? 'checkbox' : 'option',
 						click: function(ev) {
 							ev.preventDefault();
 							ev.stopPropagation();
@@ -1670,7 +1996,9 @@ return baseclass.extend({
 						}
 					},
 					row
-				));
+				);
+				choice.setAttribute(multiple ? 'aria-checked' : 'aria-selected', picked(item.value) ? 'true' : 'false');
+				menu.appendChild(choice);
 			});
 			if (open)
 				self.pinMenu(menu, btn);
@@ -1733,7 +2061,7 @@ return baseclass.extend({
 	},
 
 	signedIn: function(status) {
-		return !!(status && status.session && status.session.logged_in);
+		return !!(status && status.session && status.session.logged_in && status.session.id == sessionKey);
 	},
 
 	signedOut: function() {
@@ -1819,12 +2147,6 @@ return baseclass.extend({
 		return node;
 	},
 
-	deviceLimitReached: function(account) {
-		var limit = +((account && account.node_connector) || 0);
-		var count = +((account && account.online_client_count) || 0);
-		return limit > 0 && count >= limit && !(account && account.online_client_self);
-	},
-
 	onlineDeviceText: function(account) {
 		var count = +((account && account.online_client_count) || 0);
 		var limit = +((account && account.node_connector) || 0);
@@ -1864,60 +2186,50 @@ return baseclass.extend({
 		});
 	},
 
+	requestDeviceSlot: function(account, generation) {
+		var self = this;
+		var cancelled = { ok: false, cancelled: true };
+		if (!(account.node_connector > 0) || account.online_client_self)
+			return Promise.resolve({ ok: true });
+		return self.onlineDevices().then(function(res) {
+			return res && res.devices ? res.devices : [];
+		}, function() {
+			return [];
+		}).then(function(devices) {
+			if (generation != connectGeneration)
+				return cancelled;
+			return self.confirmDeviceLimitKick(devices).then(function(targetDeviceId) {
+				if (targetDeviceId == null || generation != connectGeneration)
+					return cancelled;
+				return self.reclaimDeviceSlot(targetDeviceId).then(function(reclaim) {
+					if (generation != connectGeneration)
+						return cancelled;
+					return reclaim || { ok: false, msg: _('Request failed') };
+				});
+			});
+		});
+	},
+
 	connect: function(opts) {
 		var self = this;
 		opts = opts || {};
 		var generation = ++connectGeneration;
 		connectPending = generation;
-		var cancelled = { ok: false, cancelled: true };
-		var limitDenied = opts.forceDeviceLimit === true;
-
-		var withAccount = function(account) {
-			if (generation != connectGeneration)
-				return cancelled;
-			limitDenied = limitDenied || (account.device_kick_notice && account.device_kick_reason == 'limit_denied');
-			if (!limitDenied && !self.deviceLimitReached(account))
-				return self.start();
-
-			return self.onlineDevices().then(function(res) {
-				return res && res.devices ? res.devices : [];
-			}, function() {
-				return [];
-			}).then(function(devices) {
-				if (generation != connectGeneration)
-					return cancelled;
-				return self.confirmDeviceLimitKick(devices).then(function(targetDeviceId) {
-					if (targetDeviceId == null || generation != connectGeneration)
-						return cancelled;
-
-					return self.reclaimDeviceSlot(targetDeviceId).then(function(reclaim) {
-						if (generation != connectGeneration)
-							return cancelled;
-						if (!reclaim || !reclaim.ok)
-							return reclaim || { ok: false, msg: _('Request failed') };
-						return self.start();
-					});
-				});
-			});
-		};
 
 		var afterProfile = function() {
-			return self.refreshAccount().then(function(res) {
+			return self.refreshAccount(true).then(function(res) {
 				if (!res || !res.ok || !res.account)
 					return { ok: false, msg: (res && res.msg) || _('Request failed') };
-				return withAccount(res.account);
+				if (generation != connectGeneration)
+					return { ok: false, cancelled: true };
+				return self.start();
 			});
 		};
 
 		var noticeReason = opts.device_kick_reason || (opts.account && opts.account.device_kick_reason);
-		var request = limitDenied ? withAccount({})
-			: noticeReason != 'limit_denied' && (opts.device_kicked || (opts.account && opts.account.device_kick_notice))
+		var request = noticeReason != 'limit_denied' && (opts.device_kicked || (opts.account && opts.account.device_kick_notice))
 				? this.ackDeviceKick().then(afterProfile, afterProfile) : afterProfile();
-		return request.then(function(res) {
-			if (limitDenied && res && res.cancelled)
-				return self.ackDeviceKick().then(function() { return res; }, function() { return res; });
-			return res;
-		}).catch(function(err) {
+		return request.catch(function(err) {
 			return { ok: false, msg: err.message || _('Request failed') };
 		}).finally(function() {
 			if (connectPending == generation)
@@ -1936,13 +2248,32 @@ return baseclass.extend({
 				return;
 			var generation = connectGeneration;
 			self.status().then(function(status) {
-				if (generation == connectGeneration && status && status.session && status.session.logged_in)
+				if (generation == connectGeneration && status && status.session && status.session.logged_in) {
 					self.handleDeviceKick(status);
+					self.noticeUpdates(status);
+				}
 			});
 		};
 
 		tick();
 		setInterval(tick, 5000);
+	},
+
+	noticeUpdates: function(status) {
+		var seen = loadJson('ecycloud.updatesSeen', {});
+		var updates = status.updates || {};
+		var notices = [];
+		[ 'app', 'kernel' ].forEach(function(kind) {
+			var item = updates[kind];
+			if (!item || !item.ok || !item.outdated || seen[kind] == item.latest)
+				return;
+			seen[kind] = item.latest;
+			notices.push(_('Update available: %s %s. See About for installation.').format(
+				kind == 'app' ? _('Client') : _('Kernel'), item.latest));
+		}, this);
+		saveJson('ecycloud.updatesSeen', seen);
+		if (notices.length)
+			this.notify({ ok: true, msg: notices.join('\n') });
 	},
 
 	handleDeviceKick: function(status) {
@@ -1957,10 +2288,10 @@ return baseclass.extend({
 		if (reason == 'limit_denied' && connectPending == connectGeneration)
 			return;
 		kickBusy = true;
-		if (reason == 'limit_denied' && !status.enabled)
+		if (reason == 'limit_denied' && !status.enabled && !status.device_kicked)
 			return this.ackDeviceKick().finally(function() { kickBusy = false; });
 		var phase = this.phase(status);
-		var stop = (status.running || phase == 'connecting')
+		var stop = reason == 'remove' && (status.running || phase == 'connecting')
 			? this.stop() : Promise.resolve({ ok: true });
 		var generation = connectGeneration;
 
@@ -1970,16 +2301,19 @@ return baseclass.extend({
 					return self.ackDeviceKick();
 				if (!stopped || !stopped.ok)
 					return self.notify(stopped || { ok: false });
-				return self.connect({ forceDeviceLimit: true }).then(function(res) {
-					if (!res.ok && !res.cancelled)
-						self.notify(res);
-					return res;
+				return self.refreshAccount(true).then(function(res) {
+					if (!res || !res.ok || !res.account)
+						return res;
+					return self.requestDeviceSlot(res.account, generation);
+				}).then(function(res) {
+					if (res && !res.ok && !res.cancelled) self.notify(res);
+					return self.ackDeviceKick();
 				});
 			}
 			return self.dialog({
 				title: _('Device disconnected'),
 				text: reason == 'remove'
-					? _('This device was removed from the usage list, so it was disconnected.')
+					? _('This device was disconnected.')
 					: _('A new client connected after the online client limit was reached, so this device was disconnected.'),
 				ok: _('Got it'),
 				dismissible: false
@@ -2074,19 +2408,8 @@ return baseclass.extend({
 	},
 
 	connectedSince: function(running) {
-		if (!running) {
-			sessionStorage.removeItem(SINCE_KEY);
-			return 0;
-		}
-
-		var raw = sessionStorage.getItem(SINCE_KEY);
-
-		if (!raw) {
-			raw = String(Date.now());
-			sessionStorage.setItem(SINCE_KEY, raw);
-		}
-
-		return Date.now() - +raw;
+		var since = +(runtimeStatus.connected_at || 0) * 1000;
+		return running && since > 0 ? Math.max(0, Date.now() - since) : 0;
 	},
 
 	delayText: function(delay) {
@@ -2255,96 +2578,26 @@ return baseclass.extend({
 		return slash < 0 ? name : name.slice(slash + 1);
 	},
 
-	ingestConnections: function(list) {
-		var snapshot = list || [];
-		var prev = loadJson(ALIVE_KEY, {});
-		var alive = {};
-		var closed = loadJson(CLOSED_KEY, []);
-		var now = new Date().toISOString();
+	connectionSource: function(item) {
+		var ip = String(item.source_ip || '').trim();
+		var port = String(item.source_port || '').trim();
 
-		if (typeof prev != 'object' || prev == null || Array.isArray(prev))
-			prev = {};
+		if (!ip || !port)
+			return '';
 
-		if (!Array.isArray(closed))
-			closed = [];
-
-		snapshot.forEach(function(item) {
-			if (item.id)
-				alive[item.id] = item;
-		});
-
-		Object.keys(prev).forEach(function(id) {
-			if (!alive[id])
-				closed.unshift(Object.assign({}, prev[id], { closed_at: now }));
-		});
-
-		if (closed.length > CLOSED_LIMIT)
-			closed = closed.slice(0, CLOSED_LIMIT);
-
-		saveJson(ALIVE_KEY, alive);
-		saveJson(CLOSED_KEY, closed);
-
-		return { active: snapshot, closed: closed };
+		return ip.indexOf(':') != -1 ? '[' + ip + ']:' + port : ip + ':' + port;
 	},
 
-	noteTrafficRank: function(item, bytes, skip) {
-		var now;
-		var today;
-		var yest;
-		var all;
-		var bucket;
-		var chains;
-		var host;
-		var i;
-		var name;
-
-		if (!(bytes > 0))
-			return;
-
-		now = new Date();
-		today = dayKey(now);
-		yest = dayKey(neighborDay(now, -1));
-		all = loadLocal(RANK_KEY, {});
-		if (typeof all != 'object' || all == null || Array.isArray(all))
-			all = {};
-		bucket = all[today];
-		if (typeof bucket != 'object' || bucket == null || Array.isArray(bucket))
-			bucket = { groups: {}, hosts: {} };
-		if (typeof bucket.groups != 'object' || bucket.groups == null)
-			bucket.groups = {};
-		if (typeof bucket.hosts != 'object' || bucket.hosts == null)
-			bucket.hosts = {};
-
-		chains = item && item.chains ? item.chains : [];
-		for (i = 1; i < chains.length; i++) {
-			name = String(chains[i] || '');
-			if (name)
-				bucket.groups[name] = (bucket.groups[name] || 0) + bytes;
-		}
-
-		host = String((item && item.host) || '').replace(/^\s+|\s+$/g, '')
-			|| String((item && item.destination_ip) || '').replace(/^\s+|\s+$/g, '');
-		if (host && !(skip && skip[host.toLowerCase()]))
-			bucket.hosts[host] = (bucket.hosts[host] || 0) + bytes;
-
-		all[today] = bucket;
-		Object.keys(all).forEach(function(key) {
-			if (key != today && key != yest)
-				delete all[key];
-		});
-		saveLocal(RANK_KEY, all);
+	ingestConnections: function(list) {
+		return sessionKey ? { active: list || [], closed: runtimeConnections.closed || [] }
+			: { active: [], closed: [] };
 	},
 
 	trafficRank: function(day, skip) {
-		var now = new Date();
-		var key = day == 'yesterday' ? dayKey(neighborDay(now, -1)) : dayKey(now);
-		var all = loadLocal(RANK_KEY, {});
-		var bucket = all && all[key] ? all[key] : {};
-
-		return {
-			groups: topRank(bucket.groups),
-			hosts: topRank(bucket.hosts, skip)
-		};
+		var stats = sessionKey ? runtimeStatus.statistics || {} : {};
+		var key = day == 'yesterday' ? stats.yesterday : stats.today;
+		var bucket = (stats.rank && stats.rank[key]) || {};
+		return { groups: topRank(bucket.groups), hosts: topRank(bucket.hosts, skip) };
 	},
 
 	rankSkip: function(status) {
@@ -2582,7 +2835,7 @@ return baseclass.extend({
 		}, [
 			E('div', { 'class': 'ecycloud-modal-card is-dialog' }, [
 				E('div', { 'class': 'ecycloud-modal-title' }, [ _('Notice') ]),
-				E('div', { 'class': 'ecycloud-modal-text' }, [ message ]),
+				E('div', { 'class': 'ecycloud-modal-text' }, [ this.messageText(message) ]),
 				E('div', { 'class': 'ecycloud-modal-actions' }, [
 					this.pressable('ecycloud-modal-ok', {}, [ _('Got it') ])
 				])
@@ -2599,6 +2852,21 @@ return baseclass.extend({
 		document.body.appendChild(node);
 		this.isolate(node);
 		return node;
+	},
+
+	copyText: function(text) {
+		if (navigator.clipboard && window.isSecureContext)
+			return navigator.clipboard.writeText(text);
+		var input = E('textarea', { 'class': 'ecycloud-copy-buffer', 'readonly': true }, [ text ]);
+		var focused = document.activeElement;
+		while (focused && focused.shadowRoot && focused.shadowRoot.activeElement)
+			focused = focused.shadowRoot.activeElement;
+		document.body.appendChild(input);
+		input.select();
+		var ok;
+		try { ok = document.execCommand('copy'); }
+		finally { input.remove(); if (focused) focused.focus(); }
+		return ok ? Promise.resolve() : Promise.reject(new Error(_('Copy failed')));
 	},
 
 	showText: function(title, text) {
@@ -2622,6 +2890,7 @@ return baseclass.extend({
 				E('div', { 'class': 'ecycloud-modal-title' }, [ title ]),
 				E('pre', { 'class': 'ecycloud-textview' }, [ body ]),
 				E('div', { 'class': 'ecycloud-modal-actions' }, [
+					this.pressable('ecycloud-modal-cancel ecycloud-modal-copy', {}, [ _('Copy all') ]),
 					this.pressable('ecycloud-modal-ok', {}, [ _('Got it') ])
 				])
 			])
@@ -2632,6 +2901,12 @@ return baseclass.extend({
 				node.parentNode.removeChild(node);
 		};
 
+		var self = this;
+		var copy = node.querySelector('.ecycloud-modal-copy');
+		copy.addEventListener('click', function() {
+			self.copyText(body).then(function() { copy.textContent = _('Copied'); },
+				function(err) { self.notify({ ok: false, msg: err.message }); });
+		});
 		node.querySelector('.ecycloud-modal-ok').addEventListener('click', close);
 		this.onBackdrop(node, close);
 		document.body.appendChild(node);
@@ -2779,35 +3054,44 @@ return baseclass.extend({
 
 	announceHtml: function(html, site) {
 		var box = E('div', { 'class': 'ecycloud-ann-html' });
-		var scratch = document.createElement('div');
+		var scratch = document.createElement('template');
 		scratch.innerHTML = String(html || '');
-		scratch.querySelectorAll(
-			'script,iframe,object,embed,form,input,button,select,textarea,style,link,meta,base,svg,math,applet,frame,frameset'
-		).forEach(function(node) {
-			if (node.parentNode)
-				node.parentNode.removeChild(node);
-		});
-		scratch.querySelectorAll('*').forEach(function(node) {
+		var tags = /^(a|abbr|address|article|aside|b|bdi|bdo|blockquote|br|caption|cite|code|col|colgroup|dd|del|details|div|dl|dt|em|figcaption|figure|h[1-6]|hr|i|img|ins|kbd|li|main|mark|ol|p|pre|q|s|samp|section|small|source|span|strong|sub|summary|sup|table|tbody|td|tfoot|th|thead|time|tr|u|ul|var|video)$/;
+		var attrs = /^(alt|title|href|src|poster|width|height|colspan|rowspan|scope|span|start|reversed|type|controls|loop|muted|preload|dir|lang|style)$/;
+		var styles = /^(color|background-color|font(-family|-size|-style|-weight)?|text-align|text-decoration(-line|-color|-style)?|text-indent|line-height|letter-spacing|word-spacing|white-space|vertical-align|border(-width|-color|-style|-radius|-collapse|-spacing)?|margin(-top|-right|-bottom|-left)?|padding(-top|-right|-bottom|-left)?|width|height|max-width|max-height)$/;
+		scratch.content.querySelectorAll('*').forEach(function(node) {
+			if (node.namespaceURI != 'http://www.w3.org/1999/xhtml' || !tags.test(node.localName)) {
+				node.remove();
+				return;
+			}
 			for (var i = node.attributes.length - 1; i >= 0; i--) {
 				var name = node.attributes[i].name;
-				var value = node.getAttribute(name) || '';
-				if (/^on/i.test(name) || name == 'srcdoc' ||
-					((name == 'href' || name == 'src' || name == 'xlink:href') &&
-						/^\s*javascript:/i.test(value)))
+				if (!attrs.test(name))
 					node.removeAttribute(name);
 			}
+			for (var j = node.style.length - 1; j >= 0; j--) {
+				var property = node.style[j];
+				if (!styles.test(property) || /url\s*\(|expression\s*\(/i.test(node.style.getPropertyValue(property)))
+					node.style.removeProperty(property);
+			}
+			[ 'href', 'src', 'poster' ].forEach(function(attr) {
+				if (!node.hasAttribute(attr))
+					return;
+				try {
+					var url = new URL(node.getAttribute(attr), site || undefined);
+					if (!/^https?:$/.test(url.protocol) && !(node.localName == 'a' && attr == 'href' && url.protocol == 'mailto:'))
+						throw new Error('unsupported protocol');
+					node.setAttribute(attr, url.href);
+				} catch (e) {
+					node.removeAttribute(attr);
+				}
+			});
 		});
-		scratch.querySelectorAll('a[href], img[src], video[src], source[src]').forEach(function(node) {
-			var attr = node.hasAttribute('href') ? 'href' : 'src';
-			var url = String(node.getAttribute(attr) || '').trim();
-			if (url.charAt(0) == '/' && site)
-				node.setAttribute(attr, String(site).replace(/\/$/, '') + url);
-		});
-		scratch.querySelectorAll('a[href]').forEach(function(node) {
+		scratch.content.querySelectorAll('a[href]').forEach(function(node) {
 			node.setAttribute('target', '_blank');
-			node.setAttribute('rel', 'noreferrer');
+			node.setAttribute('rel', 'noopener noreferrer');
 		});
-		box.innerHTML = scratch.innerHTML;
+		box.appendChild(scratch.content);
 		return box;
 	},
 

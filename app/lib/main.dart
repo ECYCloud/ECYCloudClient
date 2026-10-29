@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'core/app_config.dart';
 import 'core/app_paths.dart';
 import 'core/error_logger.dart';
 import 'core/logger.dart';
 import 'data/store/credential_store.dart';
+import 'data/api/api_exception.dart';
 import 'data/store/settings_store.dart';
 import 'l10n/app_language.dart';
 import 'l10n/l10n.dart';
@@ -25,8 +27,11 @@ import 'ui/pages/language_setup_page.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
+import 'ui/widgets/icon_image.dart';
 import 'ui/widgets/television_navigation.dart';
+import 'ui/widgets/video_viewer.dart';
 import 'ui/widgets/zoom_cursors.dart';
+import 'ui/widgets/app_scaffold.dart';
 
 final Stopwatch _boot = Stopwatch();
 bool _framed = false;
@@ -77,11 +82,24 @@ Future<void> main() async {
   final PlatformService platform = PlatformFactory.createPlatformService();
   final KernelController kernel = PlatformFactory.createKernelController();
 
-  final AuthController auth = AuthController(platform, CredentialStore());
   final ConnectionController connection = ConnectionController(
     platform: platform,
     kernel: kernel,
     settingsStore: settingsStore,
+  );
+  final AuthController auth = AuthController(
+    platform,
+    CredentialStore(),
+    clearLocalSession: () async {
+      await connection.shutdown(clearSession: true);
+      await Future.wait(<Future<void>>[
+        RemoteIcon.clearSession(),
+        HtmlVideoView.clearSession(),
+      ]);
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      svg.cache.clear();
+    },
   );
   final AnnouncementController announcements = AnnouncementController();
   final UpdateController update = UpdateController(
@@ -126,6 +144,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
   UpdateController? _update;
   PlatformService? _platform;
   AuthStage _authStage = AuthStage.unknown;
+  String? _authAccountKey;
   bool? _windowDark;
 
   @override
@@ -166,6 +185,8 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     // 流量轮询也会 notify connection：绝不能因此整棵重建 MaterialApp，否则偶发白屏
     connection.addListener(_onConnectionChanged);
     auth.onConfigRevision = connection.notePanelRevision;
+    connection.onPanelSync = auth.syncAccountStatus;
+    connection.onSessionRejected = auth.logout;
 
     try {
       await platform.initialize();
@@ -182,7 +203,11 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     // 界面可能是被系统重建的，隧道还在后台跑着，要在拉起常驻内核之前认回来
     await connection.adoptRunningKernel();
     _mark('adopt');
-    await auth.restore();
+    try {
+      await auth.restore();
+    } on ApiException catch (e) {
+      Logger.instance.warn('auth', e.message);
+    }
     _mark('auth');
 
     update.start();
@@ -207,6 +232,12 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
       return;
     }
     L10n.current = language;
+    if (nextLocale != _locale) {
+      unawaited(_auth?.refreshProfile());
+      _announcements?.languageChanged();
+      unawaited(_announcements?.refresh());
+      connection.languageChanged();
+    }
     if (next != _themeMode) {
       _syncWindowDark(_windowDarkOf(next));
     }
@@ -259,9 +290,24 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     final bool leftRestricted =
         auth.stage == AuthStage.loggedIn &&
         previous == AuthStage.accountRestricted;
-    _authStage = auth.stage;
+    if (_authStage != auth.stage || _authAccountKey != auth.accountKey) {
+      setState(() {
+        _authStage = auth.stage;
+        _authAccountKey = auth.accountKey;
+      });
+    }
 
-    connection.attachApi(auth.api, accountKey: auth.accountKey);
+    if (auth.stage == AuthStage.accountRestricted && previous != auth.stage) {
+      unawaited(connection.shutdown(clearSession: true));
+    }
+    connection.attachApi(
+      auth.stage == AuthStage.accountRestricted ? null : auth.api,
+      accountKey: auth.accountKey,
+    );
+    if (auth.api != null) {
+      RemoteIcon.resumeSession();
+      HtmlVideoView.resumeSession();
+    }
     connection.attachProfileLookup(() => auth.profile);
     announcements.attachApi(auth.api);
 
@@ -274,7 +320,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
         connection.settings.autoConnect &&
         connection.state == ConnectionPhase.disconnected &&
         !connection.busy) {
-      unawaited(connection.connect());
+      unawaited(connection.autoConnect());
     }
   }
 
@@ -283,13 +329,18 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     final AppScope scope = AppScope.of(context);
 
     return MaterialApp(
+      key: ValueKey<(AuthStage, String?)>(switch (_authStage) {
+        AuthStage.loggedIn ||
+        AuthStage.accountRestricted => (_authStage, _authAccountKey),
+        _ => (AuthStage.loggedOut, null),
+      }),
       title: 'ECY Cloud',
       debugShowCheckedModeBanner: false,
       locale: _locale,
       supportedLocales: const <Locale>[
         Locale('zh', 'CN'),
         Locale('zh', 'TW'),
-        Locale('en'),
+        Locale('en', 'US'),
       ],
       localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
         GlobalMaterialLocalizations.delegate,
@@ -334,7 +385,10 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
           : ListenableBuilder(
               listenable: scope.auth,
               builder: (BuildContext context, _) => switch (scope.auth.stage) {
-                AuthStage.unknown => const _Splash(),
+                AuthStage.unknown => _Splash(
+                  error: scope.auth.error,
+                  onRetry: () => unawaited(scope.auth.restore()),
+                ),
                 AuthStage.loggedIn => const Shell(),
                 AuthStage.accountRestricted => const AccountStatusPage(),
                 _ => const LoginPage(),
@@ -345,11 +399,48 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
 }
 
 class _Splash extends StatelessWidget {
-  const _Splash();
+  const _Splash({this.error, this.onRetry});
+
+  final String? error;
+  final VoidCallback? onRetry;
 
   @override
-  Widget build(BuildContext context) =>
-      const Scaffold(body: Center(child: CircularProgressIndicator()));
+  Widget build(BuildContext context) {
+    final String? text = error;
+    return AppScaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (error == null)
+                  const CircularProgressIndicator()
+                else
+                  Icon(
+                    Icons.error_outline,
+                    size: 32,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                if (text != null) ...<Widget>[
+                  const SizedBox(height: 16),
+                  Text(text, textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: Text(L10n.t('重试')),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _MisconfiguredApp extends StatelessWidget {
@@ -361,7 +452,7 @@ class _MisconfiguredApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     darkTheme: AppTheme.dark(),
     theme: AppTheme.light(),
-    home: const Scaffold(
+    home: const AppScaffold(
       body: Center(
         child: Padding(
           padding: EdgeInsets.all(32),

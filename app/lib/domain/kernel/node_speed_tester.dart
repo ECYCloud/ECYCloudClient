@@ -4,16 +4,20 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../../l10n/l10n.dart';
+
 class NodeSpeedTestException implements Exception {
   NodeSpeedTestException(this.message);
 
   final String message;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }
 
 class NodeSpeedTester {
+  final Set<Future<int>> _pending = <Future<int>>{};
+
   static const String downloadUrl =
       'https://speed.cloudflare.com/__down?bytes=100000000';
   static const String referer = 'https://speed.cloudflare.com/';
@@ -42,7 +46,8 @@ class NodeSpeedTester {
     return (bytes * 1000 / millis).round();
   }
 
-  static int peak(int current, int sample) => sample > current ? sample : current;
+  static int peak(int current, int sample) =>
+      sample > current ? sample : current;
 
   static int httpStatus(String head) {
     final Match? match = RegExp(r'^HTTP/1\.[01] (\d{3})').firstMatch(head);
@@ -70,7 +75,11 @@ class NodeSpeedTester {
     final bool bsd = !Platform.isLinux && !Platform.isAndroid;
     try {
       socket.setRawOption(
-        RawSocketOption.fromInt(bsd ? 0xffff : 1, bsd ? 0x1002 : 8, 1024 * 1024),
+        RawSocketOption.fromInt(
+          bsd ? 0xffff : 1,
+          bsd ? 0x1002 : 8,
+          1024 * 1024,
+        ),
       );
     } on Object {
       return;
@@ -80,9 +89,7 @@ class NodeSpeedTester {
   static void _writeAll(RawSocket socket, List<int> bytes) {
     int offset = 0;
     while (offset < bytes.length) {
-      final int n = socket.write(
-        offset == 0 ? bytes : bytes.sublist(offset),
-      );
+      final int n = socket.write(offset == 0 ? bytes : bytes.sublist(offset));
       if (n <= 0) {
         throw NodeSpeedTestException('测速失败');
       }
@@ -90,8 +97,15 @@ class NodeSpeedTester {
     }
   }
 
-  static List<int> _connectRequest(String host, int port) => ascii.encode(
-    'CONNECT $host:$port HTTP/1.1\r\nHost: $host:$port\r\n\r\n',
+  static List<int> connectRequest(
+    String host,
+    int port,
+    String credential,
+  ) => ascii.encode(
+    'CONNECT $host:$port HTTP/1.1\r\n'
+    'Host: $host:$port\r\n'
+    'Proxy-Authorization: Basic ${base64.encode(utf8.encode(credential))}\r\n'
+    '\r\n',
   );
 
   static List<int> _getRequest(Uri uri) {
@@ -108,6 +122,32 @@ class NodeSpeedTester {
 
   Future<int> download({
     required int proxyPort,
+    required String credential,
+    void Function(int speed)? onPeak,
+  }) async {
+    final Future<int> pending = _download(
+      proxyPort: proxyPort,
+      credential: credential,
+      onPeak: onPeak,
+    );
+    _pending.add(pending);
+    try {
+      return await pending;
+    } finally {
+      _pending.remove(pending);
+    }
+  }
+
+  Future<void> waitForIdle() async {
+    await Future.wait<void>(<Future<void>>[
+      for (final Future<int> pending in _pending.toList())
+        pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+    ]);
+  }
+
+  Future<int> _download({
+    required int proxyPort,
+    required String credential,
     void Function(int speed)? onPeak,
   }) async {
     final ReceivePort reply = ReceivePort();
@@ -117,10 +157,12 @@ class NodeSpeedTester {
         onPeak?.call(msg);
       }
     });
-    final Isolate isolate = await Isolate.spawn(
-      _isolateMain,
-      (proxyPort, peaks.sendPort, reply.sendPort),
-    );
+    final Isolate isolate = await Isolate.spawn(_isolateMain, (
+      proxyPort,
+      credential,
+      peaks.sendPort,
+      reply.sendPort,
+    ));
     try {
       final Object? msg = await reply.first.timeout(isolateTimeout);
       if (msg is String) {
@@ -140,10 +182,14 @@ class NodeSpeedTester {
     }
   }
 
-  static Future<void> _isolateMain((int, SendPort, SendPort) args) async {
-    final (int proxyPort, SendPort peaks, SendPort reply) = args;
+  static Future<void> _isolateMain(
+    (int, String, SendPort, SendPort) args,
+  ) async {
+    final (int proxyPort, String credential, SendPort peaks, SendPort reply) =
+        args;
     final ({int speed, String? error}) result = await _downloadOnWorker(
       proxyPort,
+      credential,
       peaks,
     );
     reply.send(result.error ?? result.speed);
@@ -151,11 +197,12 @@ class NodeSpeedTester {
 
   static Future<({int speed, String? error})> _downloadOnWorker(
     int proxyPort,
+    String credential,
     SendPort? peaks,
   ) async {
     try {
       return (
-        speed: await NodeSpeedTester()._pull(proxyPort, peaks),
+        speed: await NodeSpeedTester()._pull(proxyPort, credential, peaks),
         error: null,
       );
     } on NodeSpeedTestException catch (e) {
@@ -165,7 +212,7 @@ class NodeSpeedTester {
     }
   }
 
-  Future<int> _pull(int proxyPort, SendPort? peaks) async {
+  Future<int> _pull(int proxyPort, String credential, SendPort? peaks) async {
     final Uri uri = Uri.parse(downloadUrl);
     final int port = uri.hasPort ? uri.port : 443;
     final Stopwatch total = Stopwatch()..start();
@@ -179,7 +226,7 @@ class NodeSpeedTester {
     try {
       final Future<StreamSubscription<RawSocketEvent>> connectReady =
           _awaitConnectOk(raw, connectTimeout);
-      _writeAll(raw, _connectRequest(uri.host, port));
+      _writeAll(raw, connectRequest(uri.host, port, credential));
       final StreamSubscription<RawSocketEvent> connectSub = await connectReady;
       final Duration handshakeLimit = timeout - total.elapsed;
       if (handshakeLimit <= Duration.zero) {
@@ -192,7 +239,7 @@ class NodeSpeedTester {
       ).timeout(handshakeLimit);
       tls = secure;
       _tune(secure);
-      final Future<int> body = _readDownload(secure, total, peaks);
+      final Future<int> body = readDownload(secure, total, peaks);
       _writeAll(secure, _getRequest(uri));
       return await body;
     } on TimeoutException {
@@ -236,7 +283,10 @@ class NodeSpeedTester {
           if (end < 0) {
             continue;
           }
-          final String head = ascii.decode(buf.sublist(0, end), allowInvalid: true);
+          final String head = ascii.decode(
+            buf.sublist(0, end),
+            allowInvalid: true,
+          );
           if (httpStatus(head) != 200) {
             done.completeError(
               NodeSpeedTestException('测速代理返回 HTTP ${httpStatus(head)}'),
@@ -268,7 +318,7 @@ class NodeSpeedTester {
     }
   }
 
-  static Future<int> _readDownload(
+  static Future<int> readDownload(
     RawSocket socket,
     Stopwatch total,
     SendPort? peaks,
@@ -310,7 +360,7 @@ class NodeSpeedTester {
       windowBytes += n;
       takeWindow();
       if (total.elapsed >= timeout) {
-        socket.close();
+        done.complete();
       }
     }
 

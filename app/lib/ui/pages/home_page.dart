@@ -7,7 +7,6 @@ import '../../data/models/user_profile.dart';
 import '../../data/store/settings_store.dart';
 import '../../domain/kernel/clash_api_client.dart';
 import '../../domain/platform/platform_service.dart';
-import '../../state/announcement_controller.dart';
 import '../../state/auth_controller.dart';
 import '../../l10n/app_language.dart';
 import '../../l10n/l10n.dart';
@@ -20,6 +19,7 @@ import '../shell_navigator.dart';
 import '../theme.dart';
 import '../widgets/overlay_scroll_view.dart';
 import '../widgets/announcement_dialog.dart';
+import '../widgets/app_text_selection.dart';
 import '../widgets/connection_status_badge.dart';
 import '../widgets/delay_badge.dart';
 import '../widgets/flag_icon.dart';
@@ -35,6 +35,7 @@ import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
 import 'network_segments_page.dart';
 import 'traffic_log_page.dart';
+import '../widgets/app_alert_dialog.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -47,11 +48,13 @@ class _HomePageState extends State<HomePage> {
   Timer? _ticker;
   Timer? _profileTicker;
   final FocusNode _connectFocus = FocusNode();
+  final ScrollController _scrollController = ScrollController();
   bool _requestedConnectFocus = false;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(Tooltip.dismissAllToolTips);
     _ticker = Timer.periodic(
       const Duration(seconds: 1),
       (_) => mounted ? setState(() {}) : null,
@@ -86,6 +89,7 @@ class _HomePageState extends State<HomePage> {
     _ticker?.cancel();
     _profileTicker?.cancel();
     _connectFocus.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -104,11 +108,44 @@ class _HomePageState extends State<HomePage> {
         final UserProfile? profile = scope.auth.profile;
 
         return OverlayScrollView(
+          controller: _scrollController,
           padding: AppTheme.pageScrollPadding.copyWith(left: 0, top: 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              PageHeader(title: L10n.t('首页'), showUserAvatar: false),
+              PageHeader(
+                title: L10n.t('首页'),
+                showUserAvatar: false,
+                actions: <Widget>[
+                  IconButton(
+                    tooltip: L10n.t('公告'),
+                    onPressed: () => unawaited(
+                      showAnnouncementBrowser(
+                        context,
+                        controller: scope.announcements,
+                      ),
+                    ),
+                    icon: Badge(
+                      isLabelVisible: scope.announcements.hasUnread,
+                      backgroundColor: const Color(0xFFE53935),
+                      smallSize: 8,
+                      child: const SizedBox(
+                        width: AppTheme.pointerTapTarget,
+                        height: AppTheme.pointerTapTarget,
+                        child: Center(
+                          child: Icon(Icons.notifications_outlined, size: 20),
+                        ),
+                      ),
+                    ),
+                    visualDensity: VisualDensity.standard,
+                    constraints: BoxConstraints.tightFor(
+                      width: AppTheme.minTapTarget,
+                      height: AppTheme.minTapTarget,
+                    ),
+                    padding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
               Padding(
                 padding: EdgeInsets.only(left: AppTheme.pageScrollPadding.left),
                 child: Column(
@@ -120,7 +157,6 @@ class _HomePageState extends State<HomePage> {
                     ],
                     _ConnectionCard(
                       connection: connection,
-                      announcements: scope.announcements,
                       connectFocus: _connectFocus,
                     ),
                     if (connection.routeMode == 'direct' ||
@@ -156,10 +192,11 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _Pair extends StatelessWidget {
-  const _Pair({required this.left, required this.right});
+  const _Pair({required this.left, required this.right, this.stackedSeparator});
 
   final Widget left;
   final Widget right;
+  final Widget? stackedSeparator;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -167,7 +204,11 @@ class _Pair extends StatelessWidget {
       if (constraints.maxWidth < 660) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[left, const SizedBox(height: 10), right],
+          children: <Widget>[
+            left,
+            stackedSeparator ?? const SizedBox(height: 10),
+            right,
+          ],
         );
       }
 
@@ -227,15 +268,13 @@ class _Grid extends StatelessWidget {
 }
 
 class _ConnectionCard extends StatelessWidget {
-  const _ConnectionCard({
-    required this.connection,
-    required this.announcements,
-    required this.connectFocus,
-  });
+  const _ConnectionCard({required this.connection, required this.connectFocus});
 
   final ConnectionController connection;
-  final AnnouncementController announcements;
   final FocusNode connectFocus;
+
+  static Widget _fadeButtonContent(Widget child, Animation<double> animation) =>
+      FadeTransition(opacity: animation, child: child);
 
   @override
   Widget build(BuildContext context) {
@@ -245,6 +284,18 @@ class _ConnectionCard extends StatelessWidget {
     final bool connecting = phase == ConnectionPhase.connecting;
     final bool disconnecting = phase == ConnectionPhase.disconnecting;
     final bool busy = connecting || disconnecting;
+    final Duration buttonTransition = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 200);
+    final String buttonLabel = disconnecting
+        ? L10n.t('断开中')
+        : connecting
+        ? L10n.t('取消')
+        : connected
+        ? L10n.t('断开')
+        : L10n.current == AppLanguage.en
+        ? 'Connect'
+        : L10n.t('连接');
     final ConnectionStatusVisual visual = ConnectionStatusVisual.of(
       phase,
       theme.colorScheme,
@@ -252,7 +303,9 @@ class _ConnectionCard extends StatelessWidget {
 
     final String detail = switch (phase) {
       ConnectionPhase.connected =>
-        connection.connectedAt == null
+        connection.panelOffline
+            ? L10n.t('已连接，面板暂不可达，正在使用有效的本地配置')
+            : connection.connectedAt == null
             ? L10n.t('已连接')
             : L10n.t('已连接 {0}', <Object>[
                 Format.elapsed(
@@ -272,7 +325,7 @@ class _ConnectionCard extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             final bool wide = constraints.maxWidth >= 560;
@@ -329,71 +382,76 @@ class _ConnectionCard extends StatelessWidget {
               runSpacing: 8,
               children: <Widget>[
                 _ModeSelector(connection: connection),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    FilledButton.icon(
-                      focusNode: connectFocus,
-                      onPressed: disconnecting
-                          ? null
-                          : () {
-                              if (connected || connecting) {
-                                unawaited(connection.disconnect());
-                                return;
-                              }
-                              unawaited(connection.connect());
-                            },
-                      icon: Icon(
-                        disconnecting || connecting
-                            ? Icons.close
+                FilledButton.icon(
+                  focusNode: connectFocus,
+                  onPressed: disconnecting
+                      ? null
+                      : () {
+                          if (connected || connecting) {
+                            unawaited(connection.disconnect());
+                            return;
+                          }
+                          unawaited(connection.connect());
+                        },
+                  icon: AnimatedSwitcher(
+                    duration: buttonTransition,
+                    transitionBuilder: _fadeButtonContent,
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: SizedBox.square(
+                      key: ValueKey<String>(
+                        busy
+                            ? 'busy'
                             : connected
-                            ? Icons.stop
-                            : Icons.play_arrow,
-                        size: 16,
+                            ? 'connected'
+                            : 'disconnected',
                       ),
-                      label: Text(
-                        disconnecting
-                            ? L10n.t('断开中')
-                            : connecting
-                            ? L10n.t('取消')
-                            : connected
-                            ? L10n.t('断开')
-                            : L10n.current == AppLanguage.en
-                            ? 'Connect'
-                            : L10n.t('连接'),
-                      ),
-                      style: connected || disconnecting
-                          ? FilledButton.styleFrom(
-                              backgroundColor: AppTheme.danger,
+                      dimension: 16,
+                      child: busy
+                          ? Builder(
+                              builder: (BuildContext context) =>
+                                  CircularProgressIndicator(
+                                    value:
+                                        MediaQuery.disableAnimationsOf(context)
+                                        ? 0.75
+                                        : null,
+                                    strokeWidth: 2,
+                                    strokeCap: StrokeCap.round,
+                                    color: IconTheme.of(context).color,
+                                  ),
                             )
-                          : null,
+                          : Icon(
+                              connected ? Icons.stop : Icons.play_arrow,
+                              size: 16,
+                            ),
                     ),
-                    const SizedBox(width: 4),
-                    Badge(
-                      isLabelVisible: announcements.hasUnread,
-                      backgroundColor: const Color(0xFFE53935),
-                      smallSize: 8,
-                      child: IconButton(
-                        tooltip: L10n.t('网站公告'),
-                        onPressed: () => unawaited(
-                          showAnnouncementBrowser(
-                            context,
-                            controller: announcements,
-                          ),
-                        ),
-                        icon: const Icon(
-                          Icons.notifications_outlined,
-                          size: 20,
-                        ),
-                        visualDensity: VisualDensity.standard,
-                        constraints: BoxConstraints.tightFor(
-                          width: AppTheme.minTapTarget,
-                          height: AppTheme.minTapTarget,
-                        ),
-                        padding: EdgeInsets.zero,
+                  ),
+                  label: AnimatedSize(
+                    duration: buttonTransition,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedSwitcher(
+                      duration: buttonTransition,
+                      transitionBuilder: _fadeButtonContent,
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: Text(
+                        buttonLabel,
+                        key: ValueKey<String>(buttonLabel),
                       ),
                     ),
-                  ],
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: connected || disconnecting
+                        ? AppTheme.danger
+                        : null,
+                    disabledBackgroundColor: disconnecting
+                        ? AppTheme.danger
+                        : null,
+                    disabledForegroundColor: disconnecting
+                        ? theme.colorScheme.surface
+                        : null,
+                    animationDuration: buttonTransition,
+                  ),
                 ),
               ],
             );
@@ -434,8 +492,6 @@ class _ModeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool enabled = connection.controlPlaneReady;
-
     return UnconstrainedBox(
       constrainedAxis: Axis.vertical,
       child: SegmentedButton<String>(
@@ -451,10 +507,8 @@ class _ModeSelector extends StatelessWidget {
               ? connection.routeMode
               : 'rule',
         },
-        onSelectionChanged: enabled
-            ? (Set<String> selection) =>
-                  connection.setRouteMode(selection.first)
-            : null,
+        onSelectionChanged: (Set<String> selection) =>
+            connection.setRouteMode(selection.first),
         showSelectedIcon: false,
       ),
     );
@@ -562,7 +616,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
   Future<void> _showCheckinResult(String message) {
     return showDialog<void>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('提示')),
         content: Text(message),
         actions: <Widget>[
@@ -606,13 +660,15 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
             tooltip: L10n.t('刷新流量'),
             onRefresh: auth.refreshProfile,
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (BuildContext context) => const TrafficLogPage(),
+          Flexible(
+            child: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext context) => const TrafficLogPage(),
+                ),
               ),
+              child: Text('${L10n.t('流量明细')} ›'),
             ),
-            child: Text('${L10n.t('流量明细')} ›'),
           ),
         ],
       ),
@@ -683,7 +739,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
           _TrafficMetaRow(
             icon: Icons.today_outlined,
             label: L10n.t('下次重置已使用流量日期'),
-            value: user.trafficReset.isEmpty ? '—' : user.trafficReset,
+            value: user.trafficReset.isEmpty ? '—' : L10n.t(user.trafficReset),
           ),
           _TrafficMetaRow(
             icon: Icons.schedule_outlined,
@@ -761,13 +817,13 @@ class _TrafficBarRow extends StatelessWidget {
         Row(
           children: <Widget>[
             Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
             ),
-          ),
             Text(value, style: _trafficAmountStyle(theme, tagColor)),
           ],
         ),
@@ -897,6 +953,7 @@ class _TrafficRankCard extends StatefulWidget {
 
 class _TrafficRankCardState extends State<_TrafficRankCard> {
   TrafficRankDay _day = TrafficRankDay.today;
+  final GlobalKey<TooltipState> _hintKey = GlobalKey<TooltipState>();
 
   @override
   Widget build(BuildContext context) {
@@ -905,10 +962,76 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
       _day,
     );
     final List<TrafficRankRow> hosts = widget.connection.trafficRankHosts(_day);
+    final String notice = L10n.t(
+      '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。',
+    );
 
     return SectionCard(
       icon: Icons.leaderboard_outlined,
       title: L10n.t('流量排行'),
+      titleTrailing: Transform.translate(
+        offset: const Offset(0, (14 - AppTheme.sectionTitleSize) / 2),
+        child: Tooltip(
+          key: _hintKey,
+          richMessage: WidgetSpan(
+            child: TextFieldTapRegion(
+              child: AppTextSelection(child: Text(notice)),
+            ),
+          ),
+          excludeFromSemantics: true,
+          enableTapToDismiss: false,
+          triggerMode: TooltipTriggerMode.manual,
+          showDuration: const Duration(seconds: 8),
+          constraints: const BoxConstraints(maxWidth: 320),
+          positionDelegate: (TooltipPositionContext position) {
+            final double x =
+                position.target.dx + position.targetSize.width / 2 + 8;
+            if (x + position.tooltipSize.width >
+                position.overlaySize.width - 10) {
+              return positionDependentBox(
+                size: position.overlaySize,
+                childSize: position.tooltipSize,
+                target: position.target,
+                verticalOffset: position.verticalOffset,
+                preferBelow: position.preferBelow,
+              );
+            }
+            return Offset(
+              x,
+              (position.target.dy - position.tooltipSize.height / 2)
+                  .clamp(
+                    10.0,
+                    position.overlaySize.height -
+                        position.tooltipSize.height -
+                        10,
+                  )
+                  .toDouble(),
+            );
+          },
+          child: TextFieldTapRegion(
+            onTapOutside: (_) => Tooltip.dismissAllToolTips(),
+            child: IconButton(
+              icon: Icon(
+                Icons.error_outline,
+                size: 14,
+                color: theme.colorScheme.onSurfaceVariant,
+                semanticLabel: notice,
+              ),
+              visualDensity: VisualDensity.standard,
+              constraints: BoxConstraints.tightFor(
+                width: AppTheme.minTapTarget,
+                height: AppTheme.minTapTarget,
+              ),
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                if (!_hintKey.currentState!.ensureTooltipVisible()) {
+                  Tooltip.dismissAllToolTips();
+                }
+              },
+            ),
+          ),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -934,21 +1057,21 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
           ),
           const SizedBox(height: 12),
           _Pair(
-            left: SelectionArea(
-              contextMenuBuilder: AppTheme.selectableRegionMenu,
-              child: _RankList(
-                title: L10n.t('策略组'),
-                rows: groups,
-                color: theme.colorScheme.primary,
-              ),
+            left: _RankList(
+              title: L10n.t('策略组'),
+              icon: NodeLabels.groupIcon(selectable: true),
+              rows: groups,
+              color: theme.colorScheme.primary,
             ),
-            right: SelectionArea(
-              contextMenuBuilder: AppTheme.selectableRegionMenu,
-              child: _RankList(
-                title: L10n.t('域名/IP'),
-                rows: hosts,
-                color: theme.colorScheme.primary,
-              ),
+            right: _RankList(
+              title: L10n.t('域名/IP'),
+              icon: Icons.language,
+              rows: hosts,
+              color: theme.colorScheme.primary,
+            ),
+            stackedSeparator: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Divider(height: 1),
             ),
           ),
         ],
@@ -960,11 +1083,13 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
 class _RankList extends StatelessWidget {
   const _RankList({
     required this.title,
+    required this.icon,
     required this.rows,
     required this.color,
   });
 
   final String title;
+  final IconData icon;
   final List<TrafficRankRow> rows;
   final Color color;
 
@@ -976,11 +1101,12 @@ class _RankList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Text(
-          title,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+        Row(
+          children: <Widget>[
+            Icon(icon, size: 16, color: theme.colorScheme.onSurface),
+            const SizedBox(width: 6),
+            Text(title, style: theme.textTheme.titleSmall),
+          ],
         ),
         const SizedBox(height: 8),
         if (rows.isEmpty)
@@ -1095,9 +1221,8 @@ class _PreflightCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 1.5),
                 child: Text(
                   '· $problem',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onErrorContainer,
-                  ),
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: scheme.onErrorContainer),
                 ),
               ),
           ],
@@ -1245,7 +1370,7 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
                 enabled: connection.routeMode != 'global',
                 options: <String, String>{
                   for (final ProxyGroup item in connection.groupsForMode)
-                    item.name: item.name,
+                    item.name: NodeLabels.displayName(item.name),
                 },
                 selectedLeading: GroupIcon(
                   url: connection.groupIconOf(group.name),
@@ -1314,9 +1439,8 @@ class _LabeledDropdown extends StatelessWidget {
       children: <Widget>[
         Text(
           label,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 6),
         LayoutBuilder(

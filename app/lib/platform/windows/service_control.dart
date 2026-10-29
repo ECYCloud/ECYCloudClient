@@ -3,6 +3,8 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
+import '../../l10n/l10n.dart';
+
 enum WindowsServiceState {
   missing,
   stopped,
@@ -14,14 +16,15 @@ enum WindowsServiceState {
 }
 
 class ServiceProbe {
-  const ServiceProbe(this.state, {this.detail});
+  const ServiceProbe(this.state, {this.detail, this.processId = 0});
 
   final WindowsServiceState state;
   final String? detail;
+  final int processId;
 
   bool get running => state == WindowsServiceState.running;
 
-  String get label => switch (state) {
+  String get label => L10n.t(switch (state) {
     WindowsServiceState.missing => '未安装',
     WindowsServiceState.stopped => '已停止',
     WindowsServiceState.starting => '正在启动',
@@ -29,7 +32,7 @@ class ServiceProbe {
     WindowsServiceState.running => '正在运行',
     WindowsServiceState.denied => '无权查询',
     WindowsServiceState.unknown => '状态未知',
-  };
+  });
 }
 
 /// SCM 失败恢复窗口内管道不存在；安装时 SERVICE_START 已授给交互用户（serviceSDDL）。
@@ -44,6 +47,8 @@ class ServiceControl {
     final String name = serviceName;
     return Isolate.run(() => _probe(name));
   }
+
+  ServiceProbe probeSynchronous() => _probe(serviceName);
 
   Future<ServiceProbe> ensureRunning({
     Duration timeout = const Duration(seconds: 15),
@@ -94,22 +99,40 @@ const int _errorAccessDenied = 5;
 const int _errorServiceDoesNotExist = 1060;
 const int _errorServiceAlreadyRunning = 1056;
 
-// SERVICE_STATUS 是 7 个 DWORD，只用到 dwCurrentState（第二个）
-const int _serviceStatusDwords = 7;
+// SERVICE_STATUS_PROCESS 的第二项为状态，第八项为 PID。
+const int _serviceStatusDwords = 9;
 const int _currentStateIndex = 1;
 
-typedef _OpenSCManagerNative =
-    IntPtr Function(Pointer<Utf16>, Pointer<Utf16>, Uint32);
+typedef _OpenSCManagerNative = IntPtr Function(
+  Pointer<Utf16>,
+  Pointer<Utf16>,
+  Uint32,
+);
 typedef _OpenSCManagerDart = int Function(Pointer<Utf16>, Pointer<Utf16>, int);
 
 typedef _OpenServiceNative = IntPtr Function(IntPtr, Pointer<Utf16>, Uint32);
 typedef _OpenServiceDart = int Function(int, Pointer<Utf16>, int);
 
-typedef _QueryStatusNative = Int32 Function(IntPtr, Pointer<Uint32>);
-typedef _QueryStatusDart = int Function(int, Pointer<Uint32>);
+typedef _QueryStatusNative = Int32 Function(
+  IntPtr,
+  Int32,
+  Pointer<Uint32>,
+  Uint32,
+  Pointer<Uint32>,
+);
+typedef _QueryStatusDart = int Function(
+  int,
+  int,
+  Pointer<Uint32>,
+  int,
+  Pointer<Uint32>,
+);
 
-typedef _StartServiceNative =
-    Int32 Function(IntPtr, Uint32, Pointer<Pointer<Utf16>>);
+typedef _StartServiceNative = Int32 Function(
+  IntPtr,
+  Uint32,
+  Pointer<Pointer<Utf16>>,
+);
 typedef _StartServiceDart = int Function(int, int, Pointer<Pointer<Utf16>>);
 
 typedef _CloseHandleNative = Int32 Function(IntPtr);
@@ -131,7 +154,7 @@ class _Scm {
       .lookupFunction<_OpenServiceNative, _OpenServiceDart>('OpenServiceW');
   late final _QueryStatusDart queryStatus = _advapi
       .lookupFunction<_QueryStatusNative, _QueryStatusDart>(
-        'QueryServiceStatus',
+        'QueryServiceStatusEx',
       );
   late final _StartServiceDart startService = _advapi
       .lookupFunction<_StartServiceNative, _StartServiceDart>('StartServiceW');
@@ -147,6 +170,7 @@ ServiceProbe _probe(String serviceName) {
   final _Scm scm = _Scm();
   final Pointer<Utf16> name = serviceName.toNativeUtf16();
   final Pointer<Uint32> status = calloc<Uint32>(_serviceStatusDwords);
+  final Pointer<Uint32> needed = calloc<Uint32>();
   int manager = 0;
   int service = 0;
 
@@ -174,7 +198,14 @@ ServiceProbe _probe(String serviceName) {
       };
     }
 
-    if (scm.queryStatus(service, status) == 0) {
+    if (scm.queryStatus(
+          service,
+          0,
+          status,
+          _serviceStatusDwords * sizeOf<Uint32>(),
+          needed,
+        ) ==
+        0) {
       return ServiceProbe(
         WindowsServiceState.unknown,
         detail: '查询服务状态失败（Win32 错误 ${scm.lastError()}）',
@@ -187,7 +218,7 @@ ServiceProbe _probe(String serviceName) {
       _stateStopPending => WindowsServiceState.stopping,
       _stateStopped => WindowsServiceState.stopped,
       _ => WindowsServiceState.unknown,
-    });
+    }, processId: status[7]);
   } finally {
     if (service != 0) {
       scm.closeServiceHandle(service);
@@ -196,6 +227,7 @@ ServiceProbe _probe(String serviceName) {
       scm.closeServiceHandle(manager);
     }
     calloc.free(status);
+    calloc.free(needed);
     malloc.free(name);
   }
 }

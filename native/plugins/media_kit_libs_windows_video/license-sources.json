@@ -1,0 +1,30 @@
+{
+  "mpv-windows Copyright": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/0f78584/Copyright",
+    "sha256": "ca8f78358716ff15098bf681e07d508007e4e5f1bbcbefc5d859bef55559d00d"
+  },
+  "mpv GPL": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/f4d13e1c2c91f3a56e589aef9cb44cbc02e26e47/LICENSE.GPL",
+    "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+  },
+  "mpv LGPL": {
+    "url": "https://raw.githubusercontent.com/mpv-player/mpv/f4d13e1c2c91f3a56e589aef9cb44cbc02e26e47/LICENSE.LGPL",
+    "sha256": "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
+  },
+  "FFmpeg-windows Copyright": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/8d940a07d/LICENSE.md",
+    "sha256": "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2"
+  },
+  "FFmpeg GPL-3.0": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.GPLv3",
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+  },
+  "FFmpeg LGPL-2.1": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.LGPLv2.1",
+    "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+  },
+  "FFmpeg LGPL-3.0": {
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/d32b387f2b0a484599d4587d651891f0c63c4238/COPYING.LGPLv3",
+    "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+  }
+}

@@ -1,3 +1,5 @@
+import '../../l10n/l10n.dart';
+
 class TicketSummary {
   const TicketSummary({
     required this.id,
@@ -47,7 +49,7 @@ class TicketMessage {
       id: (json['id'] as num).toInt(),
       isAdmin: isAdmin,
       // 旧面板未下发 user_name 时回退，避免空白
-      userName: rawName.isNotEmpty ? rawName : (isAdmin ? '管理员' : '我'),
+      userName: rawName.isNotEmpty ? rawName : L10n.t(isAdmin ? '管理员' : '我'),
       content: json['content'] as String? ?? '',
       datetime: json['datetime'] as String? ?? '',
     );

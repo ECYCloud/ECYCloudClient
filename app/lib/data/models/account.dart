@@ -1107,6 +1107,7 @@ class SubscriptionConfig {
     required this.customizableGroups,
     required this.allGroupNames,
     required this.groupIcons,
+    this.groupLabels = const <String, String>{},
     required this.availableProxyNames,
     required this.allowCustomHosts,
     required this.allowCustomRules,
@@ -1129,6 +1130,7 @@ class SubscriptionConfig {
   final List<String> customizableGroups;
   final List<String> allGroupNames;
   final Map<String, String> groupIcons;
+  final Map<String, String> groupLabels;
   final List<String> availableProxyNames;
   final bool allowCustomHosts;
   final bool allowCustomRules;
@@ -1161,6 +1163,11 @@ class SubscriptionConfig {
       customizableGroups: _stringList(json['customizable_groups']),
       allGroupNames: _stringList(json['all_group_names']),
       groupIcons: groupIcons,
+      groupLabels: <String, String>{
+        if (json['group_labels'] case final Map<String, dynamic> labels)
+          for (final MapEntry<String, dynamic> entry in labels.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+      },
       availableProxyNames: _orderedAvailableProxyNames(
         _stringList(json['available_proxy_names']),
       ),

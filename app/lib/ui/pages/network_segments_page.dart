@@ -7,6 +7,8 @@ import '../../state/connection_controller.dart';
 import '../app_scope.dart';
 import '../theme.dart';
 import '../widgets/tag_chip.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_text_field.dart';
 
 Future<void> openSystemProxyBypass(BuildContext context) {
   final AppScope scope = AppScope.of(context);
@@ -23,7 +25,8 @@ Future<void> openSystemProxyBypass(BuildContext context) {
     items: settings.systemProxyBypass,
     lockedItems: defaultSystemProxyBypass(scope.platform.platformId),
     lockedLabel: L10n.t('默认绕过'),
-    validate: (String value) => isSystemProxyBypass(scope.platform.platformId, value)
+    validate: (String value) =>
+        isSystemProxyBypass(scope.platform.platformId, value)
         ? null
         : L10n.t('仅支持主机名、IP、CIDR 或通配'),
     onSave: (List<String> value) => connection.updateSettings(
@@ -77,7 +80,17 @@ Future<void> editNetworkSegments(
   if (next == null) {
     return;
   }
-  await onSave(next);
+  String message = L10n.t('保存成功');
+  try {
+    await onSave(next);
+  } on Object catch (e) {
+    message = L10n.t('保存失败：{0}', <Object>[e]);
+  }
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
 }
 
 class NetworkSegmentsPage extends StatefulWidget {
@@ -169,14 +182,11 @@ class _NetworkSegmentsPageState extends State<NetworkSegmentsPage> {
       color: scheme.onSurfaceVariant,
     );
 
-    return Scaffold(
+    return AppScaffold(
       appBar: AppBar(
         title: Text(widget.title),
         actions: <Widget>[
-          FilledButton(
-            onPressed: _save,
-            child: Text(L10n.t('保存')),
-          ),
+          FilledButton(onPressed: _save, child: Text(L10n.t('保存'))),
         ],
       ),
       body: ListView(
@@ -219,8 +229,7 @@ class _NetworkSegmentsPageState extends State<NetworkSegmentsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Expanded(
-                child: TextField(
-                  contextMenuBuilder: AppTheme.editableTextMenu,
+                child: AppTextField(
                   controller: _input,
                   decoration: AppTheme.controlDecoration(
                     hintText: widget.hintText,

@@ -141,7 +141,7 @@ function updateTile(initial, check) {
 
 function kernelUpdateText(res) {
 	if (!res || !res.ok)
-		return _('Check failed: %s').format((res && res.msg) || _('Request failed'));
+		return _('Check failed: %s').format(api.messageText((res && res.msg) || _('Request failed')));
 	if (!res.current)
 		return _('Local version unknown, latest (%s)').format(res.latest);
 	if (res.outdated)
@@ -272,7 +272,7 @@ return view.extend({
 
 		o = s.option(form.Flag, 'ipv6', _('IPv6'),
 			_('Handle IPv6 traffic as well.'));
-		o.default = '1';
+		o.default = '0';
 		o.rmempty = false;
 		api.skinFlag(o);
 
@@ -298,7 +298,7 @@ return view.extend({
 		o = s.option(form.ListValue, '_ui_language', _('Language'));
 		o.value('zh_CN', '简体中文');
 		o.value('zh_TW', '繁體中文');
-		o.value('en', 'English');
+		o.value('en-US', 'English');
 		o.rmempty = false;
 		o.cfgvalue = function() {
 			return api.resolveLang();
@@ -323,6 +323,7 @@ return view.extend({
 		api.skinValue(o);
 
 		o = s.option(form.ListValue, 'log_level', _('Log level'));
+		o.description = _('Client log level; kernel uses info for connection diagnostics.');
 		o.value('silent', 'silent');
 		o.value('error', 'error');
 		o.value('warning', 'warning');
@@ -428,6 +429,14 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'config', 'ecycloud', _('About'));
 		s.addremove = false;
+
+		dummyOption(s, '_terms', _('Terms of Service'), null, function() {
+			return E('a', { href: status.site + '/tos', target: '_blank', rel: 'noreferrer' }, [ _('Terms of Service') ]);
+		});
+
+		dummyOption(s, '_privacy', _('Privacy Policy'), null, function() {
+			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy Policy') ]);
+		});
 
 		o = s.option(form.DummyValue, '_version', _('Current version'));
 		o.cfgvalue = function() {

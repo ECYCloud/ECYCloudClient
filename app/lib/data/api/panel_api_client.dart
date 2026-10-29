@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:crypto/crypto.dart';
 
 import '../../core/logger.dart';
+import '../../l10n/l10n.dart';
 import '../models/account.dart';
 import '../models/announcement.dart';
 import '../models/online_device.dart';
@@ -19,12 +22,14 @@ class LoginResult {
     this.expiresAt, {
     this.profile,
     this.accountStatus,
+    this.message = '',
   });
 
   final String token;
   final DateTime expiresAt;
   final UserProfile? profile;
   final AccountStatus? accountStatus;
+  final String message;
 
   bool get isRestricted {
     final AccountStatus? status = accountStatus;
@@ -39,16 +44,36 @@ class RemoteProfile {
     required this.groupIcons,
     required this.nodeLabels,
     required this.flagRegex,
+    this.groupLabels = const <String, String>{},
+    this.offlineIssuedAt,
+    this.offlineUntil,
+    this.cacheBinding = '',
   });
 
   final Map<String, dynamic> config;
   final String revision;
+  final DateTime? offlineIssuedAt;
+  final DateTime? offlineUntil;
+  final String cacheBinding;
+
+  bool usableOffline(PanelApiClient api, {DateTime? now}) {
+    final DateTime time = now ?? DateTime.now();
+    final DateTime? issued = offlineIssuedAt;
+    final DateTime? until = offlineUntil;
+    return issued != null &&
+        until != null &&
+        !time.isBefore(issued) &&
+        time.isBefore(until) &&
+        cacheBinding.isNotEmpty &&
+        cacheBinding == api.cacheBinding;
+  }
 
   /// 面板 Clash 模板 x-sspanel.group_icons
   final Map<String, String> groupIcons;
 
   /// 内核只用 proxy 名；界面显示靠这张表
   final Map<String, String> nodeLabels;
+  final Map<String, String> groupLabels;
 
   /// 面板 flag_regex 原文（PHP 形态）
   final String flagRegex;
@@ -94,10 +119,7 @@ class SpeedTestDenied {
 }
 
 class SpeedTestReserveResult {
-  const SpeedTestReserveResult({
-    required this.allowed,
-    required this.denied,
-  });
+  const SpeedTestReserveResult({required this.allowed, required this.denied});
 
   final List<String> allowed;
   final List<SpeedTestDenied> denied;
@@ -132,8 +154,17 @@ class PanelApiClient {
   static const String _source = 'api';
   static const Duration _timeout = Duration(seconds: 20);
 
+  static const int _maxConnectAttempts = 3;
+
+  // 这一层只兜「瞬时打不通」，必须短：启动时 auth.restore() 的账户状态查询就走这条
+  // 路，而界面在它返回之前一直停在启动图上。网络迟迟不就绪那种情况由
+  // ConnectionController.autoConnect() 的秒级退避负责，不在这里等。
+  static const Duration _connectRetryDelay = Duration(milliseconds: 400);
+
   /// TUN 会把解析劫持成 fake-ip，面板域名 A 记录缓存复用，勿每请求重解
   static const Duration _directTtl = Duration(minutes: 5);
+
+  static const Duration _lookupTimeout = Duration(seconds: 3);
 
   final String baseUrl;
   final String configBaseUrl;
@@ -150,6 +181,21 @@ class PanelApiClient {
   int? _proxyPort;
 
   String? token;
+
+  String get cacheBinding => token == null || token!.isEmpty
+      ? ''
+      : sha256
+            .convert(
+              utf8.encode(
+                jsonEncode(<String>[
+                  _originOf(baseUrl),
+                  _originOf(configBaseUrl),
+                  device.deviceId,
+                  token!,
+                ]),
+              ),
+            )
+            .toString();
 
   bool reportConnected = false;
 
@@ -237,6 +283,7 @@ class PanelApiClient {
     _sentNodeUsed = nodeUsed || _nodeUsedPending;
     return <String, String>{
       'Accept': 'application/json',
+      'Accept-Language': contentLanguage,
       'User-Agent':
           'ECYCloud/${_uaVersion(device.appVersion)} (${_uaPlatform(device.platform)})',
       // 设备信息须随请求刷新，否则升级后面板一直是旧值
@@ -254,6 +301,8 @@ class PanelApiClient {
       if (reportConnected || _sentNodeUsed) 'X-ECY-Node-Used': '1',
     };
   }
+
+  String get contentLanguage => L10n.current.contentLanguage;
 
   // HTTP 头只保证 ASCII；非 ASCII 须 encode，面板 rawurldecode 还原
   static String _headerText(String value) => Uri.encodeComponent(value);
@@ -276,14 +325,16 @@ class PanelApiClient {
     required String password,
     String? twoFactorCode,
   }) async {
-    final Map<String, dynamic> data =
-        await _post('/auth/login', <String, dynamic>{
-          'email': email,
-          'passwd': password,
-          if (twoFactorCode != null && twoFactorCode.isNotEmpty)
-            'code': twoFactorCode,
-          ...device.toJson(),
-        });
+    final Map<String, dynamic> data = await _post(
+      '/auth/login',
+      <String, dynamic>{
+        'email': email,
+        'passwd': password,
+        if (twoFactorCode != null && twoFactorCode.isNotEmpty)
+          'code': twoFactorCode,
+        ...device.toJson(),
+      },
+    );
 
     return _loginResult(data);
   }
@@ -306,8 +357,12 @@ class PanelApiClient {
   Future<AuthOptions> fetchAuthOptions() async =>
       AuthOptions.fromJson(await _get('/auth/options'));
 
-  Future<String> fetchTos() async {
-    final Map<String, dynamic> data = await _get('/auth/tos');
+  Future<String> fetchTos() => _fetchLegalContent('/auth/tos');
+
+  Future<String> fetchPrivacyPolicy() => _fetchLegalContent('/auth/privacy');
+
+  Future<String> _fetchLegalContent(String path) async {
+    final Map<String, dynamic> data = await _get(path);
     return data['content'] as String? ?? '';
   }
 
@@ -322,16 +377,18 @@ class PanelApiClient {
     String code = '',
     String emailcode = '',
   }) async {
-    final Map<String, dynamic> data =
-        await _post('/auth/register', <String, dynamic>{
-          'name': name,
-          'email': email,
-          'passwd': passwd,
-          'repasswd': repasswd,
-          if (code.isNotEmpty) 'code': code,
-          if (emailcode.isNotEmpty) 'emailcode': emailcode,
-          ...device.toJson(),
-        });
+    final Map<String, dynamic> data = await _post(
+      '/auth/register',
+      <String, dynamic>{
+        'name': name,
+        'email': email,
+        'passwd': passwd,
+        'repasswd': repasswd,
+        if (code.isNotEmpty) 'code': code,
+        if (emailcode.isNotEmpty) 'emailcode': emailcode,
+        ...device.toJson(),
+      },
+    );
     return _loginResult(data);
   }
 
@@ -343,7 +400,7 @@ class PanelApiClient {
     required String password,
     required String repasswd,
   }) async {
-    final Map<String, dynamic> data = await _post(
+    final Map<String, dynamic> envelope = await _postEnvelope(
       '/auth/password-reset/confirm',
       <String, dynamic>{
         'token': token,
@@ -352,10 +409,13 @@ class PanelApiClient {
         ...device.toJson(),
       },
     );
-    return _loginResult(data);
+    return _loginResult(
+      envelope['data'] as Map<String, dynamic>,
+      message: envelope['msg'] as String,
+    );
   }
 
-  LoginResult _loginResult(Map<String, dynamic> data) {
+  LoginResult _loginResult(Map<String, dynamic> data, {String message = ''}) {
     final String token = data['token'] as String;
     this.token = token;
 
@@ -365,6 +425,7 @@ class PanelApiClient {
     return LoginResult(
       token,
       DateTime.parse(data['expires_at'] as String),
+      message: message,
       profile: userRaw is Map<String, dynamic>
           ? UserProfile.fromJson(userRaw)
           : null,
@@ -374,8 +435,17 @@ class PanelApiClient {
     );
   }
 
-  Future<AccountStatus> fetchAccountStatus() async =>
-      AccountStatus.fromJson(await _get('/user/account-status'));
+  /// 不重试：启动时 auth.restore() 第一件事就是它，界面在它返回之前停在启动图上。
+  /// 连不上不影响进界面（restore 会退回本地缓存并另行安排重试），多等两轮纯属白卡。
+  Future<AccountStatus> fetchAccountStatus() async => AccountStatus.fromJson(
+    _unwrap(
+      await _sendVia(
+        (http.Client client) =>
+            client.get(_endpoint('/user/account-status'), headers: _headers()),
+        retryUnreachable: false,
+      ),
+    ),
+  );
 
   Future<void> reportNodeUsed() async {
     markNodeUsed();
@@ -399,12 +469,11 @@ class PanelApiClient {
   Future<String> sendKillEmailCode() =>
       _postMsg('/user/send-kill-email-code', const <String, dynamic>{});
 
-  Future<AccountStatus> killAccount({String? emailCode, String? passwd}) async {
-    final Map<String, dynamic> envelope =
-        await _postEnvelope('/user/kill', <String, dynamic>{
-          'email_code': ?emailCode,
-          'passwd': ?passwd,
-        });
+  Future<AccountStatus> killAccount({String? emailCode}) async {
+    final Map<String, dynamic> envelope = await _postEnvelope(
+      '/user/kill',
+      <String, dynamic>{'email_code': ?emailCode},
+    );
     final Object? data = envelope['data'];
     if (data is Map<String, dynamic>) {
       return AccountStatus.fromJson(data);
@@ -425,7 +494,7 @@ class PanelApiClient {
     final Object? statusRaw = map['status'];
     final Object? userRaw = map['user'];
     return (
-      message: envelope['msg'] as String? ?? '账号状态已恢复正常。',
+      message: envelope['msg'] as String? ?? L10n.t('账号状态已恢复正常。'),
       status: statusRaw is Map<String, dynamic>
           ? AccountStatus.fromJson(statusRaw)
           : await fetchAccountStatus(),
@@ -468,7 +537,10 @@ class PanelApiClient {
     return _viaDirectThenProxy(
       run: (http.Client client) async {
         final http.Response response = await _send(
-          () => client.get(_endpoint('/user/online-devices'), headers: _headers()),
+          () => client.get(
+            _endpoint('/user/online-devices'),
+            headers: _headers(),
+          ),
         );
         final Object? data = _envelope(response)['data'];
         return <OnlineDevice>[
@@ -509,7 +581,10 @@ class PanelApiClient {
     final UserProfile profile = data is Map<String, dynamic>
         ? UserProfile.fromJson(data)
         : await fetchProfile();
-    return (message: envelope['msg'] as String? ?? '签到成功', profile: profile);
+    return (
+      message: envelope['msg'] as String? ?? L10n.t('签到成功'),
+      profile: profile,
+    );
   }
 
   Future<String> updateUsername(String newusername) =>
@@ -533,10 +608,13 @@ class PanelApiClient {
     <String, dynamic>{'old_emailcode': oldEmailcode},
   );
 
-  Future<String> sendNewEmailVerify({required String email}) => _postMsg(
-    '/user/send-new-email-verify',
-    <String, dynamic>{'email': email},
-  );
+  Future<String> sendNewEmailVerify({
+    required String email,
+    required String oldEmailcode,
+  }) => _postMsg('/user/send-new-email-verify', <String, dynamic>{
+    'email': email,
+    'old_emailcode': oldEmailcode,
+  });
 
   Future<String> updateEmail({
     required String newemail,
@@ -584,13 +662,17 @@ class PanelApiClient {
   Future<String> gaCheck(String code) =>
       _postMsg('/user/ga-check', <String, dynamic>{'code': code});
 
-  Future<String> gaSet(int enable) =>
-      _postMsg('/user/ga-set', <String, dynamic>{'enable': enable});
+  Future<String> gaSet(int enable, {String? passwd}) => _postMsg(
+    '/user/ga-set',
+    <String, dynamic>{'enable': enable, 'passwd': ?passwd},
+  );
 
-  Future<({String message, String gaToken, String gaUrl})> gaReset() async {
+  Future<({String message, String gaToken, String gaUrl})> gaReset({
+    String? passwd,
+  }) async {
     final Map<String, dynamic> envelope = await _postEnvelope(
       '/user/ga-reset',
-      const <String, dynamic>{},
+      <String, dynamic>{'passwd': ?passwd},
     );
     final Object? data = envelope['data'];
     final Map<String, dynamic> body = data is Map<String, dynamic>
@@ -652,10 +734,10 @@ class PanelApiClient {
     <String, dynamic>{'preferences': jsonEncode(preferences)},
   );
 
-  Future<SpeedTestReserveResult> reserveSpeedTest(List<String> proxyNames) async {
-    return _speedTest(
-      <String, dynamic>{'proxy_names': proxyNames},
-    );
+  Future<SpeedTestReserveResult> reserveSpeedTest(
+    List<String> proxyNames,
+  ) async {
+    return _speedTest(<String, dynamic>{'proxy_names': proxyNames});
   }
 
   Future<SpeedTestReserveResult> reportSpeedTest(
@@ -755,9 +837,7 @@ class PanelApiClient {
 
   /// 与网页 POST /user/profile/kick-device 同一业务
   Future<String> kickDevice(String deviceId) =>
-      _postMsg('/user/kick-device', <String, dynamic>{
-        'device_id': deviceId,
-      });
+      _postMsg('/user/kick-device', <String, dynamic>{'device_id': deviceId});
 
   Future<LoginLogListPage> fetchLoginLogs({
     int page = 1,
@@ -868,14 +948,51 @@ class PanelApiClient {
     );
   }
 
-  /// repeatable 为 false 时只在连接未建起时换代理重发，超时可能已处理完
+  /// 只重发 connectFailed：连接压根没建起来才保证服务端没收到，超时与 HTTP 错误
+  /// 重发会让下单、提交工单这类非幂等请求执行两次，也会把界面等待翻几倍
   Future<T> _viaDirectThenProxy<T>({
     required Future<T> Function(http.Client client) run,
     int? fallbackProxyPort,
     bool repeatable = true,
+    bool retryUnreachable = true,
+  }) async {
+    for (int attempt = 1; ; attempt++) {
+      try {
+        return await _sendOnce(
+          run: run,
+          proxyPort: fallbackProxyPort ?? this.fallbackProxyPort,
+          repeatable: repeatable,
+        );
+      } on ApiException catch (e) {
+        if (!e.connectFailed || !retryUnreachable) {
+          rethrow;
+        }
+        if (attempt >= _maxConnectAttempts) {
+          throw ApiException(
+            L10n.t('{0}（已自动重试 {1} 次仍连不上，请关闭软件后重新打开）', <Object>[
+              '$e',
+              _maxConnectAttempts,
+            ]),
+            connectFailed: true,
+          );
+        }
+        Logger.instance.warn(
+          _source,
+          '连接面板失败（$attempt/$_maxConnectAttempts），'
+          '${_connectRetryDelay.inMilliseconds} 毫秒后重试：${e.message}',
+        );
+        await Future<void>.delayed(_connectRetryDelay);
+      }
+    }
+  }
+
+  /// repeatable 为 false 时只在连接未建起时换代理重发，超时可能已处理完
+  Future<T> _sendOnce<T>({
+    required Future<T> Function(http.Client client) run,
+    required int? proxyPort,
+    required bool repeatable,
   }) async {
     await _ensureDirectAddresses();
-    final int? proxyPort = fallbackProxyPort ?? this.fallbackProxyPort;
     try {
       return await run(_direct);
     } on Object catch (directError) {
@@ -889,11 +1006,16 @@ class PanelApiClient {
 
   Future<RemoteProfile> _fetchClashProfileVia(http.Client client) async {
     final http.Response response = await _send(
-      () => client.get(_configEndpoint('/config/clash'), headers: _headers()),
+      () => client.get(
+        _configEndpoint('/config/clash'),
+        headers: <String, String>{..._headers(), 'X-ECY-Node-Providers': '1'},
+      ),
     );
     final Map<String, dynamic> data = _unwrap(response);
     final Object? icons = data['group_icons'];
     final Object? labels = data['node_labels'];
+    final Object? groupLabels = data['group_labels'];
+    final Object? authorization = data['offline_authorization'];
 
     final Object? raw = data['config'];
     if (raw is! Map) {
@@ -908,12 +1030,28 @@ class PanelApiClient {
           for (final MapEntry<String, dynamic> entry in icons.entries)
             if (entry.value is String) entry.key: entry.value as String,
       },
+      groupLabels: <String, String>{
+        if (groupLabels is Map<String, dynamic>)
+          for (final MapEntry<String, dynamic> entry in groupLabels.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+      },
       nodeLabels: <String, String>{
         if (labels is Map<String, dynamic>)
           for (final MapEntry<String, dynamic> entry in labels.entries)
             if (entry.value is String) entry.key: entry.value as String,
       },
       flagRegex: data['flag_regex'] as String? ?? '',
+      offlineIssuedAt: authorization is Map && authorization['issued_at'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (authorization['issued_at'] as int) * 1000,
+            )
+          : null,
+      offlineUntil: authorization is Map && authorization['valid_until'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (authorization['valid_until'] as int) * 1000,
+            )
+          : null,
+      cacheBinding: cacheBinding,
     );
   }
 
@@ -978,7 +1116,7 @@ class PanelApiClient {
       }
       return SecureSocket.startConnect(connectHost, uri.port);
     };
-    return IOClient(raw);
+    return _PanelHttpClient(raw);
   }
 
   static Future<List<InternetAddress>> _lookupRoutable(String host) async {
@@ -987,12 +1125,16 @@ class PanelApiClient {
       return <InternetAddress>[literal];
     }
     try {
-      final List<InternetAddress> found = await InternetAddress.lookup(host);
+      // InternetAddress.lookup 自身没有超时。TUN 把 DNS 劫持进黑洞时它能挂住几十秒，
+      // 而启动画面正等着 auth.restore() 返回。解析不出来不影响功能：_directHttpClient
+      // 在 bind 为空时直接按域名连，仍走系统解析
+      final List<InternetAddress> found = await InternetAddress.lookup(host)
+          .timeout(_lookupTimeout);
       return <InternetAddress>[
         for (final InternetAddress address in found)
           if (!_isClashFakeIp(address)) address,
       ];
-    } on SocketException {
+    } on Exception {
       return const <InternetAddress>[];
     }
   }
@@ -1005,8 +1147,9 @@ class PanelApiClient {
     return bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19);
   }
 
-  static http.Client _proxyHttpClient(int port) =>
-      IOClient(HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port');
+  static http.Client _proxyHttpClient(int port) => _PanelHttpClient(
+    HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port',
+  );
 
   Future<AnnouncementBundle> fetchAnnouncements() async =>
       AnnouncementBundle.fromJson(await _get('/announcements'));
@@ -1046,6 +1189,35 @@ class PanelApiClient {
   }
 
   Future<TicketUploadResult> uploadTicketAttachment(String filePath) async {
+    final String name = filePath.replaceAll('\\', '/').split('/').last;
+    final Map<String, dynamic> prepared = await _post('/tickets/upload', {
+      'prepare': 1,
+      'name': name,
+    });
+    if (prepared['direct'] == 1) {
+      final String uploadUrl = prepared['upload_url'] as String? ?? '';
+      final String token = prepared['token'] as String? ?? '';
+      final String url = prepared['url'] as String? ?? '';
+      if (uploadUrl.isEmpty || token.isEmpty || url.isEmpty) {
+        throw ApiException(L10n.t('上传失败'));
+      }
+      final http.Response uploaded = await _sendVia((http.Client client) async {
+        final File file = File(filePath);
+        final _PanelRequest request =
+            _PanelRequest.file(file, Uri.parse(uploadUrl), await file.length())
+              ..headers.addAll(<String, String>{
+                'Content-Type': 'application/octet-stream',
+                'X-Files-Token': token,
+              });
+        return http.Response.fromStream(await client.send(request));
+      }, repeatable: false);
+      _envelope(uploaded);
+      return TicketUploadResult(
+        url: url,
+        originalName: prepared['originalName'] as String? ?? name,
+        kind: prepared['kind'] as String? ?? 'file',
+      );
+    }
     return _viaDirectThenProxy(
       repeatable: false,
       run: (http.Client client) async {
@@ -1057,9 +1229,7 @@ class PanelApiClient {
         request.headers.addAll(_headers());
         request.files.add(await http.MultipartFile.fromPath('file', filePath));
         try {
-          final http.StreamedResponse streamed = await client
-              .send(request)
-              .timeout(const Duration(seconds: 120));
+          final http.StreamedResponse streamed = await client.send(request);
           final http.Response response = await http.Response.fromStream(
             streamed,
           );
@@ -1067,7 +1237,7 @@ class PanelApiClient {
         } on ApiException {
           rethrow;
         } on Exception catch (e) {
-          throw ApiException('上传失败：$e');
+          throw ApiException(L10n.t('上传失败：{0}', <Object>[e]));
         }
       },
     );
@@ -1242,9 +1412,11 @@ class PanelApiClient {
   Future<http.Response> _sendVia(
     Future<http.Response> Function(http.Client client) request, {
     bool repeatable = true,
+    bool retryUnreachable = true,
   }) {
     return _viaDirectThenProxy(
       repeatable: repeatable,
+      retryUnreachable: retryUnreachable,
       run: (http.Client client) => _send(() => request(client)),
     );
   }
@@ -1253,15 +1425,25 @@ class PanelApiClient {
   Map<String, dynamic> _envelopeAllowRetZero(http.Response response) {
     Map<String, dynamic>? payload;
     try {
-      payload =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final Object? decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is Map<String, dynamic>) payload = decoded;
     } on FormatException {
       payload = null;
     }
     if (payload == null) {
       throw ApiException(
-        '面板返回了非预期的内容（HTTP ${response.statusCode}）',
+        L10n.t('面板返回了非预期的内容（HTTP {0}）', <Object>[response.statusCode]),
         statusCode: response.statusCode,
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        payload['msg'] is String
+            ? payload['msg'] as String
+            : L10n.t('请求失败（HTTP {0}）', <Object>[response.statusCode]),
+        statusCode: response.statusCode,
+        ret: payload['ret'] is num ? (payload['ret'] as num).toInt() : 0,
+        retryAfterSeconds: _retryAfterSeconds(response),
       );
     }
     return payload;
@@ -1269,11 +1451,14 @@ class PanelApiClient {
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {
     try {
-      return await request().timeout(_timeout);
+      return await request();
+    } on ApiException {
+      rethrow;
     } on Exception catch (e) {
       throw ApiException(
-        '无法连接面板，请检查网络或面板地址：$e',
+        L10n.t('无法连接面板，请检查网络或面板地址：{0}', <Object>[e]),
         connectFailed: _isConnectFailure(e),
+        transportFailure: true,
       );
     }
   }
@@ -1289,25 +1474,12 @@ class PanelApiClient {
 
   /// 商店成功文案在 msg 里，需要整个信封
   Map<String, dynamic> _envelope(http.Response response) {
-    Map<String, dynamic>? payload;
-    try {
-      payload =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-    } on FormatException {
-      payload = null;
-    }
-
-    if (payload == null) {
-      throw ApiException(
-        '面板返回了非预期的内容（HTTP ${response.statusCode}）',
-        statusCode: response.statusCode,
-      );
-    }
-
+    final Map<String, dynamic> payload = _envelopeAllowRetZero(response);
     final int ret = (payload['ret'] as num?)?.toInt() ?? 0;
     if (ret != 1) {
       throw ApiException(
-        payload['msg'] as String? ?? '请求失败（HTTP ${response.statusCode}）',
+        payload['msg'] as String? ??
+            L10n.t('请求失败（HTTP {0}）', <Object>[response.statusCode]),
         statusCode: response.statusCode,
         ret: ret,
         retryAfterSeconds: _retryAfterSeconds(response),
@@ -1326,5 +1498,95 @@ class PanelApiClient {
     _proxy?.close();
     _proxy = null;
     _proxyPort = null;
+  }
+}
+
+class _PanelHttpClient extends http.BaseClient {
+  _PanelHttpClient(HttpClient raw) : _inner = IOClient(raw);
+
+  static const int _maxResponseBytes = 8 * 1024 * 1024;
+  final IOClient _inner;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final Completer<void> abort = Completer<void>();
+    final Duration timeout =
+        request is http.MultipartRequest || request is _PanelRequest
+        ? const Duration(seconds: 120)
+        : PanelApiClient._timeout;
+    final Timer timer = Timer(timeout, abort.complete);
+    try {
+      final http.StreamedResponse response = await _inner
+          .send(_PanelRequest(request, abort.future))
+          .timeout(timeout);
+      return http.StreamedResponse(
+        _readResponse(response, abort, timer),
+        response.statusCode,
+        contentLength: response.contentLength,
+        request: request,
+        headers: response.headers,
+        isRedirect: response.isRedirect,
+        persistentConnection: response.persistentConnection,
+        reasonPhrase: response.reasonPhrase,
+      );
+    } on Object {
+      timer.cancel();
+      if (!abort.isCompleted) abort.complete();
+      rethrow;
+    }
+  }
+
+  Stream<List<int>> _readResponse(
+    http.StreamedResponse response,
+    Completer<void> abort,
+    Timer timer,
+  ) async* {
+    int bytes = 0;
+    try {
+      await for (final List<int> chunk in response.stream) {
+        bytes += chunk.length;
+        if (bytes > _maxResponseBytes) {
+          throw ApiException(
+            L10n.t('面板响应超过 8 MiB 限制'),
+            statusCode: response.statusCode,
+          );
+        }
+        yield chunk;
+      }
+    } finally {
+      timer.cancel();
+      if (!abort.isCompleted) abort.complete();
+    }
+  }
+
+  @override
+  void close() => _inner.close();
+}
+
+class _PanelRequest extends http.BaseRequest with http.Abortable {
+  _PanelRequest.file(File file, Uri url, int length)
+    : _body = http.ByteStream(file.openRead(0, length)),
+      abortTrigger = null,
+      super('POST', url) {
+    contentLength = length;
+  }
+
+  _PanelRequest(http.BaseRequest request, this.abortTrigger)
+    : _body = request.finalize(),
+      super(request.method, request.url) {
+    contentLength = request.contentLength;
+    headers.addAll(request.headers);
+    followRedirects = false;
+    persistentConnection = request.persistentConnection;
+  }
+
+  final http.ByteStream _body;
+  @override
+  final Future<void>? abortTrigger;
+
+  @override
+  http.ByteStream finalize() {
+    super.finalize();
+    return _body;
   }
 }

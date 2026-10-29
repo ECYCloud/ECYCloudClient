@@ -9,6 +9,7 @@
 | Linux（deb） | Debian 12+ / Ubuntu 22.04+ 及衍生版 | x64 / arm64 | `linux-x64.deb` / `linux-arm64.deb` |
 | Linux（rpm） | Fedora 36+ / openSUSE Leap 15.6+ / RHEL 10+ 系 | x64 / arm64 | `linux-x64.rpm` / `linux-arm64.rpm` |
 | Linux（tar.gz） | 其它带 systemd 与 GTK3 的发行版（Arch 等），glibc 2.35+ | x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` |
+| Linux（AppImage） | 同 tar.gz，另需 polkit（`pkexec`）；首次运行授权安装到 `/opt/ecycloud` | x64 / arm64 | `linux-x64.AppImage` / `linux-arm64.AppImage` |
 | Android | 7.0（API 24）；含 Android TV（同一 APK） | arm64-v8a / armeabi-v7a / x86_64（按 ABI 分包） | `android-arm64.apk` / `android-arm.apk` / `android-x64.apk` |
 | OpenWrt | **23.05 / 24.10**（ipk）、**25.12**（apk）；要求 fw4 / nftables | 插件 noarch；内核按机型 | `openwrt-23.05.tar.gz` / `openwrt-24.10.tar.gz` / `openwrt-25.12.tar.gz` |
 
@@ -16,7 +17,7 @@
 
 各端安装与完整卸载见 [INSTALL.md](INSTALL.md)。
 
-客户端每 24 小时检查一次自身与 mihomo 内核的更新，发现新版会在界面上提示，也可在设置 - 关于里手动检查：客户端更新会下载安装包并校验 SHA-256 后启动安装程序；内核更新由后台服务就地替换，Android 的内核随应用整包更新，不单独升级。Linux 的 tar.gz 形态没有能接手的安装器，只提示新版本并给出发布页入口，需自行下载后重跑 `install.sh`。
+客户端每 24 小时检查一次自身与 mihomo 内核的更新，发现新版会在界面上提示，也可在设置 - 关于里手动检查：客户端更新会下载安装包并校验 SHA-256 后启动安装程序；内核更新由后台服务就地替换，Android 的内核随应用整包更新，不单独升级。Linux 的 tar.gz 与 AppImage 形态没有能接手的安装器，只提示新版本并给出发布页入口，需自行下载后重跑 `install.sh` 或新的 AppImage。
 
 ## OpenWrt 插件
 
@@ -53,7 +54,7 @@ pwsh scripts/build-windows.ps1 -Arch x64 -Installer
 ./scripts/build-macos.sh --arch arm64 --version 1.0.1 --package
 
 # Linux：另需 GTK3 与 libayatana-appindicator 开发包；打包用 dpkg-deb 与 rpmbuild
-# 默认出 deb / rpm / tar.gz 三种，--format deb,rpm,tar 可只出其中几种
+# 默认出 deb / rpm / tar.gz / AppImage 四种，--format deb,rpm,tar,appimage 可只出其中几种
 ./scripts/build-linux.sh --arch x64 --version 1.0.1 --package
 
 # Android：另需 JDK 17、Android SDK + NDK（版本见 app/android/app/build.gradle.kts；首次会现编 libmihomo.aar）

@@ -6,6 +6,7 @@
 
 var LINES = 300;
 var LEVELS = [ 'debug', 'info', 'warning', 'error' ];
+var SOURCE = /^\[(?:TCP|UDP)\] (\[[^\]]+\]:\d+|[^\s(]+:\d+)/;
 
 function lineLevel(line) {
 	var body = line.indexOf(' msg=');
@@ -85,6 +86,22 @@ function logText(data) {
 	return data.log || '';
 }
 
+function inboundTypes(conns) {
+	var store = api.ingestConnections((conns && conns.connections) || []);
+	var types = {};
+
+	store.closed.slice().reverse().concat(store.active).forEach(function(item) {
+		if (item.inbound)
+			types[api.connectionSource(item)] = item.inbound;
+	});
+
+	return types;
+}
+
+function fetchLogs() {
+	return Promise.all([ api.logs(LINES), api.connections() ]);
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
@@ -96,15 +113,16 @@ return view.extend({
 		return api.status().then(function(status) {
 			self.signedIn = api.signedIn(status);
 			if (!self.signedIn)
-				return '';
+				return [ '', null ];
 
-			return api.logs(LINES);
+			return fetchLogs();
 		});
 	},
 
 	entries: function() {
 		var keyword = (this.keyword || '').toLowerCase();
 		var level = this.level || '';
+		var types = this.inbound || {};
 
 		return (this.raw || '').split('\n').filter(function(line) {
 			return line.length > 0;
@@ -115,7 +133,11 @@ return view.extend({
 			if (!keyword)
 				return true;
 
-			return (entry.source + ' ' + entry.message).toLowerCase().indexOf(keyword) != -1;
+			var source = SOURCE.exec(entry.message);
+			var inbound = (source && types[source[1]]) || '';
+
+			return [ entry.level, entry.time, entry.source, entry.message, inbound ].join(' ')
+				.toLowerCase().indexOf(keyword) != -1;
 		}).reverse();
 	},
 
@@ -129,6 +151,7 @@ return view.extend({
 		}
 
 		var rows = this.entries();
+		var types = this.inbound || {};
 
 		this.count.textContent = _('%d entries').format(rows.length);
 		this.paintFilter();
@@ -141,11 +164,17 @@ return view.extend({
 		}
 
 		dom.content(this.body, E('div', { 'class': 'ecycloud-list' }, rows.map(function(entry) {
+			var source = SOURCE.exec(entry.message);
+			var inbound = source && types[source[1]];
+
 			return E('div', { 'class': 'ecycloud-log is-' + entry.level }, [
 				E('span', { 'class': 'ecycloud-chip' }, [ entry.level ]),
 				E('span', { 'class': 'ecycloud-log-time' }, [ entry.time ]),
 				E('span', { 'class': 'ecycloud-log-src' }, [ entry.source ]),
-				E('span', { 'class': 'ecycloud-log-msg' }, [ entry.message ])
+				E('span', { 'class': 'ecycloud-log-msg' }, [
+					inbound ? E('span', { 'class': 'ecycloud-tag' }, [ inbound ]) : '',
+					entry.message
+				])
 			]);
 		})));
 	},
@@ -165,12 +194,13 @@ return view.extend({
 		));
 	},
 
-	update: function(log) {
-		this.raw = logText(log);
+	update: function(data) {
+		this.raw = logText(data[0]);
+		this.inbound = inboundTypes(data[1]);
 		this.paint();
 	},
 
-	render: function(log) {
+	render: function(data) {
 		var self = this;
 
 		return api.ensureStyle().then(function() {
@@ -179,7 +209,6 @@ return view.extend({
 
 			self.keyword = '';
 			self.level = '';
-			self.raw = logText(log);
 			self.body = E('div', {});
 			self.filterBar = E('div', {});
 			self.count = E('span', { 'class': 'ecycloud-count' }, [ '' ]);
@@ -192,7 +221,7 @@ return view.extend({
 				self.paint();
 			});
 
-			self.paint();
+			self.update(data);
 
 			poll.add(L.bind(function() {
 				var view = this;
@@ -205,7 +234,7 @@ return view.extend({
 						return;
 					}
 
-					return api.logs(LINES).then(L.bind(view.update, view));
+					return fetchLogs().then(L.bind(view.update, view));
 				});
 			}, self), 5);
 

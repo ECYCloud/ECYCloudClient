@@ -44,12 +44,7 @@ func openInternetSettings(sid string, access uint32) (registry.Key, error) {
 	return registry.OpenKey(registry.USERS, sid+`\`+internetSettingsKey, access)
 }
 
-func (p *proxyManager) set(port int, clientPID int, bypass []string) error {
-	sid, err := clientUserSID(clientPID)
-	if err != nil {
-		return err
-	}
-
+func (p *proxyManager) set(port int, clientPID int, sid string, bypass []string) error {
 	key, err := openInternetSettings(sid, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("打开用户 Internet 设置失败: %w", err)
@@ -116,10 +111,15 @@ func (p *proxyManager) restore() error {
 	}
 	defer key.Close()
 
-	restoreDWord(key, "ProxyEnable", snapshot.Enable)
-	restoreString(key, "ProxyServer", snapshot.Server)
-	restoreString(key, "ProxyOverride", snapshot.Override)
+	err = errors.Join(
+		restoreDWord(key, "ProxyEnable", snapshot.Enable),
+		restoreString(key, "ProxyServer", snapshot.Server),
+		restoreString(key, "ProxyOverride", snapshot.Override),
+	)
 	notifySettingsChanged()
+	if err != nil {
+		return fmt.Errorf("还原用户代理设置失败: %w", err)
+	}
 
 	return os.Remove(snapshotPath())
 }
@@ -130,23 +130,16 @@ type proxyState struct {
 	SnapshotPresent bool   `json:"snapshot_present"`
 }
 
-func (p *proxyManager) state(clientPID int) (proxyState, error) {
+func (p *proxyManager) state(sid string) (proxyState, error) {
 	state := proxyState{}
 
-	sid := ""
 	if snapshot, err := loadSnapshot(); err == nil {
 		state.SnapshotPresent = true
-		sid = snapshot.UserSID
+		if snapshot.UserSID != sid {
+			return state, fmt.Errorf("代理快照不属于当前系统账号")
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return state, err
-	}
-
-	if sid == "" {
-		resolved, err := clientUserSID(clientPID)
-		if err != nil {
-			return state, err
-		}
-		sid = resolved
 	}
 
 	key, err := openInternetSettings(sid, registry.QUERY_VALUE)
@@ -209,20 +202,26 @@ func saveSnapshot(snapshot proxySnapshot) error {
 	return os.WriteFile(snapshotPath(), data, 0o600)
 }
 
-func restoreDWord(key registry.Key, name string, value *uint32) {
+func restoreDWord(key registry.Key, name string, value *uint32) error {
 	if value == nil {
-		key.DeleteValue(name)
-		return
+		err := key.DeleteValue(name)
+		if errors.Is(err, registry.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
-	key.SetDWordValue(name, *value)
+	return key.SetDWordValue(name, *value)
 }
 
-func restoreString(key registry.Key, name string, value *string) {
+func restoreString(key registry.Key, name string, value *string) error {
 	if value == nil {
-		key.DeleteValue(name)
-		return
+		err := key.DeleteValue(name)
+		if errors.Is(err, registry.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
-	key.SetStringValue(name, *value)
+	return key.SetStringValue(name, *value)
 }
 
 // 不通知的话已运行的 WinINet 客户端不会重读代理设置

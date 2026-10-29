@@ -9,7 +9,6 @@ import '../../data/models/account.dart';
 import '../../state/auth_controller.dart';
 import '../app_scope.dart';
 import '../theme.dart';
-import '../widgets/overlay_scroll_view.dart';
 import '../widgets/option_dropdown.dart';
 import '../widgets/page_header.dart';
 import '../widgets/qr_card.dart';
@@ -17,6 +16,9 @@ import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import 'login_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_text_field.dart';
 
 class EditAccountPage extends StatefulWidget {
   const EditAccountPage({super.key});
@@ -41,6 +43,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
   int _gaEnableDraft = 0;
   bool _loadingOptions = true;
   bool _busy = false;
+  bool? _sendingOldEmail;
   int _oldEmailCountdown = 0;
   int _newEmailCountdown = 0;
   Timer? _oldCooldownTimer;
@@ -71,11 +74,13 @@ class _EditAccountPageState extends State<EditAccountPage> {
     super.dispose();
   }
 
+  bool _otherAccount(PanelApiClient? api) =>
+      !identical(api, AppScope.of(context).auth.api);
+
   Future<void> _loadOptions() async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
-    final AuthOptions? options = await AppScope.of(
-      context,
-    ).auth.fetchAuthOptions();
+    final AuthOptions? options = await AppScope.of(context).auth
+        .fetchAuthOptions();
     EditAccountOptions? edit;
     if (api != null) {
       try {
@@ -84,7 +89,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
         edit = null;
       }
     }
-    if (!mounted) {
+    if (!mounted || _otherAccount(api)) {
       return;
     }
     setState(() {
@@ -118,7 +123,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     try {
       final ({bool bound, String imValue, int telegramId}) result = await api
           .telegramBindCheck();
-      if (!mounted || !result.bound) {
+      if (!mounted || _otherAccount(api) || !result.bound) {
         return;
       }
       _tgPollTimer?.cancel();
@@ -140,10 +145,22 @@ class _EditAccountPageState extends State<EditAccountPage> {
     } on Object catch (_) {}
   }
 
+  Future<void> _sendEmailCode(
+    bool oldEmail,
+    Future<String> Function(PanelApiClient api) action,
+  ) async {
+    setState(() => _sendingOldEmail = oldEmail);
+    await _run(action, onSuccess: () => _startCountdown(oldEmail));
+    if (mounted) {
+      setState(() => _sendingOldEmail = null);
+    }
+  }
+
   Future<void> _run(
     Future<String> Function(PanelApiClient api) action, {
     VoidCallback? onSuccess,
     bool logoutAfter = false,
+    bool waitForAcknowledgement = false,
   }) async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
     if (api == null || _busy) {
@@ -152,23 +169,46 @@ class _EditAccountPageState extends State<EditAccountPage> {
     setState(() => _busy = true);
     try {
       final String msg = await action(api);
-      if (!mounted) {
+      if (!mounted || _otherAccount(api)) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg.isEmpty ? L10n.t('操作成功') : msg),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      onSuccess?.call();
-      if (logoutAfter) {
-        await AppScope.of(context).auth.logout();
+      if (waitForAcknowledgement) {
+        await AppScope.of(context).auth.logout(
+          beforeLogout: () => showDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext context) => PopScope(
+              canPop: false,
+              child: AppAlertDialog(
+                title: Text(L10n.t('修改成功')),
+                content: Text(L10n.t(msg)),
+                scrollable: true,
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(L10n.t('我知道了')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
       } else {
-        await AppScope.of(context).auth.refreshProfile();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg.isEmpty ? L10n.t('操作成功') : msg),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        onSuccess?.call();
+        if (logoutAfter) {
+          await AppScope.of(context).auth.logout();
+        } else {
+          await AppScope.of(context).auth.refreshProfile();
+        }
       }
     } on ApiException catch (e) {
-      if (!mounted) {
+      if (!mounted || _otherAccount(api)) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -200,10 +240,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
       return;
     }
     final int enable = _gaEnableDraft;
+    String? passwd;
     if (enable == 1) {
       final bool? confirmed = await showDialog<bool>(
         context: context,
-        builder: (BuildContext context) => AlertDialog(
+        builder: (BuildContext context) => AppAlertDialog(
           title: Text(L10n.t('您确定要开启两步验证吗？')),
           content: Text(L10n.t('开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。')),
           actions: <Widget>[
@@ -221,15 +262,53 @@ class _EditAccountPageState extends State<EditAccountPage> {
       if (confirmed != true || !mounted) {
         return;
       }
+    } else if (edit.gaEnable != 0) {
+      passwd = await _askGaPassword();
+      if (passwd == null || !mounted) {
+        return;
+      }
     }
     await _run(
-      (PanelApiClient api) => api.gaSet(enable),
+      (PanelApiClient api) => api.gaSet(enable, passwd: passwd),
       onSuccess: () {
         setState(() {
-          _editOptions = edit.copyWith(gaEnable: enable);
+          _editOptions = edit.copyWith(
+            gaEnable: enable,
+            gaToken: enable == 1 ? '' : edit.gaToken,
+            gaUrl: enable == 1 ? '' : edit.gaUrl,
+          );
           _gaEnableDraft = enable;
         });
+        if (enable == 0) {
+          unawaited(_reloadEditOptions());
+        }
       },
+    );
+  }
+
+  Future<void> _reloadEditOptions() async {
+    final PanelApiClient? api = AppScope.of(context).auth.api;
+    if (api == null) {
+      return;
+    }
+    try {
+      final EditAccountOptions edit = await api.fetchEditOptions();
+      if (!mounted || _otherAccount(api)) {
+        return;
+      }
+      setState(() {
+        _editOptions = edit;
+        _gaEnableDraft = edit.gaEnable;
+      });
+    } on Object {
+      return;
+    }
+  }
+
+  Future<String?> _askGaPassword() {
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const _GaPasswordDialog(),
     );
   }
 
@@ -239,11 +318,21 @@ class _EditAccountPageState extends State<EditAccountPage> {
     if (edit == null || api == null || _busy) {
       return;
     }
+    String? passwd;
+    if (edit.gaEnable != 0) {
+      passwd = await _askGaPassword();
+      if (passwd == null || !mounted) {
+        return;
+      }
+    }
     setState(() => _busy = true);
     try {
       final ({String message, String gaToken, String gaUrl}) result = await api
-          .gaReset();
-      if (!mounted) {
+          .gaReset(passwd: passwd);
+      if (!mounted || _otherAccount(api)) {
+        if (mounted) {
+          setState(() => _busy = false);
+        }
         return;
       }
       setState(() {
@@ -269,7 +358,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
         return;
       }
       setState(() => _busy = false);
-      if (!context.mounted) {
+      if (!context.mounted || _otherAccount(api)) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -282,49 +371,46 @@ class _EditAccountPageState extends State<EditAccountPage> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
+        return AppAlertDialog(
           title: Text(L10n.t('您确定要解除Telegram绑定吗？')),
-          content: OverlayScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text.rich(
-                  TextSpan(
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    children: <InlineSpan>[
-                      TextSpan(text: L10n.t('注意：您点击 ')),
-                      TextSpan(
-                        text: L10n.t('确定'),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.danger,
-                          fontWeight: FontWeight.w700,
-                        ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text.rich(
+                TextSpan(
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  children: <InlineSpan>[
+                    TextSpan(text: L10n.t('注意：您点击 ')),
+                    TextSpan(
+                      text: L10n.t('确定'),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.danger,
+                        fontWeight: FontWeight.w700,
                       ),
-                      TextSpan(
-                        text: L10n.t(' 按钮之后系统会解除你本站账号与Telegram Bot的绑定。'),
-                      ),
-                    ],
-                  ),
+                    ),
+                    TextSpan(
+                      text: L10n.t(' 按钮之后系统会解除你本站账号与Telegram Bot的绑定。'),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                L10n.t('解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。'),
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (edit.telegramUnbindKick) ...<Widget>[
                 const SizedBox(height: 10),
                 Text(
-                  L10n.t('解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。'),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (edit.telegramUnbindKick) ...<Widget>[
-                  const SizedBox(height: 10),
-                  Text(
-                    L10n.t(
-                      '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。',
-                    ),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: AppTheme.danger),
+                  L10n.t(
+                    '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。',
                   ),
-                ],
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: AppTheme.danger),
+                ),
               ],
-            ),
+            ],
           ),
           actions: <Widget>[
             FilledButton(
@@ -351,7 +437,10 @@ class _EditAccountPageState extends State<EditAccountPage> {
     try {
       final ({String message, String bindToken}) result = await api
           .telegramReset();
-      if (!mounted) {
+      if (!mounted || _otherAccount(api)) {
+        if (mounted) {
+          setState(() => _busy = false);
+        }
         return;
       }
       setState(() {
@@ -379,7 +468,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
         return;
       }
       setState(() => _busy = false);
-      if (!context.mounted) {
+      if (!context.mounted || _otherAccount(api)) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -479,7 +568,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     final bool emailVerify = _options?.emailVerify == true;
     final EditAccountOptions? edit = _editOptions;
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -528,8 +617,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              TextField(
-                                contextMenuBuilder: AppTheme.editableTextMenu,
+                              AppTextField(
                                 controller: _username,
                                 decoration: InputDecoration(
                                   labelText: L10n.t('新用户名'),
@@ -592,8 +680,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                                 BuildContext context,
                                                 FocusNode focusNode,
                                               ) {
-                                                return TextField(
-                                                  contextMenuBuilder: AppTheme.editableTextMenu,
+                                                return AppTextField(
                                                   controller: _oldEmailCode,
                                                   focusNode: focusNode,
                                                   keyboardType: TextInputType
@@ -620,26 +707,33 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                               _busy || _oldEmailCountdown > 0
                                               ? null
                                               : () => unawaited(
-                                                  _run(
+                                                  _sendEmailCode(
+                                                    true,
                                                     (PanelApiClient api) => api
                                                         .sendOldEmailVerify(),
-                                                    onSuccess: () =>
-                                                        _startCountdown(true),
                                                   ),
                                                 ),
-                                          child: Text(
-                                            _oldEmailCountdown > 0
-                                                ? '${_oldEmailCountdown}s'
-                                                : L10n.t('发送'),
-                                          ),
+                                          child: _sendingOldEmail == true
+                                              ? const SizedBox(
+                                                  height: 18,
+                                                  width: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                )
+                                              : Text(
+                                                  _oldEmailCountdown > 0
+                                                      ? '${_oldEmailCountdown}s'
+                                                      : L10n.t('发送'),
+                                                ),
                                         ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
                                 ],
-                                TextField(
-                                  contextMenuBuilder: AppTheme.editableTextMenu,
+                                AppTextField(
                                   controller: _newEmail,
                                   keyboardType: TextInputType.emailAddress,
                                   decoration: InputDecoration(
@@ -660,8 +754,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                                 BuildContext context,
                                                 FocusNode focusNode,
                                               ) {
-                                                return TextField(
-                                                  contextMenuBuilder: AppTheme.editableTextMenu,
+                                                return AppTextField(
                                                   controller: _newEmailCode,
                                                   focusNode: focusNode,
                                                   keyboardType: TextInputType
@@ -688,21 +781,32 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                               _busy || _newEmailCountdown > 0
                                               ? null
                                               : () => unawaited(
-                                                  _run(
+                                                  _sendEmailCode(
+                                                    false,
                                                     (PanelApiClient api) =>
                                                         api.sendNewEmailVerify(
                                                           email: _newEmail.text
                                                               .trim(),
+                                                          oldEmailcode:
+                                                              _oldEmailCode.text
+                                                                  .trim(),
                                                         ),
-                                                    onSuccess: () =>
-                                                        _startCountdown(false),
                                                   ),
                                                 ),
-                                          child: Text(
-                                            _newEmailCountdown > 0
-                                                ? '${_newEmailCountdown}s'
-                                                : L10n.t('发送'),
-                                          ),
+                                          child: _sendingOldEmail == false
+                                              ? const SizedBox(
+                                                  height: 18,
+                                                  width: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                )
+                                              : Text(
+                                                  _newEmailCountdown > 0
+                                                      ? '${_newEmailCountdown}s'
+                                                      : L10n.t('发送'),
+                                                ),
                                         ),
                                       ),
                                     ],
@@ -727,6 +831,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                                         .text
                                                         .trim(),
                                                   ),
+                                              logoutAfter: true,
                                             ),
                                           ),
                                     child: Text(L10n.t('换绑邮箱')),
@@ -749,8 +854,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                       BuildContext context,
                                       FocusNode focusNode,
                                     ) {
-                                      return TextField(
-                                        contextMenuBuilder: AppTheme.editableTextMenu,
+                                      return AppTextField(
                                         controller: _oldPwd,
                                         focusNode: focusNode,
                                         obscureText: true,
@@ -773,8 +877,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                       BuildContext context,
                                       FocusNode focusNode,
                                     ) {
-                                      return TextField(
-                                        contextMenuBuilder: AppTheme.editableTextMenu,
+                                      return AppTextField(
                                         controller: _pwd,
                                         focusNode: focusNode,
                                         obscureText: true,
@@ -797,8 +900,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                       BuildContext context,
                                       FocusNode focusNode,
                                     ) {
-                                      return TextField(
-                                        contextMenuBuilder: AppTheme.editableTextMenu,
+                                      return AppTextField(
                                         controller: _repwd,
                                         focusNode: focusNode,
                                         obscureText: true,
@@ -840,7 +942,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                                   pwd: _pwd.text,
                                                   repwd: _repwd.text,
                                                 ),
-                                            logoutAfter: true,
+                                            waitForAcknowledgement: true,
                                           ),
                                         ),
                                   child: Text(L10n.t('修改密码')),
@@ -869,46 +971,61 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                const SizedBox(height: 12),
-                                if (edit.gaUrl.isNotEmpty)
+                                if (edit.gaUrl.isNotEmpty) ...<Widget>[
+                                  const SizedBox(height: 12),
                                   Center(child: QrCard(data: edit.gaUrl)),
+                                ],
+                                if (edit.gaToken.isNotEmpty) ...<Widget>[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    L10n.t('密钥：{0}', <Object>[edit.gaToken]),
+                                    textAlign: TextAlign.center,
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                                if (edit.gaToken.isNotEmpty ||
+                                    edit.gaUrl.isNotEmpty) ...<Widget>[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: <Widget>[
+                                      if (edit.gaUrl.isNotEmpty)
+                                        Expanded(
+                                          child: Text(
+                                            edit.gaUrl,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.bodySmall,
+                                          ),
+                                        )
+                                      else
+                                        const Spacer(),
+                                      if (edit.gaToken.isNotEmpty)
+                                        IconButton(
+                                          tooltip: L10n.t('复制密钥'),
+                                          onPressed: () => unawaited(
+                                            _copy(L10n.t('密钥'), edit.gaToken),
+                                          ),
+                                          icon: const Icon(Icons.key, size: 18),
+                                        ),
+                                      if (edit.gaUrl.isNotEmpty)
+                                        IconButton(
+                                          tooltip: L10n.t('复制 otpauth'),
+                                          onPressed: () => unawaited(
+                                            _copy(
+                                              L10n.t('otpauth 链接'),
+                                              edit.gaUrl,
+                                            ),
+                                          ),
+                                          icon: const Icon(
+                                            Icons.link,
+                                            size: 18,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
                                 const SizedBox(height: 8),
-                                SelectableText(
-                                  L10n.t('密钥：{0}', <Object>[edit.gaToken]),
-                                  textAlign: TextAlign.center,
-                                  contextMenuBuilder: AppTheme.editableTextMenu,
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Text(
-                                        edit.gaUrl,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodySmall,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: L10n.t('复制密钥'),
-                                      onPressed: () => unawaited(
-                                        _copy(L10n.t('密钥'), edit.gaToken),
-                                      ),
-                                      icon: const Icon(Icons.key, size: 18),
-                                    ),
-                                    IconButton(
-                                      tooltip: L10n.t('复制 otpauth'),
-                                      onPressed: () => unawaited(
-                                        _copy(L10n.t('otpauth 链接'), edit.gaUrl),
-                                      ),
-                                      icon: const Icon(Icons.link, size: 18),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                TextField(
-                                  contextMenuBuilder: AppTheme.editableTextMenu,
+                                AppTextField(
                                   controller: _gaCode,
                                   inputFormatters: <TextInputFormatter>[
                                     OtpCodeFormatter(),
@@ -1028,12 +1145,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                               ),
                                         ),
                                         const SizedBox(height: 8),
-                                        SelectableText(
+                                        Text(
                                           L10n.t('绑定码：{0}', <Object>[
                                             edit.bindToken,
                                           ]),
-                                          contextMenuBuilder:
-                                              AppTheme.editableTextMenu,
+
                                           style: theme.textTheme.bodySmall,
                                         ),
                                         const SizedBox(height: 8),
@@ -1062,9 +1178,9 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                                       final String url =
                                                           'https://t.me/${edit.telegramBot}?start=${edit.bindToken}';
                                                       unawaited(
-                                                        AppScope.of(
-                                                          context,
-                                                        ).platform.openUrl(url),
+                                                        AppScope.of(context)
+                                                            .platform
+                                                            .openUrl(url),
                                                       );
                                                     },
                                               icon: const Icon(
@@ -1099,6 +1215,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                     in _visibleMailKeys(edit))
                                   SwitchTile(
                                     contentPadding: EdgeInsets.zero,
+                                    toggleOnTap: true,
                                     title: entry.value,
                                     value: _mailPrefs[entry.key] ?? true,
                                     onChanged: (bool value) {
@@ -1192,6 +1309,67 @@ class _TelegramLink extends StatelessWidget {
         onPressed: () => unawaited(AppScope.of(context).platform.openUrl(url)),
         child: Text(label),
       ),
+    );
+  }
+}
+
+class _GaPasswordDialog extends StatefulWidget {
+  const _GaPasswordDialog();
+
+  @override
+  State<_GaPasswordDialog> createState() => _GaPasswordDialogState();
+}
+
+class _GaPasswordDialogState extends State<_GaPasswordDialog> {
+  final TextEditingController _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String value = _password.text;
+    if (value.isEmpty) {
+      return;
+    }
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppAlertDialog(
+      title: Text(L10n.t('请验证登录密码')),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(L10n.t('关闭或重置已启用的两步验证属敏感操作，为确认是您本人，请输入当前登录密码。')),
+            const SizedBox(height: 12),
+            AppTextField(
+              controller: _password,
+              obscureText: true,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              autofillHints: const <String>[AutofillHints.password],
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(labelText: L10n.t('登录密码')),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        FilledButton(onPressed: _submit, child: Text(L10n.t('确定'))),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(L10n.t('取消')),
+        ),
+      ],
     );
   }
 }

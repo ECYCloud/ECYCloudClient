@@ -6,13 +6,17 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../../l10n/l10n.dart';
+
 import '../service/service_transport.dart';
+import 'service_control.dart';
 
 // Win32 同步 I/O 会阻塞线程，管道读写一律放在临时 isolate 中执行
 class NamedPipeClient {
-  const NamedPipeClient(this.pipeName);
+  const NamedPipeClient(this.pipeName, this.serviceName);
 
   final String pipeName;
+  final String serviceName;
 
   Future<Map<String, dynamic>> request(
     String command, [
@@ -26,8 +30,9 @@ class NamedPipeClient {
     });
 
     final String name = pipeName;
+    final String service = serviceName;
     final String responseLine = await Isolate.run(
-      () => _transact(name, requestLine),
+      () => _transact(name, service, requestLine),
     );
 
     final Object? decoded = jsonDecode(responseLine);
@@ -54,46 +59,59 @@ class PipeException extends ServiceException {
       lastError == _errorFileNotFound || lastError == _errorPipeBusy;
 
   @override
-  String toString() =>
-      lastError == null ? message : '$message（Win32 错误 $lastError）';
+  String toString() => lastError == null
+      ? super.toString()
+      : L10n.t('{0}（Win32 错误 {1}）', <Object>[super.toString(), lastError!]);
 }
 
 const int _genericRead = 0x80000000;
 const int _genericWrite = 0x40000000;
 const int _openExisting = 3;
+const int _securityIdentification = 0x00110000;
 const int _invalidHandleValue = -1;
 const int _errorFileNotFound = 2;
 const int _errorPipeBusy = 231;
 const int _errorBrokenPipe = 109;
 const int _errorMoreData = 234;
+const int _lineFeed = 0x0A;
 const int _readBufferSize = 64 * 1024;
 const int _connectTimeoutMs = 5000;
 
-typedef _CreateFileWNative =
-    IntPtr Function(
-      Pointer<Utf16>,
-      Uint32,
-      Uint32,
-      Pointer<Void>,
-      Uint32,
-      Uint32,
-      IntPtr,
-    );
-typedef _CreateFileWDart =
-    int Function(Pointer<Utf16>, int, int, Pointer<Void>, int, int, int);
+typedef _CreateFileWNative = IntPtr Function(
+  Pointer<Utf16>,
+  Uint32,
+  Uint32,
+  Pointer<Void>,
+  Uint32,
+  Uint32,
+  IntPtr,
+);
+typedef _CreateFileWDart = int Function(
+  Pointer<Utf16>,
+  int,
+  int,
+  Pointer<Void>,
+  int,
+  int,
+  int,
+);
 
-typedef _ReadWriteNative =
-    Int32 Function(
-      IntPtr,
-      Pointer<Uint8>,
-      Uint32,
-      Pointer<Uint32>,
-      Pointer<Void>,
-    );
-typedef _ReadWriteDart =
-    int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>);
+typedef _ReadWriteNative = Int32 Function(
+  IntPtr,
+  Pointer<Uint8>,
+  Uint32,
+  Pointer<Uint32>,
+  Pointer<Void>,
+);
+typedef _ReadWriteDart = int Function(
+  int,
+  Pointer<Uint8>,
+  int,
+  Pointer<Uint32>,
+  Pointer<Void>,
+);
 
-String _transact(String pipeName, String requestLine) {
+String _transact(String pipeName, String serviceName, String requestLine) {
   final DynamicLibrary kernel32 = DynamicLibrary.open('kernel32.dll');
 
   final _CreateFileWDart createFile = kernel32
@@ -113,6 +131,7 @@ String _transact(String pipeName, String requestLine) {
       >('WaitNamedPipeW');
 
   final Pointer<Utf16> name = pipeName.toNativeUtf16();
+  final Pointer<Uint32> serverPid = calloc<Uint32>();
   int handle = _invalidHandleValue;
 
   try {
@@ -122,7 +141,7 @@ String _transact(String pipeName, String requestLine) {
       0,
       nullptr,
       _openExisting,
-      0,
+      _securityIdentification,
       0,
     );
 
@@ -134,7 +153,7 @@ String _transact(String pipeName, String requestLine) {
         0,
         nullptr,
         _openExisting,
-        0,
+        _securityIdentification,
         0,
       );
     }
@@ -143,6 +162,18 @@ String _transact(String pipeName, String requestLine) {
       throw PipeException('无法连接后台服务', lastError: getLastError());
     }
 
+    final getServerPid = kernel32
+        .lookupFunction<
+          Int32 Function(IntPtr, Pointer<Uint32>),
+          int Function(int, Pointer<Uint32>)
+        >('GetNamedPipeServerProcessId');
+    final ServiceProbe service = ServiceControl(serviceName).probeSynchronous();
+    if (getServerPid(handle, serverPid) == 0 ||
+        !service.running ||
+        service.processId == 0 ||
+        service.processId != serverPid.value) {
+      throw PipeException('后台服务身份校验失败，拒绝发送配置');
+    }
     _write(writeFile, getLastError, handle, utf8.encode('$requestLine\n'));
     return _read(readFile, getLastError, handle);
   } finally {
@@ -150,6 +181,7 @@ String _transact(String pipeName, String requestLine) {
       closeHandle(handle);
     }
     malloc.free(name);
+    calloc.free(serverPid);
   }
 }
 
@@ -209,6 +241,11 @@ String _read(_ReadWriteDart readFile, int Function() getLastError, int handle) {
       }
 
       collected.add(buffer.asTypedList(read.value));
+      // 应答以换行结尾，读到即结束：经 FFI 取到的 GetLastError 可能已被 VM 覆盖
+      // （dart-lang/sdk#38832），不能靠 EOF 时的错误码判定读完
+      if (buffer[read.value - 1] == _lineFeed) {
+        break;
+      }
     }
 
     final Uint8List bytes = collected.takeBytes();

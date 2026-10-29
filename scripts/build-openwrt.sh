@@ -31,10 +31,10 @@ case "$openwrt" in
 		package_separator='-'
 		;;
 	24.10)
-		sdk_release='24.10.5'
+		sdk_release='24.10.8'
 		sdk_toolchain='gcc-13.3.0'
 		sdk_compression='zst'
-		sdk_sha256='d3e8ea62fc1c12f93a9c808c2ef4c01b6e149ee240bcd5a74d15bebcbc385bdd'
+		sdk_sha256='ac4a0405d2eea821b06f93c14ba13ffa90ad0457648903df7dde02570027ab21'
 		package_format='ipk'
 		package_separator='_'
 		;;

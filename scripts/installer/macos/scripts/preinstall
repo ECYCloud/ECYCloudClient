@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+helper='/Library/Application Support/ECYCloud/bin/ecycloud-helper'
+if [ -x "$helper" ]; then
+    if /bin/launchctl bootout system/com.ecycloud.helper; then
+        :
+    else
+        result=$?
+        [ "$result" = 3 ] || exit "$result"
+    fi
+    "$helper" uninstall
+fi
+exit 0

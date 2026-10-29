@@ -41,6 +41,12 @@ SetupIconFile={#IconFile}
 WizardSmallImageFile=wizard\shield-55.bmp,wizard\shield-83.bmp,wizard\shield-110.bmp,wizard\shield-138.bmp,wizard\shield-165.bmp,wizard\shield-192.bmp
 PrivilegesRequired=admin
 MinVersion=10.0.17763
+; esigner 与 build-windows.ps1 传入的 /Sesigner 同名；重试由 sign-windows.ps1 负责，这里不再叠加
+#ifdef SignInstaller
+SignTool=esigner
+SignedUninstaller=yes
+SignToolRetryCount=0
+#endif
 #if AppArch == "arm64"
 ArchitecturesAllowed=arm64
 ArchitecturesInstallIn64BitMode=arm64
@@ -51,9 +57,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Languages]
 ; Inno Setup 6 未随包分发简体/繁体中文，语言文件随仓库落地，不依赖构建机安装了哪些语言
 ; 许可协议按安装语言切换；中文为 FSF 认可链路上的非官方译本，英文原文仍有法律效力
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "{#StageDir}\LICENSE.txt"
 Name: "chinese"; MessagesFile: "lang\ChineseSimplified.isl"; LicenseFile: "lang\LICENSE.zh-CN.txt"
 Name: "chinesetraditional"; MessagesFile: "lang\ChineseTraditional.isl"; LicenseFile: "lang\LICENSE.zh-TW.txt"
-Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "{#StageDir}\LICENSE.txt"
 
 [LangOptions]
 chinese.DialogFontName=Microsoft YaHei UI
@@ -63,8 +69,8 @@ chinesetraditional.DialogFontName=Microsoft JhengHei UI
 ; 只有 CloseRunningApp 连强杀都没关掉客户端时才会看到；关窗口只是缩到托盘，必须点明从托盘退出
 chinese.SetupAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出安装程序。
 chinese.UninstallAppRunningError=%1 正在运行。请在系统托盘图标上右键选择「退出」，然后单击「确定」继续，或单击「取消」退出卸载程序。
-chinesetraditional.SetupAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「退出」，然後按「確定」繼續，或按「取消」結束安裝程式。
-chinesetraditional.UninstallAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「退出」，然後按「確定」繼續，或按「取消」結束解除安裝程式。
+chinesetraditional.SetupAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「結束」，然後按「確定」繼續，或按「取消」結束安裝程式。
+chinesetraditional.UninstallAppRunningError=%1 正在執行。請在系統匣圖示上按右鍵選擇「結束」，然後按「確定」繼續，或按「取消」結束解除安裝程式。
 english.SetupAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Setup.
 english.UninstallAppRunningError=%1 is running. Right-click the tray icon and choose Quit, then click OK to continue or Cancel to exit Uninstall.
 
@@ -76,13 +82,13 @@ chinese.UninstallCaption=卸载 %1
 chinesetraditional.UninstallCaption=解除安裝 %1
 english.UninstallCaption=Uninstall %1
 chinese.UninstallPrompt=即将卸载 %1，后台服务会一并注销，系统代理与 TUN 网卡会自动还原。
-chinesetraditional.UninstallPrompt=即將解除安裝 %1，背景服務會一併註銷，系統代理與 TUN 網卡會自動還原。
+chinesetraditional.UninstallPrompt=即將解除安裝 %1，背景服務會一併註銷，系統代理與 TUN 網路介面卡會自動還原。
 english.UninstallPrompt=%1 will be uninstalled. The background service will be removed, and the system proxy and TUN adapter will be restored.
 chinese.RemoveUserData=删除应用数据
 chinesetraditional.RemoveUserData=刪除應用程式資料
 english.RemoveUserData=Delete application data
 chinese.RemoveUserDataDetail=含登录凭据、偏好设置、日志与内核缓存，删除后不可恢复；不勾选则全部保留，重装后可直接继续使用。
-chinesetraditional.RemoveUserDataDetail=含登入憑證、偏好設定、日誌與核心快取，刪除後無法復原；不勾選則全部保留，重裝後可直接繼續使用。
+chinesetraditional.RemoveUserDataDetail=含登入憑證、偏好設定、記錄與核心快取，刪除後無法復原；不勾選則全部保留，重裝後可直接繼續使用。
 english.RemoveUserDataDetail=Includes sign-in credentials, preferences, logs, and kernel cache. This cannot be undone. Leave unchecked to keep them for the next install.
 chinese.StartUninstall=开始卸载
 chinesetraditional.StartUninstall=開始解除安裝
@@ -93,6 +99,21 @@ english.UninstallDone=%1 has been uninstalled.
 chinese.RegisterService=正在注册后台服务...
 chinesetraditional.RegisterService=正在註冊背景服務...
 english.RegisterService=Registering the background service...
+chinese.StopService=正在停止旧后台服务并还原网络设置...
+chinesetraditional.StopService=正在停止舊背景服務並還原網路設定...
+english.StopService=Stopping the old background service and restoring network settings...
+chinese.ServiceStopFailed=旧后台服务停止或注销失败，安装已中止。请排除服务故障后重试。
+chinesetraditional.ServiceStopFailed=舊背景服務停止或註銷失敗，安裝已中止。請排除服務故障後重試。
+english.ServiceStopFailed=The old background service could not be stopped or removed. Installation has been cancelled. Resolve the service error and retry.
+chinese.ServiceInstallFailed=后台服务安装失败，客户端未启动。请排除服务故障后重新运行安装器。
+chinesetraditional.ServiceInstallFailed=背景服務安裝失敗，用戶端未啟動。請排除服務故障後重新執行安裝程式。
+english.ServiceInstallFailed=The background service could not be installed. The client was not started. Resolve the service error and run the installer again.
+chinese.ServiceInstallFailedTitle=安装未完成
+chinesetraditional.ServiceInstallFailedTitle=安裝未完成
+english.ServiceInstallFailedTitle=Installation incomplete
+chinese.ServiceUninstallFailed=后台服务停止或注销失败，卸载已中止，应用文件及数据已保留。请排除服务故障后重试。
+chinesetraditional.ServiceUninstallFailed=背景服務停止或註銷失敗，解除安裝已中止，應用程式檔案及資料已保留。請排除服務故障後重試。
+english.ServiceUninstallFailed=The background service could not be stopped or removed. Uninstallation was cancelled; application files and data have been kept. Resolve the service error and retry.
 chinese.LaunchNow=立即运行 %1
 chinesetraditional.LaunchNow=立即執行 %1
 english.LaunchNow=Launch %1 now
@@ -101,19 +122,19 @@ english.LaunchNow=Launch %1 now
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 服务 exe 不能延到重启替换：ssPostInstall 立即用它注册服务，延后就会注册旧版
+Source: "{#StageDir}\service\{#ServiceExeName}"; DestDir: "{app}\service"; Flags: ignoreversion
+Source: "{#StageDir}\*"; DestDir: "{app}"; Excludes: "service\{#ServiceExeName}"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\service\{#ServiceExeName}"; Parameters: "install"; StatusMsg: "{cm:RegisterService}"; Flags: runhidden waituntilterminated
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchNow,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchNow,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: ServiceInstalled
 
-[UninstallRun]
-; 服务停止时会还原系统代理并清理 TUN 网卡，必须等它执行完再删文件
-Filename: "{app}\service\{#ServiceExeName}"; Parameters: "uninstall"; RunOnceId: "RemoveService"; Flags: runhidden waituntilterminated
+[UninstallDelete]
+Type: files; Name: "{app}\installer-locale"
 
 [Code]
 const
@@ -122,7 +143,16 @@ const
   HWND_NOTOPMOST = -2;
   SWP_NOSIZE = $0001;
   SWP_NOMOVE = $0002;
+  OBM_CHECKBOXES = 32759;
+  BP_CHECKBOX = 3;
+  CBS_CHECKEDNORMAL = 5;
+  TS_TRUE = 1;
   UninstallRegKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F3C4A21-7B65-4D0E-9C2A-1E6B5D4F3A80}_is1';
+
+type
+  TCheckSize = record
+    cx, cy: Integer;
+  end;
 
 function SetWindowPos(Wnd, WndInsertAfter, X, Y, cx, cy, Flags: Integer): Boolean;
   external 'SetWindowPos@user32.dll stdcall';
@@ -130,10 +160,33 @@ function SetForegroundWindow(Wnd: Integer): Boolean;
   external 'SetForegroundWindow@user32.dll stdcall';
 function RegisterWindowMessage(Name: String): Cardinal;
   external 'RegisterWindowMessageW@user32.dll stdcall';
+function LoadBitmap(Instance, Name: Integer): Integer;
+  external 'LoadBitmapW@user32.dll stdcall';
+function OpenThemeData(Wnd: HWND; ClassList: String): Integer;
+  external 'OpenThemeData@uxtheme.dll stdcall';
+function GetThemePartSize(Theme, DC, Part, State, Rect, Sizing: Integer;
+  var Size: TCheckSize): Integer;
+  external 'GetThemePartSize@uxtheme.dll stdcall';
+function CloseThemeData(Theme: Integer): Integer;
+  external 'CloseThemeData@uxtheme.dll stdcall';
 
 var
   WizardFronted: Boolean;
   RemoveUserData: Boolean;
+  ServiceInstallSucceeded: Boolean;
+
+function ServiceInstalled: Boolean;
+begin
+  Result := ServiceInstallSucceeded;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if ServiceInstallSucceeded then
+    Result := 0
+  else
+    Result := 1;
+end;
 
 // 等的是互斥体而不是进程：Inno 后面的检查同样只看互斥体
 procedure CloseRunningApp;
@@ -170,17 +223,40 @@ begin
   if CompareText(ActiveLanguage(), 'chinesetraditional') = 0 then
     Locale := 'zh_TW'
   else if CompareText(ActiveLanguage(), 'english') = 0 then
-    Locale := 'en'
+    Locale := 'en-US'
   else
     Locale := 'zh_CN';
-  Dir := ExpandConstant('{userappdata}\ECYCloud');
-  ForceDirectories(Dir);
+  Dir := ExpandConstant('{app}');
   SaveStringToFile(Dir + '\installer-locale', Locale, False);
 end;
 
 procedure InitializeWizard;
+var
+  Bitmap: TBitmap;
+  Theme: Integer;
+  Size: TCheckSize;
 begin
   WizardForm.LicenseAcceptedRadio.Checked := True;
+  WizardForm.TasksList.Offset := 0;
+  Theme := OpenThemeData(WizardForm.TasksList.Handle, 'Button');
+  if Theme <> 0 then
+  begin
+    try
+      if GetThemePartSize(Theme, 0, BP_CHECKBOX, CBS_CHECKEDNORMAL, 0, TS_TRUE, Size) = 0 then
+      begin
+        Bitmap := TBitmap.Create;
+        try
+          Bitmap.Handle := LoadBitmap(0, OBM_CHECKBOXES);
+          WizardForm.TasksList.Offset := Size.cx - Bitmap.Width div 4;
+        finally
+          Bitmap.Free;
+        end;
+      end;
+    finally
+      CloseThemeData(Theme);
+    end;
+  end;
+  WizardForm.RunList.Offset := WizardForm.TasksList.Offset;
 end;
 
 function InitializeSetup(): Boolean;
@@ -202,9 +278,19 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   UninstallCmd: String;
+  Code: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
+    WizardForm.StatusLabel.Caption := CustomMessage('RegisterService');
+    ServiceInstallSucceeded := Exec(ExpandConstant('{app}\service\{#ServiceExeName}'), 'install', '',
+      SW_HIDE, ewWaitUntilTerminated, Code);
+    ServiceInstallSucceeded := ServiceInstallSucceeded and (Code = 0);
+    if not ServiceInstallSucceeded then
+    begin
+      Log(CustomMessage('ServiceInstallFailed') + ' (' + IntToStr(Code) + ')');
+      SuppressibleMsgBox(CustomMessage('ServiceInstallFailed'), mbError, MB_OK, IDOK);
+    end;
     // 设置里的「卸载」走 QuietUninstallString；只改 UninstallString 仍会弹 ConfirmUninstall
     UninstallCmd := '"' + ExpandConstant('{uninstallexe}') + '" /SILENT /SUPPRESSMSGBOXES';
     RegWriteStringValue(HKLM64, UninstallRegKey, 'UninstallString', UninstallCmd);
@@ -217,6 +303,11 @@ end;
 // 只能自己置顶再取消置顶把它抬到最上层，SetForegroundWindow 单独调用会被系统降级。
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if (CurPageID = wpFinished) and not ServiceInstallSucceeded then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := CustomMessage('ServiceInstallFailedTitle');
+    WizardForm.FinishedLabel.Caption := CustomMessage('ServiceInstallFailed');
+  end;
   if WizardFronted then
     Exit;
   WizardFronted := True;
@@ -225,16 +316,24 @@ begin
   SetForegroundWindow(WizardForm.Handle);
 end;
 
-// install 遇到已注册的服务会报错，必须先让旧版 uninstall；未注册时非零可忽略
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Service: String;
   Code: Integer;
 begin
   Result := '';
-  Service := ExpandConstant('{app}\service\{#ServiceExeName}');
-  if FileExists(Service) then
-    Exec(Service, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ECYCloudService') then
+    Exit;
+  WizardForm.PreparingLabel.Caption := CustomMessage('StopService');
+  WizardForm.PreparingLabel.Visible := True;
+  WizardForm.PreparingLabel.Update;
+  Log(CustomMessage('StopService'));
+  ExtractTemporaryFile('{#ServiceExeName}');
+  Service := ExpandConstant('{tmp}\{#ServiceExeName}');
+  if not Exec(Service, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    Result := CustomMessage('ServiceStopFailed')
+  else if Code <> 0 then
+    Result := CustomMessage('ServiceStopFailed');
 end;
 
 function HasUninstallParam(const Name: String): Boolean;
@@ -350,12 +449,28 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Code: Integer;
+  ServiceRemoved: Boolean;
 begin
   // 客户端要赶在 Inno 检查互斥体之前关掉，否则会弹那句「请从托盘退出」
   if CurUninstallStep = usAppMutexCheck then
   begin
     CloseRunningApp;
     Exit;
+  end;
+
+  if (CurUninstallStep = usUninstall) and
+    RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ECYCloudService') then
+  begin
+    ServiceRemoved := Exec(ExpandConstant('{app}\service\{#ServiceExeName}'), 'uninstall', '',
+      SW_HIDE, ewWaitUntilTerminated, Code);
+    if not ServiceRemoved or (Code <> 0) then
+    begin
+      Log(CustomMessage('ServiceUninstallFailed') + ' (' + IntToStr(Code) + ')');
+      SuppressibleMsgBox(CustomMessage('ServiceUninstallFailed'), mbError, MB_OK, IDOK);
+      Abort;
+    end;
   end;
 
   if CurUninstallStep = usPostUninstall then

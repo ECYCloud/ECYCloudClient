@@ -105,7 +105,9 @@ func TestKernelStopSavesAndLeavesOtherConsoleRunning(t *testing.T) {
 	prepareKernelSignalTestLogs(t)
 	k, lines := startKernelSignalTestProcess(t, false)
 	other, _ := startKernelSignalTestProcess(t, false)
-	k.stop()
+	if err := k.stop(); err != nil {
+		t.Fatal(err)
+	}
 	if status := k.status(0); status.Running || status.ExitCode == nil || *status.ExitCode != 0 {
 		logs, _ := os.ReadFile(serviceLogPath())
 		t.Fatalf("内核未正常退出: %+v；服务日志: %s", status, logs)
@@ -123,14 +125,18 @@ func TestKernelStopSavesAndLeavesOtherConsoleRunning(t *testing.T) {
 		t.Fatal("停止信号影响了其他控制台")
 	default:
 	}
-	other.stop()
+	if err := other.stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestKernelStopKillsUnresponsiveProcess(t *testing.T) {
 	prepareKernelSignalTestLogs(t)
 	k, _ := startKernelSignalTestProcess(t, true)
 	started := time.Now()
-	k.stop()
+	if err := k.stop(); err != nil {
+		t.Fatal(err)
+	}
 	if elapsed := time.Since(started); elapsed < 5*time.Second || elapsed > 13*time.Second {
 		logs, _ := os.ReadFile(serviceLogPath())
 		t.Fatalf("停止等待时间不正确: %s；服务日志: %s", elapsed, logs)

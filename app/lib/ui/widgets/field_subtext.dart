@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_text_field.dart';
+
 /// InputDecorator 把 helper / error 缩进到输入内容的起点（contentPadding.start 加
 /// 边框 gapPadding），与输入框左边框对不齐；要贴边框只能作为输入框的兄弟节点给出。
 class FieldSubtext extends StatelessWidget {
@@ -26,7 +28,7 @@ class FieldSubtext extends StatelessWidget {
   }
 }
 
-extension ValidatedTextField on TextField {
+extension ValidatedTextField on AppTextField {
   Widget validated(String? Function() validate) => FormField<String>(
     validator: (_) => validate(),
     builder: (FormFieldState<String> field) => Column(

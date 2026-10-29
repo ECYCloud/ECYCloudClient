@@ -48,7 +48,14 @@ class MainActivity : FlutterActivity() {
 
     // VpnService.prepare 不是只读查询：已授权时系统会抢走 VPN 槽位并断掉其它隧道，不得用来探测权限
     fun requestVpnConsent(callback: (String?) -> Unit) {
-        val intent = VpnService.prepare(this)
+        // 整机没有 VpnService 能力时 prepare 直接抛，这里在 MethodChannel 的主线程上，
+        // 不接住就是进程级崩溃
+        val intent = try {
+            VpnService.prepare(this)
+        } catch (e: Exception) {
+            callback("此设备不支持 VPN（${e.message ?: e}）")
+            return
+        }
         if (intent == null) {
             callback(null)
             return
@@ -60,7 +67,14 @@ class MainActivity : FlutterActivity() {
             return
         }
         vpnConsent = callback
-        startActivityForResult(intent, REQUEST_VPN)
+        // 不少电视盒子裁掉了系统的 VPN 授权界面 com.android.vpndialogs，prepare 给的
+        // Intent 解析不到组件，startActivityForResult 抛 ActivityNotFoundException
+        try {
+            startActivityForResult(intent, REQUEST_VPN)
+        } catch (e: Exception) {
+            vpnConsent = null
+            callback("系统未提供 VPN 授权界面，此设备无法建立 VPN 连接（${e.message ?: e}）")
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

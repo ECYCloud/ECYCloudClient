@@ -84,22 +84,20 @@ class _RefreshButtonState extends State<RefreshButton>
     );
     // 不置灰：禁用态的按钮会把鼠标指针换回箭头，看着像功能坏了。
     void onPressed() => unawaited(_run());
-    final Widget iconButton = IconButton(
-      tooltip: widget.tooltip,
-      icon: icon,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.standard,
-      constraints: BoxConstraints.tightFor(
-        width: AppTheme.minTapTarget,
-        height: AppTheme.minTapTarget,
-      ),
-      onPressed: onPressed,
-    );
 
     final String? title = widget.title;
     if (title != null) {
       final Widget? action = widget.action;
       final String? subtitle = widget.subtitle;
+      final String? tooltip = widget.tooltip;
+      // 整行即刷新按钮，尾部图标只作指示，不单独响应点击
+      Widget glyph = SizedBox.square(
+        dimension: AppTheme.minTapTarget,
+        child: Center(child: icon),
+      );
+      if (tooltip != null) {
+        glyph = Tooltip(message: tooltip, child: glyph);
+      }
       return ListTile(
         contentPadding: EdgeInsetsDirectional.only(
           start: 16,
@@ -108,11 +106,11 @@ class _RefreshButtonState extends State<RefreshButton>
         title: Text(title),
         subtitle: subtitle == null ? null : Text(subtitle),
         trailing: action == null
-            ? iconButton
+            ? glyph
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 spacing: 4,
-                children: <Widget>[action, iconButton],
+                children: <Widget>[action, glyph],
               ),
         onTap: onPressed,
       );
@@ -120,7 +118,17 @@ class _RefreshButtonState extends State<RefreshButton>
 
     final String? label = widget.label;
     if (label == null) {
-      return iconButton;
+      return IconButton(
+        tooltip: widget.tooltip,
+        icon: icon,
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.standard,
+        constraints: BoxConstraints.tightFor(
+          width: AppTheme.minTapTarget,
+          height: AppTheme.minTapTarget,
+        ),
+        onPressed: onPressed,
+      );
     }
 
     return TextButton.icon(

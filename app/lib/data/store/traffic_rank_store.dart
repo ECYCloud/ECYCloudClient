@@ -1,6 +1,5 @@
-import 'dart:async';
-
 import '../../core/app_paths.dart';
+import '../../core/logger.dart';
 import 'json_file_store.dart';
 
 enum TrafficRankDay { today, yesterday }
@@ -13,23 +12,32 @@ class TrafficRankRow {
 }
 
 class TrafficRankStore {
-  TrafficRankStore({
-    JsonFileStore? store,
-    DateTime Function()? clock,
-    this.writeDelay = const Duration(seconds: 2),
-  }) : _store = store ?? JsonFileStore(AppPaths.trafficRank, 'traffic-rank'),
-       _clock = clock ?? DateTime.now {
-    _load();
-  }
+  TrafficRankStore({JsonFileStore? store, DateTime Function()? clock})
+    : _store = store ?? JsonFileStore(AppPaths.trafficRank, 'traffic-rank'),
+      _clock = clock ?? DateTime.now;
 
   static const int topLimit = 10;
+  static const Duration _saveInterval = Duration(seconds: 30);
 
   final JsonFileStore _store;
   final DateTime Function() _clock;
-  final Duration writeDelay;
 
   final Map<String, _DayBucket> _days = <String, _DayBucket>{};
-  Timer? _writeTimer;
+  bool _dirty = false;
+  DateTime? _savedAt;
+  String _account = '';
+
+  void bindAccount(String account) {
+    final String next = account.trim().toLowerCase();
+    if (next == _account) {
+      return;
+    }
+    flush();
+    _account = next;
+    _savedAt = null;
+    _days.clear();
+    _load();
+  }
 
   static String dayKey(DateTime time) {
     final DateTime local = time.toLocal();
@@ -48,7 +56,7 @@ class TrafficRankStore {
     required String host,
     required int bytes,
   }) {
-    if (bytes <= 0) {
+    if (_account.isEmpty || bytes <= 0) {
       return;
     }
 
@@ -64,7 +72,7 @@ class TrafficRankStore {
       bucket.hosts[host] = (bucket.hosts[host] ?? 0) + bytes;
     }
     _prune(now);
-    _scheduleWrite();
+    _dirty = true;
   }
 
   List<TrafficRankRow> topGroups(TrafficRankDay day) =>
@@ -75,10 +83,23 @@ class TrafficRankStore {
     Set<String> exclude = const <String>{},
   }) => _top(_bucket(day).hosts, exclude: exclude);
 
-  void flush() {
-    _writeTimer?.cancel();
-    _writeTimer = null;
-    _write();
+  void flush({bool force = true}) {
+    if (_account.isEmpty || !_dirty) {
+      return;
+    }
+    final DateTime now = _clock();
+    final DateTime? savedAt = _savedAt;
+    if (!force && savedAt != null && now.difference(savedAt) < _saveInterval) {
+      return;
+    }
+    try {
+      _write();
+    } on Object catch (e) {
+      Logger.instance.warn('traffic-rank', '保存流量排行失败: $e');
+      return;
+    }
+    _dirty = false;
+    _savedAt = now;
   }
 
   _DayBucket _bucket(TrafficRankDay day) {
@@ -105,9 +126,20 @@ class TrafficRankStore {
   }
 
   void _load() {
+    if (_account.isEmpty) {
+      return;
+    }
     final Map<String, dynamic> raw = _store.read();
-    _days.clear();
-    raw.forEach((String key, Object? value) {
+    final Object? accounts = raw['accounts'];
+    final Object? days = accounts is Map<String, dynamic>
+        ? accounts[_account]
+        : raw['account'] == _account
+        ? raw['days']
+        : null;
+    if (days is! Map<String, dynamic>) {
+      return;
+    }
+    days.forEach((String key, Object? value) {
       if (value is Map<String, dynamic>) {
         _days[key] = _DayBucket.fromJson(value);
       } else if (value is Map) {
@@ -122,20 +154,21 @@ class TrafficRankStore {
     _days.removeWhere((String key, _DayBucket _) => !keep.contains(key));
   }
 
-  void _scheduleWrite() {
-    if (writeDelay == Duration.zero) {
-      _write();
-      return;
-    }
-    _writeTimer?.cancel();
-    _writeTimer = Timer(writeDelay, _write);
-  }
-
   void _write() {
-    _store.write(<String, dynamic>{
+    final Map<String, dynamic> raw = _store.read();
+    final Map<String, dynamic> accounts =
+        raw['accounts'] is Map<String, dynamic>
+        ? raw['accounts'] as Map<String, dynamic>
+        : <String, dynamic>{};
+    final Object? oldAccount = raw['account'];
+    if (oldAccount is String && oldAccount.isNotEmpty && raw['days'] is Map) {
+      accounts[oldAccount] = raw['days'];
+    }
+    accounts[_account] = <String, dynamic>{
       for (final MapEntry<String, _DayBucket> entry in _days.entries)
         entry.key: entry.value.toJson(),
-    });
+    };
+    _store.write(<String, dynamic>{'accounts': accounts});
   }
 }
 

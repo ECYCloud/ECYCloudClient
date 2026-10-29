@@ -16,7 +16,11 @@ fi
 
 # 覆盖安装前必须先停服务，运行中的 helper 与内核会占住自己的可执行文件
 if [ -x "$target/ecycloud-helper" ]; then
-    "$target/ecycloud-helper" uninstall || true
+    state="$(systemctl show --property=LoadState --value ecycloud-helper.service)"
+    if [ "$state" != not-found ]; then
+        systemctl stop ecycloud-helper.service
+    fi
+    "$target/ecycloud-helper" uninstall
 fi
 
 # tar 只在 root 解包时才还原属主与模式，而 helper 由 systemd 以 root 拉起：

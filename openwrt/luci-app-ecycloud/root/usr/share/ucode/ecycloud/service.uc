@@ -1,16 +1,20 @@
 'use strict';
 
-import { access, mkdir, open, readfile, rename, rmdir, unlink, writefile } from 'fs';
+import { access, lsdir, mkdir, open, readfile, rename, rmdir, unlink, writefile } from 'fs';
 import { cursor } from 'uci';
 
 import * as clash from 'ecycloud.clash';
 import * as network from 'ecycloud.network';
 import * as panel from 'ecycloud.panel';
+import * as icons from 'ecycloud.icons';
 import * as profile from 'ecycloud.profile';
+import * as statistics from 'ecycloud.statistics';
+import * as release from 'ecycloud.release';
 
-import { CONF_DIR, DELAY_FILE, SPEED_FILE, STATE_DIR, coreRunning, creds, ensurePrivateDir, log,
-         markKicked, readJson, setError, setState, settings, shellquote, state,
-         writeJson, writePrivateJson } from 'ecycloud.common';
+import { API_FILE, CONF_DIR, DELAY_FILE, KICK_FILE, PROFILE_FILE, SESSION_CHANGE, SPEED_FILE, STATE_DIR,
+		 coreRunning, creds, ensurePrivateDir, instances, log, panelDirectHosts, randomHex, sessionBinding,
+		 markKicked, readJson, setError, setState, settings, shellquote, state,
+		 writeJson, writePrivateJson } from 'ecycloud.common';
 
 const SELECTOR_FILE = `${CONF_DIR}/selectors.json`;
 const SPEED_QUOTA_FILE = `${CONF_DIR}/speed_quota.json`;
@@ -26,45 +30,43 @@ const DELAY_CONCURRENCY = 8;
 
 /* procd 先跑 stop_service 再杀实例，看门狗因此可能在撤规则之后又把规则铺回去 */
 const STOP_FILE = `${STATE_DIR}/stopping`;
+const BLOCK_FILE = `${STATE_DIR}/blocked.json`;
 
 function stopping() {
 	return access(STOP_FILE);
 };
 
+export function selectors() {
+	const saved = readJson(SELECTOR_FILE);
+	if (type(saved) != 'object' || type(saved.selected) != 'object')
+		return {};
+
+	const account = lc(trim(creds().email ?? ''));
+	return length(account) && saved.account == account ? saved.selected : {};
+};
+
 function build(remote, cfg, api) {
-	const assembled = profile.assemble(remote, cfg, api);
+	panelDirectHosts(true);
+	const assembled = profile.assemble(remote, cfg, api, selectors());
 	if (!assembled.ok)
 		return assembled;
 
 	const json = sprintf('%J', assembled.config);
 	if (readfile(`${cfg.runDir}/config.json`) == json && !profile.geodataMissing(cfg.runDir))
-		return { ok: true, json };
+		return { ...profile.writeNodeProviders(cfg.runDir, assembled.config), json };
 
 	const written = profile.write(cfg.runDir, assembled.config);
 	if (!written.ok)
 		return written;
 
 	const valid = profile.validate(cfg.runDir);
-	if (!valid.ok) {
-		profile.rollback(cfg.runDir);
-		return { ok: false, error: `配置未通过内核校验：${valid.error}` };
+	const providers = valid.ok ? profile.writeNodeProviders(cfg.runDir, assembled.config) : valid;
+	if (!providers.ok) {
+		const restored = profile.rollback(cfg.runDir);
+		return { ok: false, error: `${valid.ok ? providers.error : '配置未通过内核校验：' + valid.error}${restored ? '' : '；恢复旧配置失败'}` };
 	}
 
 	return { ok: true, json };
-};
-
-/* 新格式是 { account, selected }；旧版是扁平的 { 组名: 成员 }，没有账号标记就照用，
-   下一次保存补上标记——丢掉它等于把用户存过的手动选择静默清零 */
-export function selectors() {
-	const saved = readJson(SELECTOR_FILE);
-	if (type(saved) != 'object')
-		return {};
-
-	if (type(saved.selected) != 'object')
-		return saved;
-
-	const account = lc(trim(creds().email ?? ''));
-	return length(account) && saved.account == account ? saved.selected : {};
 };
 
 function saveSelectors(next) {
@@ -91,10 +93,6 @@ export function rememberSelector(group, name) {
 
 	const next = {};
 	next[group] = name;
-	saveSelectors(next);
-};
-
-export function rememberSelectors(next) {
 	saveSelectors(next);
 };
 
@@ -139,7 +137,7 @@ function freshStamps(list, now) {
 	const out = [];
 
 	for (let stamp in (type(list) == 'array' ? list : []))
-		if (+stamp > now - SPEED_WINDOW)
+		if (+stamp >= now - SPEED_WINDOW)
 			push(out, +stamp);
 
 	return out;
@@ -200,6 +198,10 @@ export function noteSpeedDenied(name, resetAt) {
 	saveSpeedStamps(nodes);
 };
 
+export function syncIcons() {
+	icons.sync();
+};
+
 export function runCloseVia(outbound) {
 	clash.closeVia(outbound);
 };
@@ -211,19 +213,25 @@ export function closeViaLater(outbound) {
 	system(`${shellquote('/usr/libexec/ecycloud-ctl')} close-via ${shellquote(outbound)} >/dev/null 2>&1 &`);
 };
 
-export function prepare() {
+export function prepare(retrying) {
 	const cfg = settings();
 
-	unlink(STOP_FILE);
+	if (!retrying) {
+		unlink(STOP_FILE);
+		unlink(BLOCK_FILE);
+	} else if (stopping() || !cfg.enabled) {
+		return false;
+	}
 
 	if (!panel.session().logged_in) {
-		setError('尚未登录面板，请先在 LuCI 的「概览」页登录');
+		setError(panel.session().expired ? '登录已失效，请重新登录' : '尚未登录面板，请先在 LuCI 的「概览」页登录');
 		return false;
 	}
 
 	setState('preparing', '正在准备内核配置');
 
-	let cached = profile.cached();
+	let cached = profile.cached(access(profile.PENDING_FILE));
+	let fetchedRemote = null;
 	if (cached?.config) {
 		const checked = profile.inspect(cached.config);
 		if (!checked.ok)
@@ -234,7 +242,8 @@ export function prepare() {
 		const fetched = panel.clashProfile();
 		if (!fetched.ok) {
 			/* 401 是面板把账号/会话拒了（账号被禁用、令牌失效），原文照搬比「拉取配置失败」有指导性 */
-			setError(fetched.status == 401 ? fetched.msg : `拉取配置失败：${fetched.msg}`);
+			setState('failed', '', fetched.status == 401 ? fetched.msg : `拉取配置失败：${fetched.msg}`,
+				fetched.status == 0 || fetched.status == 429 || fetched.status >= 500);
 			return false;
 		}
 		const checked = profile.inspect(fetched.data.config);
@@ -242,19 +251,25 @@ export function prepare() {
 			setError(checked.error);
 			return false;
 		}
-		/* 缓存在结构检查过关时就落盘：校验失败（首启拉不到 geodata）时不写，
-		   每次重试都要重打限流的 /config/clash */
-		profile.store(fetched.data);
+		if (!profile.authorized({ ...fetched.data, binding: sessionBinding() })) {
+			setError('配置离线授权无效，请刷新配置');
+			return false;
+		}
 		cached = fetched.data;
+		fetchedRemote = fetched.data;
 	}
 
 	setState('validating', profile.geodataMissing(cfg.runDir)
 		? '正在校验配置：首次启动需由内核下载 GeoIP / GeoSite 数据，可能耗时数分钟'
 		: '正在校验配置');
 
-	const built = build(cached.config, cfg, clash.reserve());
+	const built = build(cached.config, { ...cfg, enabled: false }, clash.reserve());
 	if (!built.ok) {
 		setError(built.error);
+		return false;
+	}
+	if (fetchedRemote != null && !profile.store(fetchedRemote, true)) {
+		setError('无法暂存已校验配置，请重试');
 		return false;
 	}
 
@@ -263,20 +278,44 @@ export function prepare() {
 	return true;
 };
 
+export function retryPrepare() {
+	let delay = 1;
+	while (!stopping() && settings().enabled && panel.session().logged_in) {
+		for (let waited = 0; waited < delay; waited++) {
+			if (stopping() || !settings().enabled)
+				return;
+			sleep(1000);
+		}
+		if (prepare(true)) {
+			if (!stopping() && settings().enabled)
+				system(`trap "" HUP; ${INIT} start >/dev/null 2>&1 &`);
+			return;
+		}
+		if (!state().retryable)
+			return;
+		delay = min(delay * 2, 30);
+	}
+};
+
+export function standby() {
+	setState('stopped', '');
+	system('/usr/libexec/ecycloud-ctl revert >/dev/null 2>&1 &');
+};
+
 function applyKick(account) {
 	const uci = cursor();
 	uci.set('ecycloud', 'config', 'enabled', '0');
 	uci.commit('ecycloud');
 	const reason = account?.data?.device_kick_reason ?? 'limit';
 	markKicked(reason);
+	standby();
 	panel.ackDeviceKick();
-	log('notice', reason == 'remove' ? 'kicked by device remove' : 'kicked by online device limit');
-	system(`${INIT} stop >/dev/null 2>&1 &`);
+	log('notice', 'kicked by device remove');
 };
 
 function kickedByNotice(account) {
 	return account.ok && account.data?.device_kick_notice == true &&
-		account.data?.device_kick_reason != 'limit_denied';
+		account.data?.device_kick_reason == 'remove';
 };
 
 export function startStandby() {
@@ -299,25 +338,55 @@ export function startStandby() {
 	system(`${INIT} start >/dev/null 2>&1 &`);
 };
 
-export function standby() {
-	setState('stopped', '');
-	system(`/usr/libexec/ecycloud-ctl revert >/dev/null 2>&1 &`);
+export function deactivate() {
+	const cfg = settings();
+	let tunStopped = true;
+	if (coreRunning()) {
+		tunStopped = clash.setTunEnabled(false).ok;
+		if (tunStopped && readJson(`${cfg.runDir}/config.json`)?.tun?.enable == true)
+			tunStopped = profile.setRunTun(cfg.runDir, false);
+	}
+	const restored = network.revert();
+	return restored && tunStopped;
+};
+
+export function block(reason) {
+	const uci = cursor();
+	uci.set('ecycloud', 'config', 'enabled', '0');
+	uci.commit('ecycloud');
+	writePrivateJson(BLOCK_FILE, { reason });
+	unlink(PROFILE_FILE);
+	unlink(profile.PENDING_FILE);
+	deactivate();
+	setError(reason);
+	system(`trap "" HUP; ${INIT} stop >/dev/null 2>&1 &`);
 };
 
 export function activate(config) {
 	const cfg = config ?? settings();
+	if (!panel.session().logged_in || !profile.cached(access(profile.PENDING_FILE))) {
+		block('配置离线授权或登录已失效，请重新登录或刷新配置');
+		return false;
+	}
+	const providers = clash.providerProgress();
+	if (providers.ready < providers.total) {
+		setState('starting', `正在加载规则集：${providers.ready}/${providers.total}`);
+		return false;
+	}
 	const applied = network.apply(cfg);
 
 	if (!applied.ok) {
-		setError(`透明代理规则未生效：${applied.error}`);
+		if (!stopping() && settings().enabled)
+			setError(`透明代理规则未生效：${applied.error}`);
+		return false;
+	}
+	if (cfg.mode == 'tun' && (!clash.setTunEnabled(true).ok || !profile.setRunTun(cfg.runDir, true))) {
+		deactivate();
+		setError('TUN 接管失败，已恢复网络设置');
 		return false;
 	}
 
-	applySelectors();
 	setState('running', cfg.mode == 'tun' ? 'TUN 模式已接管转发' : 'TPROXY 模式已接管转发');
-	const account = panel.refreshAccount(true, true);
-	if (kickedByNotice(account))
-		applyKick(account);
 
 	return true;
 };
@@ -383,10 +452,84 @@ export function cleanup() {
 	writeTestJob(DELAY_FILE, null);
 	writeTestJob(SPEED_FILE, null);
 
-	network.revert();
-	setState('stopped', '');
-
+	if (!deactivate()) {
+		setError('网络设置恢复失败');
+		return false;
+	}
+	const blocked = readJson(BLOCK_FILE);
+	if (length(blocked?.reason))
+		setError(blocked.reason);
+	else
+		setState('stopped', '');
 	return true;
+};
+
+export function changeSession(action, logout) {
+	ensurePrivateDir(STATE_DIR);
+	const authLock = open(`${STATE_DIR}/account-switch.lock`, 'ae', 0600);
+	if (!authLock)
+		return { ok: false, msg: '无法打开账户切换锁' };
+	if (!authLock.lock('xn')) {
+		authLock.close();
+		return { ok: false, msg: '账户正在切换，请稍后重试' };
+	}
+	let lease = null;
+	let result;
+	try {
+		if (!logout && panel.session().logged_in)
+			die('请先退出当前账户');
+		if (writefile(SESSION_CHANGE, '') == null)
+			die('无法阻止新的后台任务');
+		const uci = cursor();
+		if (!uci.set('ecycloud', 'config', 'enabled', '0') || !uci.commit('ecycloud'))
+			die('无法关闭旧账户连接');
+		const stopped = `${STATE_DIR}/session-stop-${randomHex(6)}`;
+		/* procd 自身的服务锁串行化 start / stop；不在 rpcd 内同步等待 ubus。 */
+		if (system(`(${INIT} stop >/dev/null 2>&1; printf '%s' "$?" >${shellquote(stopped)}) &`) != 0)
+			die('无法停止旧账户服务');
+		lease = open(`${STATE_DIR}/session.lock`, 'ae', 0600);
+		if (!lease)
+			die('无法打开会话锁');
+		let ready = false;
+		for (let i = 0; i < 80; i++) {
+			const status = readfile(stopped);
+			if (length(status) && status != '0')
+				die('旧账户服务停止失败');
+			const live = instances();
+			if (status == '0' && !live.core?.running && !live.watchdog?.running && lease.lock('xn')) {
+				ready = true;
+				break;
+			}
+			sleep(100);
+		}
+		if (!ready)
+			die('旧账户任务尚未全部退出，请稍后重试');
+		unlink(stopped);
+		if (!network.revert())
+			die('旧账户网络设置尚未恢复');
+		const runDir = settings().runDir;
+		if (system(`rm -rf -- ${shellquote(runDir)}`) != 0 || access(runDir))
+			die('无法清除旧账户运行目录');
+		panel.clearCache();
+		statistics.clear(true);
+		for (let path in [ API_FILE, DELAY_FILE, SPEED_FILE, KICK_FILE ])
+			if (access(path) && !unlink(path))
+				die('无法清除旧账户运行数据');
+		for (let name in (lsdir(STATE_DIR) ?? []))
+			if (match(name, /^(req|resp)-[a-f0-9]+\.(json|conf|err)$/) && !unlink(`${STATE_DIR}/${name}`))
+				die('无法清除旧账户请求缓存');
+		rmdir(DELAY_LOCK);
+		rmdir(SPEED_LOCK);
+		setState('stopped', '');
+		result = action();
+		if (!unlink(SESSION_CHANGE))
+			die('无法结束账户切换');
+	} catch (e) {
+		result = { ok: false, msg: e.message };
+	}
+	lease?.close();
+	authLock.close();
+	return result;
 };
 
 function withoutName(list, name) {
@@ -745,14 +888,12 @@ export function runSpeed() {
 		if (stopping() || speedJob().pid != self)
 			return;
 		if (ok) {
-			/* 面板可能就在这一刻判超限：那这次不算成功，并按它给的 reset_at 回写本地配额 */
+			noteSpeedSuccess(name);
 			const written = panel.reportSpeedTest(name, bps);
 			const denied = written.data?.denied ?? [];
 			if (length(denied) && !length(written.data?.allowed ?? [])) {
 				noteSpeedDenied(name, +(denied[0]?.reset_at ?? 0));
 				ok = false;
-			} else {
-				noteSpeedSuccess(name);
 			}
 		}
 		if (ok && !reported) {
@@ -788,14 +929,18 @@ export function runRuleProviders() {
 	}
 };
 
-export function update(force) {
+export function update(force, accountResponse, locale) {
 	const cfg = settings();
 
 	if (!panel.session().logged_in)
 		return { ok: false, error: '尚未登录面板' };
 
 	const cached = profile.cached();
-	const account = panel.refreshAccount();
+	const account = accountResponse ?? panel.refreshAccount(null, null, locale);
+	if (account.restricted) {
+		block(account.msg);
+		return { ok: false, error: account.msg };
+	}
 
 	if (!account.ok && !force)
 		return { ok: false, error: account.msg };
@@ -804,48 +949,69 @@ export function update(force) {
 		applyKick(account);
 		return { ok: true, changed: false };
 	}
+	const previous = readJson(`${cfg.runDir}/config.json`);
+	const api = clash.endpoint() ?? clash.reserve();
+	const speedReady = previous?.listeners?.[0]?.users?.[0]?.password == api.speed;
 
-	/* config_revision 与 /config/revision 同值，profile 已经拿过，手动刷新也用这道闸门：
-	   /config/clash 是 90 秒超时、60 秒内只给 20 次的重接口，戳没变就别去打 */
-	if (length(account.data?.config_revision) && account.data.config_revision == cached?.revision) {
-		if (force && coreRunning())
-			detachCtl('rules');
+	/* config_revision 与 /config/revision 同值，profile 已经拿过：
+	   /config/clash 是 90 秒超时、60 秒内只给 20 次的重接口，自动刷新时戳没变就别去打 */
+	if (!force && speedReady && cached?.config?.['proxy-providers']?.[profile.NODE_PROVIDER] != null &&
+	    length(account.data?.config_revision) && account.data.config_revision == cached?.revision && profile.authorized(cached, 3600))
 		return { ok: true, changed: false };
-	}
 
-	const fetched = panel.clashProfile();
+	const fetched = panel.clashProfile(locale);
 	if (!fetched.ok)
 		return { ok: false, error: fetched.msg };
 
 	const checked = profile.inspect(fetched.data.config);
 	if (!checked.ok)
 		return { ok: false, error: checked.error };
+	if (!profile.authorized({ ...fetched.data, binding: cached?.binding ?? sessionBinding() }))
+		return { ok: false, error: '配置离线授权无效，请刷新配置' };
 
-	if (sprintf('%J', fetched.data.config) == sprintf('%J', cached?.config)) {
+	if (speedReady && sprintf('%J', fetched.data.config) == sprintf('%J', cached?.config)) {
 		profile.store(fetched.data);
 		if (force && coreRunning())
 			detachCtl('rules');
 		return { ok: true, changed: false };
 	}
 
-	const previous = readJson(`${cfg.runDir}/config.json`);
-	const built = build(fetched.data.config, cfg, clash.endpoint() ?? clash.reserve());
+	const built = build(fetched.data.config, cfg, api);
 	if (!built.ok)
 		return { ok: false, error: built.error };
 
-	if (!coreRunning()) {
-		profile.store(fetched.data);
+	const running = coreRunning();
+	const next = json(built.json);
+	const nodesOnly = running && profile.canUpdateNodes(previous, next);
+	const restart = running && !nodesOnly &&
+		((previous?.dns?.enable == true && lc(previous.dns['enhanced-mode'] ?? '') == 'fake-ip') ||
+		(next.dns?.enable == true && lc(next.dns['enhanced-mode'] ?? '') == 'fake-ip'));
+	if ((!running || restart) && !profile.store(fetched.data, true)) {
+		profile.rollback(cfg.runDir);
+		return { ok: false, error: '无法暂存已校验配置，请重试' };
+	}
+	if (!running) {
 		const st = state();
 		if (st.stage == 'validating' || st.stage == 'preparing' || st.stage == 'starting')
 			setState('stopped', '');
 
 		return { ok: true, changed: true, reloaded: false };
 	}
-
-	const nextDns = json(built.json).dns;
-	if ((previous?.dns?.enable == true && lc(previous.dns['enhanced-mode'] ?? '') == 'fake-ip') ||
-		(nextDns?.enable == true && lc(nextDns['enhanced-mode'] ?? '') == 'fake-ip')) {
+	if (nodesOnly) {
+		const updated = clash.updateProxyProviders(next);
+		if (!updated.ok) {
+			const restored = profile.rollback(cfg.runDir) && clash.updateProxyProviders(previous).ok;
+			return { ok: false, error: `${updated.error}${restored ? '' : '；恢复旧节点配置失败'}` };
+		}
 		profile.store(fetched.data);
+		if (force)
+			detachCtl('rules');
+		if (cfg.enabled && network.applied()?.active == true)
+			setState('running', '面板节点已更新，连接保持不变');
+		return { ok: true, changed: true, reloaded: false };
+	}
+
+	if (restart) {
 		setState('starting', '配置已更新，正在重启内核以保留 DNS 映射');
 		system(`trap "" HUP; ${INIT} restart >/dev/null 2>&1 &`);
 		return { ok: true, changed: true, reloaded: false };
@@ -861,98 +1027,140 @@ export function update(force) {
 	applySelectors();
 	detachCtl('rules');
 
-	setState('running', '面板配置已热载');
+	if (cfg.enabled && network.applied()?.active == true)
+		setState('running', '面板配置已热载');
 
 	return { ok: true, changed: true, reloaded: true };
 };
 
-export function watchdog() {
-	let active = network.applied() != null;
+export function refresh() {
 	let refreshed = time();
 	let identityAt = 0;
 	let accountAt = 0;
+	let prepared = false;
+
+	while (!stopping() && panel.session().logged_in) {
+		const cfg = settings();
+		const alive = coreRunning() && clash.ready();
+		if (alive && access(profile.PENDING_FILE)) {
+			const pending = profile.cached(true);
+			if (pending == null || (+(instances().core?.pid ?? 0) != pending.pending_pid && !profile.store(pending))) {
+				block('无法提交已加载配置，请刷新配置');
+				break;
+			}
+		}
+		if (alive && !prepared) {
+			applySelectors();
+			prepared = true;
+		} else if (!alive) {
+			prepared = false;
+		}
+		if (!alive) {
+			refreshed = time();
+			identityAt = 0;
+			accountAt = 0;
+		} else {
+			const connected = cfg.enabled && network.applied()?.active == true;
+			if (identityAt == 0 || time() - identityAt >= 60) {
+				panel.touchIdentity(connected);
+				identityAt = time();
+			}
+			const cached = panel.account();
+			const interval = cfg.enabled && +(cached?.node_connector ?? 0) > 0 &&
+				cached?.online_client_self != true ? 5 : 60;
+			if (accountAt == 0 || time() - accountAt >= interval) {
+				const account = panel.refreshAccount(connected);
+				accountAt = time();
+				if (account.restricted)
+					block(account.msg);
+				else if (kickedByNotice(account))
+					applyKick(account);
+				else if (account.ok && length(account.data?.config_revision) &&
+					account.data.config_revision != profile.cached()?.revision) {
+					const res = update(false, account);
+					if (!res.ok)
+						log('warning', `panel refresh failed: ${res.error}`);
+					refreshed = time();
+				}
+			}
+			if (cfg.refreshInterval > 0 && time() - refreshed >= cfg.refreshInterval * 60) {
+				const res = update(false);
+				if (!res.ok)
+					log('warning', `panel refresh failed: ${res.error}`);
+				refreshed = time();
+			}
+			if (!profile.authorized(profile.cached(), 3600) && time() - refreshed >= 60) {
+				update(false);
+				refreshed = time();
+			}
+		}
+		if (alive)
+			release.checkPeriodic();
+		sleep(alive ? 5000 : 1000);
+	}
+};
+
+export function collectStatistics() {
+	while (!stopping() && panel.session().logged_in) {
+		statistics.poll();
+		sleep(5000);
+	}
+};
+
+export function watchdog() {
 	let waited = 0;
 
 	while (!stopping()) {
 		if (!panel.session().logged_in) {
-			const uci = cursor();
-			uci.set('ecycloud', 'config', 'enabled', '0');
-			uci.commit('ecycloud');
-			network.revert();
-			system(`${INIT} stop >/dev/null 2>&1 &`);
+			block('登录已失效，请重新登录');
 			break;
 		}
 		const cfg = settings();
-		const alive = coreRunning() && clash.ready();
+		const record = network.applied();
+		let active = record != null && record.active != false;
+		const running = coreRunning();
+		const alive = running && clash.ready();
 		const wait = (alive && active && cfg.enabled) ? 5 : 1;
+		if ((cfg.enabled || running) && !profile.cached(access(profile.PENDING_FILE))) {
+			block('配置离线授权已到期，请刷新配置');
+			break;
+		}
 
 		if (alive && cfg.enabled && !active) {
 			active = activate(cfg);
-			refreshed = time();
-			identityAt = time();
-			accountAt = identityAt;
 			waited = 0;
 
-			if (active && stopping()) {
-				network.revert();
+			if (active && (stopping() || !settings().enabled)) {
+				deactivate();
 				break;
 			}
 		} else if (alive && !cfg.enabled) {
-			if (active) {
-				network.revert();
-				active = false;
-			}
+			if (active || network.applied() != null)
+				active = !deactivate();
 			waited = 0;
-			identityAt = 0;
-			accountAt = 0;
 			if (state().stage == 'starting' || state().stage == 'preparing' ||
 				state().stage == 'validating' || state().stage == 'recovering') {
-				applySelectors();
 				setState('stopped', '');
 			}
-		} else if (!alive && active) {
-			network.revert();
-			active = false;
-			identityAt = 0;
-			accountAt = 0;
-			setState('recovering', '内核未响应，已撤下透明代理规则以保证局域网可用');
-			log('err', 'core unreachable, transparent proxy rules reverted');
-		} else if (!alive) {
-			identityAt = 0;
-			accountAt = 0;
-			waited += wait;
-			if (waited >= 300)
-				setError('内核 300 秒内未就绪，请查看「日志」页');
-		}
-
-		if (alive && active && (identityAt == 0 || time() - identityAt >= 60)) {
-			panel.touchIdentity();
-			identityAt = time();
-		}
-
-		if (alive && active) {
-			const cached = panel.account();
-			const interval = +(cached?.node_connector ?? 0) > 0 &&
-				cached?.online_client_self != true ? 5 : 60;
-			if (accountAt == 0 || time() - accountAt >= interval) {
-				const account = panel.refreshAccount(true, true);
-				accountAt = time();
-				if (kickedByNotice(account))
-					applyKick(account);
+		} else if (!alive && (active || network.applied() != null)) {
+			active = !network.revert();
+			if (active)
+				setError('内核未响应，网络设置恢复失败，将继续重试');
+			else {
+				setState('recovering', '内核未响应，已撤下透明代理规则以保证局域网可用');
+				log('err', 'core unreachable, transparent proxy rules reverted');
 			}
-		}
-
-		if (alive && active && cfg.refreshInterval > 0 && time() - refreshed >= cfg.refreshInterval * 60) {
-			const res = update(false);
-			if (!res.ok)
-				log('warning', `panel refresh failed: ${res.error}`);
-			refreshed = time();
+		} else if (!alive) {
+			waited += wait;
+			if (waited == 300)
+				setError('内核 300 秒内未就绪，请查看「日志」页');
 		}
 
 		if (alive) {
 			ensureDelayWorker();
 			ensureSpeedWorker();
 		}
+		icons.ensure();
 
 		sleep(wait * 1000);
 	}

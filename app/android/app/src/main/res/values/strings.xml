@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ECY Cloud</string>
-    <string name="notification_channel_status">连接状态</string>
-    <string name="notification_starting">正在启动内核</string>
-    <string name="notification_running">已连接</string>
-    <string name="notification_disconnect">断开连接</string>
-    <string name="documents_root_logs">日志</string>
+    <string name="notification_channel_status">Connection status</string>
+    <string name="notification_starting">Starting the kernel</string>
+    <string name="notification_running">Connected</string>
+    <string name="notification_disconnect">Disconnect</string>
+    <string name="documents_root_logs">Logs</string>
+    <string name="documents_session_ending">Account session cleanup is in progress</string>
+    <string name="documents_session_expired">The log session has expired</string>
 </resources>

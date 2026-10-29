@@ -1,12 +1,20 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
+import '../../core/safe_url.dart';
+import '../../l10n/l10n.dart';
 
 class LocalIcon extends StatelessWidget {
   const LocalIcon({
@@ -73,61 +81,146 @@ class RemoteIcon extends StatelessWidget {
   // 就会把整份响应读进内存
   static const int _maxBytes = 1 << 20;
 
+  static int _generation = 0;
+  static bool _clearing = false;
+  static final Set<Completer<void>> _downloads = <Completer<void>>{};
+  static final Set<Completer<void>> _imageLoads = <Completer<void>>{};
+
+  static void resumeSession() => _clearing = false;
+
+  static Future<void> clearSession() async {
+    _clearing = true;
+    _generation++;
+    for (final Completer<void> abort in _downloads) {
+      if (!abort.isCompleted) {
+        abort.complete();
+      }
+    }
+    await Future.wait<Object?>(<Future<Object?>>[
+      ..._cache.values,
+      for (final Completer<void> load in _imageLoads) load.future,
+    ]);
+    _cache.clear();
+    final Directory directory = AppPaths.iconCache;
+    if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      throw FileSystemException(L10n.t('图标缓存目录类型异常'), directory.path);
+    }
+    directory.deleteSync(recursive: true);
+  }
+
   static final Map<String, Future<Uint8List?>> _cache =
       <String, Future<Uint8List?>>{};
 
-  static Future<Uint8List?> _load(String url) =>
-      _cache.putIfAbsent(url, () async {
-        final File file = File(
-          '${AppPaths.iconCache.path}${Platform.pathSeparator}${_key(url)}',
-        );
+  static Future<Uint8List?> _load(String url) {
+    if (_clearing) {
+      return Future<Uint8List?>.value();
+    }
+    final int generation = _generation;
+    return _cache.putIfAbsent(url, () async {
+      final File file = File(
+        '${AppPaths.iconCache.path}${Platform.pathSeparator}${_key(url)}',
+      );
 
-        try {
-          if (file.existsSync()) {
-            return await file.readAsBytes();
-          }
-          // 地址由面板下发：明文 http 会把用得上哪个策略组暴露在链路上
-          final Uri? uri = Uri.tryParse(url);
-          if (uri == null || uri.scheme != 'https') {
-            Logger.instance.warn('icon', '图标地址不是 https，已忽略：$url');
+      try {
+        if (file.existsSync()) {
+          if (file.lengthSync() > _maxBytes) {
             return null;
           }
-
-          final Uint8List? bytes = await _fetch(uri);
-          // 面板地址填错时拿到的多是 HTML 错误页，按魔数挡掉，别把它当图标存下来
-          if (bytes == null || !_isImage(bytes)) {
-            Logger.instance.warn('icon', '图标取回失败：$url');
-            return null;
-          }
-
-          await file.writeAsBytes(bytes, flush: true);
-          return bytes;
-        } on Object catch (e) {
-          Logger.instance.warn('icon', '图标取回失败：$url（$e）');
+          final Uint8List bytes = await file.readAsBytes();
+          return generation == _generation ? bytes : null;
+        }
+        // 地址由面板下发：明文 http 会把用得上哪个策略组暴露在链路上
+        final Uri? uri = Uri.tryParse(url);
+        if (uri == null || uri.scheme != 'https') {
+          Logger.instance.warn('icon', '图标地址不是 https，已忽略：$url');
           return null;
         }
-      });
 
-  static Future<Uint8List?> _fetch(Uri uri) async {
+        final Uint8List? bytes = await _fetch(uri);
+        if (generation != _generation) {
+          return null;
+        }
+        // 面板地址填错时拿到的多是 HTML 错误页，按魔数挡掉，别把它当图标存下来
+        if (bytes == null || !_isImage(bytes)) {
+          Logger.instance.warn('icon', '图标取回失败：$url');
+          return null;
+        }
+
+        await file.writeAsBytes(bytes, flush: true);
+        return generation == _generation ? bytes : null;
+      } on Object catch (e) {
+        if (generation == _generation) {
+          Logger.instance.warn('icon', '图标取回失败：$url（$e）');
+        }
+        return null;
+      }
+    });
+  }
+
+  static Future<Uint8List?> _fetch(
+    Uri uri, {
+    int maxBytes = _maxBytes,
+    Duration timeout = _timeout,
+    void Function(int received, int? total)? onProgress,
+  }) async {
+    if (!SafeUrl.canLoad(uri.toString())) {
+      return null;
+    }
     final http.Client client = http.Client();
+    final Completer<void> abort = Completer<void>();
+    _downloads.add(abort);
+    final Timer timer = Timer(timeout, () {
+      if (!abort.isCompleted) {
+        abort.complete();
+      }
+    });
     try {
-      final http.StreamedResponse response = await client
-          .send(http.Request('GET', uri))
-          .timeout(_timeout);
+      http.StreamedResponse response;
+      final bool requireHttps = uri.scheme == 'https';
+      int redirects = 0;
+      while (true) {
+        response = await client
+            .send(
+              http.AbortableRequest('GET', uri, abortTrigger: abort.future)
+                ..followRedirects = false,
+            )
+            .timeout(timeout);
+        if (!response.isRedirect) {
+          break;
+        }
+        await response.stream.listen(null).cancel();
+        final String? location = response.headers['location'];
+        if (location == null || redirects++ >= 5) {
+          return null;
+        }
+        final Uri? redirect = Uri.tryParse(location);
+        if (redirect == null) {
+          return null;
+        }
+        uri = uri.resolveUri(redirect);
+        if (!SafeUrl.canLoad(uri.toString()) ||
+            (requireHttps && uri.scheme != 'https')) {
+          return null;
+        }
+      }
       if (response.statusCode != 200 ||
-          (response.contentLength ?? 0) > _maxBytes) {
+          (response.contentLength ?? 0) > maxBytes) {
         return null;
       }
 
-      final List<int> body = <int>[];
+      final BytesBuilder body = BytesBuilder(copy: false);
       await for (final List<int> chunk in response.stream) {
-        body.addAll(chunk);
-        if (body.length > _maxBytes) {
+        if (body.length + chunk.length > maxBytes) {
           return null;
         }
+        body.add(chunk);
+        onProgress?.call(body.length, response.contentLength);
       }
-      return Uint8List.fromList(body);
+      return body.takeBytes();
     } finally {
+      timer.cancel();
+      _downloads.remove(abort);
       client.close();
     }
   }
@@ -162,13 +255,7 @@ class RemoteIcon extends StatelessWidget {
     return true;
   }
 
-  static String _key(String url) {
-    int hash = 0x811C9DC5;
-    for (final int unit in url.codeUnits) {
-      hash = ((hash ^ unit) * 0x01000193) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
-  }
+  static String _key(String url) => sha256.convert(utf8.encode(url)).toString();
 
   @override
   Widget build(BuildContext context) => _IconBytes(
@@ -178,6 +265,87 @@ class RemoteIcon extends StatelessWidget {
     fit: fit,
     fallback: fallback,
   );
+}
+
+class RemoteImage extends ImageProvider<RemoteImage> {
+  RemoteImage(this.url) : _generation = RemoteIcon._generation;
+
+  final String url;
+  final int _generation;
+
+  @override
+  Future<RemoteImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture<RemoteImage>(this);
+
+  @override
+  ImageStreamCompleter loadImage(RemoteImage key, ImageDecoderCallback decode) {
+    final StreamController<ImageChunkEvent> chunks =
+        StreamController<ImageChunkEvent>();
+    return MultiFrameImageStreamCompleter(
+      codec: key._load(decode, chunks),
+      scale: 1,
+      chunkEvents: chunks.stream,
+    );
+  }
+
+  bool get _current =>
+      !RemoteIcon._clearing && _generation == RemoteIcon._generation;
+
+  Future<ui.Codec> _load(
+    ImageDecoderCallback decode,
+    StreamController<ImageChunkEvent> chunks,
+  ) async {
+    final Completer<void> done = Completer<void>();
+    RemoteIcon._imageLoads.add(done);
+    try {
+      if (!_current || !SafeUrl.canLoad(url)) {
+        throw StateError('图片会话已结束或地址无效');
+      }
+      final Uint8List? bytes = await RemoteIcon._fetch(
+        Uri.parse(url.trim()),
+        maxBytes: 50 << 20,
+        timeout: const Duration(seconds: 30),
+        onProgress: (int received, int? total) => chunks.add(
+          ImageChunkEvent(
+            cumulativeBytesLoaded: received,
+            expectedTotalBytes: total,
+          ),
+        ),
+      );
+      if (!_current || bytes == null || bytes.isEmpty) {
+        throw StateError('图片加载已取消或内容无效');
+      }
+      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+        bytes,
+      );
+      if (!_current) {
+        buffer.dispose();
+        throw StateError('图片会话已结束');
+      }
+      final ui.Codec codec = await decode(buffer);
+      if (!_current) {
+        codec.dispose();
+        throw StateError('图片会话已结束');
+      }
+      return codec;
+    } catch (_) {
+      scheduleMicrotask(() => PaintingBinding.instance.imageCache.evict(this));
+      rethrow;
+    } finally {
+      unawaited(chunks.close());
+      RemoteIcon._imageLoads.remove(done);
+      done.complete();
+    }
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RemoteImage &&
+      other.url == url &&
+      other._generation == _generation;
+
+  @override
+  int get hashCode => Object.hash(url, _generation);
 }
 
 class _IconBytes extends StatelessWidget {

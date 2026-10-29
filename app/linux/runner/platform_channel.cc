@@ -654,7 +654,12 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
       g_autoptr(GError) clear_error = nullptr;
       secret_password_clear_sync(&kRememberedSchema, nullptr, &clear_error,
                                  "account", name, nullptr);
-      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+      if (clear_error != nullptr) {
+        response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "secret", clear_error->message, nullptr));
+      } else {
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+      }
     }
   } else if (g_strcmp0(method, "cursor.create") == 0) {
     if (create_named_cursor(self, arguments)) {

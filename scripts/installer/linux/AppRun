@@ -1,0 +1,56 @@
+#!/bin/sh
+# AppImage 入口：helper 只认 /opt/ecycloud/ECYCloud 发来的指令，挂载点里的 GUI 连不上后台服务，
+# 因此首次运行或版本不符时经 pkexec 用 install.sh 整份装到 /opt/ecycloud，再启动装好的 GUI。
+set -e
+
+appdir="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+target='/opt/ecycloud'
+
+installed_matches() {
+    [ -f /etc/systemd/system/ecycloud-helper.service ] &&
+        cmp -s "$appdir$target/lib/libapp.so" "$target/lib/libapp.so" &&
+        cmp -s "$appdir$target/ecycloud-helper" "$target/ecycloud-helper"
+}
+
+launch_installed() {
+    exec "$target/ECYCloud" "$@"
+}
+
+if installed_matches; then
+    launch_installed "$@"
+fi
+
+installed_format="$(cat "$target/package-format" 2>/dev/null || true)"
+case "$installed_format" in
+    deb|rpm)
+        echo "本机已用 $installed_format 包安装，AppImage 不覆盖包管理器的文件，直接启动已装版本；改用 AppImage 请先卸载该包" >&2
+        launch_installed "$@"
+        ;;
+esac
+
+if ! command -v pkexec >/dev/null 2>&1; then
+    echo "未找到 pkexec，无法申请管理员授权安装后台服务，请安装 polkit 后重试" >&2
+    exit 1
+fi
+
+# FUSE 挂载只对挂载者可见，root 也读不到，须先拷到挂载点之外再交给 pkexec
+stage="$(mktemp -d "${TMPDIR:-/tmp}/ecycloud-appimage.XXXXXX")"
+if ! cp -R "$appdir/opt" "$appdir/usr" "$appdir/install.sh" "$appdir/uninstall.sh" \
+    "$appdir/purge-data.sh" "$stage/"; then
+    rm -rf "$stage"
+    exit 1
+fi
+
+# install.sh 会把暂存区收归 root，普通用户删不掉，清理放在提权侧
+# shellcheck disable=SC2016
+if pkexec /bin/sh -c '/bin/sh "$1/install.sh"; status=$?; rm -rf "$1"; exit $status' sh "$stage"; then
+    launch_installed "$@"
+fi
+
+rm -rf "$stage" 2>/dev/null || true
+if [ -x "$target/ECYCloud" ]; then
+    echo "后台服务未完成安装，启动已装版本" >&2
+    launch_installed "$@"
+fi
+echo "后台服务未完成安装，客户端无法连接；重新运行本 AppImage 并完成管理员授权" >&2
+exit 1

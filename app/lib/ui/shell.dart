@@ -15,7 +15,6 @@ import '../state/update_controller.dart';
 import 'app_scope.dart';
 import 'theme.dart';
 import 'widgets/nav_glyph.dart';
-import 'widgets/overlay_scroll_view.dart';
 import 'pages/connections_page.dart';
 import 'pages/home_page.dart';
 import 'pages/invite_page.dart';
@@ -30,9 +29,12 @@ import 'widgets/announcement_dialog.dart';
 import 'widgets/app_header.dart';
 import 'widgets/app_sidebar.dart';
 import 'widgets/page_header.dart';
-import 'widgets/clipped_scroll_body.dart';
 import 'widgets/profile_format_dialog.dart';
 import 'widgets/update_progress_bar.dart';
+import 'widgets/app_alert_dialog.dart';
+import 'widgets/app_scaffold.dart';
+import 'widgets/app_text_selection.dart';
+import 'widgets/television_navigation.dart';
 
 class _Destination {
   const _Destination(this.icon, this.selectedIcon, this.label, this.page);
@@ -68,18 +70,8 @@ class _ShellState extends State<Shell> {
       '工单',
       TicketsPage(),
     ),
-    _Destination(
-      Icons.group_add_outlined,
-      Icons.group_add,
-      '邀请',
-      InvitePage(),
-    ),
-    _Destination(
-      Icons.lock_open_outlined,
-      Icons.lock_open,
-      '解锁',
-      UnlockPage(),
-    ),
+    _Destination(Icons.group_add_outlined, Icons.group_add, '邀请', InvitePage()),
+    _Destination(Icons.lock_open_outlined, Icons.lock_open, '解锁', UnlockPage()),
     _Destination(
       Icons.swap_horiz_outlined,
       Icons.swap_horizontal_circle,
@@ -130,6 +122,7 @@ class _ShellState extends State<Shell> {
       ..onConfigAlert = _onConfigAlert;
     _announcements = scope.announcements..addListener(_maybeShowPopup);
     _forceUpdateIfNeeded();
+    _showInstallResult();
     _maybeShowPopup();
     _syncDeviceKickPoll();
     if (_auth?.profile?.deviceKickNotice == true) {
@@ -165,7 +158,9 @@ class _ShellState extends State<Shell> {
   }
 
   Widget _chromePage(int index, Widget page) {
-    return ShellChrome(active: _index == index, bar: _chrome, child: page);
+    return AppTextSelection(
+      child: ShellChrome(active: _index == index, bar: _chrome, child: page),
+    );
   }
 
   void _syncDeviceKickPoll() {
@@ -226,7 +221,7 @@ class _ShellState extends State<Shell> {
     String selected = devices.isEmpty ? '' : devices.first.deviceId;
     final bool? ok = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext context) => AppAlertDialog(
         title: Text(L10n.t('在线客户端数量已达上限')),
         content: devices.isEmpty
             ? Text(L10n.t('在线客户端数量已达上限，是否下线其中一个客户端，以挪出位置？'))
@@ -238,13 +233,12 @@ class _ShellState extends State<Shell> {
                       children: <Widget>[
                         Text(L10n.t('在线客户端数量已达上限，请选择一个要下线的客户端：')),
                         const SizedBox(height: 8),
-                        ClippedScrollBody(
-                          filled: false,
-                          child: RadioGroup<String>(
-                            groupValue: selected,
-                            onChanged: (String? value) => setDialogState(
-                              () => selected = value ?? selected,
-                            ),
+                        RadioGroup<String>(
+                          groupValue: selected,
+                          onChanged: (String? value) => setDialogState(
+                            () => selected = value ?? selected,
+                          ),
+                          child: TelevisionArrowKeys(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
@@ -323,17 +317,14 @@ class _ShellState extends State<Shell> {
         if (!mounted) {
           return;
         }
-        if (!attempted ||
-            connection?.state == ConnectionPhase.disconnected ||
-            connection?.state == ConnectionPhase.disconnecting) {
-          try {
-            await _auth?.api?.ackDeviceKick();
-          } on Object catch (_) {}
-        }
+        try {
+          await _auth?.api?.ackDeviceKick();
+        } on Object catch (_) {}
         await _auth?.refreshProfile();
         return;
       }
-      if (connection != null &&
+      if (_auth?.profile?.deviceKickReason == 'remove' &&
+          connection != null &&
           (connection.state == ConnectionPhase.connected ||
               connection.state == ConnectionPhase.connecting)) {
         await connection.disconnect();
@@ -344,12 +335,12 @@ class _ShellState extends State<Shell> {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (BuildContext context) => AlertDialog(
+        builder: (BuildContext context) => AppAlertDialog(
           title: Text(L10n.t('设备已下线')),
           content: Text(
             L10n.t(
               _auth?.profile?.deviceKickReason == 'remove'
-                  ? '该设备已从使用记录中被移除下线。'
+                  ? '该设备已被下线。'
                   : '由于超出在线客户端数量限制，有新客户端请求连接，已将您的设备踢下线。',
             ),
           ),
@@ -397,6 +388,33 @@ class _ShellState extends State<Shell> {
           context,
           announcement: pending,
           controller: announcements,
+        ),
+      );
+    });
+  }
+
+  void _showInstallResult() {
+    final String? result = _update!.takeInstallResult();
+    if (result == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(
+        showDialog<void>(
+          context: context,
+          builder: (BuildContext context) => AppAlertDialog(
+            title: Text(L10n.t('客户端更新')),
+            content: Text(result),
+            actions: <Widget>[
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(L10n.t('知道了')),
+              ),
+            ],
+          ),
         ),
       );
     });
@@ -488,123 +506,127 @@ class _ShellState extends State<Shell> {
         return ListenableBuilder(
           listenable: AppScope.of(context).auth,
           builder: (BuildContext context, Widget? _) {
-            final bool ticketUnread = AppScope.of(
-              context,
-            ).auth.hasUnreadTicketReply;
+            final bool ticketUnread = AppScope.of(context)
+                .auth
+                .hasUnreadTicketReply;
             return ShellNavigator(
               goTo: _goToTab,
-              child: Scaffold(
-            body: SafeArea(
-              bottom: wide,
-              child: wide
-                  ? Row(
-                      children: <Widget>[
-                        AppSidebar(
-                          selectedIndex: _index,
-                          onSelected: _goToTab,
-                          items: <AppSidebarItem>[
-                            for (int i = 0; i < _destinations.length; i++)
-                              AppSidebarItem(
-                                icon: _destinations[i].icon,
-                                selectedIcon: _destinations[i].selectedIcon,
-                                label: L10n.t(_destinations[i].label),
+              child: AppScaffold(
+                body: SafeArea(
+                  bottom: wide,
+                  child: wide
+                      ? Row(
+                          children: <Widget>[
+                            AppSidebar(
+                              selectedIndex: _index,
+                              onSelected: _goToTab,
+                              items: <AppSidebarItem>[
+                                for (int i = 0; i < _destinations.length; i++)
+                                  AppSidebarItem(
+                                    icon: _destinations[i].icon,
+                                    selectedIcon: _destinations[i].selectedIcon,
+                                    label: L10n.t(_destinations[i].label),
+                                    badge:
+                                        i == ShellNavigator.ticketsTab &&
+                                        ticketUnread,
+                                  ),
+                              ],
+                            ),
+                            Expanded(child: headed),
+                          ],
+                        )
+                      : Stack(
+                          children: <Widget>[
+                            headed,
+                            if (_moreOpen)
+                              Align(
+                                alignment: Alignment.bottomRight,
+                                child: Material(
+                                  color: Theme.of(context).colorScheme.surface,
+                                  clipBehavior: Clip.antiAlias,
+                                  borderRadius: BorderRadius.circular(
+                                    AppTheme.cardRadius,
+                                  ),
+                                  child: IntrinsicWidth(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        for (
+                                          int i = _mobilePinnedCount;
+                                          i < _destinations.length;
+                                          i++
+                                        )
+                                          ListTile(
+                                            leading: NavGlyph(
+                                              _index == i
+                                                  ? _destinations[i]
+                                                        .selectedIcon
+                                                  : _destinations[i].icon,
+                                              filled: _index == i,
+                                            ),
+                                            title: Text(
+                                              L10n.t(_destinations[i].label),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyLarge
+                                                  ?.copyWith(
+                                                    fontSize:
+                                                        AppTheme.navLabelSize,
+                                                  ),
+                                            ),
+                                            selected: _index == i,
+                                            selectedTileColor: Theme.of(context)
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                            onTap: () => _goToTab(i),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                ),
+                bottomNavigationBar: wide
+                    ? null
+                    : NavigationBar(
+                        selectedIndex: _index < _mobilePinnedCount
+                            ? _index
+                            : _mobilePinnedCount,
+                        onDestinationSelected: (int index) {
+                          if (index < _mobilePinnedCount) {
+                            _goToTab(index);
+                            return;
+                          }
+                          setState(() => _moreOpen = !_moreOpen);
+                        },
+                        destinations: <NavigationDestination>[
+                          for (int i = 0; i < _mobilePinnedCount; i++)
+                            NavigationDestination(
+                              icon: _navIcon(
+                                _destinations[i].icon,
                                 badge:
                                     i == ShellNavigator.ticketsTab &&
                                     ticketUnread,
                               ),
-                          ],
-                        ),
-                        Expanded(child: headed),
-                      ],
-                    )
-                  : Stack(
-                      children: <Widget>[
-                        headed,
-                        if (_moreOpen)
-                          Align(
-                            alignment: Alignment.bottomRight,
-                            child: Material(
-                              color: Theme.of(context).colorScheme.surface,
-                              clipBehavior: Clip.antiAlias,
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.cardRadius,
+                              selectedIcon: _navIcon(
+                                _destinations[i].selectedIcon,
+                                filled: true,
+                                badge:
+                                    i == ShellNavigator.ticketsTab &&
+                                    ticketUnread,
                               ),
-                              child: IntrinsicWidth(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    for (
-                                      int i = _mobilePinnedCount;
-                                      i < _destinations.length;
-                                      i++
-                                    )
-                                      ListTile(
-                                        leading: NavGlyph(
-                                          _index == i
-                                              ? _destinations[i].selectedIcon
-                                              : _destinations[i].icon,
-                                          filled: _index == i,
-                                        ),
-                                        title: Text(
-                                          L10n.t(_destinations[i].label),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge
-                                              ?.copyWith(
-                                                fontSize: AppTheme.navLabelSize,
-                                              ),
-                                        ),
-                                        selected: _index == i,
-                                        selectedTileColor: Theme.of(
-                                          context,
-                                        ).colorScheme.surfaceContainerHighest,
-                                        onTap: () => _goToTab(i),
-                                      ),
-                                  ],
-                                ),
-                              ),
+                              label: L10n.t(_destinations[i].label),
                             ),
+                          NavigationDestination(
+                            icon: const Icon(Icons.more_horiz),
+                            selectedIcon: const Icon(Icons.more_horiz),
+                            label: L10n.t('更多'),
                           ),
-                      ],
-                    ),
-            ),
-            bottomNavigationBar: wide
-                ? null
-                : NavigationBar(
-                    selectedIndex: _index < _mobilePinnedCount
-                        ? _index
-                        : _mobilePinnedCount,
-                    onDestinationSelected: (int index) {
-                      if (index < _mobilePinnedCount) {
-                        _goToTab(index);
-                        return;
-                      }
-                      setState(() => _moreOpen = !_moreOpen);
-                    },
-                    destinations: <NavigationDestination>[
-                      for (int i = 0; i < _mobilePinnedCount; i++)
-                        NavigationDestination(
-                          icon: _navIcon(
-                            _destinations[i].icon,
-                            badge:
-                                i == ShellNavigator.ticketsTab && ticketUnread,
-                          ),
-                          selectedIcon: _navIcon(
-                            _destinations[i].selectedIcon,
-                            filled: true,
-                            badge:
-                                i == ShellNavigator.ticketsTab && ticketUnread,
-                          ),
-                          label: L10n.t(_destinations[i].label),
-                        ),
-                      NavigationDestination(
-                        icon: const Icon(Icons.more_horiz),
-                        selectedIcon: const Icon(Icons.more_horiz),
-                        label: L10n.t('更多'),
+                        ],
                       ),
-                    ],
-                  ),
-          ),
+              ),
             );
           },
         );
@@ -632,6 +654,8 @@ class _ForceUpdateDialog extends StatefulWidget {
 }
 
 class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
+  bool _attempted = false;
+
   @override
   void initState() {
     super.initState();
@@ -648,11 +672,17 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     if (!mounted) {
       return;
     }
-    if (!widget.update.requiresUpdate) {
+    // 本窗口发起过更新时保留窗口展示结果，否则内核更新成功的瞬间窗口就消失了
+    if (!widget.update.requiresUpdate && !_attempted) {
       Navigator.of(context).pop();
       return;
     }
     setState(() {});
+  }
+
+  void _run(Future<void> Function() action) {
+    _attempted = true;
+    unawaited(action());
   }
 
   @override
@@ -666,62 +696,64 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
     final bool busy = update.appBusy || update.kernelUpgrading;
     final bool appFailed = update.appStatus.startsWith(L10n.t('更新失败'));
     final bool kernelFailed = update.kernelStatus.startsWith(L10n.t('更新失败'));
+    final bool kernelUpdated =
+        _attempted && update.kernelStatus.startsWith(L10n.t('更新成功'));
     final Color errorColor = Theme.of(context).colorScheme.error;
 
-    return AlertDialog(
-      icon: const Icon(Icons.system_update_alt),
-      title: Text(L10n.t('必须更新')),
-      content: OverlayScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: 6,
-          children: <Widget>[
-            Text(L10n.t('强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。')),
-            if (appOutdated)
-              Text(L10n.t('客户端 {0} → {1}', <Object>[app.current, app.latest])),
-            if (kernelOutdated)
-              Text(
-                L10n.t('mihomo 内核 {0} → {1}', <Object>[
-                  kernel.current,
-                  kernel.latest,
-                ]),
-              ),
-            if (update.appBusy || appFailed)
-              Text(
-                update.appStatus,
-                style: appFailed
-                    ? Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: errorColor)
-                    : null,
-              ),
-            if (update.appBusy)
-              UpdateProgressBar(
-                percent: update.appPercent,
-                padding: EdgeInsets.zero,
-              ),
-            if (update.kernelUpgrading || kernelFailed)
-              Text(
-                update.kernelStatus,
-                style: kernelFailed
-                    ? Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: errorColor)
-                    : null,
-              ),
-            if (update.kernelUpgrading)
-              UpdateProgressBar(
-                percent: update.kernelPercent,
-                padding: EdgeInsets.zero,
-              ),
-          ],
-        ),
+    return AppAlertDialog(
+      icon: Icon(
+        Icons.system_update_alt,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
+      title: Text(L10n.t('检测到更新')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 6,
+        children: <Widget>[
+          Text(L10n.t('强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。')),
+          if (appOutdated)
+            Text(L10n.t('客户端 {0} → {1}', <Object>[app.current, app.latest])),
+          if (kernelOutdated)
+            Text(
+              L10n.t('mihomo 内核 {0} → {1}', <Object>[
+                kernel.current,
+                kernel.latest,
+              ]),
+            ),
+          if (update.appBusy || appFailed)
+            Text(
+              update.appStatus,
+              style: appFailed
+                  ? Theme.of(context).textTheme.bodyMedium
+                        ?.copyWith(color: errorColor)
+                  : null,
+            ),
+          if (update.appBusy)
+            UpdateProgressBar(
+              percent: update.appPercent,
+              padding: EdgeInsets.zero,
+            ),
+          if (update.kernelUpgrading || kernelFailed || kernelUpdated)
+            Text(
+              update.kernelStatus,
+              style: kernelFailed || kernelUpdated
+                  ? Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: kernelFailed ? errorColor : AppTheme.success,
+                    )
+                  : null,
+            ),
+          if (update.kernelUpgrading)
+            UpdateProgressBar(
+              percent: update.kernelPercent,
+              padding: EdgeInsets.zero,
+            ),
+        ],
       ),
       actions: <Widget>[
         if (update.kernelUpgradable != null)
           FilledButton(
-            onPressed: busy ? null : () => unawaited(update.upgradeKernel()),
+            onPressed: busy ? null : () => _run(update.upgradeKernel),
             child: Text(
               update.kernelUpgrading
                   ? (update.kernelPercent == null
@@ -734,7 +766,7 @@ class _ForceUpdateDialogState extends State<_ForceUpdateDialog> {
           ),
         if (appOutdated)
           FilledButton(
-            onPressed: busy ? null : () => unawaited(update.installApp()),
+            onPressed: busy ? null : () => _run(update.installApp),
             child: Text(
               update.appBusy
                   ? (update.appPercent == null

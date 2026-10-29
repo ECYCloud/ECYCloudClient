@@ -17,6 +17,9 @@ import '../widgets/refresh_button.dart';
 import '../widgets/section_card.dart';
 import 'login_page.dart';
 import '../../l10n/l10n.dart';
+import '../widgets/app_alert_dialog.dart';
+import '../widgets/app_scaffold.dart';
+import '../widgets/app_text_field.dart';
 
 class RechargePage extends StatefulWidget {
   const RechargePage({super.key});
@@ -101,7 +104,7 @@ class _RechargePageState extends State<RechargePage>
       _code.clear();
       await showDialog<void>(
         context: context,
-        builder: (BuildContext context) => AlertDialog(
+        builder: (BuildContext context) => AppAlertDialog(
           title: Text(L10n.t('兑换成功')),
           content: Text(msg.isEmpty ? L10n.t('兑换码已使用，余额已到账。') : msg),
           actions: <Widget>[
@@ -179,7 +182,7 @@ class _RechargePageState extends State<RechargePage>
       if (status != null) {
         await showDialog<void>(
           context: context,
-          builder: (BuildContext context) => AlertDialog(
+          builder: (BuildContext context) => AppAlertDialog(
             title: Text(L10n.t('支付成功')),
             content: Text(L10n.t('支付成功，余额已到账')),
             actions: <Widget>[
@@ -211,7 +214,7 @@ class _RechargePageState extends State<RechargePage>
   Widget build(BuildContext context) {
     final RechargeInfo? info = _info;
 
-    return Scaffold(
+    return AppScaffold(
       body: Column(
         children: <Widget>[
           SafeArea(
@@ -271,8 +274,7 @@ class _RechargePageState extends State<RechargePage>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
-                              TextField(
-                                contextMenuBuilder: AppTheme.editableTextMenu,
+                              AppTextField(
                                 controller: _code,
                                 inputFormatters: <TextInputFormatter>[
                                   asciiOnlyFormatter,
@@ -301,8 +303,7 @@ class _RechargePageState extends State<RechargePage>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
-                                TextField(
-                                  contextMenuBuilder: AppTheme.editableTextMenu,
+                                AppTextField(
                                   controller: _amount,
                                   keyboardType:
                                       const TextInputType.numberWithOptions(

@@ -1,3 +1,5 @@
+import '../../l10n/l10n.dart';
+
 /// 指令名、请求体与 `{ok, error, data}` 应答四端一致。
 abstract class ServiceTransport {
   Future<Map<String, dynamic>> request(
@@ -15,5 +17,5 @@ class ServiceException implements Exception {
   bool get serviceUnavailable => false;
 
   @override
-  String toString() => message;
+  String toString() => L10n.message(message);
 }

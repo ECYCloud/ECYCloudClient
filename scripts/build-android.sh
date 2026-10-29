@@ -38,12 +38,12 @@ fi
 if [[ -z "$sub_url" ]]; then
     sub_url="$(jq -er '.subUrl' "$root_dir/config/panel.json")"
 fi
-if [[ ! "$panel_url" =~ ^https?:// ]]; then
-    echo "站点域名不是合法的 http(s) 地址：$panel_url" >&2
+if [[ ! "$panel_url" =~ ^https:// ]]; then
+    echo "站点域名必须是 https 地址：$panel_url" >&2
     exit 1
 fi
-if [[ ! "$sub_url" =~ ^https?:// ]]; then
-    echo "订阅域名不是合法的 http(s) 地址：$sub_url" >&2
+if [[ ! "$sub_url" =~ ^https:// ]]; then
+    echo "订阅域名必须是 https 地址：$sub_url" >&2
     exit 1
 fi
 

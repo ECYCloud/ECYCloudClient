@@ -141,7 +141,7 @@ function updateTile(initial, check) {
 
 function appUpdateText(res) {
 	if (!res || !res.ok)
-		return _('Check failed: %s').format((res && res.msg) || _('Request failed'));
+		return _('Check failed: %s').format(api.messageText((res && res.msg) || _('Request failed')));
 	if (!res.outdated)
 		return _('Up to date (%s)').format(res.latest || res.current);
 	return _('Update available (%s). This page cannot install it. Open the releases page, extract the OpenWrt package, then install via SSH. apk: apk add --allow-untrusted /tmp/luci-app-ecycloud-*.apk; ipk: opkg install /tmp/luci-app-ecycloud_*.ipk').format(res.latest);
@@ -149,7 +149,7 @@ function appUpdateText(res) {
 
 function kernelUpdateText(res) {
 	if (!res || !res.ok)
-		return _('Check failed: %s').format((res && res.msg) || _('Request failed'));
+		return _('Check failed: %s').format(api.messageText((res && res.msg) || _('Request failed')));
 	if (!res.current)
 		return _('Local version unknown, latest (%s)').format(res.latest);
 	if (res.outdated)
@@ -280,7 +280,7 @@ return view.extend({
 
 		o = s.option(form.Flag, 'ipv6', _('IPv6'),
 			_('Handle IPv6 traffic as well.'));
-		o.default = '1';
+		o.default = '0';
 		o.rmempty = false;
 		api.skinFlag(o);
 
@@ -306,7 +306,7 @@ return view.extend({
 		o = s.option(form.ListValue, '_ui_language', _('Language'));
 		o.value('zh_CN', '简体中文');
 		o.value('zh_TW', '繁體中文');
-		o.value('en', 'English');
+		o.value('en-US', 'English');
 		o.rmempty = false;
 		o.cfgvalue = function() {
 			return api.resolveLang();
@@ -436,6 +436,10 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'config', 'ecycloud', _('About'));
 		s.addremove = false;
+
+		dummyOption(s, '_privacy', _('Privacy Policy'), null, function() {
+			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy Policy') ]);
+		});
 
 		o = s.option(form.DummyValue, '_version', _('Current version'));
 		o.cfgvalue = function() {
