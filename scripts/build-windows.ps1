@@ -74,7 +74,7 @@ if (Test-Path 'D:\') {
 }
 
 if ($Installer) {
-    $iscc = Get-Command 'iscc.exe' -CommandType Application -ErrorAction SilentlyContinue
+    $iscc = Get-Command 'iscc.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $iscc) {
         throw '未找到 iscc.exe，请安装 Inno Setup 7.1.1 并加入 PATH'
     }
