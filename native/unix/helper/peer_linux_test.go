@@ -3,10 +3,13 @@
 package main
 
 import (
+	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,5 +89,21 @@ func TestKernelCredentialFailsClosed(t *testing.T) {
 	}
 	if cmd.SysProcAttr.Credential.Uid != 1234 || cmd.SysProcAttr.Credential.Gid != 1234 || len(cmd.SysProcAttr.AmbientCaps) != 2 {
 		t.Fatal("内核必须使用受限用户和两项网络权限")
+	}
+}
+
+func TestProcessStartRejectsValueOverflowingDuration(t *testing.T) {
+	stat := func(start uint64) []byte {
+		return []byte("42 (a b) c) S " + strings.Repeat("0 ", 18) + strconv.FormatUint(start, 10) + " 0 0\n")
+	}
+	limit := uint64(math.MaxInt64) / uint64(procClockTick)
+	start, err := parseProcessStart(stat(limit), 42)
+	if err != nil || start != limit || time.Duration(start)*procClockTick <= 0 {
+		t.Fatalf("上限内的启动时间必须照常解析且换算后为正: %d, %v", start, err)
+	}
+	for _, value := range []uint64{limit + 1, math.MaxInt64, math.MaxUint64} {
+		if _, err := parseProcessStart(stat(value), 42); err == nil {
+			t.Fatalf("换算后会溢出的启动时间 %d 必须拒绝，否则会被当成早于本次连接", value)
+		}
 	}
 }

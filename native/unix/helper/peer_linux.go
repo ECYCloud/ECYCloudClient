@@ -115,12 +115,24 @@ func processStart(pid int) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("查询调用方进程失败: %w", err)
 	}
+	return parseProcessStart(stat, pid)
+}
+
+func parseProcessStart(stat []byte, pid int) (uint64, error) {
 	// comm 可含空格与括号，只能从最后一个 ')' 往后数：其后第 20 段是第 22 列 starttime
 	fields := bytes.Fields(stat[bytes.LastIndexByte(stat, ')')+1:])
 	if len(fields) < 20 {
 		return 0, fmt.Errorf("进程 %d 的状态信息不完整", pid)
 	}
-	return strconv.ParseUint(string(fields[19]), 10, 64)
+	start, err := strconv.ParseUint(string(fields[19]), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	// 换算成 time.Duration 会溢出成负数的值一律拒绝，否则会被当成早于本次连接
+	if start > math.MaxInt64/uint64(procClockTick) {
+		return 0, fmt.Errorf("进程 %d 的启动时间超出范围", pid)
+	}
+	return start, nil
 }
 
 func bootTimeAt(moment time.Time) time.Duration {
