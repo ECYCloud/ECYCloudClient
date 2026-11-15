@@ -59,7 +59,7 @@ private final class LoopbackServer: @unchecked Sendable {
 struct PhysicalInterfaceTransportTests {
     @Test func parsesLengthChunkedAndInformationalResponses() async throws {
         let server = try LoopbackServer([
-            "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nRetry-After: 9\r\n\r\n{\"ret\":1}  ",
+            "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nRetry-After: 9\r\nProfile-Update-Interval: 12\r\n\r\n{\"ret\":1}  ",
             "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 429 Too Many Requests\r\nTransfer-Encoding: chunked\r\n\r\n4;x=y\r\n{\"re\r\n5\r\nt\":0}\r\n0\r\n\r\n",
             "HTTP/1.1 204 No Content\r\n\r\n",
             "HTTP/1.1 200 OK\r\n\r\nuntil-close"
@@ -72,7 +72,7 @@ struct PhysicalInterfaceTransportTests {
         request.httpBody = Data("{\"a\":1}".utf8)
         request.setValue("Bearer synthetic", forHTTPHeaderField: "Authorization")
         let first = try await transport.send(request)
-        #expect(first.status == 200 && first.data == Data("{\"ret\":1}  ".utf8) && first.retryAfter == 9)
+        #expect(first.status == 200 && first.data == Data("{\"ret\":1}  ".utf8) && first.retryAfter == 9 && first.profileUpdateInterval == "12")
         let second = try await transport.send(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/x")!))
         #expect(second.status == 429 && second.data == Data("{\"ret\":0}".utf8))
         let third = try await transport.send(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
@@ -83,6 +83,23 @@ struct PhysicalInterfaceTransportTests {
         #expect(sent.hasPrefix("POST /api/client/v1/tickets?page=2&q=a%20b HTTP/1.1\r\n"))
         #expect(sent.contains("\r\nHost: 127.0.0.1:\(port)\r\n") && sent.contains("\r\nContent-Length: 7\r\n"))
         #expect(sent.contains("\r\nAuthorization: Bearer synthetic\r\n") && sent.hasSuffix("\r\n\r\n{\"a\":1}"))
+    }
+
+    // 畸形长度不能让前置条件或整数溢出直接带崩应用
+    @Test func malformedLengthsFailInsteadOfCrashing() async throws {
+        let server = try LoopbackServer([
+            "HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n7fffffffffffffff\r\nx\r\n0\r\n\r\n"
+        ])
+        defer { server.stop() }
+        let port = try await server.start()
+        let transport = PhysicalInterfaceTransport { NWPathMonitor(requiredInterfaceType: .loopback) }
+        await #expect(throws: ClientError.invalidResponse) {
+            _ = try await transport.send(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+        }
+        await #expect(throws: ClientError.networkFailure(URLError.networkConnectionLost.rawValue)) {
+            _ = try await transport.send(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+        }
     }
 
     @Test func rejectsOversizedAndRefusedConnections() async throws {

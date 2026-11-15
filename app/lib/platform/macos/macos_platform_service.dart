@@ -57,10 +57,60 @@ class MacosPlatformService extends UnixPlatformService {
   }
 
   @override
+  Future<bool> runInstaller(String path) async {
+    await verifyInstaller(path);
+    return super.runInstaller(path);
+  }
+
+  @override
+  Future<void> copySecret(String text) =>
+      UnixPlatformService.channel.invokeMethod<void>(
+        'clipboard.copySecret',
+        <String, dynamic>{'text': text},
+      );
+
+  // 安装包与 sha256 同出自 GitHub 应答，发布被顶替时两者会一起换；
+  // 本机带团队签名时，只接受同一团队 Developer ID Installer 签名的安装包
+  static Future<void> verifyInstaller(
+    String path, {
+    Future<ProcessResult> Function(String, List<String>) run = Process.run,
+  }) async {
+    final ProcessResult self = await run('/usr/bin/codesign', <String>[
+      '-dv',
+      Platform.resolvedExecutable,
+    ]);
+    final String? team = RegExp(
+      r'^TeamIdentifier=([A-Z0-9]{10})$',
+      multiLine: true,
+    ).firstMatch('${self.stderr}')?.group(1);
+    if (team == null) {
+      return;
+    }
+    final ProcessResult package = await run('/usr/sbin/pkgutil', <String>[
+      '--check-signature',
+      path,
+    ]);
+    final String output = '${package.stdout}';
+    final String? signer =
+        output.contains(
+          'Status: signed by a developer certificate issued by Apple for distribution',
+        )
+        ? RegExp(
+            r'^\s*1\. Developer ID Installer: .+ \(([A-Z0-9]{10})\)$',
+            multiLine: true,
+          ).firstMatch(output)?.group(1)
+        : null;
+    if (package.exitCode != 0 || signer != team) {
+      throw PlatformServiceException('安装包签名与当前客户端的开发者不一致，已中止更新');
+    }
+  }
+
+  @override
   Future<void> setSystemProxy({
     required int port,
     required List<String> bypass,
   }) async {
+    await leftoverProxyRestore;
     await _helper.request('proxy.set', <String, dynamic>{
       'port': port,
       'bypass': bypass,

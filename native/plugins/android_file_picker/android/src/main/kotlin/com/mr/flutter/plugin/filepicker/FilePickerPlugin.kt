@@ -127,6 +127,15 @@ class FilePickerPlugin : MethodCallHandler, FlutterPlugin,
                 result.success(null)
             }
 
+            "retrieveLostData" -> {
+                val context = activity?.applicationContext
+                if (context == null) {
+                    result.success(null)
+                } else {
+                    LostDataStore.retrieve(context, result)
+                }
+            }
+
             "releaseSafGrant" -> {
                 val uriStr = arguments?.get("uri") as? String
                 if (uriStr == null) {

@@ -184,8 +184,10 @@ install -m 0644 "$script_dir/installer/lang/LICENSE.zh-CN.txt" \
     "$work_dir/resources/zh_CN.lproj/LICENSE.txt"
 install -m 0644 "$script_dir/installer/lang/LICENSE.zh-TW.txt" \
     "$work_dir/resources/zh_TW.lproj/LICENSE.txt"
+min_os="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$stage_dir/Applications/ECYCloud.app/Contents/Info.plist")"
 sed -e "s/APP_VERSION/$version/" \
     -e "s/HOST_ARCHITECTURES/$host_architectures/" \
+    -e "s/min=\"11.0\"/min=\"$min_os\"/" \
     "$script_dir/installer/macos/distribution.xml" \
     > "$work_dir/distribution.xml"
 # pkgbuild 要求脚本可执行，仓库里的文件模式不可依赖

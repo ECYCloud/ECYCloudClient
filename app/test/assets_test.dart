@@ -1,4 +1,6 @@
 import 'package:ecycloud_client/ui/node_labels.dart';
+import 'package:ecycloud_client/ui/widgets/flag_icon.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -68,6 +70,48 @@ void main() {
     expect(NodeLabels.displayName('🇯🇵'), '🇯🇵');
   });
 
+  // 连接页与日志页旁边没有旗帜图标：名字原样保留国旗，界面上再把 emoji 画成 FlagIcon
+  test('完整名保留国旗 emoji，旗帜段按地区码换成旗帜图标', () {
+    NodeLabels.configure(
+      '',
+      <String, String>{'node-12': '🇭🇰 香港 01'},
+      <String, String>{'主节点': '🇯🇵 Main'},
+    );
+    addTearDown(() => NodeLabels.configure(''));
+    expect(NodeLabels.fullName('node-12'), '🇭🇰 香港 01');
+    expect(NodeLabels.fullName('主节点'), '🇯🇵 Main');
+    expect(NodeLabels.fullName('node-99'), '');
+    expect(NodeLabels.displayName('node-12'), '香港 01');
+
+    final List<InlineSpan> spans = NodeLabels.flagSpans(
+      '主节点 → 🇭🇰 香港 01 → 🇺🇸️US',
+      width: 12,
+    );
+    expect(
+      <String?>[
+        for (final InlineSpan span in spans)
+          switch (span) {
+            TextSpan(:final String? text) => text,
+            WidgetSpan(child: final FlagIcon flag) =>
+              '[${flag.code} ${flag.width} ${flag.text}]',
+            _ => null,
+          },
+      ],
+      <String>[
+        '主节点 → ',
+        '[hk 12.0 🇭🇰]',
+        ' 香港 01 → ',
+        '[us 12.0 🇺🇸️]',
+        'US',
+      ],
+    );
+    expect(
+      NodeLabels.flagSpans('DIRECT')
+          .map((InlineSpan span) => span.toPlainText()),
+      <String>['DIRECT'],
+    );
+  });
+
   test('面板按 node-{id} 命名 proxy 时，显示名与地区都从映射表取', () async {
     await NodeLabels.load();
     NodeLabels.configure(r'/[\p{L}\p{N}]+/u', <String, String>{
@@ -106,9 +150,9 @@ void main() {
 }''';
 
     final String shown = NodeLabels.annotateRuntimeConfig(raw);
-    expect(shown, contains('"香港 01"'));
+    expect(shown, contains('"🇭🇰 香港 01"'));
     expect(shown, contains('"备用"'));
-    expect(shown, contains('DOMAIN,x.com,香港 01'));
+    expect(shown, contains('DOMAIN,x.com,🇭🇰 香港 01'));
     expect(shown, contains('"DIRECT"'));
     expect(shown, contains('"MATCH,主节点"'));
     expect(shown, isNot(contains(RegExp(r'node-\d+'))));
@@ -127,9 +171,12 @@ void main() {
         '[TCP] 198.18.0.1:23016(ECYCloud.exe) --> owo.ecycloud.com:443 '
         'match Match using 主节点[node-120]',
       ),
-      contains('主节点[香港 01]'),
+      contains('主节点[🇭🇰 香港 01]'),
     );
-    expect(NodeLabels.annotateText('node-12 and node-120'), '备用 and 香港 01');
+    expect(
+      NodeLabels.annotateText('node-12 and node-120'),
+      '备用 and 🇭🇰 香港 01',
+    );
     expect(NodeLabels.annotateText('DIRECT'), 'DIRECT');
     expect(
       NodeLabels.annotateText('Match using 主节点[node-120]'),
@@ -172,6 +219,26 @@ void main() {
     expect(shown, contains('"MATCH,Google services"'));
     expect(shown, isNot(contains('主节点')));
     expect(raw, contains('"MATCH,Google服务"'));
+  });
+
+  // 空标签键在每个字符边界都能匹配：日志按行放大数十倍，运行配置里的空串与逗号也被改写
+  test('面板下发的空标签键不参与日志与运行配置替换', () {
+    NodeLabels.configure(
+      '',
+      <String, String>{'': '空键节点', 'node-9': 'Fixture node'},
+      <String, String>{'': '空键分组'},
+    );
+    addTearDown(() => NodeLabels.configure(''));
+    expect(
+      NodeLabels.annotateText('match Match using 主节点[node-9] (a, b)'),
+      'match Match using 主节点[Fixture node] (a, b)',
+    );
+    expect(
+      NodeLabels.annotateRuntimeConfig(
+        '{"external-ui":"","proxies":["node-9"],"rules":["MATCH,DIRECT"]}',
+      ),
+      '{"external-ui":"","proxies":["Fixture node"],"rules":["MATCH,DIRECT"]}',
+    );
   });
 
   test('随包素材按文件名即标识的约定取得到', () async {

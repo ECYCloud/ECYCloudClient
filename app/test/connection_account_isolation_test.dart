@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
@@ -617,7 +618,10 @@ class _Controller extends ConnectionController {
   @override
   Future<void> startStandby() async {}
   @override
-  Future<void> shutdown({bool clearSession = false}) async {}
+  Future<void> shutdown({
+    bool clearSession = false,
+    String endedSession = '',
+  }) async {}
 }
 
 class _Client extends PanelApiClient {
@@ -703,9 +707,10 @@ class _Client extends PanelApiClient {
 class _Cache extends PanelResponseCache {
   final Map<String, RemoteProfile> saved = <String, RemoteProfile>{};
   @override
-  RemoteProfile? loadRemote(String accountKey) => saved[accountKey];
+  RemoteProfile? loadRemote(String accountKey, Uint8List? sealKey) =>
+      saved[accountKey];
   @override
-  void saveRemote(String accountKey, RemoteProfile remote) {
+  void saveRemote(String accountKey, RemoteProfile remote, Uint8List? sealKey) {
     saved[accountKey] = remote;
   }
 }
@@ -733,7 +738,7 @@ class _Kernel implements KernelController {
   @override
   Future<void> dispose() async {}
   @override
-  Future<void> clearSession() async {}
+  Future<void> clearSession(String cacheKey) async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

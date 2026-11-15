@@ -24,18 +24,6 @@ enum TrayAction {
   modeDirect,
 }
 
-class InstalledApp {
-  const InstalledApp({
-    required this.packageName,
-    required this.label,
-    required this.system,
-  });
-
-  final String packageName;
-  final String label;
-  final bool system;
-}
-
 class TrayLabels {
   const TrayLabels({
     required this.connect,
@@ -188,9 +176,6 @@ abstract class PlatformService {
 
   bool get supportsLaunchAtLogin;
 
-  // 能否按应用分流。只有 Android 有应用清单，桌面端的 tun 入站没有对应字段
-  bool get supportsPerAppProxy;
-
   // 认证 Android TV / 声明了 Leanback 的设备。只由原生按系统口径填写
   bool get isTelevision;
 
@@ -235,8 +220,6 @@ abstract class PlatformService {
 
   Future<({String model, String os})> deviceProfile();
 
-  Future<List<InstalledApp>> installedApps();
-
   Future<bool> runInstaller(String path);
 
   Future<bool> openUrl(String url);
@@ -248,6 +231,8 @@ abstract class PlatformService {
   Future<String?> unprotectSecret(String name, String blob);
 
   Future<void> deleteSecret(String name);
+
+  Future<void> copySecret(String text);
 
   Future<void> dispose();
 }

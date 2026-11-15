@@ -119,7 +119,7 @@ struct AccountHistoryView: View {
         case .loginLogs: [L10n.t("登录IP"), L10n.t("归属地"), L10n.t("设备"), L10n.t("状态"), L10n.t("登录方式"), L10n.t("登录时间")]
         case .operationLogs: [L10n.t("操作时间"), L10n.t("操作描述"), L10n.t("操作前"), L10n.t("操作后"), L10n.t("IP地址"), L10n.t("归属地"), L10n.t("请求方法"), L10n.t("请求URL"), "User-Agent"]
         case .balance: [L10n.t("订单号"), L10n.t("类型"), L10n.t("金额"), L10n.t("时间")]
-        case .purchases: [L10n.t("操作"), L10n.t("订单号"), L10n.t("商品名称"), L10n.t("购买价格"), L10n.t("商品详情"), L10n.t("购买时间"), L10n.t("套餐过期时间"), L10n.t("自动续费时间")]
+        case .purchases: [L10n.t("续费"), L10n.t("订单号"), L10n.t("商品名称"), L10n.t("购买价格"), L10n.t("商品详情"), L10n.t("购买时间"), L10n.t("套餐过期时间"), L10n.t("自动续费时间")]
         case .unlock: [L10n.t("节点"), "YouTube Premium", "Netflix", "Prime Video", "Disney Plus", "TikTok", "HBO Max", "OpenAI", "Gemini", "Claude", L10n.t("更新时间")]
         }
     }
@@ -158,7 +158,7 @@ struct AccountHistoryView: View {
 
     private func tableRow(_ row: AccountHistory.Row) -> [AnyView] {
         columns.map { column in
-            if column == L10n.t("操作") { return actionCell(row) }
+            if column == L10n.t(kind == .purchases ? "续费" : "操作") { return actionCell(row) }
             if column == L10n.t("商品详情") {
                 guard let content = row.content, !content.isEmpty else { return AnyView(cell("-", muted: true)) }
                 return AnyView(PurchaseDetail(html: content, origin: session.endpoints.site))
@@ -190,14 +190,19 @@ struct AccountHistoryView: View {
                 self.renewal = renewal; confirmingRenewal = true
             }.buttonStyle(ProductButtonStyle()).disabled(kicking))
         }
+        if !row.renewalUnavailableReason.isEmpty {
+            // 不能操作时显示灰色原因、悬浮禁止光标，与网页购买记录一致
+            return AnyView(cell(L10n.t(row.renewalUnavailableReason), muted: true, selectable: false).productForbiddenCursor())
+        }
         return AnyView(cell("-", muted: true))
     }
 
-    private func cell(_ text: String, muted: Bool = false, bold: Bool = false, color: Color? = nil) -> some View {
-        Text(verbatim: text.isEmpty ? "—" : text)
+    // selectable 为 false 时不开文字选择，否则 macOS 悬浮会显示文字光标，盖掉禁止光标
+    @ViewBuilder private func cell(_ text: String, muted: Bool = false, bold: Bool = false, color: Color? = nil, selectable: Bool = true) -> some View {
+        let label = Text(verbatim: text.isEmpty ? "—" : text)
             .font(.system(size: bold ? 13 : 12, weight: bold ? .semibold : .regular)).monospacedDigit()
             .foregroundStyle(color ?? (muted ? colors.secondary : colors.text))
-            .productTextSelection()
+        if selectable { label.productTextSelection() } else { label }
     }
 
     private func statusColor(_ status: String) -> Color? {

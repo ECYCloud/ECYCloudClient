@@ -35,7 +35,7 @@ class BoxService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (BoxState.sessionCleanupPending(this)) {
+        if (BoxState.sessionKey(this) == null) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -86,13 +86,13 @@ class BoxService : VpnService() {
     // 独立后两者会真的并发；同时进两次 Mihomo.start 会把内核搞成半启动状态
     @Synchronized
     private fun launch() {
-        if (BoxState.sessionCleanupPending(this)) {
-            startResult.offer("账户会话正在清理")
+        val key = runCatching { ensureSetup(this) }.getOrElse {
+            fail(it.message ?: it.toString())
             return
         }
         BoxState.revoked = false
         BoxState.stoppedByUser = false
-        val raw = runCatching { BoxState.configFile(this).readText() }.getOrNull()
+        val raw = runCatching { BoxState.configFile(this, key).readText() }.getOrNull()
         if (raw.isNullOrBlank()) {
             fail("没有可用的内核配置")
             return
@@ -104,10 +104,8 @@ class BoxService : VpnService() {
             val configJson = JSONObject(raw)
             configJson.getJSONObject("tun").put("enable", true)
             // AOSP JSONObject 会把 / 编成 \/，mihomo 的 yaml.v3 不认该转义
-            val config = configJson.toString(2).replace("\\/", "/")
-            BoxState.writeConfig(this, config)
+            val config = BoxState.writeConfig(this, key, configJson.toString(2).replace("\\/", "/"))
 
-            ensureSetup(this)
             Mihomo.setProtector(protector)
 
             val descriptor = establish(configJson)
@@ -175,18 +173,6 @@ class BoxService : VpnService() {
             val dns = address.host().nextAddress()
             builder.addDnsServer(dns)
             builder.addRoute(dns, if (dns.contains(':')) 128 else 32)
-        }
-
-        val included = options.strings("include-package")
-        for (name in included) {
-            runCatching { builder.addAllowedApplication(name) }
-        }
-        // 只放行选中应用时本客户端也得在内，否则它自己的流量绕开隧道
-        if (included.isNotEmpty()) {
-            runCatching { builder.addAllowedApplication(packageName) }
-        }
-        for (name in options.strings("exclude-package")) {
-            runCatching { builder.addDisallowedApplication(name) }
         }
 
         return builder.establish() ?: error("系统拒绝建立 VPN 连接")
@@ -332,20 +318,21 @@ class BoxService : VpnService() {
         @Volatile
         private var instance: BoxService? = null
 
-        @Volatile
-        private var setupDone = false
-
         @Synchronized
-        fun ensureSetup(context: Context) {
-            if (setupDone) {
-                return
+        fun ensureSetup(context: Context): String {
+            val key = BoxState.sessionKey(context) ?: error("尚未登录")
+            val current = BoxState.session
+            if (current != null) {
+                check(current == key) { "内核属于已退出的账户" }
+                return key
             }
             // cache.db、geodata 与 rule-providers 都落在这里，与 Dart 侧
             // AppPaths.kernelConfigFile 所在目录必须是同一个
-            val runDir = BoxState.runDir(context).also { it.mkdirs() }
+            val runDir = BoxState.runDir(context, key).also { it.mkdirs() }
             seedGeoData(context, runDir)
             Mihomo.setup(runDir.absolutePath)
-            setupDone = true
+            BoxState.session = key
+            return key
         }
 
         // 内核解析 GEOIP / GEOSITE 时就地读这两个库，缺文件就按 geox-url 同步下载，
@@ -368,10 +355,8 @@ class BoxService : VpnService() {
             }
         }
 
-        fun start(context: Context, config: String) {
-            check(!BoxState.sessionCleanupPending(context)) { "账户会话正在清理" }
-            ensureSetup(context)
-            BoxState.writeConfig(context, config)
+        fun start(context: Context, raw: String) {
+            val config = BoxState.writeConfig(context, ensureSetup(context), raw)
 
             if (!BoxState.takesOverExit(config)) {
                 standby(config)

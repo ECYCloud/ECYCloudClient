@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../l10n/l10n.dart';
 import 'app_paths.dart';
 
 /// 取值与 mihomo 的合法级别一一对应：label 同时用作内核配置的 `log-level`、
@@ -105,6 +104,17 @@ class Logger {
     }
     return line;
   }
+
+  // 内核把出站链写成 `策略组[节点]`，与连接页一致改为 `策略组 → 节点`。
+  // 必须在节点标识换成显示名之前调用：显示名可能自带方括号。
+  static String kernelChain(String message) => message.replaceFirstMapped(
+    _kernelChain,
+    (Match match) => ' using ${match[1]} → ${match[2]}',
+  );
+
+  static final RegExp _kernelChain = RegExp(
+    r' using ([^\[\]]+)\[([^\[\]]+)\]$',
+  );
 
   static final RegExp _logfmtLevel = RegExp(r'(?:^|\s)level=([a-z]+)');
   static final RegExp _prefixLevel = RegExp(
@@ -226,23 +236,15 @@ class Logger {
     _sink?.flush();
   }
 
-  void clearSession({Directory? directory}) {
+  void clearSession() {
+    _ring.clear();
+    reopen();
+  }
+
+  void reopen() {
     _sink?.close();
     _sink = null;
     _sinkDate = null;
-    _ring.clear();
-    final Directory logs = directory ?? AppPaths.logs;
-    final FileSystemEntityType type = FileSystemEntity.typeSync(
-      logs.path,
-      followLinks: false,
-    );
-    if (type == FileSystemEntityType.notFound) {
-      return;
-    }
-    if (type != FileSystemEntityType.directory) {
-      throw FileSystemException(L10n.t('日志目录不是普通目录'), logs.path);
-    }
-    logs.deleteSync(recursive: true);
   }
 
   Future<void> dispose() async {

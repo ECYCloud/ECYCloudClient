@@ -11,16 +11,16 @@ import Darwin
     func request(_ command: String, payload: [String: Any] = [:]) async throws -> [String: Any] {
         var value = payload
         value["command"] = command
-        let data = try JSONSerialization.data(withJSONObject: value) + Data([10])
-        guard data.count <= 4 * 1024 * 1024 else { throw TunnelError.configuration }
+        let data = try JSONSerialization.data(withJSONObject: value)
         let response: Data = try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do { continuation.resume(returning: try Self.transact(data)) }
                 catch { continuation.resume(throwing: error) }
             }
         }
-        guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any], result["ok"] as? Bool == true else {
-            throw TunnelError.control
+        guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any] else { throw TunnelError.control }
+        guard result["ok"] as? Bool == true else {
+            throw TunnelError.failed(L10n.message((result["error"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "后台服务处理失败"))
         }
         return result["data"] as? [String: Any] ?? [:]
     }
@@ -42,6 +42,21 @@ import Darwin
         guard connected == 0 else { throw TunnelError.helperUnavailable }
         var uid: uid_t = 0, gid: gid_t = 0
         guard getpeereid(fd, &uid, &gid) == 0, uid == 0 else { throw TunnelError.helperUnavailable }
+        return try converse(fd: fd, payload: data, greetingTimeout: .seconds(5))
+    }
+
+    // helper 只受理握手之后由同一进程写出、带本次随机数的请求，不能在读到握手前预写。
+    // 握手时限须短于 helper 读请求的 10 秒：旧版 helper 不发握手，只会干等请求。
+    nonisolated static func converse(fd: Int32, payload: Data, greetingTimeout: Duration) throws -> Data {
+        let greeting = try MacSocket.readLine(fd: fd, maximum: 64 * 1024, timeout: greetingTimeout)
+        guard let challenge = try? JSONSerialization.jsonObject(with: greeting) as? [String: Any],
+              let nonce = (challenge["data"] as? [String: Any])?["nonce"] as? String,
+              var request = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
+            throw TunnelError.helperUnavailable
+        }
+        request["nonce"] = nonce
+        let data = try JSONSerialization.data(withJSONObject: request) + Data([10])
+        guard data.count <= 4 * 1024 * 1024 else { throw TunnelError.configuration }
         return try MacSocket.exchange(fd: fd, data: data, maximum: 8 * 1024 * 1024, timeout: .seconds(40))
     }
 }
@@ -72,23 +87,9 @@ enum MacSocket {
     }
 
     static func exchange(fd: Int32, data: Data, maximum: Int, timeout: Duration) throws -> Data {
-        var noSignal: Int32 = 1
-        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal))) == 0 else { throw TunnelError.helperUnavailable }
-        guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { throw TunnelError.helperUnavailable }
+        try configure(fd)
         let deadline = ContinuousClock.now + timeout
-        func ready(_ event: Int16) throws {
-            while true {
-                try Task.checkCancellation()
-                let remaining = ContinuousClock.now.duration(to: deadline)
-                guard remaining > .zero else { throw TunnelError.helperUnavailable }
-                let milliseconds = min(40_000, max(1, Int(remaining.components.seconds * 1000 + remaining.components.attoseconds / 1_000_000_000_000_000)))
-                var descriptor = pollfd(fd: fd, events: event, revents: 0)
-                let result = poll(&descriptor, 1, Int32(milliseconds))
-                if result > 0 { return }
-                if result < 0 && errno == EINTR { continue }
-                throw TunnelError.helperUnavailable
-            }
-        }
+        func ready(_ event: Int16) throws { try wait(fd: fd, event: event, deadline: deadline) }
         try data.withUnsafeBytes { bytes in
             var offset = 0
             while offset < bytes.count {
@@ -110,6 +111,41 @@ enum MacSocket {
         }
         guard !output.isEmpty else { throw TunnelError.control }
         return output
+    }
+
+    static func readLine(fd: Int32, maximum: Int, timeout: Duration) throws -> Data {
+        try configure(fd)
+        let deadline = ContinuousClock.now + timeout
+        var line = Data(), byte: UInt8 = 0
+        while true {
+            try wait(fd: fd, event: Int16(POLLIN), deadline: deadline)
+            let count = Darwin.recv(fd, &byte, 1, 0)
+            if count < 0 && [EINTR, EAGAIN].contains(errno) { continue }
+            guard count == 1 else { throw TunnelError.helperUnavailable }
+            if byte == 10 { return line }
+            guard line.count < maximum else { throw TunnelError.control }
+            line.append(byte)
+        }
+    }
+
+    private static func configure(_ fd: Int32) throws {
+        var noSignal: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal))) == 0 else { throw TunnelError.helperUnavailable }
+        guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { throw TunnelError.helperUnavailable }
+    }
+
+    private static func wait(fd: Int32, event: Int16, deadline: ContinuousClock.Instant) throws {
+        while true {
+            try Task.checkCancellation()
+            let remaining = ContinuousClock.now.duration(to: deadline)
+            guard remaining > .zero else { throw TunnelError.helperUnavailable }
+            let milliseconds = min(40_000, max(1, Int(remaining.components.seconds * 1000 + remaining.components.attoseconds / 1_000_000_000_000_000)))
+            var descriptor = pollfd(fd: fd, events: event, revents: 0)
+            let result = poll(&descriptor, 1, Int32(milliseconds))
+            if result > 0 { return }
+            if result < 0 && errno == EINTR { continue }
+            throw TunnelError.helperUnavailable
+        }
     }
 }
 

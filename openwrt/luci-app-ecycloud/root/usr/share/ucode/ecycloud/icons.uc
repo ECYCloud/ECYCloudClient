@@ -29,7 +29,7 @@ function iconFileName(name) {
 	if (index(text, '.') != 64 || !match(substr(text, 0, 64), /^[0-9a-f]+$/))
 		return false;
 	const ext = substr(text, 65);
-	return ext == 'png' || ext == 'jpg' || ext == 'gif' || ext == 'webp' || ext == 'svg';
+	return ext == 'png' || ext == 'jpg' || ext == 'gif' || ext == 'webp';
 };
 
 export function acceptIconUrl(raw, site) {
@@ -52,17 +52,16 @@ export function acceptIconUrl(raw, site) {
 export function imageExt(bytes) {
 	if (length(bytes) < 12)
 		return '';
-	if (substr(bytes, 0, 8) == "\x89PNG\r\n\x1a\n")
+	/* 23.05 / 24.10 的 ucode 把字符串里大于 0x7F 的 \x 转义编码成 UTF-8 多字节，文件头里的高位字节只能用 chr() 拼 */
+	if (substr(bytes, 0, 8) == chr(0x89) + 'PNG\r\n\x1a\n')
 		return 'png';
-	if (substr(bytes, 0, 3) == "\xff\xd8\xff")
+	if (substr(bytes, 0, 3) == chr(0xff, 0xd8, 0xff))
 		return 'jpg';
 	if (substr(bytes, 0, 4) == 'GIF8')
 		return 'gif';
 	if (substr(bytes, 0, 4) == 'RIFF' && substr(bytes, 8, 4) == 'WEBP')
 		return 'webp';
-	const head = lc(substr(bytes, 0, 64));
-	if (index(head, '<svg') == 0 || index(head, '<?xml') == 0)
-		return 'svg';
+	/* SVG 可带脚本，存进与 LuCI 同源的静态目录后直接打开即以管理员会话执行，不接受 */
 	return '';
 };
 
@@ -167,6 +166,7 @@ function fetchIcon(url) {
 		'fail',
 		'globoff',
 		'proto = "=https"',
+		'location',
 		'proto-redir = "=https"',
 		'max-redirs = 5',
 		`max-filesize = ${MAX_BYTES}`,
@@ -281,8 +281,9 @@ export function sync() {
 
 	writePrivateJson(MANIFEST, { account: accountName(), files });
 
+	/* 目录只由本插件写入；不在保留清单内的一律删除，含旧版落盘的 .svg */
 	for (let name in (lsdir(ICON_DIR) ?? [])) {
-		if (!iconFileName(name) || keep[name])
+		if (keep[name])
 			continue;
 		unlink(`${ICON_DIR}/${name}`);
 	}

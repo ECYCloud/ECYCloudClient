@@ -62,8 +62,17 @@ struct KeychainProbe {
                   try vault.load() == nil else { throw ClientError.invalidResponse }
             try vault.clearRemembered()
             guard try vault.loadRemembered() == nil else { throw ClientError.invalidResponse }
+            let next = try PanelEndpoints(site: "https://next-site.example.test", config: "https://next-config.example.test")
+            vault.endpoints = endpoints
+            vault.endpoints = next
+            try vault.save(first)
+            try vault.clear()
+            guard KeychainVault(service: service).endpoints == next,
+                  KeychainVault(service: "\(service).other").endpoints == nil else { throw ClientError.invalidResponse }
+            vault.endpoints = nil
+            guard vault.endpoints == nil else { throw ClientError.invalidResponse }
             itemCreated = false
-            print("系统钥匙串会话与记住密码的新增、读取、更新、隔离、删除：通过")
+            print("系统钥匙串会话、记住密码与面板地址的新增、读取、更新、隔离、删除：通过")
             passed = true
         } catch let ClientError.keychain(status) {
             print("系统钥匙串测试失败，OSStatus=\(status)")
@@ -71,7 +80,7 @@ struct KeychainProbe {
             print("系统钥匙串数据校验失败")
         }
         if itemCreated {
-            do { try vault.clear(); try vault.clearRemembered() }
+            do { try vault.clear(); try vault.clearRemembered(); vault.endpoints = nil }
             catch {
                 passed = false
                 print("测试项目清理失败，service=\(service)")

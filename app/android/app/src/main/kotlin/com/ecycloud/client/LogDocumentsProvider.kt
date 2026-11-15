@@ -1,7 +1,6 @@
 package com.ecycloud.client
 
 import android.content.Context
-import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -13,7 +12,6 @@ import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
 import java.io.File
 import java.io.FileNotFoundException
-import java.util.UUID
 
 // 应用私有目录只能由自家 DocumentsProvider 对外暴露：FileProvider 的契约里只有单个
 // 文件的读写，没有列目录，系统「文件」应用无从进入 filesDir
@@ -24,11 +22,11 @@ class LogDocumentsProvider : DocumentsProvider() {
     override fun queryRoots(projection: Array<String>?): Cursor = synchronized(sessionLock) {
         val cursor = MatrixCursor(projection ?: ROOT_PROJECTION)
         val app = requireNotNull(context)
-        if (BoxState.sessionCleanupPending(app)) return@synchronized cursor
+        val session = BoxState.sessionKey(app) ?: return@synchronized cursor
         val resources = NativeLanguage.resources(app)
         cursor.newRow()
             .add(Root.COLUMN_ROOT_ID, ROOT_ID)
-            .add(Root.COLUMN_DOCUMENT_ID, documentRoot(app))
+            .add(Root.COLUMN_DOCUMENT_ID, documentRoot(session))
             .add(Root.COLUMN_TITLE, resources.getString(R.string.app_name))
             .add(Root.COLUMN_SUMMARY, resources.getString(R.string.documents_root_logs))
             .add(Root.COLUMN_FLAGS, Root.FLAG_LOCAL_ONLY)
@@ -66,13 +64,14 @@ class LogDocumentsProvider : DocumentsProvider() {
 
     private fun fileFor(documentId: String): File {
         val app = requireNotNull(context)
-        if (BoxState.sessionCleanupPending(app)) throw FileNotFoundException(NativeLanguage.resources(app).getString(R.string.documents_session_ending))
-        val rootId = documentRoot(app)
-        val root = logsDir(app)
+        val expired = { FileNotFoundException(NativeLanguage.resources(app).getString(R.string.documents_session_expired)) }
+        val session = BoxState.sessionKey(app) ?: throw expired()
+        val rootId = documentRoot(session)
+        val root = logsDir(app, session)
         if (documentId == rootId) {
             return root
         }
-        if (!documentId.startsWith("$rootId/")) throw FileNotFoundException(NativeLanguage.resources(app).getString(R.string.documents_session_expired))
+        if (!documentId.startsWith("$rootId/")) throw expired()
         return BoxState.resolveWithin(root, documentId.removePrefix("$rootId/"))
     }
 
@@ -94,25 +93,8 @@ class LogDocumentsProvider : DocumentsProvider() {
         private const val ROOT_ID = "logs"
         private const val MIME_LOG = "text/plain"
 
-        private fun documentRoot(context: Context): String {
-            val generation = context.getSharedPreferences("log-session", Context.MODE_PRIVATE)
-                .getString("generation", "initial")
-            return "$ROOT_ID/$generation"
-        }
-
-        fun clearSession(context: Context) {
-            synchronized(sessionLock) {
-                check(BoxState.sessionCleanupPending(context)) { "缺少会话清理标记" }
-                check(context.getSharedPreferences("log-session", Context.MODE_PRIVATE).edit()
-                    .putString("generation", UUID.randomUUID().toString()).commit()) {
-                    "无法使旧日志文档失效"
-                }
-            }
-            context.revokeUriPermission(
-                Uri.parse("content://${context.packageName}.documents"),
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-        }
+        // 文档 ID 带上会话键：退出或换号后旧 ID 与旧授权全部失效
+        private fun documentRoot(session: String): String = "$ROOT_ID/$session"
 
         private val ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID,
@@ -133,12 +115,13 @@ class LogDocumentsProvider : DocumentsProvider() {
             Document.COLUMN_FLAGS,
         )
 
-        // Dart 侧 AppPaths.logs 按 paths.data 拼出 <filesDir>/logs，两处必须同一个目录
-        private fun logsDir(context: Context): File = File(context.filesDir, "logs")
+        // Dart 侧 AppPaths.logs 按 paths.data 拼出 <filesDir>/sessions/<会话键>/logs，两处必须同一个目录
+        private fun logsDir(context: Context, session: String): File = File(BoxState.sessionDir(context, session), "logs")
 
         fun rootUri(context: Context, path: String): Uri? {
+            val session = BoxState.sessionKey(context) ?: return null
             val wanted = runCatching { File(path).canonicalFile }.getOrNull()
-            val logs = runCatching { logsDir(context).canonicalFile }.getOrNull()
+            val logs = runCatching { logsDir(context, session).canonicalFile }.getOrNull()
             if (wanted == null || wanted != logs) {
                 return null
             }

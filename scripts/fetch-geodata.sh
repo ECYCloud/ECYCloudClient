@@ -12,7 +12,15 @@ lock="$script_dir/kernel.lock.json"
 cache_dir="${ECYCLOUD_BUILD_DIR:-$root_dir/build}/cache"
 mkdir -p "$cache_dir" "$out_dir"
 
-# 上游滚动 latest、锁不住 sha256；只拦 404 与截断（体积下限 + MaxMind 魔数）
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+# 上游滚动 latest、锁不住 sha256：按同一发布附带的 .sha256sum 核对，另拦体积异常与非 MaxMind 文件
 for name in mmdb geosite; do
     url="$(jq -er --arg n "$name" '.geodata.assets[$n].url' "$lock")"
     target="$(jq -er --arg n "$name" '.geodata.assets[$n].target' "$lock")"
@@ -22,6 +30,15 @@ for name in mmdb geosite; do
     echo "下载 $url"
     curl -fsSL -o "$file" "$url"
 
+    want="$(curl -fsSL "$url.sha256sum" | cut -d' ' -f1)"
+    got="$(sha256_of "$file")"
+    if [[ "$got" != "$want" ]]; then
+        rm -f "$file"
+        echo "geodata 与上游校验值不符：$url（上游每天重建 latest 发布，赶上重建时稍后重试）" >&2
+        echo "  期望 $want" >&2
+        echo "  实际 $got" >&2
+        exit 1
+    fi
     size="$(wc -c < "$file" | tr -d ' ')"
     if [[ "$size" -lt "$min" ]]; then
         rm -f "$file"

@@ -5,13 +5,12 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../core/app_paths.dart';
-import '../../core/logger.dart';
 import '../../l10n/l10n.dart';
+import 'icon_image.dart';
 
 class HtmlVideoView extends StatefulWidget {
   const HtmlVideoView(this.src, {super.key, this.onRemove});
@@ -24,7 +23,9 @@ class HtmlVideoView extends StatefulWidget {
   static void resumeSession() => _HtmlVideoCache._clearing = false;
 
   static Future<void> clearSession() async {
-    _HtmlVideoCache._cancelDownloads();
+    // 先停掉新的封面读写与播放，再释放播放器、删缓存目录
+    _HtmlVideoCache._clearing = true;
+    _HtmlVideoCache._generation++;
     await Future.wait(<Future<void>>[
       for (final Player player in _players.keys.toList())
         _disposePlayer(player),
@@ -57,11 +58,11 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
   bool _failed = false;
   bool _posterSaved = false;
 
+  // 点击前不建播放器也不预取，正文里的视频不会自己消耗流量
   @override
   void initState() {
     super.initState();
     _poster = _HtmlVideoCache.posterOf(widget.src);
-    _attach(widget.src);
   }
 
   @override
@@ -73,12 +74,12 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
       _failed = false;
       _posterSaved = false;
       _poster = _HtmlVideoCache.posterOf(widget.src);
-      _attach(widget.src);
     }
   }
 
   void _attach(String src) {
-    if (_HtmlVideoCache._clearing) {
+    if (_HtmlVideoCache._clearing || !RemoteIcon.mediaBudgetLeft) {
+      _failed = true;
       return;
     }
     final int generation = _HtmlVideoCache._generation;
@@ -131,8 +132,8 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
     try {
       final File? cached = _HtmlVideoCache.videoOf(src);
       try {
-        // 网站 <video preload="metadata">：停在首帧当封面，禁止自动播放
-        await player.open(Media(cached?.uri.toString() ?? src), play: false);
+        // 用户点了封面上的播放才走到这里，打开即播放
+        await player.open(Media(cached?.uri.toString() ?? src));
       } catch (_) {
         if (!isCurrent()) {
           return;
@@ -141,10 +142,7 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
           rethrow;
         }
         cached.deleteSync();
-        await player.open(Media(src), play: false);
-      }
-      if (isCurrent() && cached == null) {
-        unawaited(_HtmlVideoCache.prefetch(src));
+        await player.open(Media(src));
       }
     } catch (_) {
       if (isCurrent()) {
@@ -208,8 +206,10 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
               fit: StackFit.expand,
               clipBehavior: Clip.hardEdge,
               children: <Widget>[
-                if (_failed || controller == null)
+                if (_failed)
                   _placeholder(theme)
+                else if (controller == null)
+                  _cover(poster)
                 else ...<Widget>[
                   Video(controller: controller, fit: BoxFit.contain),
                   if (!_ready && poster != null)
@@ -260,6 +260,29 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
     );
   }
 
+  // 遥控器要能选中它，点击控件必须是可聚焦的 Material 组件
+  Widget _cover(File? poster) => Material(
+    color: Colors.black,
+    child: InkWell(
+      onTap: () => setState(() => _attach(widget.src)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (poster != null)
+            Image.file(poster, fit: BoxFit.contain, gaplessPlayback: true),
+          Center(
+            child: Icon(
+              Icons.play_circle_outline,
+              size: 48,
+              color: Colors.white,
+              semanticLabel: L10n.t('播放视频'),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
   Widget _placeholder(ThemeData theme) {
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -277,34 +300,15 @@ class _HtmlVideoViewState extends State<HtmlVideoView> {
 class _HtmlVideoCache {
   _HtmlVideoCache._();
 
-  // 单文件与面板工单上传上限同值；整目录再封顶，避免把用户目录写满
-  static const int _maxFile = 50 << 20;
+  // 播放器自己拉流，不再另行预取整份视频（否则首次播放下两遍）；目录里只剩封面与旧版本留下的缓存，整体封顶
   static const int _maxTotal = 200 << 20;
 
-  static final Map<String, Future<void>> _jobs = <String, Future<void>>{};
   static final Set<Future<void>> _posters = <Future<void>>{};
-  static final Set<Completer<void>> _downloads = <Completer<void>>{};
   static int _generation = 0;
   static bool _clearing = false;
 
-  static void _cancelDownloads() {
-    _clearing = true;
-    _generation++;
-    for (final Completer<void> abort in _downloads) {
-      if (!abort.isCompleted) {
-        abort.complete();
-      }
-    }
-  }
-
   static Future<void> clearSession() async {
-    await Future.wait(<Future<void>>[..._jobs.values, ..._posters]);
-    final Directory directory = AppPaths.videoCache;
-    if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
-        FileSystemEntityType.directory) {
-      throw FileSystemException(L10n.t('视频缓存目录类型异常'), directory.path);
-    }
-    directory.deleteSync(recursive: true);
+    await Future.wait(<Future<void>>[..._posters]);
   }
 
   static File? videoOf(String url) =>
@@ -334,87 +338,6 @@ class _HtmlVideoCache {
     }
   }
 
-  static Future<void> prefetch(String url) => _jobs.putIfAbsent(url, () async {
-    try {
-      await _download(url);
-    } finally {
-      _jobs.remove(url);
-    }
-  });
-
-  static Future<void> _download(String url) async {
-    if (_clearing) {
-      return;
-    }
-    final int generation = _generation;
-    final File dest = _videoFile(url);
-    if (_existing(dest) != null) {
-      return;
-    }
-    final Uri? uri = Uri.tryParse(url);
-    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-      return;
-    }
-    final File part = File('${dest.path}.part');
-    final http.Client client = http.Client();
-    final Completer<void> abort = Completer<void>();
-    _downloads.add(abort);
-    final Timer timer = Timer(const Duration(seconds: 120), () {
-      if (!abort.isCompleted) {
-        abort.complete();
-      }
-    });
-    try {
-      final http.StreamedResponse response = await client
-          .send(http.AbortableRequest('GET', uri, abortTrigger: abort.future))
-          .timeout(const Duration(seconds: 120));
-      if (response.statusCode != 200) {
-        return;
-      }
-      final int? length = response.contentLength;
-      if (length != null && length > _maxFile) {
-        return;
-      }
-      final IOSink sink = part.openWrite();
-      int written = 0;
-      try {
-        await for (final List<int> chunk in response.stream) {
-          written += chunk.length;
-          if (written > _maxFile) {
-            await sink.close();
-            _delete(part);
-            return;
-          }
-          sink.add(chunk);
-        }
-        await sink.flush();
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        _delete(part);
-        rethrow;
-      }
-      if (written == 0 || generation != _generation) {
-        _delete(part);
-        return;
-      }
-      if (dest.existsSync()) {
-        dest.deleteSync();
-      }
-      part.renameSync(dest.path);
-      _evict(keep: dest);
-    } on Object catch (e) {
-      _delete(part);
-      if (generation == _generation) {
-        Logger.instance.warn('video', '视频缓存失败：$url（$e）');
-      }
-    } finally {
-      timer.cancel();
-      _downloads.remove(abort);
-      client.close();
-    }
-  }
-
   static File? _existing(File file) =>
       file.existsSync() && file.lengthSync() > 0 ? file : null;
 
@@ -425,19 +348,21 @@ class _HtmlVideoCache {
   }
 
   static void _evict({File? keep}) {
-    final List<File> files = AppPaths.videoCache
+    final List<File> all = AppPaths.videoCache
         .listSync()
         .whereType<File>()
+        .toList();
+    int total = 0;
+    for (final File file in all) {
+      total += file.lengthSync();
+    }
+    final List<File> files = all
         .where((File file) => !file.path.endsWith('.part'))
         .toList();
     files.sort(
       (File a, File b) =>
           a.statSync().modified.compareTo(b.statSync().modified),
     );
-    int total = 0;
-    for (final File file in files) {
-      total += file.lengthSync();
-    }
     for (final File file in files) {
       if (total <= _maxTotal) {
         return;

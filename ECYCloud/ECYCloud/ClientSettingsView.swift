@@ -43,7 +43,7 @@ struct ClientSettingsView: View {
                     let proxyLocked = working || ![.disconnected, .connected].contains(connection.state)
                     ProductSection(title: L10n.t("代理"), icon: "vpn_lock_outlined") {
                         #if os(macOS)
-                        settingToggle(L10n.t("设置系统代理"), detail: L10n.t("把系统代理指向本机混合端口，只对读取该设置的程序生效，其余程序需要 TUN 模式；退出与崩溃后自动还原"), value: $preferences.systemProxy, edit: false)
+                        settingToggle(L10n.t("设置系统代理"), detail: L10n.t("把系统代理指向本机混合端口，只对读取该设置的程序生效，其余程序需要 TUN 模式；退出与崩溃后自动还原"), value: $preferences.systemProxy, edit: false, proxyOnly: true)
                         Divider()
                         settingToggle(L10n.t("TUN 模式"), detail: L10n.t("接管系统全部流量，需要后台服务与虚拟网卡驱动"), value: $preferences.tunEnabled, edit: true)
                         Divider()
@@ -224,8 +224,11 @@ struct ClientSettingsView: View {
             if let detail { Text(verbatim: detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func settingToggle(_ title: String, detail: String? = nil, value: Binding<Bool>, edit: Bool? = nil) -> some View {
-        Toggle(isOn: Binding(get: { value.wrappedValue }, set: { next in value.wrappedValue = next; run(.apply) { try await session.applyProxySettings() } })) {
+    private func settingToggle(_ title: String, detail: String? = nil, value: Binding<Bool>, edit: Bool? = nil, proxyOnly: Bool = false) -> some View {
+        Toggle(isOn: Binding(get: { value.wrappedValue }, set: { next in
+            value.wrappedValue = next
+            run(.apply) { if proxyOnly { try await session.applySystemProxySettings() } else { try await session.applyProxySettings() } }
+        })) {
             text(title, detail, edit: edit)
         }.toggleStyle(ProductToggleStyle()).padding(rowInsets)
     }
@@ -287,6 +290,7 @@ private struct TextViewerSheet: View {
     let subtitle: String
     let load: @MainActor () async throws -> String
     @State private var lines: [String]?
+    @State private var source = ""
     @State private var failure: String?
     @Environment(\.colorScheme) private var scheme
     // 对应 text_viewer_page.dart 的「复制全部」：有内容才显示；tvOS 没有剪贴板
@@ -296,7 +300,7 @@ private struct TextViewerSheet: View {
         #else
         guard let lines, !lines.isEmpty else { return nil }
         return AnyView(Button {
-            let text = lines.joined(separator: "\n")
+            let text = source
             #if os(macOS)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
@@ -313,13 +317,16 @@ private struct TextViewerSheet: View {
         let colors = ProductPalette(scheme: scheme)
         FeatureSheet(title: title, appBar: true, action: copyAction) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(verbatim: subtitle).font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+                HStack {
+                    Text(verbatim: subtitle).frame(maxWidth: .infinity, alignment: .leading)
+                    if let lines, !lines.isEmpty { Text(L10n.t("共 {0} 行", [String(lines.count)])) }
+                }.font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 16).padding(.vertical, 8)
                 Group {
                     if let failure { Text(verbatim: failure).foregroundStyle(colors.danger).multilineTextAlignment(.center).padding(24) }
                     else if let lines, lines.isEmpty { Text(L10n.t("文件为空或不存在")) }
                     else if let lines {
-                        // 单个 Text 超过图层纹理尺寸上限时整块空白，大文件须逐行渲染
-                        ScrollView {
+                        // 单个 Text 超过图层纹理尺寸上限时整块空白，大文件须逐行渲染；不折行、行高固定，长文件滚动时不必逐行量高
+                        ScrollView(Self.scrollAxes) {
                             #if os(tvOS)
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(stride(from: 0, to: lines.count, by: 40)), id: \.self) { start in
@@ -328,10 +335,19 @@ private struct TextViewerSheet: View {
                             }.font(.system(size: 12, design: .monospaced))
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(10)
                             #else
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(lines.indices, id: \.self) { Text(verbatim: lines[$0]) }
-                            }.font(.system(size: 12, design: .monospaced)).productTextSelection()
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 16)
+                            let digits = String(repeating: "0", count: String(lines.count).count)
+                            let rows = LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(lines.indices, id: \.self) { index in
+                                    HStack(spacing: 12) {
+                                        ZStack(alignment: .trailing) {
+                                            Text(verbatim: digits).hidden()
+                                            Text(verbatim: String(index + 1)).foregroundStyle(colors.secondary)
+                                        }.textSelection(.disabled)
+                                        Text(verbatim: lines[index]).lineLimit(1).fixedSize()
+                                    }.frame(height: 17)
+                                }
+                            }.font(.system(size: 12, design: .monospaced))
+                            rows.productTextSelection().frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 16)
                             #endif
                         }
                     } else { ProgressView() }
@@ -340,9 +356,23 @@ private struct TextViewerSheet: View {
         }.task {
             do {
                 let text = try await load()
-                lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+                let split = await Task.detached { Self.split(text) }.value
+                source = text
+                lines = split
             } catch is CancellationError {} catch { failure = error.localizedDescription }
         }
+    }
+    #if os(tvOS)
+    private static let scrollAxes: Axis.Set = .vertical
+    #else
+    private static let scrollAxes: Axis.Set = [.vertical, .horizontal]
+    #endif
+    // 断行与 text_viewer_page.dart 的 TextLineIndex 一致：\n、\r\n、\r 为行尾，末尾行尾不多出空行，单行最多显示 10000 字符
+    nonisolated private static func split(_ text: String) -> [String] {
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        return lines.map { $0.count > 10000 ? String($0.prefix(10000)) + "…" : $0 }
     }
 }
 
@@ -413,7 +443,10 @@ struct NetworkSegmentsEditor: View {
         working = true; error = nil
         Task {
             defer { working = false }
-            do { try await session.applyProxySettings(); finished(L10n.t("保存成功")) }
+            do {
+                if routes { try await session.applyProxySettings() } else { try await session.applySystemProxySettings() }
+                finished(L10n.t("保存成功"))
+            }
             catch is CancellationError {} catch { finished(L10n.t("保存失败：{0}", [error.localizedDescription])) }
             dismiss()
         }

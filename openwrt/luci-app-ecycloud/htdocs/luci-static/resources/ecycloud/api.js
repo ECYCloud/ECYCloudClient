@@ -54,6 +54,7 @@ var ALIVE_KEY = 'ecycloud.alive';
 var SINCE_KEY = 'ecycloud.connectedAt';
 var RANK_KEY = 'ecycloud.trafficRank';
 var SESSION_KEY = 'ecycloud.session';
+var DEVICES_KEY = 'ecycloud.devices';
 var sessionKey = null;
 var sessionGeneration = 0;
 var sessionReloading = false;
@@ -71,6 +72,7 @@ var stopRpc = declare('stop');
 var connectGeneration = 0;
 var connectPending = null;
 var statusRpc = declare('status');
+var devicesRpc = declare('devices', [ 'page', 'length', 'search' ]);
 var updateRpc = declare('update', [ 'what', 'path', 'locale' ]);
 var languageRefresh = null;
 var languageRetryAfter = 0;
@@ -87,7 +89,7 @@ function bindSession(key) {
 	groupsResponse = ++groupsRequest;
 	groupTests = { testing: new Map(), speed_testing: new Map() };
 	if (!key || sessionStorage.getItem(SESSION_KEY) != key) {
-		[ CLOSED_KEY, ALIVE_KEY, SINCE_KEY, 'ecycloud.updatesSeen' ].forEach(function(name) { sessionStorage.removeItem(name); });
+		[ CLOSED_KEY, ALIVE_KEY, SINCE_KEY, DEVICES_KEY, 'ecycloud.updatesSeen' ].forEach(function(name) { sessionStorage.removeItem(name); });
 		sessionStorage.setItem(SESSION_KEY, key);
 	}
 	if (!key || localStorage.getItem(SESSION_KEY) != key) {
@@ -166,6 +168,8 @@ var flagRegionsLoad = null;
 var flagCache = {};
 var flagWarmKey = '';
 var flagWarmPromise = null;
+
+var FLAG_EMOJI = /[\u{1F1E6}-\u{1F1FF}]{2}️?/gu;
 
 function emojiRegion(name) {
 	var chars = Array.from(String(name || ''));
@@ -293,6 +297,8 @@ function warmFlagWorker(names, compiled, regions) {
 return baseclass.extend({
 	status: function() {
 		var self = this;
+		if (!this._sheet)
+			this.ensureStyle();
 		return statusRpc().then(function(data) {
 			var language = self.resolveLang().replace('_', '-');
 			if (data.session.logged_in && data.profile && data.profile.fetched_at &&
@@ -342,7 +348,7 @@ return baseclass.extend({
 	sendLoginVerify: declare('send_login_verify', [ 'email' ]),
 	loginCode: declare('login_code', [ 'email', 'code' ]),
 	logout: declare('logout'),
-	start: declare('start'),
+	start: declare('start', [ 'refreshed' ]),
 	stop: function() {
 		connectGeneration++;
 		return stopRpc();
@@ -351,7 +357,25 @@ return baseclass.extend({
 		return connectPending != null;
 	},
 	update: function(what, path, locale) {
-		return updateRpc(what, path, locale || this.resolveLang().replace('_', '-'));
+		var self = this;
+		return updateRpc(what, path, locale || this.resolveLang().replace('_', '-')).then(function(res) {
+			return res && res.pending ? self.waitUpdate(res.id) : res;
+		});
+	},
+	waitUpdate: function(id) {
+		var self = this;
+		return new Promise(function(resolve) {
+			setTimeout(resolve, 2000);
+		}).then(function() {
+			return statusRpc();
+		}).then(function(status) {
+			var task = (status.update_tasks || []).filter(function(item) {
+				return item.id == id;
+			})[0];
+			if (task && task.state != 'done')
+				return self.waitUpdate(id);
+			return task || { ok: false, msg: _('The background update was interrupted. Try again.') };
+		});
 	},
 	selectRpc: declare('select', [ 'group', 'name' ]),
 	delay: declare('delay', [ 'name' ]),
@@ -395,12 +419,31 @@ return baseclass.extend({
 
 	nodeLabel: function(name) {
 		name = String(name || '');
-		var stripped = name.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\uFE0F?/gu, '').trim();
+		var stripped = name.replace(FLAG_EMOJI, '').trim();
 		return stripped || name;
 	},
 
+	/* Windows \u7684\u8868\u60C5\u5B57\u4F53\u6CA1\u6709\u65D7\u5E1C\u5B57\u5F62\uFF0C\u56FD\u65D7 emoji \u4F1A\u753B\u6210 HK \u8FD9\u6837\u7684\u5B57\u6BCD\u5BF9\uFF1B\u56FE\u4E0A\u53E0\u900F\u660E\u539F\u5B57\u7B26\uFF0C\u590D\u5236\u4ECD\u662F\u539F\u6587 */
+	flagText: function(text) {
+		var self = this;
+		var parts = [];
+		var start = 0;
+
+		text = String(text == null ? '' : text);
+		text.replace(FLAG_EMOJI, function(match, offset) {
+			parts.push(text.slice(start, offset), E('span', { 'class': 'ecycloud-flag-glyph' }, [
+				self.flagImg(emojiRegion(match)),
+				E('span', {}, [ match ])
+			]));
+			start = offset + match.length;
+			return match;
+		});
+		parts.push(text.slice(start));
+		return parts;
+	},
+
 	groupMark: function(src, selectable) {
-		if (typeof src == 'string' && /^\/luci-static\/resources\/ecycloud\/icons\/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp|svg)$/.test(src))
+		if (typeof src == 'string' && /^\/luci-static\/resources\/ecycloud\/icons\/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp)$/.test(src))
 			return E('img', { 'class': 'ecycloud-group-icon', 'alt': '', 'src': src, 'data-ecy-key': 'mark' });
 
 		return E('span', {
@@ -443,7 +486,18 @@ return baseclass.extend({
 		return flagWarmPromise;
 	},
 	onlineDevices: declare('online_devices'),
-	devices: declare('devices', [ 'page', 'length', 'search' ]),
+	devices: function(page, length, search) {
+		var key = sessionKey;
+		return devicesRpc(page, length, search).then(function(res) {
+			if (res && res.ok && page == 1 && !search && key && key == sessionKey)
+				saveJson(DEVICES_KEY, { length: length, usage: res });
+			return res;
+		});
+	},
+	cachedDevices: function(length) {
+		var saved = loadJson(DEVICES_KEY, null);
+		return saved && saved.length == length ? saved.usage : null;
+	},
 	ensureKernel: declare('ensure_kernel'),
 
 	updateGeo: function() {
@@ -564,11 +618,19 @@ return baseclass.extend({
 		/* uhttpd 不发 Cache-Control，URL 也没版本号：不强制回源校验就会拿到旧样式 */
 		if (!this._sheet)
 			this._sheet = fetch(href, { cache: 'no-cache' }).then(function(res) {
-				return res.ok ? res.text() : '';
+				if (!res.ok)
+					throw new Error(res.statusText);
+				return res.text();
 			}).then(function(css) {
 				self._shadowCss = self.rewriteShadowCss(css);
+				(self._bareStyles || []).forEach(function(style) {
+					style.textContent = self.hostReset() + self._shadowCss;
+				});
+				self._bareStyles = null;
 			}).catch(function() {
-				self._shadowCss = self._shadowCss || '';
+				/* 失败不缓存：否则整页一直没有样式，要刷新才恢复 */
+				self._sheet = null;
+				setTimeout(function() { self.ensureStyle(); }, 2000);
 			});
 
 		return Promise.all([ this.applyI18n(), this._sheet ]);
@@ -735,7 +797,6 @@ return baseclass.extend({
 		var shadow = host.attachShadow({ mode: 'open' });
 		var style = E('style', { id: 'ecycloud-shadow-style' });
 		var inner = E('div', { 'class': 'ecycloud-stage' });
-		var self = this;
 
 		host.setAttribute('data-ecy-shadow', '1');
 		style.textContent = this.hostReset() + (this._shadowCss || '');
@@ -746,9 +807,8 @@ return baseclass.extend({
 			inner.appendChild(host.firstChild);
 
 		if (!this._shadowCss) {
-			this.ensureStyle().then(function() {
-				style.textContent = self.hostReset() + (self._shadowCss || '');
-			});
+			(this._bareStyles = this._bareStyles || []).push(style);
+			this.ensureStyle();
 		}
 
 		this.parkFields(host);
@@ -1031,7 +1091,7 @@ return baseclass.extend({
 
 	profileNotice: function(res) {
 		if (!res || !res.ok)
-			return this.messageText((res && res.msg) || _('Update failed'));
+			return this.messageText((res && res.msg) || _('Failed to update'));
 		if (res.reloaded)
 			return _('Update succeeded');
 		if (res.changed)
@@ -2223,6 +2283,14 @@ return baseclass.extend({
 				if (generation != connectGeneration)
 					return { ok: false, cancelled: true };
 				return self.start();
+			}).then(function(res) {
+				if (!res || !res.pending)
+					return res;
+				return self.waitUpdate(res.id).then(function(task) {
+					if (generation != connectGeneration)
+						return { ok: false, cancelled: true };
+					return task.ok ? self.start(true) : { ok: false, msg: task.msg };
+				});
 			});
 		};
 
@@ -2866,7 +2934,7 @@ return baseclass.extend({
 		var ok;
 		try { ok = document.execCommand('copy'); }
 		finally { input.remove(); if (focused) focused.focus(); }
-		return ok ? Promise.resolve() : Promise.reject(new Error(_('Copy failed')));
+		return ok ? Promise.resolve() : Promise.reject(new Error(_('Failed to copy')));
 	},
 
 	showText: function(title, text) {
@@ -2882,13 +2950,58 @@ return baseclass.extend({
 		}
 		catch (e) {}
 
+		/* 整份文本放进一个 <pre> 时大文件会卡住页面：行高固定，只渲染可见行；行高须与 style.css 的 .ecycloud-textview-rows 一致 */
+		var lineHeight = 18;
+		var lines = body.split(/\r\n|\r|\n/);
+		if (lines.length && lines[lines.length - 1] === '')
+			lines.pop();
+		var widest = 0;
+		lines = lines.map(function(line) {
+			if (line.length > 10000)
+				line = line.slice(0, 10000) + '\u2026';
+			widest = Math.max(widest, line.length);
+			return line;
+		});
+		var digits = String(lines.length).length;
+		var numbers = E('pre', { 'class': 'ecycloud-textview-numbers' });
+		var rows = E('pre', { 'class': 'ecycloud-textview-lines' });
+		var page = E('div', { 'class': 'ecycloud-textview-rows' }, [ numbers, rows ]);
+		var space = E('div', { 'class': 'ecycloud-textview-space' }, [ page ]);
+		var view = E('div', { 'class': 'ecycloud-textview' }, [ space ]);
+		space.style.height = (lines.length * lineHeight) + 'px';
+		space.style.minWidth = 'calc(' + (digits + widest) + 'ch + 12px)';
+		numbers.style.width = digits + 'ch';
+
+		var shown = -1;
+		var frame = 0;
+		var render = function() {
+			frame = 0;
+			var first = Math.max(0, Math.floor(view.scrollTop / lineHeight) - 20);
+			var count = Math.ceil(Math.max(window.innerHeight, 720) / lineHeight) + 40;
+			if (first == shown)
+				return;
+			shown = first;
+			var last = Math.min(lines.length, first + count);
+			var labels = [];
+			for (var i = first; i < last; i++)
+				labels.push(i + 1);
+			page.style.top = (first * lineHeight) + 'px';
+			numbers.textContent = labels.join('\n');
+			rows.textContent = lines.slice(first, last).join('\n');
+		};
+		view.addEventListener('scroll', function() {
+			if (!frame)
+				frame = window.requestAnimationFrame(render);
+		});
+
 		var node = E('div', {
 			'class': 'ecycloud-modal is-dialog is-textview',
 			'data-theme': this.detectTheme()
 		}, [
 			E('div', { 'class': 'ecycloud-modal-card is-dialog is-wide' }, [
 				E('div', { 'class': 'ecycloud-modal-title' }, [ title ]),
-				E('pre', { 'class': 'ecycloud-textview' }, [ body ]),
+				lines.length ? E('div', { 'class': 'ecycloud-textview-meta' }, [ _('Lines: %d').format(lines.length) ]) : '',
+				view,
 				E('div', { 'class': 'ecycloud-modal-actions' }, [
 					this.pressable('ecycloud-modal-cancel ecycloud-modal-copy', {}, [ _('Copy all') ]),
 					this.pressable('ecycloud-modal-ok', {}, [ _('Got it') ])
@@ -2903,14 +3016,16 @@ return baseclass.extend({
 
 		var self = this;
 		var copy = node.querySelector('.ecycloud-modal-copy');
-		copy.addEventListener('click', function() {
-			self.copyText(body).then(function() { copy.textContent = _('Copied'); },
-				function(err) { self.notify({ ok: false, msg: err.message }); });
-		});
+		if (copy)
+			copy.addEventListener('click', function() {
+				self.copyText(body).then(function() { copy.textContent = _('Copied'); },
+					function(err) { self.notify({ ok: false, msg: err.message }); });
+			});
 		node.querySelector('.ecycloud-modal-ok').addEventListener('click', close);
 		this.onBackdrop(node, close);
 		document.body.appendChild(node);
 		this.isolate(node);
+		render();
 		return node;
 	},
 
@@ -3095,47 +3210,6 @@ return baseclass.extend({
 		return box;
 	},
 
-	announcePopup: function(item, opts) {
-		opts = opts || {};
-		this.closeAnnounce();
-
-		var body = [
-			E('div', { 'class': 'ecycloud-modal-title' }, [ item.title || _('Announcements') ])
-		];
-
-		if (item.id != 1 && item.date)
-			body.push(E('div', { 'class': 'ecycloud-ann-date' }, [ item.date ]));
-
-		body.push(this.announceHtml(item.content, opts.site));
-		body.push(E('div', { 'class': 'ecycloud-modal-actions' }, [
-			this.pressable('ecycloud-modal-ok', {}, [ _('Got it') ])
-		]));
-
-		var node = E('div', {
-			'class': 'ecycloud-modal is-dialog is-announce',
-			'data-theme': this.detectTheme()
-		}, [
-			E('div', { 'class': 'ecycloud-modal-card is-dialog is-announce' }, body)
-		]);
-
-		var done = function(gotIt) {
-			if (node.parentNode)
-				node.parentNode.removeChild(node);
-			if (opts.onClose)
-				opts.onClose(gotIt);
-		};
-
-		node.querySelector('.ecycloud-modal-ok').addEventListener('click', function() {
-			done(true);
-		});
-		this.onBackdrop(node, function() {
-			done(false);
-		});
-		document.body.appendChild(node);
-		this.isolate(node);
-		return node;
-	},
-
 	announceBrowser: function(opts) {
 		opts = opts || {};
 		this.closeAnnounce();
@@ -3151,11 +3225,12 @@ return baseclass.extend({
 			'data-theme': this.detectTheme()
 		}, [ card ]);
 
-		var done = function() {
+		// closed 为 true 表示点了「关闭」，点遮罩退出时为 false
+		var done = function(closed) {
 			if (node.parentNode)
 				node.parentNode.removeChild(node);
 			if (opts.onClose)
-				opts.onClose();
+				opts.onClose(closed === true);
 		};
 
 		var paint = function() {
@@ -3216,12 +3291,16 @@ return baseclass.extend({
 					paint();
 				});
 			card.querySelector('.ecycloud-modal-actions .ecycloud-modal-cancel')
-				.addEventListener('click', done);
+				.addEventListener('click', function() {
+					done(true);
+				});
 		};
 
 		document.body.appendChild(node);
 		paint();
-		this.onBackdrop(node, done);
+		this.onBackdrop(node, function() {
+			done(false);
+		});
 		this.isolate(node);
 		return node;
 	}

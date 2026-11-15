@@ -81,7 +81,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       Logger.instance.log(
         Logger.kernelLevel(line),
         'mihomo',
-        NodeLabels.annotateText(Logger.kernelMessage(line)),
+        NodeLabels.annotateText(Logger.kernelChain(Logger.kernelMessage(line))),
       );
       _trackStartupStage(line);
     });
@@ -100,6 +100,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   static const String _source = 'connection';
   // 与 Website ClientApiRateLimit 一致：60s/10 次；缺 Retry-After 时的退避兜底
   static const Duration _rateLimitFallback = Duration(seconds: 6);
+  // 与面板 /link/ 订阅响应头 profile-update-interval: 24 保持一致
+  static const Duration _defaultProfileUpdateInterval = Duration(hours: 24);
   static const List<Duration> _backoff = <Duration>[
     Duration(seconds: 1),
     Duration(seconds: 2),
@@ -195,7 +197,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   int _autoConnectAttempt = 0;
   bool _profileRefreshInFlight = false;
   // 面板对 /config/clash 有最小请求间隔，超了直接 429。手上的配置只有在面板
-  // 报出新的 revision 后才算过期，在那之前一律复用，不再重复请求
+  // 报出新的 revision 或超过更新间隔后才算过期，在那之前一律复用，不再重复请求
   bool _remoteStale = false;
   Future<void>? _remoteFetch;
   DateTime? _remoteCooldownUntil;
@@ -298,6 +300,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Set<String> get unreachableNodes => _unreachable;
 
   bool get kernelCacheReady => _kernel.cacheReady;
+
+  String? get mixedProxyCredential => _clash?.options.mixedCredential;
 
   Future<String> kernelVersion() => _kernel.kernelVersion();
 
@@ -517,6 +521,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     api?.fallbackProxyPort = _state == ConnectionPhase.connected
         ? _settings.mixedPort
         : null;
+    api?.fallbackProxyCredential = mixedProxyCredential;
     api?.reportConnected = _state == ConnectionPhase.connected;
     if (api != null) {
       unawaited(api.refreshConfigDirectAddresses());
@@ -604,7 +609,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   /// 内核比界面活得久时（Android 上 Activity 被销毁、进程被杀，VpnService 仍在
   /// 跑隧道），界面重新起来必须认回这条连接。认不回的一律停掉：留着就是一条
   /// 界面显示「未连接」、用户也断不开的隧道。
-  Future<void> adoptRunningKernel() async {
+  Future<void> adoptRunningKernel({bool takeover = false}) async {
     final int generation = ++_generation;
     final ClashApiOptions? live = await _kernel.attach();
     if (live == null || generation != _generation) {
@@ -626,14 +631,19 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       }
       _clash = clash;
       await _refreshProxies();
-      final ({String mode, bool tunEnabled}) runtime = await clash
-          .fetchRuntime();
+      final ({String mode, bool tunEnabled, int mixedPort}) runtime =
+          await clash.fetchRuntime();
       if (generation != _generation || !identical(clash, _clash)) {
         return;
       }
       _routeMode = runtime.mode;
       // 认回来的可能是一个常驻但没接管出口的内核，此时界面该显示未连接
-      _takeover = runtime.tunEnabled;
+      _takeover = runtime.tunEnabled || takeover;
+      // 平台初始化会还原残留的系统代理，认回后按接管状态重新设置
+      await _applySystemProxy();
+      if (generation != _generation || !identical(clash, _clash)) {
+        return;
+      }
     } on Object catch (e) {
       if (generation != _generation) {
         clash.close();
@@ -789,8 +799,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 登出或退出应用：内核彻底停下，出口还原。与 [disconnect] 的区别是这之后
   /// 控制面也不在了，节点列表退回面板配置那一份。
-  Future<void> shutdown({bool clearSession = false}) async {
-    _generation++;
+  Future<void> shutdown({
+    bool clearSession = false,
+    String endedSession = '',
+  }) async {
+    final int generation = ++_generation;
     _takeover = false;
     _userStopped = true;
     _persistRestart = false;
@@ -809,13 +822,27 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _setState(ConnectionPhase.disconnecting, error: null);
-    await _teardown(clearSession: clearSession);
-    if (clearSession) {
+    try {
+      await _teardown(clearSession: clearSession, session: endedSession);
+    } on Object catch (e) {
+      if (!clearSession) {
+        if (generation == _generation) {
+          _fail(e.toString());
+        }
+        rethrow;
+      }
+      Logger.instance.warn(_source, '停止旧账户内核失败，下次启动或退出时再停: $e');
+    }
+    if (clearSession && _api == null) {
       await _speedTester.waitForIdle();
-      _clashApiOptions = null;
-      _panelCache.clear();
-      NodeLabels.configure('');
-      Logger.instance.clearSession();
+      if (_api == null) {
+        _clashApiOptions = null;
+        NodeLabels.configure('');
+        Logger.instance.clearSession();
+      }
+    }
+    if (generation != _generation) {
+      return;
     }
     _forgetTestResults();
     _setState(ConnectionPhase.disconnected, error: null);
@@ -853,12 +880,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     try {
-      await _ensureRemoteConfig(api);
-      if (generation != _generation) {
-        return;
+      if (takeover || _clash == null || _remote == null) {
+        await _ensureRemoteConfig(api);
+        if (generation != _generation) {
+          return;
+        }
       }
 
-      if (_clash != null && _remotePending) {
+      if (takeover && _clash != null && _remotePending) {
         await _hotReloadPanelProfile();
         if (generation != _generation) {
           return;
@@ -917,7 +946,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       final String reason = _kernelDiedDuringConnect
           ? L10n.t('内核启动失败，请重试')
           : e.toString();
-      await _teardown();
+      try {
+        await _teardown();
+      } on Object catch (stop) {
+        Logger.instance.warn(_source, '连接失败后停止内核失败: $stop');
+      }
       if (generation != _generation) {
         return;
       }
@@ -1817,6 +1850,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
             _remoteProfile!.offlineUntil!.difference(DateTime.now()) >
                 const Duration(hours: 1)) &&
         _remoteHasProxyGroups &&
+        !_remoteUpdateDue &&
         await _remoteRevisionUnchanged(api, fallbackProxyPort) &&
         (_remote!['proxy-providers'] as Map?)?.containsKey('ecy-panel-nodes') ==
             true) {
@@ -1971,7 +2005,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (_accountKey.isEmpty) {
       return false;
     }
-    final RemoteProfile? cached = _panelCache.loadRemote(_accountKey);
+    final RemoteProfile? cached = _panelCache.loadRemote(
+      _accountKey,
+      _api?.cacheKey,
+    );
     if (cached == null) {
       return false;
     }
@@ -2010,7 +2047,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   void _commitRemote() {
     final RemoteProfile? remote = _remoteProfile;
     if (_remotePending && remote != null && _accountKey.isNotEmpty) {
-      _panelCache.saveRemote(_accountKey, remote);
+      _panelCache.saveRemote(_accountKey, remote, _api?.cacheKey);
       _remotePending = false;
     }
   }
@@ -2026,7 +2063,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _authorizationTimer = Timer(
       delay.isNegative ? Duration.zero : delay,
       () async {
-        if (!identical(api, _api) || _canUseOffline(api)) {
+        if (!identical(api, _api)) {
+          return;
+        }
+        // Timer 按时长触发、判断按墙钟：墙钟回拨后还没到期，要重新计时，否则不会再自动停用
+        if (_canUseOffline(api)) {
+          _armAuthorizationExpiry();
           return;
         }
         final Future<void> stopping = shutdown();
@@ -2151,6 +2193,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         _settings.toTemplateOptions(
           tunInterfaceName: _platform.tunInterfaceName,
           takeover: _takeover,
+          supportsSystemProxy: _platform.supportsSystemProxy,
           extraTunExcludeAddresses: api?.configDirectCidrs ?? const <String>[],
         ),
         _clashApiOptions!,
@@ -2178,10 +2221,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       throw StateError(L10n.t('配置尚未生成'));
     }
 
-    await _kernel.bindSession(_api?.cacheBinding ?? '');
+    await _kernel.bindSession(AppPaths.session);
     if (generation != _generation) {
       return;
     }
+    AppPaths.touchSession();
     final String? invalid = await _kernel.validate(profile.validationJson);
     if (invalid != null) {
       final KernelException error = KernelException('配置校验未通过：$invalid');
@@ -2318,15 +2362,29 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (_takeover && _settings.systemProxyEnabled) {
-      await _platform.setSystemProxy(
-        port: _settings.mixedPort,
-        bypass: resolvedSystemProxyBypass(
-          _platform.platformId,
-          _settings.systemProxyBypass,
-        ),
-      );
+      // 端口被其它程序（含同机其它账户）抢先占用时内核只记一条日志照常运行，
+      // 系统代理再指过去，流量就交给了那个程序
+      final int port = _settings.mixedPort;
+      if ((await _clash?.fetchRuntime())?.mixedPort != port) {
+        throw ClashApiException('混合端口 $port 已被其它程序占用，请在设置中更换端口后重新连接');
+      }
+      try {
+        await _platform.setSystemProxy(
+          port: port,
+          bypass: resolvedSystemProxyBypass(
+            _platform.platformId,
+            _settings.systemProxyBypass,
+          ),
+        );
+      } on PlatformServiceException catch (e) {
+        Logger.instance.warn(_source, '系统代理设置失败，连接照常，可手动设置代理: $e');
+      }
     } else {
-      await _platform.restoreSystemProxy();
+      try {
+        await _platform.restoreSystemProxy();
+      } on PlatformServiceException catch (e) {
+        Logger.instance.warn(_source, '还原系统代理失败: $e');
+      }
     }
   }
 
@@ -2777,7 +2835,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final String before = _geoDataFingerprint();
     await clash.updateGeoDatabases();
     final String after = _geoDataFingerprint();
-    if (before == after) {
+    // 桌面运行目录只有特权侧可读，指纹恒为空：内核已应答更新成功，不能报成「已是最新」
+    if (before.isNotEmpty && before == after) {
       Logger.instance.info(_source, 'GeoData 已是最新');
       return L10n.t('已是最新');
     }
@@ -2816,17 +2875,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         .toList(growable: false);
   }
 
-  Future<void> _applyRuntimeConfig(String configJson) async {
-    if (Platform.isAndroid) {
-      await _kernel.reloadConfig(configJson);
-      return;
-    }
-    final ClashApiClient? clash = _clash;
-    if (clash == null) {
-      throw StateError(L10n.t('内核未就绪'));
-    }
-    await clash.applyConfigPayload(configJson);
-  }
+  // 热载交特权侧：服务 / helper 净化落盘后让内核按文件重载，Android 在封装进程内热载；GUI 不向内核提交配置原文
+  Future<void> _applyRuntimeConfig(String configJson) =>
+      _kernel.reloadConfig(configJson);
 
   Future<void> _hotReloadPanelProfile({
     Map<String, dynamic>? previousRemote,
@@ -2878,7 +2929,17 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         ),
       );
     } else {
-      await _applyRuntimeConfig(profile.json);
+      try {
+        await _applyRuntimeConfig(profile.json);
+      } on KernelException catch (e) {
+        // 后台组件旧于界面时不认 kernel.reload：改走同样经特权侧净化的重启，不退回直接向内核提交配置原文
+        if (!e.unsupported) {
+          rethrow;
+        }
+        Logger.instance.warn(_source, '后台组件不支持热载，改为重启内核: $e');
+        await _restartKernel(L10n.t('面板配置有变更，正在重启内核'));
+        return;
+      }
     }
 
     await _refreshProxies(notify: false);
@@ -2986,6 +3047,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   bool get _remoteHasProxyGroups {
     final Object? groups = _remote?['proxy-groups'];
     return groups is List && groups.isNotEmpty;
+  }
+
+  bool get _remoteUpdateDue {
+    final RemoteProfile? remote = _remoteProfile;
+    final DateTime? fetchedAt = remote?.offlineIssuedAt;
+    return fetchedAt == null ||
+        DateTime.now().difference(fetchedAt) >=
+            (remote!.updateInterval ?? _defaultProfileUpdateInterval);
   }
 
   void _indexProxyExtra() {
@@ -3152,9 +3221,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _scheduleRestart(
-      L10n.message(
-        status.message ?? '内核异常退出（退出码 ${status.exitCode ?? ''}）',
-      ),
+      L10n.message(status.message ?? '内核异常退出（退出码 ${status.exitCode ?? ''}）'),
     );
   }
 
@@ -3267,7 +3334,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _teardown({
     bool restarting = false,
     bool clearSession = false,
+    String session = '',
   }) async {
+    final int generation = _generation;
     _proxyRefreshTimer?.cancel();
     _proxyRefreshTimer = null;
     _sysProxyGuardTimer?.cancel();
@@ -3283,23 +3352,34 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     // kernelManager.start 写完配置就调 k.stop()，Android 的 startOrReloadService
     // 就地重载），重启路径上再停一次纯属多余。Android 上那一次还会连 VpnService
     // 一起停掉，逼得随后的 start 在后台调 startForegroundService 被 API 31+ 拒
-    if (clearSession) {
-      await _kernel.clearSession();
-    } else if (!restarting) {
-      await _kernel.stop();
+    Object? stopError;
+    try {
+      if (clearSession) {
+        await _kernel.clearSession(session);
+      } else if (!restarting) {
+        await _kernel.stop();
+      }
+    } on Object catch (e) {
+      stopError = e;
+    }
+    if (generation != _generation) {
+      if (stopError != null) {
+        throw stopError;
+      }
+      return;
     }
 
     // 下一轮不接管出口（断开，或常驻重载）时同样要立刻交还系统代理，不能等到
-    // 内核重载完：那期间浏览器仍指着一个已经停掉的 mixed 口
+    // 内核重载完：那期间浏览器仍指着一个已经停掉的 mixed 口。停内核失败也要还原
     if ((!restarting || !_takeover) && _platform.supportsSystemProxy) {
       try {
         await _platform.restoreSystemProxy();
-      } on PlatformServiceException catch (e) {
-        if (clearSession) {
-          rethrow;
-        }
+      } on Object catch (e) {
         Logger.instance.error(_source, '还原系统代理失败', e);
       }
+    }
+    if (stopError != null) {
+      throw stopError;
     }
 
     if (!restarting || !_takeover) {
@@ -3339,6 +3419,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _api?.fallbackProxyPort = state == ConnectionPhase.connected
         ? _settings.mixedPort
         : null;
+    _api?.fallbackProxyCredential = mixedProxyCredential;
     _api?.reportConnected = state == ConnectionPhase.connected;
     if (becameConnected) {
       final PanelApiClient? api = _api;
@@ -3401,7 +3482,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (api == null) {
       return;
     }
-    await _kernel.bindSession(api.cacheBinding);
+    await _kernel.bindSession(AppPaths.session);
     if (!identical(api, _api)) {
       return;
     }
@@ -3411,6 +3492,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         _settings.toTemplateOptions(
           tunInterfaceName: _platform.tunInterfaceName,
           takeover: false,
+          supportsSystemProxy: _platform.supportsSystemProxy,
         ),
         _clashApiOptions ??
             ClashApiOptions(port: _settings.mixedPort, secret: _randomSecret()),
@@ -3456,13 +3538,100 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<String> readRuntimeConfig() async {
     try {
-      return NodeLabels.annotateRuntimeConfig(await readRunFile('config.json'));
+      final String raw = await readRunFile('config.json');
+      return NodeLabels.annotateRuntimeConfig(
+        maskRuntimeSecrets(raw, nodes: await _panelNodesFor(raw)),
+      );
     } on Object {
       final String? json = _profile?.json;
       if (json != null && json.isNotEmpty) {
-        return NodeLabels.annotateRuntimeConfig(json);
+        return NodeLabels.annotateRuntimeConfig(maskRuntimeSecrets(json));
       }
       rethrow;
+    }
+  }
+
+  // 落盘配置里的节点 provider 不带 payload，节点只在节点文件里；查看时从 ecy-panel-nodes 的文件补回全部节点
+  Future<List<Object?>?> _panelNodesFor(String raw) async {
+    final Object? config = jsonDecode(raw);
+    final Object? providers = config is Map ? config['proxy-providers'] : null;
+    final Object? panel = providers is Map
+        ? providers['ecy-panel-nodes']
+        : null;
+    if (panel is! Map || panel['payload'] != null) {
+      return null;
+    }
+    final Object? file = jsonDecode(await readRunFile('ecy-panel-nodes.json'));
+    final Object? proxies = file is Map ? file['proxies'] : null;
+    return proxies is List ? proxies.cast<Object?>() : null;
+  }
+
+  // 运行配置只供查看：控制面 secret、本设备的节点凭据与测速入站口令都不得出现在界面上。
+  // 节点只在 ecy-panel-nodes 下列一次，各组节点 provider 不再重复列出
+  @visibleForTesting
+  static String maskRuntimeSecrets(String raw, {List<Object?>? nodes}) {
+    final Object? config = jsonDecode(raw);
+    if (config is! Map<String, dynamic>) {
+      throw const FormatException('运行配置不是 JSON 对象');
+    }
+    final Object? panelProviders = config['proxy-providers'];
+    if (panelProviders is Map) {
+      for (final MapEntry<dynamic, dynamic> entry in panelProviders.entries) {
+        final Object? provider = entry.value;
+        if (provider is! Map || !'${entry.key}'.startsWith('ecy-panel-')) {
+          continue;
+        }
+        if (entry.key == 'ecy-panel-nodes') {
+          if (provider['payload'] == null && nodes != null) {
+            provider['payload'] = nodes;
+          }
+        } else {
+          provider.remove('payload');
+        }
+      }
+    }
+    if (config.containsKey('secret')) {
+      config['secret'] = '******';
+    }
+    _maskCredentials(config['proxies']);
+    _maskCredentials(config['listeners']);
+    final Object? providers = config['proxy-providers'];
+    if (providers is Map) {
+      for (final Object? provider in providers.values) {
+        _maskCredentials(provider is Map ? provider['payload'] : null);
+      }
+    }
+    return const JsonEncoder.withIndent('  ').convert(config);
+  }
+
+  static const Set<String> _credentialKeys = <String>{
+    'uuid',
+    'password',
+    'auth',
+    'auth-str',
+    'obfs-password',
+    'private-key',
+    'pre-shared-key',
+    'public-key',
+    'short-id',
+    'psk',
+    'token',
+  };
+
+  static void _maskCredentials(Object? value) {
+    if (value is List) {
+      value.forEach(_maskCredentials);
+    } else if (value is Map) {
+      for (final Object? key in value.keys.toList()) {
+        final Object? item = value[key];
+        if (_credentialKeys.contains(key) &&
+            item is String &&
+            item.isNotEmpty) {
+          value[key] = '******';
+        } else {
+          _maskCredentials(item);
+        }
+      }
     }
   }
 
@@ -3505,7 +3674,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       final Object? providers = _panelCache
-          .loadRemote(_accountKey)
+          .loadRemote(_accountKey, _api?.cacheKey)
           ?.config['rule-providers'];
       if (providers is! Map) {
         return null;

@@ -35,6 +35,37 @@ const (
 
 var kernelVersionPattern = regexp.MustCompile(`^\d+(\.\d+){1,3}$`)
 
+var installedVersionPattern = regexp.MustCompile(`\bv?(\d+(?:\.\d+){1,3})\b`)
+
+// 从 mihomo -v 首行（如 "Mihomo Meta v1.19.33 darwin arm64 ..."）取版本号
+func installedKernelVersion() string {
+	match := installedVersionPattern.FindStringSubmatch(kernelVersionOf(kernelPath()))
+	if match == nil {
+		return ""
+	}
+	return match[1]
+}
+
+func compareKernelVersion(a, b string) int {
+	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < 4; i++ {
+		var x, y int
+		if i < len(left) {
+			x, _ = strconv.Atoi(left[i])
+		}
+		if i < len(right) {
+			y, _ = strconv.Atoi(right[i])
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
 // amd64 必须取 compatible（GOAMD64=v1），须与 scripts/kernel.lock.json 一致
 func kernelAssetTarget() string {
 	if runtime.GOARCH == "amd64" {
@@ -59,6 +90,10 @@ func (s *server) upgradeProgress() map[string]any {
 func (s *server) upgradeKernel(version string, proxyPort int) (string, error) {
 	if !kernelVersionPattern.MatchString(version) {
 		return "", fmt.Errorf("版本号 %q 不合法", version)
+	}
+	// 只许升级或重装同版本：注入官方 GUI 的调用方不能把以特权身份运行的内核换回旧版；读不出当前版本时放行，保留修复入口
+	if current := installedKernelVersion(); current != "" && compareKernelVersion(version, current) < 0 {
+		return "", fmt.Errorf("不能把内核降级到 %s（当前 %s）", version, current)
 	}
 	if !s.upgrading.TryLock() {
 		return "", fmt.Errorf("已有一个升级任务在进行中")
@@ -176,12 +211,26 @@ func resolveKernelAsset(version string, proxyPort int) (name string, url string,
 		if !ok || len(digest) != 64 {
 			return "", "", "", fmt.Errorf("上游未给出 %s 的 SHA-256，拒绝安装未经校验的内核", wanted)
 		}
-		if !strings.HasPrefix(asset.URL, downloadPrefix) {
+		if !officialDownload(asset.URL) {
 			return "", "", "", fmt.Errorf("下载地址 %q 不在官方发布路径下", asset.URL)
 		}
 		return asset.Name, asset.URL, digest, nil
 	}
 	return "", "", "", fmt.Errorf("该版本没有提供 %s", wanted)
+}
+
+// 只比较前缀会放过 releases/download/../../ 之类解析后落到别的仓库的地址
+func officialDownload(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.HasPrefix(raw, downloadPrefix) || parsed.User != nil || parsed.Port() != "" {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // digest 来自 Releases API，下载可跟随 GitHub 重定向

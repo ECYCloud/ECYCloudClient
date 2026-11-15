@@ -21,6 +21,7 @@ struct DashboardView: View {
     @State private var segments: Bool?
     @State private var rankDay = TrafficRankDay.today
     @State private var rankHint = false
+    @State private var usageHint = false
     @State private var toast: String?
     private var state: ConnectionState { session.connection?.state ?? .disconnected }
     private var connected: Bool { state == .connected }
@@ -109,7 +110,7 @@ struct DashboardView: View {
                         HStack(spacing: 12) {
                             switchTile(L10n.t("系统代理"), connected ? L10n.t("本机 {0} 端口", [String(preferences.mixedPort)]) : L10n.t("仅连接后占用，当前未生效"),
                                        isOn: Binding(get: { preferences.systemProxy }, set: { value in
-                                           Task { await perform { preferences.systemProxy = value; try await session.applyProxySettings() } }
+                                           Task { await perform { preferences.systemProxy = value; try await session.applySystemProxySettings() } }
                                        }), routes: false) { ProductGlyph(name: "public", size: 18) }
                             Divider().frame(height: 34)
                             switchTile(L10n.t("TUN 模式"), connected ? L10n.t("接管系统全部流量") : L10n.t("仅连接后占用，当前未生效"),
@@ -177,6 +178,8 @@ struct DashboardView: View {
                                 }.frame(maxWidth: .infinity)
                             }.buttonStyle(ProductButtonStyle(filled: true)).disabled(checkingIn || profile.ableToCheckin != true)
                         }
+                    }.titleAccessory {
+                        trafficHelp(L10n.t("统计所有设备的流量使用情况"), isPresented: $usageHint)
                     }.headerAction {
                         HStack(spacing: 0) {
                             Button { if !session.busy { Task { await session.refresh() } } } label: {
@@ -288,7 +291,7 @@ struct DashboardView: View {
                     Text(verbatim: connectionButtonTitle)
                 }
             }.buttonStyle(ProductButtonStyle(filled: true, color: connected || stopping ? colors.danger : nil))
-                .disabled(session.connection == nil || (stopping && session.connection?.message == nil) || session.busy)
+                .disabled(session.connection == nil || (stopping && session.connection?.message == nil))
     }
     private var connectionButtonTitle: String {
         switch state {
@@ -376,16 +379,18 @@ struct DashboardView: View {
                 rankList(L10n.t("域名/IP"), icon: "language", rows: session.trafficRank.top(rankDay, hosts: true))
             }
         }.titleAccessory {
-            Button { rankHint.toggle() } label: {
-                ProductGlyph(name: "error_outline", size: 14).foregroundStyle(colors.secondary)
-                    .frame(width: ProductMetrics.tapTarget, height: ProductMetrics.tapTarget).contentShape(Rectangle()).productIconHover()
-            }.buttonStyle(.productPlain).offset(y: -2)
-                .accessibilityLabel(L10n.t("统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。"))
-                .productTooltip(isPresented: $rankHint) {
-                    Text(L10n.t("统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。"))
-                        .font(.system(size: 12)).productTextSelection()
-                }
+            trafficHelp(L10n.t("统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。"), isPresented: $rankHint)
         }
+    }
+    private func trafficHelp(_ notice: String, isPresented: Binding<Bool>) -> some View {
+        Button { isPresented.wrappedValue.toggle() } label: {
+            ProductGlyph(name: "error_outline", size: 14).foregroundStyle(colors.secondary)
+                .frame(width: ProductMetrics.tapTarget, height: ProductMetrics.tapTarget).contentShape(Rectangle()).productIconHover()
+        }.buttonStyle(.productPlain).offset(y: -2)
+            .accessibilityLabel(notice)
+            .productTooltip(isPresented: isPresented) {
+                Text(verbatim: notice).font(.system(size: 12)).productTextSelection()
+            }
     }
     private func rankList(_ title: String, icon: String, rows: [TrafficRankRow]) -> some View {
         VStack(alignment: .leading, spacing: 0) {

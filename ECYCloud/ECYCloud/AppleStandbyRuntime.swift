@@ -23,8 +23,9 @@ actor AppleStandbyRuntime: StandbyRuntime {
             ECYStart(UnsafeMutableRawPointer(mutating: $0.baseAddress), Int32($0.count), path.path, 0, "", "", "")
         }
         guard identifier != 0, lease.expiresAt > .now, !Task.isCancelled else {
+            let noNodes = identifier == 0 && ECYStartError() == -4
             stop()
-            throw TunnelError.start
+            throw noNodes ? TunnelError.noNodes : TunnelError.start
         }
         expiresAt = lease.expiresAt
         TunnelFiles.keepCache(group: group, lease: lease, from: path)
@@ -47,7 +48,7 @@ actor AppleStandbyRuntime: StandbyRuntime {
         try Task.checkCancellation()
         let data = try JSONEncoder().encode(command)
         guard data.count <= 4096 else { throw TunnelError.control }
-        var response = [UInt8](repeating: 0, count: 65536)
+        var response = [UInt8](repeating: 0, count: Int(ECY_CONTROL_CAPACITY))
         let count = data.withUnsafeBytes { input in
             response.withUnsafeMutableBytes { output in
                 ECYControl(identifier, UnsafeMutableRawPointer(mutating: input.baseAddress), Int32(input.count), output.baseAddress, Int32(output.count))

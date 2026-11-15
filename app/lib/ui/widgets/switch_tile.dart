@@ -15,6 +15,7 @@ class SwitchTile extends StatelessWidget {
     this.onSettings,
     this.settingsTooltip,
     this.toggleOnTap = false,
+    this.mouseCursor,
   });
 
   final String title;
@@ -26,6 +27,7 @@ class SwitchTile extends StatelessWidget {
   final VoidCallback? onSettings;
   final String? settingsTooltip;
   final bool toggleOnTap;
+  final MouseCursor? mouseCursor;
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +35,7 @@ class SwitchTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: contentPadding,
+      mouseCursor: mouseCursor,
       onTap: toggleOnTap && onChanged != null ? () => onChanged!(!value) : null,
       leading: icon == null
           ? null
@@ -72,6 +75,7 @@ class SwitchTile extends StatelessWidget {
         child: Switch(
           value: value,
           onChanged: onChanged,
+          mouseCursor: mouseCursor,
           splashRadius: 0,
         ),
       ),

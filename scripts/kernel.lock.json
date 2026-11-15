@@ -1,40 +1,40 @@
 {
   "comment": "只用官方发布二进制。amd64 必须取 compatible（GOAMD64=v1）。Android 由 build-libmihomo.sh 以同一 tag 依赖构建。发布包不含 LICENSE，出包复用仓库根 LICENSE。",
   "mihomo": {
-    "tag": "v1.19.33",
-    "version": "1.19.33",
-    "releasePage": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33",
+    "tag": "v1.19.34",
+    "version": "1.19.34",
+    "releasePage": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34",
     "assets": {
       "windows-x64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-windows-amd64-compatible-v1.19.33.zip",
-        "sha256": "7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-windows-amd64-compatible-v1.19.34.zip",
+        "sha256": "cd6738d4648cc1a5f48049a1343b697ab510889d648f045c5c780fc1ab443a79",
         "entry": "mihomo-windows-amd64-compatible.exe"
       },
       "windows-arm64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-windows-arm64-v1.19.33.zip",
-        "sha256": "a2a26869a14634c49f3fbcecc593b498ed8591fbdd7616b24475b3d60b148da3",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-windows-arm64-v1.19.34.zip",
+        "sha256": "076cb04a21377675bcf009b8d1dd83006ce2464aa537e37bce1faf6d3504f554",
         "entry": "mihomo-windows-arm64.exe"
       },
       "macos-x64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-darwin-amd64-compatible-v1.19.33.gz",
-        "sha256": "eefe967b74312f70b64efa0dfa54929d00c7af8e94416e1b12df09863a40f35b"
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-darwin-amd64-compatible-v1.19.34.gz",
+        "sha256": "703bceaa494732fa456f47e6ac2f06bf0bc5593d4c927d5f61e10f1a31039c37"
       },
       "macos-arm64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-darwin-arm64-v1.19.33.gz",
-        "sha256": "060b64b0f2c9a310831db0fe4adb2878de67bfa606c311813c1f13966aa504b6"
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-darwin-arm64-v1.19.34.gz",
+        "sha256": "1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c"
       },
       "linux-x64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-compatible-v1.19.33.gz",
-        "sha256": "386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6"
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-compatible-v1.19.34.gz",
+        "sha256": "2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06"
       },
       "linux-arm64": {
-        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-arm64-v1.19.33.gz",
-        "sha256": "ba408b317080ee265c46cb923a50018c1b82cbd708551cdd46a1e3e307396187"
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-arm64-v1.19.34.gz",
+        "sha256": "daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f"
       }
     }
   },
   "geodata": {
-    "comment": "target 是内核认的本地文件名（MMDB() / GeoSite）。上游滚动 latest、锁不住 sha256，只校验体积下限与 MaxMind 魔数。",
+    "comment": "target 是内核认的本地文件名（MMDB() / GeoSite）。出包时取上游滚动的 latest 最新版、不锁 sha256：按同一发布附带的 .sha256sum 核对完整性，另校验体积下限与 MaxMind 魔数。",
     "assets": {
       "mmdb": {
         "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb",

@@ -20,7 +20,6 @@ import '../widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/update_progress_bar.dart';
 import 'network_segments_page.dart';
-import 'per_app_proxy_page.dart';
 import 'rule_providers_page.dart';
 import 'text_viewer_page.dart';
 import 'privacy_policy_page.dart';
@@ -81,18 +80,6 @@ class SettingsPage extends StatelessWidget {
                         onSettings: () =>
                             unawaited(openTunExcludeAddresses(context)),
                       ),
-                      if (scope.platform.supportsPerAppProxy)
-                        ListTile(
-                          title: Text(L10n.t('分应用代理')),
-                          subtitle: Text(_perAppSummary(settings)),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (BuildContext context) =>
-                                  const PerAppProxyPage(),
-                            ),
-                          ),
-                        ),
                       SwitchTile(
                         title: L10n.t('严格路由'),
                         subtitle: L10n.t(
@@ -341,17 +328,6 @@ class SettingsPage extends StatelessWidget {
       },
     );
   }
-
-  static String _perAppSummary(AppSettings settings) =>
-      switch (settings.perAppMode) {
-        PerAppProxyMode.off => L10n.t('接管全部应用，按当前模式分流'),
-        PerAppProxyMode.include => L10n.t('仅所选 {0} 个应用走代理', <Object>[
-          settings.perAppPackages.length,
-        ]),
-        PerAppProxyMode.exclude => L10n.t('已排除 {0} 个应用', <Object>[
-          settings.perAppPackages.length,
-        ]),
-      };
 }
 
 class _SiteLink extends StatelessWidget {

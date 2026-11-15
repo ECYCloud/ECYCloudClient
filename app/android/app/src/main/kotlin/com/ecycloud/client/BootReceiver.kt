@@ -26,8 +26,8 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) {
             return
         }
-        if (BoxState.sessionCleanupPending(context) ||
-            !Autostart.enabled(context) || !BoxState.configFile(context).isFile) {
+        val session = BoxState.sessionKey(context) ?: return
+        if (!Autostart.enabled(context) || !BoxState.configFile(context, session).isFile) {
             return
         }
         // 未授权时 establish 必然失败，拉起来只会留下一个空跑的前台服务

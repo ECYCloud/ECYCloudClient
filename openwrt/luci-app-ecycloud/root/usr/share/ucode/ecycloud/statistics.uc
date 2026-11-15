@@ -2,13 +2,15 @@
 
 import { access, unlink } from 'fs';
 import * as clash from 'ecycloud.clash';
-import { CONF_DIR, STATE_DIR, coreRunning, creds, ensurePrivateDir, readJson, sessionBinding, settings, writePrivateJson } from 'ecycloud.common';
+import { CONF_DIR, STATE_DIR, coreRunning, creds, ensurePrivateDir, log, readJson, sessionBinding, settings, writePrivateJson } from 'ecycloud.common';
 import { nodesOf } from 'ecycloud.profile';
 
 const SNAPSHOT_FILE = `${STATE_DIR}/connections.json`;
 const RANK_FILE = `${CONF_DIR}/traffic_rank.json`;
 const CLOSED_LIMIT = 1000;
 const HOST_LIMIT = 10000;
+const HOST_LENGTH = 253;
+const RANK_KEEP = 100;
 const BYPASS = [ 'direct', 'reject', 'reject-drop', 'rejectdrop', 'compatible', 'pass', 'dns' ];
 let savedAt = 0;
 let ranks;
@@ -21,17 +23,6 @@ function owned(path, binding) {
 		return length(account) ? { rank: saved?.accounts?.[account] ?? (saved?.binding == binding ? saved.rank : {}) } : {};
 	}
 	return length(binding) && saved?.binding == binding ? saved : {};
-};
-
-function persist(days) {
-	const account = lc(trim(creds().email ?? ''));
-	if (!length(account))
-		return false;
-	const saved = readJson(RANK_FILE);
-	const accounts = type(saved?.accounts) == 'object' ? saved.accounts : {};
-	accounts[account] = days;
-	ensurePrivateDir(CONF_DIR);
-	return writePrivateJson(RANK_FILE, { accounts });
 };
 
 function dayKey(parts) {
@@ -47,6 +38,46 @@ function trimDays(days) {
 			dirty = true;
 		}
 	return today;
+};
+
+function topRank(map) {
+	if (type(map) != 'object')
+		return {};
+	const names = keys(map);
+	if (length(names) <= RANK_KEEP)
+		return map;
+	const floor = sort(values(map))[-RANK_KEEP];
+	const out = {};
+	for (let name in slice(filter(names, key => map[key] > floor), 0, RANK_KEEP))
+		out[name] = map[name];
+	for (let name in filter(names, key => map[key] == floor))
+		if (length(out) < RANK_KEEP)
+			out[name] = map[name];
+	return out;
+};
+
+function recentRank(days) {
+	const out = {};
+	for (let day in [ dayKey(localtime(time())), dayKey(localtime(time() - 86400)) ])
+		if (type(days?.[day]) == 'object')
+			out[day] = { groups: topRank(days[day].groups), hosts: topRank(days[day].hosts) };
+	return out;
+};
+
+function persist(days) {
+	const account = lc(trim(creds().email ?? ''));
+	if (!length(account))
+		return false;
+	const saved = readJson(RANK_FILE);
+	const accounts = {};
+	for (let name, rank in (type(saved?.accounts) == 'object' ? saved.accounts : {})) {
+		const recent = recentRank(rank);
+		if (length(recent))
+			accounts[name] = recent;
+	}
+	accounts[account] = recentRank(days);
+	ensurePrivateDir(CONF_DIR);
+	return writePrivateJson(RANK_FILE, { accounts });
 };
 
 function view(conn) {
@@ -67,7 +98,7 @@ export function clear(preserve) {
 		const binding = sessionBinding();
 		const days = owned(SNAPSHOT_FILE, binding).rank ?? owned(RANK_FILE, binding).rank;
 		if (days != null && !persist(days))
-			die('无法保存当前账户流量记录');
+			log('warning', 'traffic rank not saved');
 	}
 	ranks = null;
 	savedAt = 0;
@@ -81,9 +112,7 @@ export function read() {
 	const binding = sessionBinding();
 	const snapshot = owned(SNAPSHOT_FILE, binding);
 	delete snapshot.binding;
-	const days = snapshot.rank ?? owned(RANK_FILE, binding).rank ?? {};
-	trimDays(days);
-	return { ...snapshot, rank: days, today: dayKey(localtime(time())),
+	return { ...snapshot, rank: recentRank(snapshot.rank ?? owned(RANK_FILE, binding).rank), today: dayKey(localtime(time())),
 		yesterday: dayKey(localtime(time() - 86400)) };
 };
 
@@ -133,7 +162,7 @@ export function collect(snapshot) {
 			bucket.groups[group] = +(bucket.groups[group] ?? 0) + bytes;
 		}
 		const host = trim(conn.host) || trim(conn.destination_ip);
-		if (length(host) && !skipped[lc(host)] && (exists(bucket.hosts, host) || hostCount < HOST_LIMIT)) {
+		if (length(host) && length(host) <= HOST_LENGTH && !skipped[lc(host)] && (exists(bucket.hosts, host) || hostCount < HOST_LIMIT)) {
 			if (!exists(bucket.hosts, host))
 				hostCount++;
 			bucket.hosts[host] = +(bucket.hosts[host] ?? 0) + bytes;
@@ -146,14 +175,17 @@ export function collect(snapshot) {
 			unshift(closed, { ...conn, closed_at: sprintf('%sT%02d:%02d:%02dZ', dayKey(utc), utc.hour, utc.min, utc.sec) });
 	const seconds = time() - +(previous.at ?? 0);
 	ranks.rank[today] = bucket;
+	const rank = recentRank(ranks.rank);
+	/* 今天的桶须保留完整计数：每轮都截成前 100 项，排在后面的主机就永远累计不上来 */
+	ranks.rank = { ...rank, [today]: bucket };
 	ensurePrivateDir(STATE_DIR);
 	const ok = writePrivateJson(SNAPSHOT_FILE, {
-		binding, at: time(), alive, closed: slice(closed, 0, CLOSED_LIMIT), rank: ranks.rank,
+		binding, at: time(), alive, closed: slice(closed, 0, CLOSED_LIMIT), rank,
 		up: seconds > 0 ? int(upload / seconds) : 0, down: seconds > 0 ? int(download / seconds) : 0,
 		total_up: +(previous.total_up ?? 0) + upload, total_down: +(previous.total_down ?? 0) + download
 	});
 	if (ok && dirty && time() - savedAt >= 300) {
-		if (persist(ranks.rank)) {
+		if (persist(rank)) {
 			savedAt = time();
 			dirty = false;
 		}

@@ -13,7 +13,7 @@ struct AccountSecurityView: View {
     @State private var email = ""
     @State private var oldCode = ""
     @State private var newCode = ""
-    @State private var oldVerified = false
+    @State private var emailPassword = ""
     @State private var oldPassword = ""
     @State private var password = ""
     @State private var confirmation = ""
@@ -26,9 +26,8 @@ struct AccountSecurityView: View {
     @State private var promptPassword = ""
     @State private var prompting = false
     @State private var confirmingEnable = false
-    @State private var confirmingUnbind = false
     @State private var sendingEmail: AccountEmailPurpose?
-    private enum PasswordAction { case disable, reset }
+    private enum PasswordAction { case enable, disable, reset, telegram }
     private var colors: ProductPalette { ProductPalette(scheme: scheme) }
     private var busy: Bool { working || session.busy }
 
@@ -49,14 +48,15 @@ struct AccountSecurityView: View {
         }
         .task { await load() }
         .task(id: telegramPolling) { await pollTelegram() }
-        .onChange(of: oldCode) { _, value in oldVerified = false; filterCode(value, $oldCode) }
+        .onChange(of: oldCode) { _, value in filterCode(value, $oldCode) }
         .onChange(of: newCode) { _, value in filterCode(value, $newCode) }
         .onChange(of: twoFactorCode) { _, value in filterCode(value, $twoFactorCode) }
+        .onChange(of: emailPassword) { _, value in filterASCII(value, $emailPassword) }
         .onChange(of: oldPassword) { _, value in filterASCII(value, $oldPassword) }
         .onChange(of: password) { _, value in filterASCII(value, $password) }
         .onChange(of: confirmation) { _, value in filterASCII(value, $confirmation) }
         .onDisappear { clearSecrets() }
-        .alert(L10n.t("请验证登录密码"), isPresented: $prompting) {
+        .alert(promptTitle, isPresented: $prompting) {
             SecureField(L10n.t("登录密码"), text: $promptPassword)
             Button(L10n.t("确定")) {
                 let value = promptPassword; promptPassword = ""
@@ -64,15 +64,11 @@ struct AccountSecurityView: View {
                 Task { await runPasswordAction(action, password: value) }
             }
             Button(L10n.t("取消"), role: .cancel) { promptPassword = "" }
-        } message: { Text(L10n.t("关闭或重置已启用的两步验证属敏感操作，为确认是您本人，请输入当前登录密码。")) }
+        } message: { Text(verbatim: promptMessage) }
         .alert(L10n.t("您确定要开启两步验证吗？"), isPresented: $confirmingEnable) {
-            Button(L10n.t("确定")) { Task { await enableTwoFactor() } }
+            Button(L10n.t("确定")) { Task { await run { try await session.keepTwoFactorSetting(enabled: true) } } }
             Button(L10n.t("取消"), role: .cancel) { }
         } message: { Text(L10n.t("开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。")) }
-        .alert(L10n.t("您确定要解除Telegram绑定吗？"), isPresented: $confirmingUnbind) {
-            Button(L10n.t("确定")) { Task { await unbindTelegram() } }
-            Button(L10n.t("取消"), role: .cancel) { }
-        } message: { Text(verbatim: unbindMessage) }
     }
 
     private var usernameCard: some View {
@@ -96,11 +92,6 @@ struct AccountSecurityView: View {
                     codeField(L10n.t("原邮箱验证码"), text: $oldCode)
                     sendButton(.oldEmail)
                 }
-                trailing {
-                    Button(oldVerified ? L10n.t("原邮箱已验证") : L10n.t("验证原邮箱")) { Task {
-                        oldVerified = await run { try await session.verifyOldEmail(oldCode) }
-                    } }.buttonStyle(ProductButtonStyle()).disabled(busy || oldVerified)
-                }
             }
             ProductField(title: L10n.t("新邮箱"), icon: "mail_outline", hasValue: !email.isEmpty) {
                 TextField(L10n.t("新邮箱"), text: $email).textContentType(.emailAddress).autocorrectionDisabled()
@@ -108,13 +99,16 @@ struct AccountSecurityView: View {
             if options.emailVerify {
                 HStack(spacing: 12) {
                     codeField(L10n.t("新邮箱验证码"), text: $newCode)
-                    sendButton(.newEmail).disabled(!oldVerified)
+                    sendButton(.newEmail)
+                }
+            } else {
+                ProductField(title: L10n.t("登录密码"), icon: "lock_outline", hasValue: !emailPassword.isEmpty) {
+                    SecureField(L10n.t("登录密码"), text: $emailPassword).textContentType(.password)
                 }
             }
             trailing {
-                Button(L10n.t("换绑邮箱")) { Task {
-                    await run { try await session.updateEmail(email, oldCode: oldCode, newCode: newCode); return "" }
-                } }.buttonStyle(ProductButtonStyle(filled: true)).disabled(busy)
+                Button(L10n.t("换绑邮箱")) { Task { await saveEmail(options) } }
+                    .buttonStyle(ProductButtonStyle(filled: true)).disabled(busy)
             }
         }
     }
@@ -176,13 +170,13 @@ struct AccountSecurityView: View {
                     .buttonStyle(ProductButtonStyle(filled: true)).disabled(busy)
             }
         }.headerAction {
-            Button(L10n.t("重置密钥")) { resetTwoFactor(options) }.buttonStyle(ProductButtonStyle()).disabled(busy)
+            Button(L10n.t("重置密钥")) { passwordAction = .reset; prompting = true }.buttonStyle(ProductButtonStyle()).disabled(busy)
         }
     }
 
     private func telegramCard(_ options: AccountEditOptions) -> some View {
         let bound = telegram?.bound ?? (options.telegramId > 0)
-        let token = telegram?.bindToken ?? options.bindToken
+        let token = telegram?.bindToken ?? ""
         return ProductCard(title: L10n.t("绑定 Telegram Bot"), icon: "chat_outlined") {
             if bound {
                 telegramBoundLine(imValue: telegram?.imValue ?? options.imValue, id: telegram?.telegramId ?? options.telegramId)
@@ -190,7 +184,13 @@ struct AccountSecurityView: View {
                     Text(L10n.t("解绑后将被移出 Telegram 用户群/频道。")).font(.system(size: 12)).foregroundStyle(colors.danger)
                 }
                 trailing {
-                    Button(L10n.t("解除绑定")) { confirmingUnbind = true }
+                    Button(L10n.t("解除绑定")) { passwordAction = .telegram; prompting = true }
+                        .buttonStyle(ProductButtonStyle(filled: true)).disabled(busy)
+                }
+            } else if token.isEmpty {
+                Text(L10n.t("绑定后可通过 Telegram Bot 签到、查询等。绑定码约 10 分钟有效。")).font(.system(size: 12)).foregroundStyle(colors.secondary)
+                trailing {
+                    Button(L10n.t("获取绑定码")) { passwordAction = .telegram; prompting = true }
                         .buttonStyle(ProductButtonStyle(filled: true)).disabled(busy)
                 }
             } else {
@@ -246,6 +246,22 @@ struct AccountSecurityView: View {
         }
     }
 
+    private var promptTitle: String {
+        switch passwordAction {
+        case .enable: L10n.t("您确定要开启两步验证吗？")
+        case .telegram where telegramBound: L10n.t("您确定要解除Telegram绑定吗？")
+        default: L10n.t("请验证登录密码")
+        }
+    }
+
+    private var promptMessage: String {
+        var parts: [String] = []
+        if passwordAction == .enable { parts.append(L10n.t("开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。")) }
+        if passwordAction == .telegram && telegramBound { parts.append(unbindMessage) }
+        parts.append(L10n.t("此操作属敏感操作，为确认是您本人，请输入当前登录密码。"))
+        return parts.joined(separator: "\n\n")
+    }
+
     private var unbindMessage: String {
         var parts = [L10n.t("注意：您点击 ") + L10n.t("确定") + L10n.t(" 按钮之后系统会解除你本站账号与Telegram Bot的绑定。"),
                      L10n.t("解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。")]
@@ -255,9 +271,11 @@ struct AccountSecurityView: View {
         return parts.joined(separator: "\n\n")
     }
 
+    private var telegramBound: Bool { telegram?.bound ?? ((edit?.telegramId ?? 0) > 0) }
+
     private var telegramPolling: Bool {
         guard loaded, let edit, edit.enableTelegram else { return false }
-        return !(telegram?.bound ?? (edit.telegramId > 0))
+        return !telegramBound
     }
 
     private func trailing<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -294,12 +312,14 @@ struct AccountSecurityView: View {
         }.buttonStyle(.productPlain).help(hint).accessibilityLabel(hint)
     }
 
+    // 密钥与绑定码只留在本机，不经通用剪贴板同步到其它设备；macOS 另按 nspasteboard.org 约定标记，剪贴板工具不记录
     private func copy(_ value: String, label: String) {
         #if os(macOS)
-        NSPasteboard.general.clearContents()
+        _ = NSPasteboard.general.prepareForNewContents(with: .currentHostOnly)
         NSPasteboard.general.setString(value, forType: .string)
+        NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
         #else
-        UIPasteboard.general.string = value
+        UIPasteboard.general.setItems([["public.utf8-plain-text": value]], options: [.localOnly: true])
         #endif
         message = L10n.t("已复制{0}", [label])
     }
@@ -337,49 +357,50 @@ struct AccountSecurityView: View {
         }
     }
 
+    private func saveEmail(_ options: AuthOptions) async {
+        if !options.emailVerify && emailPassword.isEmpty {
+            message = L10n.t("请填写密码")
+            return
+        }
+        await run { try await session.updateEmail(email, oldCode: oldCode, newCode: newCode, password: options.emailVerify ? nil : emailPassword); return "" }
+    }
+
     private func savePassword() async {
         await run { try await session.updatePassword(old: oldPassword, password: password, confirmation: confirmation); return "" }
     }
 
     private func saveTwoFactor(_ options: AccountEditOptions) {
-        if twoFactorDraft == 1 { confirmingEnable = true }
+        if twoFactorDraft == 1 && options.gaEnable != 0 { confirmingEnable = true }
+        else if twoFactorDraft == 1 { passwordAction = .enable; prompting = true }
         else if options.gaEnable != 0 { passwordAction = .disable; prompting = true }
         else { Task { await run { try await session.keepTwoFactorSetting(enabled: false) } } }
     }
 
-    private func enableTwoFactor() async {
-        let enabled = edit?.gaEnable != 0
-        let success = await run {
-            if enabled { return try await session.keepTwoFactorSetting(enabled: true) }
-            return try await session.enableTwoFactor(code: twoFactorCode)
-        }
-        if success && !enabled { twoFactorCode = ""; freshSecret = nil; await reloadEditOptions() }
-    }
-
-    private func resetTwoFactor(_ options: AccountEditOptions) {
-        if options.gaEnable != 0 { passwordAction = .reset; prompting = true }
-        else { Task { await runPasswordAction(.reset, password: "") } }
-    }
-
     private func runPasswordAction(_ action: PasswordAction, password: String) async {
         switch action {
+        case .enable:
+            if await run({ try await session.enableTwoFactor(code: twoFactorCode, password: password) }) { twoFactorCode = ""; freshSecret = nil; await reloadEditOptions() }
         case .disable:
             if await run({ try await session.disableTwoFactor(password: password) }) { await reloadEditOptions() }
         case .reset:
             var secret: TwoFactorSecret?
             await run { secret = try await session.resetTwoFactor(password: password); return L10n.t("两步验证密钥已重置") }
-            if let secret { freshSecret = secret }
+            if let secret { freshSecret = secret; await reloadEditOptions() }
+        case .telegram:
+            await resetTelegram(password: password)
         }
     }
 
-    private func unbindTelegram() async {
+    private func resetTelegram(password: String) async {
+        let bound = telegramBound
         var binding: TelegramBinding?
-        await run {
-            let result = try await session.resetTelegram()
+        guard await run({
+            let result = try await session.resetTelegram(password: password)
             binding = result.binding
             return result.message.isEmpty ? L10n.t("已解绑") : result.message
-        }
+        }) else { return }
         if let binding { telegram = binding }
+        if !bound { message = nil }
     }
 
     private func pollTelegram() async {
@@ -405,11 +426,12 @@ struct AccountSecurityView: View {
         guard let value = try? await session.editOptions() else { if !loaded { edit = nil }; return }
         edit = value
         twoFactorDraft = value.gaEnable
-        telegram = nil
+        // 绑定码只在复核密码后取得，面板仍是未绑定时要留着显示
+        if value.telegramId > 0 || telegram?.bound == true { telegram = nil }
     }
 
     private func clearSecrets() {
-        oldPassword = ""; password = ""; confirmation = ""; oldCode = ""; newCode = ""; twoFactorCode = ""
+        emailPassword = ""; oldPassword = ""; password = ""; confirmation = ""; oldCode = ""; newCode = ""; twoFactorCode = ""
         promptPassword = ""; freshSecret = nil; edit = nil; telegram = nil
     }
 }
@@ -422,6 +444,7 @@ struct DeleteAccountView: View {
     @State private var busy = false
     @State private var sendingCode = false
     @State private var code = ""
+    @State private var password = ""
     @State private var toast: String?
     @State private var confirming = false
     private var colors: ProductPalette { ProductPalette(scheme: scheme) }
@@ -457,7 +480,11 @@ struct DeleteAccountView: View {
             let filtered = AuthInput.otp(value)
             if filtered != value { code = filtered }
         }
-        .onDisappear { code = "" }
+        .onChange(of: password) { _, value in
+            let filtered = AuthInput.ascii(value)
+            if filtered != value { password = filtered }
+        }
+        .onDisappear { code = ""; password = "" }
         .alert(L10n.t("确认提交删除请求吗？"), isPresented: $confirming) {
             Button(L10n.t("确定")) { Task { await submit() } }
             Button(L10n.t("取消"), role: .cancel) { }
@@ -465,10 +492,14 @@ struct DeleteAccountView: View {
     }
 
     private func verifyCard(_ options: AuthOptions) -> some View {
-        ProductCard(title: options.emailVerify ? L10n.t("输入邮箱验证码以验证身份") : L10n.t("提交删除请求"), icon: "verified_user_outlined") {
+        ProductCard(title: options.emailVerify ? L10n.t("输入邮箱验证码以验证身份") : L10n.t("请验证登录密码"), icon: "verified_user_outlined") {
             if options.emailVerify {
                 Text(L10n.t("删除账号验证码将发送到 {0} 邮箱", [session.profile?.email ?? ""])).foregroundStyle(colors.secondary)
                 ProductTextField(hint: L10n.t("邮箱验证码（必填）"), text: $code).disabled(busy)
+            } else {
+                ProductField(title: L10n.t("登录密码"), icon: "lock_outline", hasValue: !password.isEmpty) {
+                    SecureField(L10n.t("登录密码"), text: $password).textContentType(.password)
+                }.disabled(busy)
             }
             ProductFlow(spacing: 12) {
                 if options.emailVerify {
@@ -504,14 +535,18 @@ struct DeleteAccountView: View {
             toast = L10n.t("请先输入邮箱验证码")
             return
         }
+        if !options.emailVerify && password.isEmpty {
+            toast = L10n.t("请填写密码")
+            return
+        }
         confirming = true
     }
 
     private func submit() async {
-        guard !busy else { return }
+        guard !busy, let options else { return }
         busy = true
         defer { busy = false }
-        do { _ = try await session.deleteAccount(emailCode: code.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        do { _ = try await session.deleteAccount(emailCode: options.emailVerify ? code.trimmingCharacters(in: .whitespacesAndNewlines) : nil, password: options.emailVerify ? nil : password) }
         catch is CancellationError { }
         catch { toast = (error as? ClientError)?.localizedDescription ?? L10n.t("操作未完成，请重试。") }
     }

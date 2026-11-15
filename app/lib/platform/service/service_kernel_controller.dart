@@ -24,6 +24,7 @@ class ServiceKernelController implements KernelController {
 
   static const String _source = 'kernel';
   static const Duration _pollInterval = Duration(seconds: 1);
+  static const Duration _controlPlaneTimeout = Duration(seconds: 60);
 
   /// 内核是独立进程，特权侧被强杀或重启期间它照旧转发流量（macOS 上 launchd 还会按
   /// KeepAlive 立刻把 helper 拉回来）。因此「问不到状态」不等于「内核退出」，
@@ -268,6 +269,9 @@ class ServiceKernelController implements KernelController {
       await _service.request('kernel.start', <String, dynamic>{
         'config': configJson,
       });
+      if (!_logFromClashApi && generation == _generation) {
+        await _awaitControlPlane(clashApi.port, generation);
+      }
     } on ServiceException catch (e) {
       if (generation != _generation) {
         return;
@@ -281,6 +285,47 @@ class ServiceKernelController implements KernelController {
     }
     _startLogStream(clashApi);
     _startPolling();
+  }
+
+  // 端口在选定之后、内核监听之前可能被本机其它进程抢先占住：内核只记一行日志照常运行，
+  // 此后带 secret 的控制面请求与热载的整份配置都会发给对方，只能以特权侧转交的内核输出为准
+  Future<void> _awaitControlPlane(int port, int generation) async {
+    final String listening = 'RESTful API listening at: 127.0.0.1:$port';
+    final DateTime deadline = DateTime.now().add(_controlPlaneTimeout);
+    while (true) {
+      final Map<String, dynamic> result = await _service.request(
+        'kernel.status',
+        <String, dynamic>{'log_cursor': _logCursor},
+      );
+      if (generation != _generation) {
+        throw KernelException('内核会话已变化');
+      }
+      _drainLog(result);
+      final Object? lines = result['log_lines'];
+      for (final Object? line in lines is List ? lines : const <Object?>[]) {
+        final String message = line is String ? Logger.kernelMessage(line) : '';
+        if (message == listening) {
+          return;
+        }
+        if (message.startsWith('External controller listen error')) {
+          throw KernelException('控制面端口 $port 已被其它程序占用，请重新连接');
+        }
+      }
+      if (result['running'] != true) {
+        _update(
+          KernelStatus(
+            state: KernelState.failed,
+            exitCode: (result['exit_code'] as num?)?.toInt(),
+            message: result['error'] as String?,
+          ),
+        );
+        throw KernelException('内核启动失败，请重试');
+      }
+      if (DateTime.now().isAfter(deadline)) {
+        throw KernelException('内核控制面在 ${_controlPlaneTimeout.inSeconds} 秒内未就绪');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
   }
 
   // 内核与 GUI 同进程时没有可捕获的 stdout，日志只能从控制面取
@@ -306,6 +351,7 @@ class ServiceKernelController implements KernelController {
   Future<void> stop() async {
     _stopPolling();
     final int generation = _generation;
+    final KernelStatus before = status;
     _update(const KernelStatus(state: KernelState.stopping));
     await _closeTunIfRunning();
     if (generation != _generation) {
@@ -319,7 +365,8 @@ class ServiceKernelController implements KernelController {
         return;
       }
       Logger.instance.warn(_source, '停止内核失败: $e');
-      _update(KernelStatus(state: KernelState.failed, message: '$e'));
+      // 不能推 failed：那是内核崩溃的信号，会触发自动重启
+      _update(before);
       throw KernelException('停止内核失败：$e');
     }
 
@@ -332,7 +379,7 @@ class ServiceKernelController implements KernelController {
   }
 
   @override
-  Future<void> clearSession() async {
+  Future<void> clearSession(String cacheKey) async {
     _stopPolling();
     final int generation = _generation;
     _update(const KernelStatus(state: KernelState.stopping));
@@ -341,7 +388,9 @@ class ServiceKernelController implements KernelController {
       throw KernelException('内核会话已变化');
     }
     try {
-      await _service.request('kernel.clear');
+      await _service.request('kernel.clear', <String, dynamic>{
+        'cache_key': cacheKey,
+      });
     } on ServiceException catch (e) {
       if (generation == _generation) {
         _update(KernelStatus(state: KernelState.failed, message: '$e'));
@@ -402,6 +451,7 @@ class ServiceKernelController implements KernelController {
     }
   }
 
+  // 桌面由服务 / helper 用与 kernel.start 相同的净化函数落盘，再让内核按这份文件重载
   @override
   Future<void> reloadConfig(String configJson) async {
     try {
@@ -409,7 +459,10 @@ class ServiceKernelController implements KernelController {
         'config': configJson,
       });
     } on ServiceException catch (e) {
-      throw KernelException('热载配置失败：$e');
+      throw KernelException(
+        '热载配置失败：$e',
+        unsupported: e.message.contains('未知指令 "kernel.reload"'),
+      );
     }
   }
 
@@ -439,7 +492,7 @@ class ServiceKernelController implements KernelController {
       );
       return result['valid'] == true ? null : result['error'] as String?;
     } on ServiceException catch (e) {
-      return '无法校验配置：$e';
+      throw KernelException('后台服务暂不可用：$e');
     }
   }
 

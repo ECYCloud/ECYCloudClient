@@ -5,6 +5,8 @@
 'require ui';
 'require ecycloud.api as api';
 
+var PAGE_SIZE = 25;
+
 function emptyUsage() {
 	return {
 		items: [],
@@ -21,14 +23,36 @@ return view.extend({
 	handleReset: null,
 
 	load: function() {
-		return this.fetch(true);
+		return api.status().then(function(status) {
+			return { status: status, usage: api.cachedDevices(PAGE_SIZE) };
+		});
 	},
 
 	refresh: function() {
-		return this.fetch(false).then(L.bind(this.update, this));
+		return this.fetch().then(L.bind(this.update, this));
 	},
 
-	fetch: function(freshAccount) {
+	syncProfile: function() {
+		var self = this;
+
+		if (this.refreshingProfile)
+			return;
+
+		this.refreshingProfile = true;
+		this.paint();
+		return this.refresh().then(function() {
+			return api.refreshAccount().catch(function() {});
+		}).then(function() {
+			return api.status();
+		}).then(function(status) {
+			self.update({ status: status });
+		}).finally(function() {
+			self.refreshingProfile = false;
+			self.paint();
+		});
+	},
+
+	fetch: function() {
 		var page = this.page || 1;
 		var search = this.keyword || '';
 		var generation = this.requestGeneration = (this.requestGeneration || 0) + 1;
@@ -37,20 +61,10 @@ return view.extend({
 			if (!api.signedIn(status))
 				return { status: status, usage: emptyUsage() };
 
-			var start = freshAccount
-				? api.refreshAccount().then(function() {
-					return api.status();
-				}, function() {
-					return api.status();
-				})
-				: Promise.resolve(status);
-
-			return start.then(function(next) {
-				return api.devices(page, 25, search).then(function(res) {
-					return { status: next, usage: res || emptyUsage(), generation: generation };
-				}, function() {
-					return { status: next, usage: emptyUsage(), generation: generation };
-				});
+			return api.devices(page, PAGE_SIZE, search).then(function(res) {
+				return { status: status, usage: res || emptyUsage(), generation: generation };
+			}, function() {
+				return { status: status, usage: emptyUsage(), generation: generation };
 			});
 		});
 	},
@@ -62,8 +76,6 @@ return view.extend({
 		if (data.usage)
 			this.usage = data.usage;
 		this.page = this.usage && this.usage.current_page || 1;
-		if (!this.usage)
-			this.usage = emptyUsage();
 		this.paint();
 	},
 
@@ -82,7 +94,7 @@ return view.extend({
 
 			return api.kickDevice(item.device_id).then(function(res) {
 				api.notify(res, res.msg || _('Request failed'));
-				return self.fetch(true).then(L.bind(self.update, self));
+				return self.syncProfile();
 			});
 		});
 	},
@@ -170,19 +182,7 @@ return view.extend({
 			'aria-label': _('Refresh profile')
 		});
 
-		refreshBtn.addEventListener('click', function() {
-			if (self.refreshingProfile)
-				return;
-
-			self.refreshingProfile = true;
-			refreshBtn.classList.add('is-refreshing');
-			self.fetch(true).then(function(data) {
-				self.update(data);
-			}).finally(function() {
-				self.refreshingProfile = false;
-				self.paint();
-			});
-		});
+		refreshBtn.addEventListener('click', L.bind(this.syncProfile, this));
 
 		var logout = signedIn
 			? api.pressable('ecycloud-jump is-danger', {
@@ -233,7 +233,7 @@ return view.extend({
 				logout ? E('div', { 'class': 'ecycloud-card-actions' }, [ logout ]) : '')
 		];
 
-		if (signedIn)
+		if (signedIn && this.usage)
 			cards.push(api.section('', _('Online clients in the last %d days').format(usage.log_keep_days || 1), E('div', {}, [
 				E('div', { 'class': 'ecycloud-hint' }, [
 					_('Confirm these IPs are yours. Change your password if anything looks wrong.')
@@ -277,7 +277,10 @@ return view.extend({
 				}
 			});
 			self.update(data);
-			poll.add(L.bind(self.refresh, self), 30);
+			self.syncProfile();
+			poll.add(function() {
+				return self.refreshingProfile ? null : self.refresh();
+			}, 30);
 			return api.shell([ self.body ]);
 		});
 	}

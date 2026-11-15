@@ -7,7 +7,7 @@ fi
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 go_bin="${GO_BIN:-go}"
 if ! command -v "$go_bin" >/dev/null 2>&1; then
-    echo '需要 Go 1.27.1 或更新版本；可通过 GO_BIN 指定已有工具链。' >&2
+    echo '需要 Go 1.27.4 或更新版本；可通过 GO_BIN 指定已有工具链。' >&2
     exit 1
 fi
 work_dir="$(mktemp -d /private/tmp/ecycloud-mihomo-verify.XXXXXX)"

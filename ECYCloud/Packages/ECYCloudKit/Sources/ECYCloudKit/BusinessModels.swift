@@ -120,9 +120,14 @@ public struct ShopQuote: Decodable, Sendable {
     public let hasStockLimit: Bool?, hasLimitedSale: Bool?, hasValidOrder: Int?
     public let upgradeMsg: String?, couponApplied: Bool?, couponMsg: String?, credit: Int?
     public let hasTrafficResetFee: Bool?, trafficResetFee: String?, trafficCurrentShopName: String?
-    public let trafficBillingBasePrice: String?, trafficUsed: Double?, trafficTotal: Double?, trafficUsagePercent: Double?
+    public let trafficBillingBasePrice: String?, trafficBillingBaseType: String?, trafficUsed: Double?, trafficTotal: Double?, trafficUsagePercent: Double?
     public let trafficFeePercent: Double?, trafficFeeIsCapped: Bool?
     public var canPurchase: Bool { planCooldown != true && total.flatMap(MoneyInput.amount) != nil }
+    public var trafficFeeIsShortfall: Bool { trafficBillingBaseType == "fee_shortfall" }
+    public func trafficBillingBaseLine(planName: String) -> String {
+        let price = trafficBillingBasePrice ?? ""
+        return trafficBillingBaseType == "previous_plan" ? L10n.t("计费基准价：{0} 元", [price]) : L10n.t("新套餐：{0} 计费基准价：{1} 元", [planName, price])
+    }
 }
 public struct PurchaseResult: Sendable {
     public let message: String
@@ -139,6 +144,10 @@ public struct PaymentStatus: Decodable, Sendable {
     public let paid: Bool
     public let total: Double
     public let cardKey: String
+    public let rechargedToBalance: Bool?
+    public var purchaseNotice: String {
+        rechargedToBalance == true ? L10n.t("商品未能交付，款项已转入余额。") : L10n.t("支付成功，订单已到账。")
+    }
 }
 public struct RechargeInfo: Decodable, Sendable {
     public struct Payment: Decodable, Identifiable, Sendable { public let id: String, name: String, type: String }

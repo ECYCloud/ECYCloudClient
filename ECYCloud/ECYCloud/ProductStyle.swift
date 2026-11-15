@@ -19,6 +19,15 @@ extension View {
         #endif
     }
 
+    // 对应 Flutter 的 SystemMouseCursors.forbidden：不可操作的控件悬浮显示禁止光标，只有 macOS 有鼠标光标
+    @ViewBuilder func productForbiddenCursor(_ active: Bool = true) -> some View {
+        #if os(macOS)
+        if active { onHover { ($0 ? NSCursor.operationNotAllowed : NSCursor.arrow).set() } } else { self }
+        #else
+        self
+        #endif
+    }
+
     @ViewBuilder func productFocusRing(_ shape: some InsettableShape) -> some View {
         #if os(tvOS)
         modifier(ProductFocusRing(shape: shape))

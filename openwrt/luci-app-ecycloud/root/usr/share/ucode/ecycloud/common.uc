@@ -5,7 +5,7 @@ import { cursor } from 'uci';
 
 export const CONF_DIR = '/etc/ecycloud';
 export const STATE_DIR = '/var/run/ecycloud';
-export const SESSION_CHANGE = `${STATE_DIR}/session-changing`;
+export const RUN_ROOT = `${CONF_DIR}/run`;
 export const BUILD_FILE = '/usr/share/ecycloud/build.json';
 export const CRED_FILE = `${CONF_DIR}/credentials.json`;
 export const ANNOUNCE_FILE = `${CONF_DIR}/announcement.json`;
@@ -48,21 +48,6 @@ export function ensureDir(path) {
 export function ensurePrivateDir(path) {
 	ensureDir(path);
 	chmod(path, DIR_MODE);
-};
-
-export function sessionLease() {
-	ensurePrivateDir(STATE_DIR);
-	if (access(SESSION_CHANGE))
-		return null;
-	/* curl 子进程也须持有共享锁，避免父任务退出后仍在写旧会话响应。 */
-	const lock = open(`${STATE_DIR}/session.lock`, 'a', 0600);
-	if (!lock)
-		die('无法打开会话锁');
-	if (!lock.lock('sn') || access(SESSION_CHANGE)) {
-		lock.close();
-		return null;
-	}
-	return lock;
 };
 
 export function readJson(path) {
@@ -152,51 +137,6 @@ export function appendNets(base, extra) {
 	return out;
 };
 
-export function settings() {
-	const raw = cursor().get_all('ecycloud', 'config') ?? {};
-	const runDir = raw.run_dir ?? `${CONF_DIR}/run`;
-	if (runDir != `${CONF_DIR}/run`)
-		die(`运行目录必须为 ${CONF_DIR}/run`);
-	const tunDevice = raw.tun_device || 'ECYCloud';
-	if (index(tunDevice, '\0') >= 0 || match(tunDevice, /[[:cntrl:][:space:]]/) ||
-	    !match(tunDevice, /^[A-Za-z0-9_.-]{1,15}$/))
-		die('TUN 网卡名只能包含 1 到 15 个字母、数字、下划线、点或连字符');
-
-	return {
-		enabled: raw.enabled == '1',
-		mode: raw.mode == 'tun' ? 'tun' : 'tproxy',
-		routeMode: raw.route_mode ?? 'rule',
-		logLevel: raw.log_level ?? 'warning',
-		tproxyPort: +(raw.tproxy_port ?? 10202),
-		mixedPort: +(raw.mixed_port ?? 10203),
-		dnsPort: +(raw.dns_port ?? 10201),
-		allowLan: (raw.allow_lan ?? '1') == '1',
-		ipv6: raw.ipv6 == '1',
-		dnsHijack: (raw.dns_hijack ?? '1') == '1',
-		routerProxy: raw.router_proxy == '1',
-		tunDevice,
-		tunStack: raw.tun_stack ?? 'mixed',
-		tunExclude: uciList(raw.tun_exclude),
-		bypass: uciList(raw.bypass),
-		runDir,
-		geoxBase: replace(trim(raw.geox_base ?? ''), /\/+$/, ''),
-		refreshInterval: +(raw.refresh_interval ?? 5),
-		autoConnect: raw.auto_connect == '1',
-		lanInterfaces: length(uciList(raw.lan_interface)) ? uciList(raw.lan_interface) : [ 'lan' ]
-	};
-};
-
-export function log(level, message) {
-	const levels = { debug: 0, info: 1, notice: 1, warning: 2, err: 3, error: 3, silent: 4 };
-	if ((levels[level] ?? 2) < (levels[settings().logLevel] ?? 2))
-		return;
-	system(`logger -t ecycloud -p daemon.${level} ${shellquote(message)}`);
-};
-
-export function build() {
-	return readJson(BUILD_FILE) ?? {};
-};
-
 export function creds() {
 	return readJson(CRED_FILE) ?? {};
 };
@@ -223,13 +163,68 @@ export function sessionValid() {
 	return length(saved.token) > 0 && timestamp(saved.expires_at) > time();
 };
 
+/* account_key 会拼进运行目录路径，只认安全字符 */
+export function sessionKey() {
+	const key = `${creds().account_key ?? ''}`;
+	return sessionValid() && match(key, /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/) ? key : '';
+};
+
+export function settings() {
+	const raw = cursor().get_all('ecycloud', 'config') ?? {};
+	const tunDevice = raw.tun_device || 'ECYCloud';
+
+	return {
+		enabled: raw.enabled == '1',
+		mode: raw.mode == 'tun' ? 'tun' : 'tproxy',
+		routeMode: raw.route_mode ?? 'rule',
+		logLevel: raw.log_level ?? 'warning',
+		tproxyPort: +(raw.tproxy_port ?? 10202),
+		mixedPort: +(raw.mixed_port ?? 10203),
+		dnsPort: +(raw.dns_port ?? 10201),
+		allowLan: (raw.allow_lan ?? '1') == '1',
+		ipv6: raw.ipv6 == '1',
+		dnsHijack: (raw.dns_hijack ?? '1') == '1',
+		routerProxy: raw.router_proxy == '1',
+		/* 停止与恢复流程也读设置：非法网卡名只置空、由 TUN 接管时拒绝，抛错会打断 dnsmasq 与防火墙的撤销 */
+		tunDevice: index(tunDevice, '\0') < 0 && !match(tunDevice, /[[:cntrl:][:space:]]/) &&
+			match(tunDevice, /^[A-Za-z0-9_.-]{1,15}$/) ? tunDevice : '',
+		tunStack: raw.tun_stack ?? 'mixed',
+		tunExclude: uciList(raw.tun_exclude),
+		bypass: uciList(raw.bypass),
+		runDir: `${RUN_ROOT}/${sessionKey() || '.none'}`,
+		geoxBase: replace(trim(raw.geox_base ?? ''), /\/+$/, ''),
+		refreshInterval: +(raw.refresh_interval ?? 5),
+		autoConnect: raw.auto_connect == '1',
+		lanInterfaces: length(uciList(raw.lan_interface)) ? uciList(raw.lan_interface) : [ 'lan' ]
+	};
+};
+
+export function touchAccountDir() {
+	const dir = settings().runDir;
+	if (!length(sessionKey()))
+		return;
+	ensurePrivateDir(dir);
+	writefile(`${dir}/.last-used`, `${time()}`);
+};
+
+export function log(level, message) {
+	const levels = { debug: 0, info: 1, notice: 1, warning: 2, err: 3, error: 3, silent: 4 };
+	if ((levels[level] ?? 2) < (levels[settings().logLevel] ?? 2))
+		return;
+	system(`logger -t ecycloud -p daemon.${level} ${shellquote(message)}`);
+};
+
+export function build() {
+	return readJson(BUILD_FILE) ?? {};
+};
+
 export function saveCreds(next) {
 	ensurePrivateDir(CONF_DIR);
 	return writePrivateJson(CRED_FILE, next);
 };
 
 /* 只认 https：这个 origin 承载此后全部带 token 的面板请求，http 等于把会话交给链路上任何人 */
-function originOf(url) {
+export function originOf(url) {
 	const value = `${url ?? ''}`;
 	if (index(value, '\0') >= 0 || match(value, /[[:cntrl:][:space:]"'\\]/))
 		return '';
@@ -239,13 +234,21 @@ function originOf(url) {
 	return m ? `https://${m[1]}` : '';
 };
 
-export function origins() {
-	const seed = build();
-	const uci = cursor();
-	const site = originOf(uci.get('ecycloud', 'config', 'site_url') ?? seed.site_url);
-	const sub = originOf(uci.get('ecycloud', 'config', 'sub_url') ?? seed.sub_url);
-
+function originPair(site, sub) {
+	site = originOf(site);
+	sub = originOf(sub);
 	return { site, sub: length(sub) ? sub : site };
+};
+
+export function origins(uci) {
+	const seed = build();
+	uci ??= cursor();
+	return originPair(uci.get('ecycloud', 'config', 'site_url') ?? seed.site_url, uci.get('ecycloud', 'config', 'sub_url') ?? seed.sub_url);
+};
+
+export function buildOrigins() {
+	const seed = build();
+	return originPair(seed.site_url, seed.sub_url);
 };
 
 function isPanelDirectAddress(address) {
@@ -313,25 +316,33 @@ export function sha256File(path) {
 	return status == 0 && m ? m[1] : '';
 };
 
-export function sessionBinding() {
+export function sessionBinding(current) {
 	const digest = sessionValid() ? sha256File(CRED_FILE) : '';
-	return length(digest) ? sprintf('%J', { digest, ...origins() }) : '';
+	return length(digest) ? sprintf('%J', { digest, ...(current ?? origins()) }) : '';
 };
 
-export function saveOrigins(site, sub) {
+export function saveOrigins(site, sub, bound, accept) {
 	const uci = cursor();
-	const current = origins();
+	const current = origins(uci);
 	let changed = false;
 
 	for (let entry in [ [ 'site_url', site, current.site ], [ 'sub_url', sub, current.sub ] ]) {
 		const next = originOf(entry[1]);
-		if (!length(next) || next == entry[2])
+		if (!length(next) || next == entry[2] || (accept && !accept(next)))
 			continue;
 		uci.set('ecycloud', 'config', entry[0], next);
 		changed = true;
 	}
 
 	if (changed) {
+		/* 面板经已鉴权的响应迁移地址，缓存仍属同一会话；须先改绑定再提交，否则看门狗读到新地址配旧绑定会停服 */
+		const previous = sessionBinding(current);
+		const binding = sessionBinding(origins(uci));
+		for (let path in bound) {
+			const saved = readJson(path);
+			if (length(previous) && saved?.binding == previous)
+				writePrivateJson(path, { ...saved, binding });
+		}
 		uci.commit('ecycloud');
 		log('notice', `panel origin updated: ${origins().site} / ${origins().sub}`);
 	}
@@ -533,12 +544,17 @@ export function httpRequest(opts) {
 	let retryAfter = null;
 	let rateRemaining = null;
 	let rateReset = null;
+	let updateInterval = null;
 	for (let line in split(readfile(headerFile, 8192) ?? '', '\n')) {
 		if (match(line, /^HTTP\//i)) {
 			retryAfter = null;
 			rateRemaining = null;
 			rateReset = null;
+			updateInterval = null;
 		}
+		const interval = match(line, /^profile-update-interval:(.*)$/i);
+		if (interval)
+			updateInterval = interval[1];
 		const header = match(line, /^Retry-After:\s*([+]?[0-9]+)\s*$/i);
 		if (header && +header[1] > 0)
 			retryAfter = +header[1];
@@ -568,6 +584,7 @@ export function httpRequest(opts) {
 		retry_after: retryAfter,
 		rate_limit_reset: rateRemaining == 0 ? rateReset : null,
 		rate_limited: rateRemaining == 0,
+		profile_update_interval: updateInterval,
 		text,
 		data,
 		error: status ? null : (length(failure) ? failure : 'connection failed')
@@ -578,9 +595,9 @@ export function httpRequest(opts) {
    嵌套这一问会把 ubusd 卡死，LuCI 连 session 都取不到 */
 export function instances() {
 	const coreBin = mihomoBin();
-	const runDir = settings().runDir;
 	const names = lsdir('/proc') ?? [];
 	let corePid = 0;
+	let coreDir = '';
 	let watchPid = 0;
 
 	for (let name in names) {
@@ -591,8 +608,13 @@ export function instances() {
 		if (!length(cmd))
 			continue;
 
-		if (!corePid && index(cmd, coreBin) >= 0 && index(cmd, runDir) >= 0)
+		const args = split(cmd, '\0');
+		const dir = args[index(args, '-d') + 1] ?? '';
+		if (!corePid && index(cmd, coreBin) >= 0 && index(args, '-d') >= 0 &&
+			(dir == RUN_ROOT || index(dir, `${RUN_ROOT}/`) == 0)) {
 			corePid = +name;
+			coreDir = dir;
+		}
 		else if (!watchPid && index(cmd, 'ecycloud-ctl') >= 0 && index(cmd, 'watchdog') >= 0)
 			watchPid = +name;
 	}
@@ -600,7 +622,7 @@ export function instances() {
 	const out = {};
 
 	if (corePid)
-		out.core = { running: true, pid: corePid };
+		out.core = { running: true, pid: corePid, dir: coreDir };
 	if (watchPid)
 		out.watchdog = { running: true, pid: watchPid };
 
@@ -608,7 +630,7 @@ export function instances() {
 };
 
 export function coreRunning() {
-	return instances()?.core?.running == true;
+	return instances()?.core?.dir == settings().runDir;
 };
 
 export function lanDevices() {

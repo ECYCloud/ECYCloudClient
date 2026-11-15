@@ -32,12 +32,26 @@ public protocol CredentialVault: AnyObject {
 
 @MainActor
 public final class KeychainVault: CredentialVault {
+    struct Keychain {
+        var copy = SecItemCopyMatching
+        var add = SecItemAdd
+        var update = SecItemUpdate
+        var delete = SecItemDelete
+    }
+
     private let service: String
     private let defaults: UserDefaults
+    private let keychain: Keychain
 
-    public init(service: String, defaults: UserDefaults = .standard) {
+    public convenience init(service: String, defaults: UserDefaults = .standard) {
+        self.init(service: service, defaults: defaults, keychain: Keychain())
+    }
+
+    init(service: String, defaults: UserDefaults, keychain: Keychain) {
         self.service = service
         self.defaults = defaults
+        self.keychain = keychain
+        defaults.removeObject(forKey: "\(service).origins")
     }
 
     public var deviceID: String {
@@ -49,17 +63,20 @@ public final class KeychainVault: CredentialVault {
     }
 
     public var logoutPending: Bool {
-        get { defaults.bool(forKey: "\(service).logout-pending") }
-        set { defaults.set(newValue, forKey: "\(service).logout-pending") }
+        get { defaults.bool(forKey: Self.logoutPendingKey(service: service)) }
+        set { defaults.set(newValue, forKey: Self.logoutPendingKey(service: service)) }
     }
+
+    static func logoutPendingKey(service: String) -> String { "\(service).logout-pending" }
 
     public var endpoints: PanelEndpoints? {
         get {
-            guard let data = defaults.data(forKey: "\(service).origins"),
-                  let saved = try? JSONDecoder().decode(PanelEndpoints.self, from: data) else { return nil }
+            guard let saved = try? load("origins", as: PanelEndpoints.self) else { return nil }
             return try? PanelEndpoints(site: saved.site.absoluteString, config: saved.config.absoluteString)
         }
-        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "\(service).origins") }
+        set {
+            if let newValue { try? save(newValue, account: "origins") } else { try? clear("origins") }
+        }
     }
 
     private func query(_ account: String) -> [String: Any] {
@@ -84,12 +101,14 @@ public final class KeychainVault: CredentialVault {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = keychain.copy(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw ClientError.keychain(status) }
-        guard let data = result as? Data else { throw ClientError.invalidResponse }
-        do { return try JSONDecoder().decode(type, from: data) }
-        catch { throw ClientError.invalidResponse }
+        guard let data = result as? Data, let value = try? JSONDecoder().decode(type, from: data) else {
+            try clear(account)
+            return nil
+        }
+        return value
     }
 
     private func save<Value: Encodable>(_ value: Value, account: String) throws {
@@ -99,9 +118,9 @@ public final class KeychainVault: CredentialVault {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let status = keychain.update(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
-            let status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+            let status = keychain.add(query.merging(attributes) { _, new in new } as CFDictionary, nil)
             guard status == errSecSuccess else { throw ClientError.keychain(status) }
         } else if status != errSecSuccess {
             throw ClientError.keychain(status)
@@ -109,7 +128,7 @@ public final class KeychainVault: CredentialVault {
     }
 
     private func clear(_ account: String) throws {
-        let status = SecItemDelete(query(account) as CFDictionary)
+        let status = keychain.delete(query(account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw ClientError.keychain(status) }
     }
 }

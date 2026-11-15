@@ -121,15 +121,30 @@ class _LoginPageState extends State<LoginPage> {
   bool _entering = false;
   bool _emailCodeMode = false;
   bool _remember = false;
+  RememberedLogin? _restored;
   int _sendCooldown = 0;
   Timer? _cooldownTimer;
 
   @override
   void initState() {
     super.initState();
+    _email.addListener(_forgetRestoredPassword);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => unawaited(_restoreRemembered()),
     );
+  }
+
+  // 回填的密码只属于记住的邮箱；改成别的邮箱就清掉，不能拿它去试另一个账户
+  void _forgetRestoredPassword() {
+    final RememberedLogin? restored = _restored;
+    if (restored == null ||
+        _email.text.trim().toLowerCase() == restored.email.toLowerCase()) {
+      return;
+    }
+    if (_password.text == restored.password) {
+      _password.clear();
+    }
+    _restored = null;
   }
 
   Future<void> _restoreRemembered() async {
@@ -146,6 +161,7 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted || saved == null) {
       return;
     }
+    _restored = saved;
     _email.text = saved.email;
     _password.text = saved.password;
     setState(() => _remember = true);

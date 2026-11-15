@@ -32,9 +32,12 @@ class KernelStatus {
 }
 
 class KernelException implements Exception {
-  KernelException(this.message);
+  KernelException(this.message, {this.unsupported = false});
 
   final String message;
+
+  // 后台组件旧于界面、不认这条指令
+  final bool unsupported;
 
   @override
   String toString() => L10n.message(message);
@@ -76,7 +79,7 @@ abstract class KernelController {
 
   Future<void> stop();
 
-  Future<void> clearSession();
+  Future<void> clearSession(String cacheKey);
 
   Future<void> bindSession(String cacheKey);
 

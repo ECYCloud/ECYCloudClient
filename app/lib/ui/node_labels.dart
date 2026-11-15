@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/logger.dart';
+import 'widgets/flag_icon.dart';
 
 class NodeLabels {
   NodeLabels._();
@@ -227,12 +228,38 @@ class NodeLabels {
   }
 
   static String displayName(String tagOrName) {
-    final String name = _groupNames[tagOrName] ?? _resolveName(tagOrName);
-    if (_isNodeIdTag(name)) {
-      return '';
-    }
+    final String name = fullName(tagOrName);
     final String stripped = name.replaceAll(_flag, '').trim();
     return stripped.isEmpty ? name : stripped;
+  }
+
+  /// 连接链路、日志与运行配置旁边没有旗帜图标，名字自带的国旗 emoji 原样保留
+  static String fullName(String tagOrName) {
+    final String name = _groupNames[tagOrName] ?? _resolveName(tagOrName);
+    return _isNodeIdTag(name) ? '' : name;
+  }
+
+  /// Windows 的表情字体没有旗帜字形，国旗 emoji 会画成 HK 这样的字母对，界面上换成 FlagIcon；
+  /// 图上叠着透明的原字符，选中复制仍是原文
+  static List<InlineSpan> flagSpans(String text, {double width = 18}) {
+    final List<InlineSpan> spans = <InlineSpan>[];
+    int start = 0;
+    for (final RegExpMatch match in _flag.allMatches(text)) {
+      spans
+        ..add(TextSpan(text: text.substring(start, match.start)))
+        ..add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: FlagIcon(
+              code: _fromEmoji(match[0]!)!,
+              width: width,
+              text: match[0],
+            ),
+          ),
+        );
+      start = match.end;
+    }
+    return spans..add(TextSpan(text: text.substring(start)));
   }
 
   static String originalName(String tagOrName) {
@@ -263,7 +290,8 @@ class NodeLabels {
             ..._nodeNames.keys,
             ..._groupNames.keys,
           })
-            if (displayName(id) case final String label when label != id)
+            if (fullName(id) case final String label
+                when id.isNotEmpty && label != id)
               MapEntry<String, String>(id, label),
         ]..sort(
           (MapEntry<String, String> a, MapEntry<String, String> b) =>

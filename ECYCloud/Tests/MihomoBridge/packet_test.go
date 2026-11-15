@@ -9,6 +9,9 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -238,6 +241,98 @@ func TestRejectsNetworkListenersBeforeStarting(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// geox-url 与 provider 地址只收 https；内联 provider 不联网，修复前这些配置都能直接启动
+func TestRejectsPlaintextDownloadsBeforeStarting(t *testing.T) {
+	rules := func(key, url string) map[string]any {
+		return map[string]any{"ads": map[string]any{"type": "inline", "behavior": "domain", key: url, "payload": []string{"synthetic.example.test"}}}
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"geox-url": func(p map[string]any) {
+			p["geox-url"] = map[string]string{"mmdb": "https://example.test/geoip.metadb", "geosite": "http://example.test/GeoSite.dat"}
+		},
+		"rule-providers": func(p map[string]any) { p["rule-providers"] = rules("url", "http://example.test/ads.yaml") },
+		"rule-providers URL": func(p map[string]any) {
+			p["rule-providers"] = rules("URL", " HTTP://example.test/ads.yaml")
+		},
+		"proxy-providers": func(p map[string]any) {
+			p["proxy-providers"] = map[string]any{"ecy-panel-nodes": map[string]any{"type": "inline", "url": "http://example.test/nodes.yaml", "payload": p["proxies"]}}
+			p["proxies"] = []any{}
+			p["proxy-groups"] = []any{map[string]any{"name": "select", "type": "select", "use": []string{"ecy-panel-nodes"}}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			profile := packetProfile(9)
+			mutate(profile)
+			data, _ := json.Marshal(profile)
+			directory := t.TempDir()
+			_ = os.Chmod(directory, 0700)
+			id, err := kernel.Start(data, directory, 1500, "198.18.0.1/30", "", "198.18.0.1:53")
+			if id != 0 {
+				kernel.Stop(id)
+				t.Fatal("plaintext download source started")
+			}
+			if err != kernel.ErrConfiguration {
+				t.Fatal(err)
+			}
+		})
+	}
+	profile := packetProfile(9)
+	profile["geox-url"] = map[string]string{"mmdb": "HTTPS://example.test/geoip.metadb", "asn": ""}
+	profile["rule-providers"] = rules("url", "https://example.test/ads.yaml")
+	kernel.Stop(startPacketCore(t, profile))
+}
+
+// 改写受监视文件或反复启停的测试放进单独子进程：fswatch 的 100 毫秒去抖回调不随 Stop 取消，会在内核停止后
+// 读 mihomo 未加锁的全局日志级别，与后续 Start 里的 log.SetLevel 构成上游自身的数据竞争，会误伤同进程的其它测试
+func isolated(t *testing.T) bool {
+	if os.Getenv("ECY_ISOLATED_TEST") == t.Name() {
+		return false
+	}
+	command := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1")
+	command.Env = append(os.Environ(), "ECY_ISOLATED_TEST="+t.Name())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
+	return true
+}
+
+// 隧道进程常驻：带文件型规则集的内核反复启停，fswatch 与 fsnotify 的监视协程须随 Stop 退出，不能累积
+func TestRestartsDoNotAccumulateProviderWatchers(t *testing.T) {
+	if isolated(t) {
+		return
+	}
+	cycle := func() {
+		directory := t.TempDir()
+		if err := os.Chmod(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "rules.yaml"), []byte("payload:\n  - example.test\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		profile := packetProfile(9)
+		profile["rule-providers"] = map[string]any{"declared": map[string]any{"type": "file", "behavior": "domain", "path": "rules.yaml"}}
+		data, _ := json.Marshal(profile)
+		id, err := kernel.Start(data, directory, 1500, "198.18.0.1/30", "", "198.18.0.1:53")
+		if err != nil {
+			t.Fatal(err)
+		}
+		kernel.Stop(id)
+	}
+	settle := func() int {
+		time.Sleep(300 * time.Millisecond)
+		runtime.GC()
+		return runtime.NumGoroutine()
+	}
+	cycle()
+	before := settle()
+	for i := 0; i < 10; i++ {
+		cycle()
+	}
+	if after := settle(); after > before+2 {
+		t.Fatalf("10 次启停后协程从 %d 增至 %d", before, after)
 	}
 }
 

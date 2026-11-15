@@ -48,9 +48,6 @@ abstract class UnixPlatformService implements PlatformService {
   bool get supportsLaunchAtLogin => true;
 
   @override
-  bool get supportsPerAppProxy => false;
-
-  @override
   bool get isTelevision => false;
 
   @override
@@ -63,10 +60,21 @@ abstract class UnixPlatformService implements PlatformService {
   Future<void> initialize() async {
     await channel.invokeMethod<void>('tray.install');
 
-    final SystemProxyState state = await systemProxyState();
-    if (state.snapshotPresent) {
-      Logger.instance.warn(source, '检测到上次未还原的系统代理，已自动还原');
-      await restoreSystemProxy();
+    // 后台服务可能要等十几秒才起来，不能挡住首屏；设置系统代理前须等它完成，否则会把新连接的代理还原掉
+    leftoverProxyRestore = _restoreLeftoverProxy();
+  }
+
+  Future<void> leftoverProxyRestore = Future<void>.value();
+
+  Future<void> _restoreLeftoverProxy() async {
+    try {
+      final SystemProxyState state = await systemProxyState();
+      if (state.snapshotPresent) {
+        Logger.instance.warn(source, '检测到上次未还原的系统代理，已自动还原');
+        await restoreSystemProxy();
+      }
+    } on Object catch (e) {
+      Logger.instance.warn(source, '检查上次未还原的系统代理失败: $e');
     }
   }
 
@@ -107,10 +115,11 @@ abstract class UnixPlatformService implements PlatformService {
   Future<String> deviceName() async => Platform.localHostname;
 
   @override
-  Future<List<InstalledApp>> installedApps() async => const <InstalledApp>[];
+  Future<bool> runInstaller(String path) => _spawn(<String>[path]);
 
   @override
-  Future<bool> runInstaller(String path) => _spawn(<String>[path]);
+  Future<void> copySecret(String text) =>
+      Clipboard.setData(ClipboardData(text: text));
 
   @override
   Future<bool> openUrl(String url) {

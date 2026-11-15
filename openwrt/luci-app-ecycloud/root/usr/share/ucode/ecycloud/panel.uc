@@ -1,10 +1,11 @@
 'use strict';
 
-import { access, open, unlink } from 'fs';
+import { access, open, unlink, writefile } from 'fs';
 
-import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, PROFILE_FILE, creds, device,
-		 ensurePrivateDir, httpRequest, log, origins, panelDirectHosts, randomHex, readJson, saveCreds, saveOrigins,
-		 STATE_DIR, coreRunning, sessionBinding, sessionValid, settings, urlencode, userAgent, writeJson, writePrivateJson } from 'ecycloud.common';
+import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, PROFILE_FILE, buildOrigins, creds, device,
+		 ensurePrivateDir, httpRequest, log, originOf, origins, panelDirectHosts, randomHex, readJson, saveCreds, saveOrigins,
+		 STATE_DIR, coreRunning, sessionBinding, sessionKey, sessionValid, settings, sha256File, touchAccountDir, urlencode, userAgent,
+		 writeJson, writePrivateJson } from 'ecycloud.common';
 import { PENDING_FILE, cached } from 'ecycloud.profile';
 
 const API_PATH = '/api/client/v1';
@@ -12,6 +13,13 @@ const API_PATH = '/api/client/v1';
 const RATE_WINDOW = 60;
 const COOLDOWN_FILE = `${STATE_DIR}/cooldown.json`;
 const NODE_USED_FILE = `${STATE_DIR}/node-used.json`;
+const REACH_FILE = `${STATE_DIR}/panel-reach.json`;
+/* 只算网络层失败：curl 的解析与建连失败、超时、连接中断和 TLS 握手 / 证书类错误码 */
+const UNREACHABLE = [ 5, 6, 7, 28, 35, 51, 52, 53, 54, 55, 56, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91, 98 ];
+const FALLBACK_FAILURES = 3;
+const FALLBACK_AFTER = 600;
+const PROBE_FILE = `${STATE_DIR}/panel-probe.json`;
+const PROBE_INTERVAL = 600;
 
 function routeKey(path) {
 	return split(`${path}`, '?')[0];
@@ -30,13 +38,34 @@ function noteCooldown(path, retryAfter) {
 	writeJson(COOLDOWN_FILE, saved);
 };
 
+/* 同一站点的同一账号固定落在同一运行目录；受限账号拿不到用户资料，邮箱始终都有 */
+function accountKeyOf(email) {
+	ensurePrivateDir(STATE_DIR);
+	const path = `${STATE_DIR}/account-${randomHex(6)}.json`;
+	writefile(path, sprintf('%J', [ origins().site, lc(trim(`${email ?? ''}`)) ]));
+	const key = sha256File(path);
+	unlink(path);
+	return key;
+};
+
+/* 旧版凭据没有 account_key，按站点与邮箱补上 */
+export function ensureAccountKey() {
+	const saved = creds();
+	if (!sessionValid() || length(sessionKey()))
+		return;
+	const key = accountKeyOf(saved.email);
+	if (length(key) && saveCreds({ ...saved, account_key: key }))
+		touchAccountDir();
+};
+
 export function session() {
+	ensureAccountKey();
 	const saved = creds();
 	if (!sessionValid())
 		return { email: '', expires_at: '', logged_in: false, expired: length(saved.token) > 0 };
 
 	return {
-		id: saved.session_id ?? `legacy:${saved.email ?? ''}:${saved.expires_at ?? ''}`,
+		id: saved.session_id,
 		email: saved.email ?? '',
 		expires_at: saved.expires_at ?? '',
 		logged_in: true,
@@ -53,8 +82,12 @@ export function clearCache() {
 export function clearToken() {
 	log('notice', 'session cleared');
 	if (!saveCreds({ device_id: creds().device_id }))
-		die('无法清除旧账户凭据');
-	clearCache();
+		log('warning', 'credentials not cleared');
+	try {
+		clearCache();
+	} catch (e) {
+		log('warning', `account cache not cleared: ${e.message}`);
+	}
 };
 
 function headers(token, hasBody, connected, nodeUsed) {
@@ -82,9 +115,89 @@ function headers(token, hasBody, connected, nodeUsed) {
 	return list;
 };
 
+function fallbackOrigin(origin) {
+	const streak = readJson(REACH_FILE)?.[origin];
+	if (+(streak?.count ?? 0) < FALLBACK_FAILURES || time() - +(streak?.first ?? 0) < FALLBACK_AFTER)
+		return null;
+	const current = origins();
+	const seed = buildOrigins();
+	const backup = origin == current.site ? seed.site : origin == current.sub ? seed.sub : '';
+	return length(backup) && backup != origin ? backup : null;
+};
+
+function noteReach(primary, backup, res, ok) {
+	let saved = readJson(REACH_FILE);
+	if (type(saved) != 'object')
+		saved = {};
+	const streak = saved[primary];
+	if (backup) {
+		if (ok) {
+			const current = origins();
+			const seed = buildOrigins();
+			saveOrigins(current.site == primary ? seed.site : '', current.sub == primary ? seed.sub : '', [ PROFILE_FILE, PENDING_FILE ]);
+		}
+		delete saved[primary];
+	} else if (res.status == 0 && res.exit_code in UNREACHABLE)
+		saved[primary] = { count: +(streak?.count ?? 0) + 1, first: +(streak?.first ?? 0) || time() };
+	else if (res.status != 0 && streak != null)
+		delete saved[primary];
+	else
+		return;
+	ensurePrivateDir(STATE_DIR);
+	writeJson(REACH_FILE, saved);
+};
+
+function probes() {
+	const saved = readJson(PROBE_FILE);
+	const fresh = {};
+	for (let origin, entry in (type(saved) == 'object' ? saved : {}))
+		if (time() - +(entry?.at ?? 0) < PROBE_INTERVAL)
+			fresh[origin] = entry;
+	return fresh;
+};
+
+/* 面板下发的新地址要先探到 HTTP 响应才采用，否则回退到出包地址后，下一次响应又把连不上的地址写回来。
+   请求里只看后台探测的结果，不等网络：rpcd 同步执行，探测最坏要几十秒 */
+function probed(origin) {
+	return probes()[origin]?.ok == true;
+};
+
+/* 面板最近一次下发的地址随账户缓存落在 account.json */
+export function pendingProbes() {
+	const announced = readJson(ACCOUNT_FILE);
+	const current = origins();
+	const done = probes();
+	const out = [];
+	for (let entry in [ [ announced?.site_origin, current.site, 'site_url' ], [ announced?.api_origin, current.sub, 'sub_url' ] ]) {
+		const origin = originOf(entry[0]);
+		if (length(origin) && origin != entry[1] && done[origin] == null && !length(filter(out, item => item[0] == origin)))
+			push(out, [ origin, entry[2] ]);
+	}
+	return out;
+};
+
+/* 由后台更新任务执行：不带令牌、不计入回退次数，收到任何 HTTP 响应即算可达 */
+export function runProbes() {
+	for (let item in pendingProbes()) {
+		const request = {
+			url: `${item[0]}${API_PATH}${item[1] == 'sub_url' ? '/config/revision' : '/auth/options'}`,
+			direct: true,
+			headers: [ 'Accept: application/json', `User-Agent: ${userAgent()}` ],
+			timeout: 8
+		};
+		let res = httpRequest(request);
+		if (res.status == 0 && coreRunning())
+			res = httpRequest({ ...request, proxy: `http://127.0.0.1:${settings().mixedPort}` });
+		const saved = probes();
+		saved[item[0]] = { at: time(), ok: res.status != 0 };
+		ensurePrivateDir(STATE_DIR);
+		writeJson(PROBE_FILE, saved);
+	}
+};
+
 export function call(path, opts) {
-	const origin = opts?.origin ?? origins().site;
-	if (!length(origin))
+	const primary = opts?.origin ?? origins().site;
+	if (!length(primary))
 		return { ok: false, ret: 0, status: 0, msg: '面板地址缺失，请重装插件或在设置里填写', data: null };
 
 	const sessionToken = creds().token ?? '';
@@ -99,6 +212,8 @@ export function call(path, opts) {
 	const body = opts?.body != null ? sprintf('%J', opts.body) : null;
 	const pending = !opts?.anonymous ? readJson(NODE_USED_FILE) : null;
 	const nodeUsed = pending?.binding == sessionBinding();
+	const backup = fallbackOrigin(primary);
+	const origin = backup ?? primary;
 	const direct = panelDirectHosts(true)[origin];
 	const addresses = direct?.addresses ?? [];
 	const address = filter(addresses, ip => index(ip, ':') < 0)[0] ?? addresses[0];
@@ -126,6 +241,7 @@ export function call(path, opts) {
 
 	const payload = res.data;
 	const ret = +(payload?.ret ?? 0);
+	noteReach(primary, backup, res, ret == 1 && res.status >= 200 && res.status < 300);
 
 	if (res.status == 429)
 		noteCooldown(path, res.retry_after);
@@ -146,7 +262,8 @@ export function call(path, opts) {
 
 	if (nodeUsed && pending.id == readJson(NODE_USED_FILE)?.id)
 		unlink(NODE_USED_FILE);
-	return { ok: true, ret, status: res.status, msg: payload?.msg ?? '', data: payload?.data ?? {} };
+	return { ok: true, ret, status: res.status, msg: payload?.msg ?? '', data: payload?.data ?? {},
+		profile_update_interval: res.profile_update_interval };
 };
 
 /* 面板对封禁（enable=0）与待删除（enable=-1）账号同样签发 token，只放行状态、资料与工单接口，
@@ -169,11 +286,13 @@ export function restrictedReason(data) {
 function storeSession(email, data, deviceId) {
 	saveCreds({
 		session_id: randomHex(16),
+		account_key: accountKeyOf(email),
 		device_id: deviceId,
 		email,
 		token: data.token,
 		expires_at: data.expires_at ?? ''
 	});
+	touchAccountDir();
 
 	if (data.user)
 		writeJson(ACCOUNT_FILE, data.user);
@@ -242,7 +361,7 @@ export function loginWithVerifyCode(email, code) {
 
 export function logout() {
 	const token = creds().token ?? '';
-	const res = call('/auth/logout', { method: 'POST', timeout: 8 });
+	const res = call('/auth/logout', { method: 'POST', timeout: 3 });
 	if ((creds().token ?? '') == token)
 		clearToken();
 	return res;
@@ -314,7 +433,7 @@ export function checkin() {
 		return res;
 
 	writeAccount(() => res.data);
-	saveOrigins(res.data.site_origin, res.data.api_origin);
+	saveOrigins(res.data.site_origin, res.data.api_origin, [ PROFILE_FILE, PENDING_FILE ], probed);
 	return res;
 };
 
@@ -339,14 +458,50 @@ export function refreshAccount(connected, nodeUsed, locale) {
 
 		if (!writeAccount((current) => current == revision ? res.data : null))
 			continue;
-		saveOrigins(res.data.site_origin, res.data.api_origin);
+		saveOrigins(res.data.site_origin, res.data.api_origin, [ PROFILE_FILE, PENDING_FILE ], probed);
 
 		return res;
 	}
 };
 
+/* 声明 X-ECY-Node-Members 后，各组节点订阅只带成员名单；按 ecy-panel-nodes 还原成完整格式，
+   下游的结构检查、缓存与「只更新节点」判断都与完整格式逐字段相同（与 panel_api_client.dart 同口径） */
+export function withNodePayloads(res) {
+	const providers = res.data?.config?.['proxy-providers'];
+	if (type(providers) != 'object')
+		return res;
+	const invalid = { ok: false, status: 200, msg: '面板配置不规范：\n面板下发的不是一份完整配置' };
+	const nodes = {};
+	const source = providers['ecy-panel-nodes']?.payload;
+	for (let node in (type(source) == 'array' ? source : []))
+		if (type(node?.name) == 'string' && nodes[node.name] == null)
+			nodes[node.name] = node;
+	for (let name in keys(providers)) {
+		const spec = providers[name];
+		if (index(name, 'ecy-panel-') != 0 || type(spec) != 'object' || !('members' in spec))
+			continue;
+		if (type(spec.members) != 'array' || !length(spec.members) || 'payload' in spec)
+			return invalid;
+		const payload = [];
+		for (let member in spec.members) {
+			if (type(member) != 'string' || nodes[member] == null)
+				return invalid;
+			push(payload, json(sprintf('%J', nodes[member])));
+		}
+		const next = {};
+		for (let key in keys(spec))
+			next[key == 'members' ? 'payload' : key] = key == 'members' ? payload : spec[key];
+		providers[name] = next;
+	}
+	return res;
+};
+
 export function clashProfile(locale) {
-	return call('/config/clash', { origin: origins().sub, timeout: 90, headers: [ 'X-ECY-Node-Providers: 1', `Accept-Language: ${contentLanguage(locale)}` ] });
+	const res = call('/config/clash', { origin: origins().sub, timeout: 90,
+		headers: [ 'X-ECY-Node-Providers: 1', 'X-ECY-Node-Members: 1', `Accept-Language: ${contentLanguage(locale)}` ] });
+	if (res.ok)
+		res.data.update_interval_hours = res.profile_update_interval;
+	return res.ok ? withNodePayloads(res) : res;
 };
 
 export function touchIdentity(connected) {
@@ -450,50 +605,24 @@ function announceItem(raw) {
 	};
 };
 
-function announceRevised(item) {
-	return length(item.updated_at) ? item.updated_at : item.date;
-};
-
 function announceSeen(state) {
 	return type(state.seen_revisions) == 'object' ? state.seen_revisions : {};
 };
 
 function announceUnreadIndex(items, seen) {
-	let best = -1;
-	let bestAt = '';
+	for (let i = 0; i < length(items); i++)
+		if (items[i].id != 1 && seen[`${items[i].id}`] != items[i].updated_at)
+			return i;
 
-	for (let i = 0; i < length(items); i++) {
-		const item = items[i];
-		if (item.id == 1 || seen[`${item.id}`] == item.updated_at)
-			continue;
-		const at = announceRevised(item);
-		if (best < 0 || (length(at) && at > bestAt)) {
-			best = i;
-			bestAt = at;
-		}
-	}
-
-	return best;
+	return -1;
 };
 
 function announceLatestIndex(items) {
-	if (!length(items))
-		return 0;
+	for (let i = 0; i < length(items); i++)
+		if (items[i].id != 1)
+			return i;
 
-	let best = 0;
-	let bestAt = '';
-
-	for (let i = 0; i < length(items); i++) {
-		if (items[i].id == 1 && length(items) > 1)
-			continue;
-		const at = announceRevised(items[i]);
-		if (length(at) && at > bestAt) {
-			best = i;
-			bestAt = at;
-		}
-	}
-
-	return best;
+	return 0;
 };
 
 function announcePending(popup, state) {

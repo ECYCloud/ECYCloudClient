@@ -23,9 +23,9 @@ public enum TunnelFiles {
         for name in kernelData where FileManager.default.fileExists(atPath: base.appendingPathComponent(name).path) {
             try FileManager.default.createSymbolicLink(atPath: path.appendingPathComponent(name).path, withDestinationPath: "../" + name)
         }
-        let cache = try ruleCache(base, owner: lease.owner)
+        let cache = try ruleCache(base, account: lease.cacheKey)
         let rules = cache.deletingLastPathComponent()
-        for item in (try? FileManager.default.contentsOfDirectory(atPath: rules.path)) ?? [] where item != lease.owner {
+        for item in (try? FileManager.default.contentsOfDirectory(atPath: rules.path)) ?? [] where item != lease.cacheKey {
             try? FileManager.default.removeItem(at: rules.appendingPathComponent(item))
         }
         for file in ruleFiles(lease.configuration) where FileManager.default.fileExists(atPath: cache.appendingPathComponent(file).path) {
@@ -39,7 +39,7 @@ public enum TunnelFiles {
     // 只在内核成功启动后调用：此时自行下载的地理数据与规则集都是完整文件。启动成功后立即保存一次，
     // 因为应用被强制结束（如重新安装）时不会走到停止流程；正常停止时再保存运行期间的规则刷新。
     public static func keepCache(group: String, lease: TunnelLease, from run: URL) {
-        guard let base = try? directory(group: group), let cache = try? ruleCache(base, owner: lease.owner) else { return }
+        guard let base = try? directory(group: group), let cache = try? ruleCache(base, account: lease.cacheKey) else { return }
         for name in kernelData where !FileManager.default.fileExists(atPath: base.appendingPathComponent(name).path) {
             let source = run.appendingPathComponent(name)
             guard (try? source.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
@@ -54,14 +54,10 @@ public enum TunnelFiles {
             try? FileManager.default.copyItem(at: source, to: target)
         }
     }
-    public static func clearRules(group: String, owner: String) {
-        guard let base = try? directory(group: group), let cache = try? ruleCache(base, owner: owner) else { return }
-        try? FileManager.default.removeItem(at: cache)
-    }
     private static var protection: [FileAttributeKey: Any] { [.posixPermissions: 0o700, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication] }
-    private static func ruleCache(_ base: URL, owner: String) throws -> URL {
-        guard owner.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else { throw TunnelError.configuration }
-        let cache = base.appendingPathComponent("Rules/\(owner)", isDirectory: true)
+    private static func ruleCache(_ base: URL, account: String) throws -> URL {
+        guard account.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else { throw TunnelError.configuration }
+        let cache = base.appendingPathComponent("Rules/\(account)", isDirectory: true)
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true, attributes: protection)
         return cache
     }
@@ -108,6 +104,8 @@ public enum TunnelFiles {
 
 @MainActor public final class AppleTunnelDriver: TunnelDriver {
     public var statusChanged: (@MainActor (ConnectionState) -> Void)?
+    public var failureOccurred: (@MainActor (TunnelError) -> Void)?
+    private var active = false
     private let bundleID: String
     private let group: String
     private var manager: NETunnelProviderManager?
@@ -137,10 +135,12 @@ public enum TunnelFiles {
             manager = existing.first
             observe()
             if owner == nil || (manager?.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration?["owner"] as? String != owner { stop() }
-            else { updateStatus() }
+            else {
+                if let status = manager?.connection.status, status != .disconnected, status != .invalid { active = true }
+                updateStatus()
+            }
         } catch { if operation == epoch { statusChanged?(.disconnected) } }
     }
-    public func clearCache(owner: String) async { TunnelFiles.clearRules(group: group, owner: owner) }
     public func start(_ lease: TunnelLease) async throws {
         epoch += 1
         let operation = epoch
@@ -164,6 +164,7 @@ public enum TunnelFiles {
         manager = selected; observe()
         do { try selected.connection.startVPNTunnel() }
         catch { TunnelFiles.clear(group: group, id: lease.id); throw TunnelError.start }
+        active = true
         updateStatus()
     }
     public func startStandby(_ lease: TunnelLease) async throws {
@@ -178,6 +179,7 @@ public enum TunnelFiles {
     public func stop() {
         epoch += 1
         let operation = epoch
+        active = false
         standbyActive = false
         let previous = stopping
         stopping = Task {
@@ -253,6 +255,17 @@ public enum TunnelFiles {
         default: state = .disconnected
         }
         if standbyActive && state == .disconnected { return }
+        if state == .disconnected, active, let connection = manager?.connection {
+            active = false
+            let operation = epoch
+            connection.fetchLastDisconnectError { [weak self] error in
+                let text = error?.localizedDescription
+                Task { @MainActor in
+                    guard let self, self.epoch == operation, let text else { return }
+                    self.failureOccurred?(.failed(text))
+                }
+            }
+        }
         statusChanged?(state)
     }
 }
@@ -262,7 +275,7 @@ public enum TunnelFiles {
     func finish(_ data: Data?) {
         guard let continuation else { return }
         self.continuation = nil; timeout?.cancel(); timeout = nil
-        if let data, !data.isEmpty, data.count <= 65536 { continuation.resume(returning: data) }
+        if let data, !data.isEmpty { continuation.resume(returning: data) }
         else { continuation.resume(throwing: TunnelError.control) }
     }
 }

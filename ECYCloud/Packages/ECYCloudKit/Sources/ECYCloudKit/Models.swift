@@ -26,7 +26,7 @@ public struct PanelEndpoints: Codable, Equatable, Sendable {
         try Self(site: site, config: config)
     }
 
-    private static func origin(_ raw: String) throws -> URL {
+    static func origin(_ raw: String) throws -> URL {
         guard var parts = URLComponents(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
               parts.scheme == "https", let host = parts.host, !host.isEmpty,
               parts.user == nil, parts.password == nil,
@@ -50,6 +50,7 @@ public enum ClientError: Error, LocalizedError, Equatable, Sendable {
     case unreachable(Int)
     case keychain(Int32)
     case server(status: Int, code: Int, message: String, retryAfter: Int?)
+    case passwordChanged(message: String)
 
     public var needsTwoFactor: Bool {
         if case .server(_, 2, _, _) = self { return true }
@@ -94,6 +95,7 @@ public enum ClientError: Error, LocalizedError, Equatable, Sendable {
             }
         case .server(_, _, let message, let retry):
             retry.map { L10n.t("{0}（请在 {1} 秒后重试）", [String(describing: message), String(describing: $0)]) } ?? message
+        case .passwordChanged(let message): message
         }
     }
 }
@@ -136,6 +138,7 @@ public struct UserProfile: Decodable, Sendable {
         public let autoRenew: Bool?
         public let renewAt: String?
         public let canToggleAutoRenew: Bool?
+        public let autoRenewUnavailableReason: String?
     }
 
     public let id: Int
@@ -235,10 +238,29 @@ public struct NodeCatalog: Decodable, Sendable {
     private let groupLabels: [String: String]
     public let groupIcons: [String: String]
     private let configurationData: Data
+    let issuedAt: Date?
+    var updateIntervalHours: Int?
+
+    // 与面板 /link/ 订阅响应头 profile-update-interval: 24 保持一致
+    static let defaultUpdateIntervalHours = 24
+
+    static func updateIntervalHours(_ raw: String?) -> Int? {
+        guard let hours = raw.flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }), (1...8760).contains(hours) else { return nil }
+        return hours
+    }
+
+    func updateDue(at now: Date) -> Bool {
+        guard let issuedAt else { return true }
+        return now.timeIntervalSince(issuedAt) >= TimeInterval((updateIntervalHours ?? Self.defaultUpdateIntervalHours) * 3600)
+    }
+
+    private struct OfflineAuthorization: Decodable { let issuedAt: Int }
 
     public func assemble(options: ProfileOptions, selections: [String: String] = [:]) throws -> AssembledProfile {
         try ProfileAssembler.assemble(configurationData, options: options, selections: selections)
     }
+
+    func validate() throws { _ = try ProfileAssembler.validate(configurationData) }
 
     private struct Proxy: Decodable {
         let name: String
@@ -259,11 +281,13 @@ public struct NodeCatalog: Decodable, Sendable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case config, revision, nodeLabels, groupLabels, groupIcons }
+    private enum CodingKeys: String, CodingKey { case config, revision, nodeLabels, groupLabels, groupIcons, offlineAuthorization }
 
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         revision = try values.decode(String.self, forKey: .revision)
+        issuedAt = (try? values.decodeIfPresent(OfflineAuthorization.self, forKey: .offlineAuthorization))
+            .map { Date(timeIntervalSince1970: TimeInterval($0.issuedAt)) }
         let configuration = try values.decode(Configuration.self, forKey: .config)
         configurationData = try JSONEncoder().encode(values.decode([String: ProfileValue].self, forKey: .config))
         let labels: [String: String]
@@ -349,12 +373,42 @@ public struct NodeCatalog: Decodable, Sendable {
 
     public func displayName(_ id: String) -> String { nodes.first { $0.id == id }?.name ?? groupLabels[id] ?? id }
 
+    // 对应 node_labels.dart 的 _ensureLabels：节点与策略组标识对显示名，长标识在前；跳过空键，名字自带的国旗保留，
+    // 名字是 node-数字 或为空时显示为空
+    private var annotationLabels: [(String, String)] {
+        (nodes.map { ($0.id, $0.name) } + groupLabels.map { ($0.key, $0.value) })
+            .map { ($0.0, $0.1.range(of: #"^node-\d+$"#, options: .regularExpression) == nil ? $0.1 : "") }
+            .filter { !$0.0.isEmpty && $0.0 != $0.1 }.sorted { $0.0.count > $1.0.count }
+    }
+
+    // 对应 node_labels.dart 的 annotateText：按完整标识替换，前后不能紧挨字母、数字、下划线或连字符；没有名字的 node-数字 一并去掉
+    public func annotateLogs(_ messages: [String]) -> [String] {
+        let labels = annotationLabels
+        let names = Dictionary(labels, uniquingKeysWith: { first, _ in first })
+        let pattern = labels.isEmpty ? nil : try? NSRegularExpression(
+            pattern: #"(?<![\p{L}\p{N}_-])(?:"# + labels.map { NSRegularExpression.escapedPattern(for: $0.0) }.joined(separator: "|") + #")(?![\p{L}\p{N}_-])"#)
+        return messages.map { line in
+            // 对应 logger.dart 的 kernelChain：内核的 `策略组[节点]` 改为与连接页一致的 `策略组 → 节点`，须在换成显示名之前改
+            let raw = line.replacingOccurrences(of: #" using ([^\[\]]+)\[([^\[\]]+)\]$"#, with: " using $1 → $2", options: .regularExpression)
+            var out = raw
+            if let pattern {
+                let text = raw as NSString
+                var next = "", cursor = 0
+                for match in pattern.matches(in: raw, range: NSRange(location: 0, length: text.length)) {
+                    let id = text.substring(with: match.range)
+                    next += text.substring(with: NSRange(location: cursor, length: match.range.location - cursor)) + (names[id] ?? id)
+                    cursor = match.range.location + match.range.length
+                }
+                out = next + text.substring(from: cursor)
+            }
+            return out.replacingOccurrences(of: #"(?<![\w-])node-\d+(?![\w-])"#, with: "", options: .regularExpression)
+        }
+    }
+
     // 对应 node_labels.dart 的 annotateRuntimeConfig：只替换带引号或逗号边界的整段标识，长标识先换
     func annotateRuntimeConfiguration(_ raw: String) -> String {
-        let labels = (nodes.map { ($0.id, $0.name) } + groupLabels.map { ($0.key, $0.value) })
-            .filter { $0.0 != $0.1 }.sorted { $0.0.count > $1.0.count }
         var out = raw
-        for (id, label) in labels {
+        for (id, label) in annotationLabels {
             let shown = label.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             out = out.replacingOccurrences(of: "\"\(id)\"", with: "\"\(shown)\"")
                 .replacingOccurrences(of: ",\(id)\"", with: ",\(shown)\"")

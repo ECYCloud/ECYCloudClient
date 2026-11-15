@@ -22,6 +22,9 @@ class _Connection extends ChangeNotifier implements ConnectionController {
   @override
   AppSettings settings = const AppSettings.defaults();
 
+  @override
+  String? get mixedProxyCredential => null;
+
   Future<String> Function()? readVersion;
 
   @override

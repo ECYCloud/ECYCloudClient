@@ -8,6 +8,7 @@ class ApiException implements Exception {
     this.retryAfterSeconds,
     this.connectFailed = false,
     this.transportFailure = false,
+    this.passwordChanged = false,
   });
 
   final String message;
@@ -17,6 +18,9 @@ class ApiException implements Exception {
   /// 连接就没建起来，请求肯定没到服务端。非幂等请求只有在这种失败下才敢换条路重发
   final bool connectFailed;
   final bool transportFailure;
+
+  /// 重置密码已生效但面板不签发令牌（两步验证或归属地限制），要回登录流程
+  final bool passwordChanged;
 
   /// 面板 429 的 Retry-After（秒）；客户端按此退避，避免瞎重试
   final int? retryAfterSeconds;

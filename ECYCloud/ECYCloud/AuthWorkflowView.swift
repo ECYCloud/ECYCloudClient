@@ -275,8 +275,11 @@ struct AuthWorkflowView: View {
         #if os(macOS)
         .frame(minWidth: 480, idealWidth: 520, minHeight: 600, idealHeight: 760)
         #endif
-        .interactiveDismissDisabled(session.busy)
+        .interactiveDismissDisabled(session.busy || session.passwordResetNotice != nil)
         .productToast($toast)
+        .alert(L10n.t("重置成功"), isPresented: Binding(get: { session.passwordResetNotice != nil }, set: { _ in })) {
+            Button(L10n.t("我知道了")) { session.dismissPasswordResetNotice(); dismiss() }
+        } message: { Text(verbatim: session.passwordResetNotice ?? "") }
         .productSheet(item: $document) { kind in LegalDocumentView(session: session, kind: kind) }
         .task { if page.document == nil { await session.loadOptions() } }
         .onChange(of: confirming) { errors = [:] }
@@ -309,7 +312,7 @@ struct AuthWorkflowView: View {
         field(L10n.t("邮箱(用于登录)"), "mail_outline", $email, .email)
         secretField(L10n.t("密码"), $password, .password)
         secretField(L10n.t("确认密码"), $confirmation, .confirmation)
-        field(options.inviteRequired ? L10n.t("邀请码") : L10n.t("邀请码（可选）"), "card_giftcard_outlined", $invite, .invite)
+        field(options.inviteRequired ? L10n.t("邀请码（必填）") : L10n.t("邀请码（可选）"), "card_giftcard_outlined", $invite, .invite)
         if options.emailVerify {
             HStack(alignment: .top, spacing: 12) {
                 field(L10n.t("邮箱验证码"), "pin_outlined", $code, .code)

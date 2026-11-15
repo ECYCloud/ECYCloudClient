@@ -24,6 +24,9 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  bool CreateEngine(const flutter::DartProject& project);
+  void RebuildEngine();
+
   // The project to run.
   flutter::DartProject project_;
 
@@ -31,6 +34,8 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
   std::unique_ptr<PlatformChannel> platform_channel_;
+
+  bool shown_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

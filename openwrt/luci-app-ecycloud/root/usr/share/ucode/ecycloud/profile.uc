@@ -2,7 +2,7 @@
 
 import { access, lstat, popen, readfile, realpath, stat, unlink } from 'fs';
 
-import { PROFILE_FILE, STATE_DIR, ROUTING_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX, appendNets, creds, ensureDir, mihomoBin, panelDirectNets, randomHex, readJson, settings, sessionBinding, timestamp,
+import { PROFILE_FILE, STATE_DIR, ROUTING_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX, appendNets, creds, ensureDir, lanDevices, mihomoBin, randomHex, readJson, settings, sessionBinding, timestamp,
 		 ensurePrivateDir, instances, shellquote, writeAtomic, writePrivateJson } from 'ecycloud.common';
 
 export const SPEED_GROUP = 'ecy-speed';
@@ -11,6 +11,32 @@ export const PENDING_FILE = `${STATE_DIR}/profile-pending.json`;
 
 export function nodeProviderNames(config) {
 	return filter(keys(config?.['proxy-providers'] ?? {}), name => index(name, 'ecy-panel-') == 0);
+};
+
+/* config.json 保留 payload 供校验、回滚与节点列表使用；内核启动读 kernel.json：节点已写成各自的文件，
+   payload 留给内核只会被当作后备节点再解析一遍 */
+export function kernelConfig(config) {
+	if (type(config) != 'object' || type(config['proxy-providers']) != 'object')
+		return config;
+	const providers = { ...config['proxy-providers'] };
+	for (let name in nodeProviderNames(config)) {
+		if (type(providers[name]) != 'object')
+			continue;
+		const spec = {};
+		for (let key, value in providers[name])
+			if (lc(key) != 'payload')
+				spec[key] = value;
+		providers[name] = spec;
+	}
+	return { ...config, 'proxy-providers': providers };
+};
+
+export function writeKernel(runDir, config) {
+	const path = `${runDir}/kernel.json`;
+	const text = sprintf('%J', kernelConfig(config));
+	if (readfile(path) != text && !writeAtomic(path, text))
+		return { ok: false, error: `无法写入 ${path}` };
+	return { ok: true };
 };
 
 export function nodesOf(config) {
@@ -30,13 +56,18 @@ export function membersOf(config, group) {
 		const exact = substr(pattern, 0, 1) == '^' && substr(pattern, -1) == '$'
 			? replace(replace(substr(pattern, 1, length(pattern) - 2), '\\x60', '`'), /\\(.)/g, '$1') : null;
 		const nodeFilter = index(pattern, '^(?!(?:') == 0;
-		return { exact, nodeFilter, re: exact != null || nodeFilter ? null : regexp(pattern) };
+		// filter 是 mihomo 的 regexp2 语法（常带 (?i) 前缀）：解析不了的写法只放弃排序，不能让分组列表报错
+		const ignoreCase = substr(pattern, 0, 4) == '(?i)';
+		let re = null;
+		if (exact == null && !nodeFilter)
+			try { re = regexp(ignoreCase ? substr(pattern, 4) : pattern, ignoreCase ? 'i' : ''); } catch (e) {}
+		return { exact, nodeFilter, re };
 	});
 	const fixed = filter(map(patterns, pattern => pattern.exact), name => name != null);
 	for (let pattern in patterns) {
 		for (let member in members)
 			if (!(member in ordered) && (pattern.exact != null ? member == pattern.exact :
-			    pattern.nodeFilter ? !(member in fixed) : match(member, pattern.re)))
+			    pattern.nodeFilter ? !(member in fixed) : pattern.re != null && match(member, pattern.re)))
 				push(ordered, member);
 	}
 	for (let member in members)
@@ -89,6 +120,19 @@ export function authorized(saved, margin) {
 		issued <= time() && until > issued && until > time() + +(margin ?? 0);
 };
 
+/* 响应头 profile-update-interval：1～8760 的正整数小时，其余视为未下发 */
+function updateIntervalHours(value) {
+	const m = match(`${value ?? ''}`, /^\s*[+]?([0-9]+)\s*$/);
+	const hours = m ? +m[1] : 0;
+	return hours >= 1 && hours <= 8760 ? hours : null;
+};
+
+/* 距面板签发本份缓存满更新间隔（未下发按 24 小时）即到期 */
+export function updateDue(saved) {
+	const issued = timestamp(saved?.offline_authorization?.issued_at);
+	return !issued || time() - issued >= (updateIntervalHours(saved?.update_interval_hours) ?? 24) * 3600;
+};
+
 export function cached(pending) {
 	const saved = readJson(pending ? PENDING_FILE : PROFILE_FILE);
 	if (type(saved) != 'object')
@@ -108,6 +152,7 @@ export function store(remote, pending) {
 		binding,
 		offline_authorization: remote.offline_authorization,
 		revision: remote.revision ?? '',
+		update_interval_hours: updateIntervalHours(remote.update_interval_hours),
 		locale: remote.locale ?? 'zh-CN',
 		config: remote.config,
 		node_labels: remote.node_labels ?? {},
@@ -131,7 +176,7 @@ function tunExcludes(cfg) {
 	for (let net in (cfg.bypass ?? []))
 		push(extra, net);
 
-	return appendNets(EXCLUDED_ROUTES, [ ...extra, ...panelDirectNets() ]);
+	return appendNets(EXCLUDED_ROUTES, extra);
 };
 
 function tunSection(cfg) {
@@ -145,6 +190,8 @@ function tunSection(cfg) {
 		'auto-detect-interface': true,
 		/* strict-route 会一并阻断旁路由与 LAN 直连流量，路由器上必须关闭 */
 		'strict-route': false,
+		/* 列表为空时 sing-tun 接管全部入站接口（含 WAN 侧）；lo 即路由器自身流量，未列入时 sing-tun 在其 iif lo 规则之前就交回主表 */
+		'include-interface': cfg.routerProxy ? [ ...lanDevices(), 'lo' ] : lanDevices(),
 		mtu: 9000,
 		'dns-hijack': [ 'any:53' ],
 		'inet4-address': [ '172.19.0.1/30' ],
@@ -281,6 +328,24 @@ function inspectProxies(raw, issues, names) {
 	}
 };
 
+// 组网类出站会让内核加入外部 P2P 网络、开监听口或充当出口节点，等于替用户开了看不见的入站
+const MESH_TYPES = { easytier: true, tailscale: true, zerotier: true };
+
+function inspectMeshNodes(remote, issues) {
+	const lists = [ remote.proxies ];
+	for (let name, spec in (type(remote['proxy-providers']) == 'object' ? remote['proxy-providers'] : {}))
+		push(lists, spec?.payload);
+	for (let list in lists) {
+		if (type(list) != 'array')
+			continue;
+		for (let item in list) {
+			const kind = lc(trim(`${item?.type ?? ''}`));
+			if (type(item) == 'object' && MESH_TYPES[kind])
+				push(issues, `节点「${item.name ?? ''}」是组网类型（${kind}），会让内核加入外部网络，客户端不支持`);
+		}
+	}
+};
+
 function inspectGroups(raw, issues, names, providers) {
 	if (type(raw) != 'array') {
 		push(issues, raw == null ? '面板配置缺少策略组' : '策略组列表格式不对');
@@ -352,6 +417,21 @@ function runRelative(path) {
 	return join('/', parts);
 };
 
+/* 客户端自己的运行文件：规则集不得覆盖，规则文件查看也不得读出（config.json 含控制密钥） */
+function clientFile(path) {
+	return match(lc(split(path, '/')[0]), /^(config\.json|kernel\.json|config\.check\.json|cache\.db|proxy-snapshot\.json|geoip\.metadb|geosite\.dat|geoip\.dat|asn\.mmdb|bundlemrs\.7z)(\.|$)|^\.validate-/);
+};
+
+function httpsUrl(value) {
+	const url = trim(`${value ?? ''}`);
+	return !length(url) || match(lc(url), /^https:\/\//) != null;
+};
+
+/* mihomo 解码 provider 时找不到同名键就按不分大小写匹配（common/structure/structure.go），安全检查须覆盖每种写法 */
+function fieldValues(spec, name) {
+	return map(filter(keys(spec), key => lc(key) == name), key => spec[key]);
+};
+
 function inspectProviders(raw, section, issues, names) {
 	if (raw == null)
 		return;
@@ -382,13 +462,15 @@ function inspectProviders(raw, section, issues, names) {
 			push(issues, `${providerTitle(section)}「${label}」没有类型`);
 		if (section == 'rule-providers' && !length(trim(`${spec.path ?? ''}`)))
 			push(issues, `规则集「${label}」没有保存路径`);
-		if (exists(spec, 'path')) {
-			const path = runRelative(spec.path);
-			if (!length(path) || match(lc(split(path, '/')[0]), /^(config\.json|config\.check\.json|cache\.db|proxy-snapshot\.json|geoip\.metadb|geosite\.dat|geoip\.dat|asn\.mmdb|bundlemrs\.7z)(\.|$)|^\.validate-/))
-				push(issues, `「${label}」的保存路径必须位于运行目录内，且不能覆盖客户端文件`);
-		}
+		if (length(filter(fieldValues(spec, 'path'), value => {
+			const path = runRelative(value);
+			return !length(path) || clientFile(path);
+		})))
+			push(issues, `「${label}」的保存路径必须位于运行目录内，且不能覆盖客户端文件`);
 		if (kind == 'http' && !length(trim(`${spec.url ?? ''}`)))
 			push(issues, `${providerTitle(section)}「${label}」是在线下载，但没有地址`);
+		else if (length(filter(fieldValues(spec, 'url'), value => !httpsUrl(value))))
+			push(issues, `${providerTitle(section)}「${label}」的下载地址必须使用 https`);
 		if (lc(trim(`${spec.format ?? ''}`)) == 'mrs' && lc(trim(`${spec.behavior ?? ''}`)) == 'classical')
 			push(issues, `「${label}」把逐条规则存成了 mrs 格式，这样无法使用`);
 	}
@@ -479,6 +561,7 @@ export function inspect(remote) {
 	const nodeProviders = {};
 	inspectProxies(nodesOf(remote), issues, names);
 	inspectProviders(remote['proxy-providers'], 'proxy-providers', issues, nodeProviders);
+	inspectMeshNodes(remote, issues);
 	inspectGroups(remote['proxy-groups'], issues, names, nodeProviders);
 	if (exists(names, SPEED_GROUP))
 		push(issues, `名称「${SPEED_GROUP}」保留给客户端测速，请修改面板中的同名节点或策略组`);
@@ -486,6 +569,9 @@ export function inspect(remote) {
 	inspectRules(remote.rules, issues, names, providers);
 	if (exists(remote, 'dns') && type(remote.dns) != 'object')
 		push(issues, 'DNS 设置不是一组完整配置');
+	for (let key, url in (type(remote['geox-url']) == 'object' ? remote['geox-url'] : {}))
+		if (!httpsUrl(url))
+			push(issues, `geox-url「${key}」必须使用 https`);
 
 	if (!length(issues))
 		return { ok: true };
@@ -510,6 +596,8 @@ export function assemble(remote, cfg, api, selectorDefaults) {
 		return checked;
 	if (!length(api?.speed))
 		return { ok: false, error: '测速入站口令缺失，不能生成配置' };
+	if (!httpsUrl(cfg.geoxBase))
+		return { ok: false, error: 'GeoData 镜像地址必须使用 https' };
 
 	const config = { ...remote };
 
@@ -578,7 +666,8 @@ export function write(runDir, config) {
 	if (!writePrivateJson(path, config))
 		return { ok: false, error: `无法写入 ${path}` };
 
-	return { ok: true, path };
+	const kernel = writeKernel(runDir, config);
+	return kernel.ok ? { ok: true, path } : kernel;
 };
 
 export function writeNodeProviders(runDir, config) {
@@ -609,7 +698,8 @@ export function writeNodeProviders(runDir, config) {
 
 export function rollback(runDir) {
 	const previous = readfile(`${runDir}/config.json.bak`);
-	return previous != null && writeNodeProviders(runDir, json(previous)).ok && writeAtomic(`${runDir}/config.json`, previous);
+	return previous != null && writeNodeProviders(runDir, json(previous)).ok && writeAtomic(`${runDir}/config.json`, previous) &&
+		writeKernel(runDir, json(previous)).ok;
 };
 
 /* procd respawn 不重跑 prepare，切模式只 PATCH 控制面会让内核按磁盘上的旧 mode 起来 */
@@ -627,7 +717,7 @@ export function setRunTun(runDir, enabled) {
 	if (type(config?.tun) != 'object')
 		return false;
 	config.tun.enable = enabled;
-	return writeAtomic(`${runDir}/config.json`, sprintf('%J', config));
+	return writeAtomic(`${runDir}/config.json`, sprintf('%J', config)) && writeKernel(runDir, config).ok;
 };
 
 export function geodataMissing(runDir) {
@@ -669,15 +759,42 @@ export function validate(runDir) {
 	return { ok: false, error: length(reason) ? reason : `mihomo -t 退出码 ${code}` };
 };
 
+function maskCredentials(value) {
+	if (type(value) == 'array')
+		for (let item in value)
+			maskCredentials(item);
+	else if (type(value) == 'object')
+		for (let key in value) {
+			if (key in [ 'uuid', 'password', 'auth', 'auth-str', 'obfs-password', 'private-key', 'pre-shared-key', 'public-key', 'short-id', 'psk', 'token' ] && type(value[key]) == 'string' && length(value[key]))
+				value[key] = '******';
+			else
+				maskCredentials(value[key]);
+		}
+};
+
+/* 运行配置只供查看：控制面 secret、本设备的节点凭据与测速入站口令都不得出现在界面上 */
+export function maskRuntime(config) {
+	if (type(config) != 'object')
+		return null;
+	if (exists(config, 'secret'))
+		config.secret = '******';
+	maskCredentials(config.proxies);
+	maskCredentials(config.listeners);
+	for (let name in (type(config['proxy-providers']) == 'object' ? config['proxy-providers'] : {}))
+		maskCredentials(config['proxy-providers'][name]?.payload);
+	return sprintf('%J', config);
+};
+
 export function runtimeConfig() {
 	const cfg = settings();
-	const raw = readfile(`${cfg.runDir}/config.json`);
-	if (raw != null)
-		return { ok: true, text: raw };
-
-	const cache = cached();
-	if (cache?.config)
-		return { ok: true, text: sprintf('%J', cache.config) };
+	const config = readJson(`${cfg.runDir}/config.json`) ?? cached()?.config;
+	/* 节点只在 ecy-panel-nodes 下列一次，各组节点订阅不再重复列出 */
+	const view = kernelConfig(config);
+	if (type(view?.['proxy-providers']?.[NODE_PROVIDER]) == 'object')
+		view['proxy-providers'][NODE_PROVIDER] = config['proxy-providers'][NODE_PROVIDER];
+	const text = maskRuntime(view);
+	if (text != null)
+		return { ok: true, text };
 
 	return { ok: false, error: '还没有运行配置' };
 };
@@ -706,7 +823,8 @@ export function ruleProviders() {
 
 export function readRunFile(rel) {
 	const safe = runRelative(rel);
-	if (!safe)
+	// ecy-panel-*.json 是插件写入的节点文件，含本设备节点凭据原文，只供内核读取
+	if (!safe || clientFile(safe) || index(lc(split(safe, '/')[0]), 'ecy-panel-') == 0)
 		return { ok: false, error: '无效路径' };
 
 	const root = realpath(settings().runDir);

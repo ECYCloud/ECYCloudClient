@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:math';
 
 import '../../core/app_paths.dart';
-import '../../l10n/l10n.dart';
 import 'json_file_store.dart';
 
 class Credentials {
@@ -32,28 +30,20 @@ class CredentialStore {
 
   final JsonFileStore _store;
 
-  File get _sessionMarker => File('${_store.file.path}.session-ending');
+  static final RegExp _sessionKeyPattern = RegExp(r'^[0-9a-f]{64}$');
 
-  bool get sessionCleanupPending =>
-      FileSystemEntity.typeSync(_sessionMarker.path, followLinks: false) !=
-      FileSystemEntityType.notFound;
-
-  void beginSessionCleanup() {
-    final FileSystemEntityType type = FileSystemEntity.typeSync(
-      _sessionMarker.path,
-      followLinks: false,
-    );
-    if (type != FileSystemEntityType.notFound &&
-        type != FileSystemEntityType.file) {
-      throw FileSystemException(L10n.t('会话清理标记不是普通文件'), _sessionMarker.path);
-    }
-    _sessionMarker.writeAsStringSync('1', flush: true);
+  // 字段名与 Android BoxState.sessionKey() 一致：原生侧只凭它判断落盘配置属于哪次登录
+  String get sessionKey {
+    final Object? key = _store.read()['session_key'];
+    return key is String && _sessionKeyPattern.hasMatch(key) ? key : '';
   }
 
-  void finishSessionCleanup() {
-    if (sessionCleanupPending) {
-      _sessionMarker.deleteSync();
+  void saveSessionKey(String key) {
+    if (!_sessionKeyPattern.hasMatch(key)) {
+      throw ArgumentError.value(key, 'key');
     }
+    final Map<String, dynamic> data = _store.read()..['session_key'] = key;
+    _store.write(data);
   }
 
   Credentials? load() {
@@ -120,7 +110,8 @@ class CredentialStore {
   void clear() {
     final Map<String, dynamic> data = _store.read()
       ..remove('token')
-      ..remove('expires_at');
+      ..remove('expires_at')
+      ..remove('session_key');
     _store.write(data);
   }
 

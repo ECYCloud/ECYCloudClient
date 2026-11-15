@@ -97,10 +97,12 @@ struct PhysicalInterfaceTransport: HTTPTransport {
             }
             guard (headers["content-encoding"] ?? "identity").lowercased() == "identity" else { throw ClientError.invalidResponse }
             let retryAfter = headers["retry-after"].flatMap(Int.init)
-            if method == "HEAD" || status == 204 || status == 304 { return HTTPResult(data: Data(), status: status, retryAfter: retryAfter) }
+            let interval = headers["profile-update-interval"]
+            if method == "HEAD" || status == 204 || status == 304 { return HTTPResult(data: Data(), status: status, retryAfter: retryAfter, profileUpdateInterval: interval) }
             let maximum = URLSessionTransport.maximumResponseBytes
             let chunked = headers["transfer-encoding"]?.lowercased().contains("chunked") == true
             let length = chunked ? nil : headers["content-length"].flatMap(Int.init)
+            if let length, length < 0 { throw ClientError.invalidResponse }
             if let length, length > maximum { throw ClientError.responseTooLarge }
             while length.map({ buffer.count < $0 }) ?? true, let chunk = try await exchange.read() {
                 buffer.append(chunk)
@@ -108,9 +110,9 @@ struct PhysicalInterfaceTransport: HTTPTransport {
             }
             if let length {
                 guard buffer.count >= length else { throw ClientError.networkFailure(URLError.networkConnectionLost.rawValue) }
-                return HTTPResult(data: Data(buffer.prefix(length)), status: status, retryAfter: retryAfter)
+                return HTTPResult(data: Data(buffer.prefix(length)), status: status, retryAfter: retryAfter, profileUpdateInterval: interval)
             }
-            return HTTPResult(data: chunked ? try dechunk(buffer) : buffer, status: status, retryAfter: retryAfter)
+            return HTTPResult(data: chunked ? try dechunk(buffer) : buffer, status: status, retryAfter: retryAfter, profileUpdateInterval: interval)
         }
     }
 
@@ -120,7 +122,8 @@ struct PhysicalInterfaceTransport: HTTPTransport {
         while true {
             guard let line = data[index...].range(of: crlf),
                   let size = Int(String(decoding: data[index..<line.lowerBound], as: UTF8.self)
-                    .split(separator: ";").first?.trimmingCharacters(in: .whitespaces) ?? "", radix: 16), size >= 0 else {
+                    .split(separator: ";").first?.trimmingCharacters(in: .whitespaces) ?? "", radix: 16),
+                  size >= 0, size <= URLSessionTransport.maximumResponseBytes else {
                 throw ClientError.networkFailure(URLError.networkConnectionLost.rawValue)
             }
             index = line.upperBound

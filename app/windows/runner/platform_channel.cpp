@@ -493,7 +493,18 @@ UINT QuitMessageId() {
 PlatformChannel::PlatformChannel(flutter::BinaryMessenger* messenger,
                                  HWND window,
                                  HWND view)
-    : window_(window), view_(view) {
+    : window_(window) {
+  Attach(messenger, view);
+}
+
+PlatformChannel::~PlatformChannel() {
+  Detach();
+  RemoveTray();
+  DestroyTintedIcons();
+}
+
+void PlatformChannel::Attach(flutter::BinaryMessenger* messenger, HWND view) {
+  view_ = view;
   channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       messenger, "ecycloud/platform",
       &flutter::StandardMethodCodec::GetInstance());
@@ -507,12 +518,15 @@ PlatformChannel::PlatformChannel(flutter::BinaryMessenger* messenger,
   }
 }
 
-PlatformChannel::~PlatformChannel() {
+void PlatformChannel::Detach() {
   if (view_ != nullptr) {
     ::RemoveWindowSubclass(view_, ViewSubclassProc, 1);
+    view_ = nullptr;
   }
-  RemoveTray();
-  DestroyTintedIcons();
+  if (channel_) {
+    channel_->SetMethodCallHandler(nullptr);
+    channel_.reset();
+  }
 }
 
 HICON PlatformChannel::DefaultIcon() {
@@ -905,6 +919,9 @@ void PlatformChannel::RestoreMainWindow() {
 }
 
 void PlatformChannel::EmitTrayAction(const char* action) {
+  if (!channel_) {
+    return;
+  }
   channel_->InvokeMethod(
       "tray.action",
       std::make_unique<flutter::EncodableValue>(std::string(action)));

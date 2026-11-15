@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart' show ThemeMode;
 
@@ -6,8 +8,6 @@ import '../../core/logger.dart' show LogLevel, LogLevelName;
 import '../../domain/config/local_template.dart';
 import '../../domain/config/network_bypass.dart';
 import 'json_file_store.dart';
-
-enum PerAppProxyMode { off, include, exclude }
 
 class AppSettings {
   const AppSettings({
@@ -24,8 +24,6 @@ class AppSettings {
     required this.closeToTray,
     required this.themeMode,
     required this.locale,
-    required this.perAppMode,
-    required this.perAppPackages,
     required this.systemProxyBypass,
     required this.tunExcludeAddresses,
   });
@@ -45,8 +43,6 @@ class AppSettings {
       closeToTray = true,
       themeMode = ThemeMode.system,
       locale = '',
-      perAppMode = PerAppProxyMode.off,
-      perAppPackages = const <String>[],
       systemProxyBypass = const <String>[],
       tunExcludeAddresses = const <String>[];
 
@@ -63,8 +59,6 @@ class AppSettings {
   final bool closeToTray;
   final ThemeMode themeMode;
   final String locale;
-  final PerAppProxyMode perAppMode;
-  final List<String> perAppPackages;
   final List<String> systemProxyBypass;
   final List<String> tunExcludeAddresses;
 
@@ -82,8 +76,6 @@ class AppSettings {
     bool? closeToTray,
     ThemeMode? themeMode,
     String? locale,
-    PerAppProxyMode? perAppMode,
-    List<String>? perAppPackages,
     List<String>? systemProxyBypass,
     List<String>? tunExcludeAddresses,
   }) => AppSettings(
@@ -100,8 +92,6 @@ class AppSettings {
     closeToTray: closeToTray ?? this.closeToTray,
     themeMode: themeMode ?? this.themeMode,
     locale: locale ?? this.locale,
-    perAppMode: perAppMode ?? this.perAppMode,
-    perAppPackages: perAppPackages ?? this.perAppPackages,
     systemProxyBypass: systemProxyBypass ?? this.systemProxyBypass,
     tunExcludeAddresses: tunExcludeAddresses ?? this.tunExcludeAddresses,
   );
@@ -113,8 +103,6 @@ class AppSettings {
       allowLan != other.allowLan ||
       ipv6Enabled != other.ipv6Enabled ||
       kernelLogLevel != other.kernelLogLevel ||
-      perAppMode != other.perAppMode ||
-      !listEquals(perAppPackages, other.perAppPackages) ||
       !listEquals(tunExcludeAddresses, other.tunExcludeAddresses);
 
   // 内核日志固定 info：低于 info（warning/error/silent）看不到规则集下载进度；
@@ -126,6 +114,7 @@ class AppSettings {
   LocalTemplateOptions toTemplateOptions({
     required String tunInterfaceName,
     required bool takeover,
+    required bool supportsSystemProxy,
     List<String> extraTunExcludeAddresses = const <String>[],
   }) => LocalTemplateOptions(
     tunEnabled: takeover && tunEnabled,
@@ -134,14 +123,9 @@ class AppSettings {
     allowLan: allowLan,
     ipv6Enabled: ipv6Enabled,
     logLevel: kernelLogLevel,
+    authenticateMixedPort: !supportsSystemProxy && !allowLan,
     routeMode: routeMode,
     tunInterfaceName: tunInterfaceName,
-    tunIncludePackages: perAppMode == PerAppProxyMode.include
-        ? perAppPackages
-        : const <String>[],
-    tunExcludePackages: perAppMode == PerAppProxyMode.exclude
-        ? perAppPackages
-        : const <String>[],
     tunExcludeAddresses: appendUnique(
       tunExcludeAddresses,
       extraTunExcludeAddresses,
@@ -163,8 +147,6 @@ class AppSettings {
     'close_to_tray': closeToTray,
     'theme_mode': themeMode.name,
     'locale': locale,
-    'per_app_mode': perAppMode.name,
-    'per_app_packages': perAppPackages,
     'system_proxy_bypass': systemProxyBypass,
     'tun_exclude_addresses': tunExcludeAddresses,
   };
@@ -193,13 +175,6 @@ class AppSettings {
         orElse: () => fallback.themeMode,
       ),
       locale: json['locale'] as String? ?? fallback.locale,
-      perAppMode: PerAppProxyMode.values.firstWhere(
-        (PerAppProxyMode mode) => mode.name == json['per_app_mode'],
-        orElse: () => fallback.perAppMode,
-      ),
-      perAppPackages:
-          (json['per_app_packages'] as List<dynamic>?)?.cast<String>() ??
-          fallback.perAppPackages,
       systemProxyBypass:
           (json['system_proxy_bypass'] as List<dynamic>?)?.cast<String>() ??
           fallback.systemProxyBypass,
@@ -227,6 +202,11 @@ class SettingsStore {
   final JsonFileStore _store;
 
   bool get hasPersistedSettings => _store.read().isNotEmpty;
+
+  DateTime? get savedAt {
+    final File file = _store.file;
+    return file.existsSync() ? file.lastModifiedSync() : null;
+  }
 
   AppSettings load() {
     final Map<String, dynamic> data = _store.read();

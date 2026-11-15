@@ -13,28 +13,13 @@ msgstr ""
 msgid "%d ms"
 msgstr ""
 
-msgid "%d nodes, fetched %s"
-msgstr ""
-
-msgid "%s up / %s down"
-msgstr ""
-
-msgid "%s used of %s, %s today"
-msgstr ""
-
 msgid "%s, %d days left"
-msgstr ""
-
-msgid "%s, current node: %s"
 msgstr ""
 
 msgid "Account"
 msgstr ""
 
 msgid "Account info"
-msgstr ""
-
-msgid "Advanced"
 msgstr ""
 
 msgid "Allow LAN"
@@ -52,7 +37,7 @@ msgstr ""
 msgid "A verification code has been sent to your email"
 msgstr ""
 
-msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgid "Base URL for geoip.metadb and GeoSite.dat. Must be https. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
 msgstr ""
 
 msgid "Connection details"
@@ -100,10 +85,16 @@ msgstr ""
 msgid "Clash profile is invalid"
 msgstr ""
 
-msgid "Fetching the profile in the background"
+msgid "Already up to date"
 msgstr ""
 
-msgid "Already up to date"
+msgid "No changes to save"
+msgstr ""
+
+msgid "Reset"
+msgstr ""
+
+msgid "The router could not be reached, so the changes were rolled back"
 msgstr ""
 
 msgid "Update succeeded"
@@ -112,13 +103,10 @@ msgstr ""
 msgid "Update saved, takes effect the next time the kernel starts"
 msgstr ""
 
-msgid "Update failed"
+msgid "Failed to update"
 msgstr ""
 
 msgid "Firewall rules"
-msgstr ""
-
-msgid "General"
 msgstr ""
 
 msgid "GeoData mirror"
@@ -145,13 +133,7 @@ msgstr ""
 msgid "Kernel"
 msgstr ""
 
-msgid "LAN devices"
-msgstr ""
-
 msgid "LAN interfaces"
-msgstr ""
-
-msgid "Last %d syslog entries of the plugin and the kernel."
 msgstr ""
 
 msgid "Latency"
@@ -176,9 +158,6 @@ msgid "Mixed"
 msgstr ""
 
 msgid "Mixed port"
-msgstr ""
-
-msgid "No entries yet."
 msgstr ""
 
 msgid "Node"
@@ -214,12 +193,6 @@ msgstr ""
 msgid "Plan"
 msgstr ""
 
-msgid "Plugin version"
-msgstr ""
-
-msgid "Ports"
-msgstr ""
-
 msgid "Preparing configuration"
 msgstr ""
 
@@ -247,31 +220,19 @@ msgstr ""
 msgid "No matching connections"
 msgstr ""
 
-msgid "No matching log entries."
-msgstr ""
-
 msgid "Request failed"
 msgstr ""
 
 msgid "Routing"
 msgstr ""
 
-msgid "Routing mode updated"
-msgstr ""
-
 msgid "Search host, IP, process, rule"
-msgstr ""
-
-msgid "Search logs"
 msgstr ""
 
 msgid "Rule"
 msgstr ""
 
 msgid "Running"
-msgstr ""
-
-msgid "Running (%s)"
 msgstr ""
 
 msgid "Send code"
@@ -281,12 +242,6 @@ msgid "Send code (%ds)"
 msgstr ""
 
 msgid "Service"
-msgstr ""
-
-msgid "Service starting"
-msgstr ""
-
-msgid "Service stopped"
 msgstr ""
 
 msgid "Settings"
@@ -305,9 +260,6 @@ msgid "This disconnects and clears saved sign-in credentials on this device."
 msgstr ""
 
 msgid "Signed in"
-msgstr ""
-
-msgid "Signed in, the service is starting"
 msgstr ""
 
 msgid "Signed out"
@@ -338,9 +290,6 @@ msgid "TPROXY port"
 msgstr ""
 
 msgid "TUN"
-msgstr ""
-
-msgid "TUN device"
 msgstr ""
 
 msgid "TUN stack"
@@ -382,12 +331,6 @@ msgstr ""
 msgid "Traffic from these interfaces is sent to the kernel."
 msgstr ""
 
-msgid "Traffic since start"
-msgstr ""
-
-msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
-msgstr ""
-
 msgid "Two-factor code"
 msgstr ""
 
@@ -422,12 +365,6 @@ msgid "no active plan"
 msgstr ""
 
 msgid "none"
-msgstr ""
-
-msgid "not fetched yet"
-msgstr ""
-
-msgid "unknown version"
 msgstr ""
 
 msgid "untested"
@@ -490,22 +427,13 @@ msgstr ""
 msgid "Current node"
 msgstr ""
 
-msgid "No node selected"
-msgstr ""
-
 msgid "Preparing kernel"
-msgstr ""
-
-msgid "Kernel not ready"
 msgstr ""
 
 msgid "Not selected"
 msgstr ""
 
 msgid "Proxy group"
-msgstr ""
-
-msgid "Nodes ›"
 msgstr ""
 
 msgid "Refresh nodes"
@@ -550,6 +478,9 @@ msgstr ""
 msgid "Traffic usage"
 msgstr ""
 
+msgid "Shows traffic usage across all devices."
+msgstr ""
+
 msgid "Today used"
 msgstr ""
 
@@ -560,9 +491,6 @@ msgid "Remaining traffic"
 msgstr ""
 
 msgid "Account total traffic"
-msgstr ""
-
-msgid "Need more traffic? Open the panel to buy a traffic pack"
 msgstr ""
 
 msgid "Next usage reset"
@@ -587,6 +515,9 @@ msgid "Checked in today"
 msgstr ""
 
 msgid "Never used"
+msgstr ""
+
+msgid "No reset"
 msgstr ""
 
 msgid "Used only while running"
@@ -700,7 +631,7 @@ msgstr ""
 msgid "Disconnect this device?"
 msgstr ""
 
-msgid "The client on %s will be told to disconnect, within 60 seconds."
+msgid "The client on %s will be told to disconnect."
 msgstr ""
 
 msgid "Not supported"
@@ -716,9 +647,6 @@ msgid "Online clients in the last %d days"
 msgstr ""
 
 msgid "No online clients in the last %d days"
-msgstr ""
-
-msgid "Account info updated"
 msgstr ""
 
 msgid "TUN excluded networks"
@@ -913,7 +841,7 @@ msgstr ""
 msgid "Copied"
 msgstr ""
 
-msgid "Copy failed"
+msgid "Failed to copy"
 msgstr ""
 
 msgid "Loading rule providers: %d/%d"
@@ -943,10 +871,421 @@ msgstr ""
 msgid " to buy a traffic pack"
 msgstr ""
 
-msgid "Privacy Policy"
+msgid "The kernel control interface is not ready"
 msgstr ""
 
-msgid "Terms of Service"
+msgid "Invalid HTTP URL"
+msgstr ""
+
+msgid "Invalid HTTP header"
+msgstr ""
+
+msgid "Disconnected; network takeover canceled"
+msgstr ""
+
+msgid "Could not determine the LAN device. Check LAN interfaces in Settings."
+msgstr ""
+
+msgid "Could not restore the previous network settings. New proxy rules were not applied."
+msgstr ""
+
+msgid "The dnsmasq config directory is unavailable. DNS is not routed through the kernel."
+msgstr ""
+
+msgid "Could not save network recovery data"
+msgstr ""
+
+msgid "Panel URL is missing. Enter it in Settings or reinstall the plugin."
+msgstr ""
+
+msgid "Sign-in required"
+msgstr ""
+
+msgid "Not signed in to the panel"
+msgstr ""
+
+msgid "Your session has expired. Sign in again."
+msgstr ""
+
+msgid "The panel is busy. Try again in about %d seconds."
+msgstr ""
+
+msgid "Your account session has changed. Try again."
+msgstr ""
+
+msgid "The panel returned HTTP %d"
+msgstr ""
+
+msgid "The control interface returned HTTP %d"
+msgstr ""
+
+msgid "The panel did not return a sign-in token"
+msgstr ""
+
+msgid "Signed in, but could not save the session"
+msgstr ""
+
+msgid "Invalid language"
+msgstr ""
+
+msgid "Invalid panel profile:"
+msgstr ""
+
+msgid "The panel did not provide a complete profile"
+msgstr ""
+
+msgid "The speed test inbound password is missing. Cannot generate the profile."
+msgstr ""
+
+msgid "Could not back up %s"
+msgstr ""
+
+msgid "Could not write %s"
+msgstr ""
+
+msgid "The node storage path must be a regular directory"
+msgstr ""
+
+msgid "Node provider \"%s\" has an invalid local file format"
+msgstr ""
+
+msgid "Node provider \"%s\" must use a separate regular file"
+msgstr ""
+
+msgid "Node provider \"%s\" exceeds 8 MiB"
+msgstr ""
+
+msgid "Could not save node provider \"%s\""
+msgstr ""
+
+msgid "Could not read the profile for validation"
+msgstr ""
+
+msgid "Could not write the profile for validation"
+msgstr ""
+
+msgid "Could not run mihomo"
+msgstr ""
+
+msgid "mihomo -t exited with code %d"
+msgstr ""
+
+msgid "Only regular files up to 8 MiB can be viewed"
+msgstr ""
+
+msgid "Could not read the file"
+msgstr ""
+
+msgid "The file exceeds 8 MiB"
+msgstr ""
+
+msgid "This is a binary rule set and cannot be viewed as text"
+msgstr ""
+
+msgid "GitHub rate limit reached (HTTP %d)"
+msgstr ""
+
+msgid "GitHub returned HTTP %d"
+msgstr ""
+
+msgid "Could not parse the GitHub response"
+msgstr ""
+
+msgid "GitHub did not provide a version number"
+msgstr ""
+
+msgid "Could not determine the device architecture"
+msgstr ""
+
+msgid "The Nikki feed does not support this device's OpenWrt version (%s)"
+msgstr ""
+
+msgid "The Nikki feed returned HTTP %d"
+msgstr ""
+
+msgid "Could not parse the Nikki feed response"
+msgstr ""
+
+msgid "The Nikki feed did not provide a mihomo-meta version"
+msgstr ""
+
+msgid "The profile failed kernel validation: {message}"
+msgstr ""
+
+msgid "{message}; could not restore the previous profile"
+msgstr ""
+
+msgid "{message}; could not restore the previous node configuration"
+msgstr ""
+
+msgid "{message}; network recovery failed, retrying"
+msgstr ""
+
+msgid "Could not open the account switching lock"
+msgstr ""
+
+msgid "Account switching is in progress. Try again shortly."
+msgstr ""
+
+msgid "Offline profile authorization is invalid. Refresh the profile."
+msgstr ""
+
+msgid "Could not stage the validated profile. Try again."
+msgstr ""
+
+msgid "Speed test limit reached"
+msgstr ""
+
+msgid "Speed test limit reached. Try again in %d minutes."
+msgstr ""
+
+msgid "Skipped %d nodes that reached the speed test limit"
+msgstr ""
+
+msgid "Sign in to the panel on the LuCI Overview page first"
+msgstr ""
+
+msgid "Preparing the kernel profile"
+msgstr ""
+
+msgid "Failed to fetch the profile: {message}"
+msgstr ""
+
+msgid "Validating the profile. The kernel needs to download GeoIP / GeoSite data on first start; this may take several minutes."
+msgstr ""
+
+msgid "Validating the profile"
+msgstr ""
+
+msgid "Starting the kernel"
+msgstr ""
+
+msgid "Your session or offline profile authorization has expired. Sign in again or refresh the profile."
+msgstr ""
+
+msgid "Transparent proxy rules were not applied: {message}"
+msgstr ""
+
+msgid "TUN takeover failed. Network settings have been restored."
+msgstr ""
+
+msgid "TUN mode is handling forwarding"
+msgstr ""
+
+msgid "TPROXY mode is handling forwarding"
+msgstr ""
+
+msgid "Could not restore network settings"
+msgstr ""
+
+msgid "Panel nodes updated; existing connections are unchanged"
+msgstr ""
+
+msgid "Profile updated. Restarting the kernel to preserve DNS mappings."
+msgstr ""
+
+msgid "Panel profile reloaded"
+msgstr ""
+
+msgid "Could not commit the loaded profile. Refresh the profile."
+msgstr ""
+
+msgid "Offline profile authorization has expired. Refresh the profile."
+msgstr ""
+
+msgid "The kernel is not responding. Network recovery failed; retrying."
+msgstr ""
+
+msgid "The kernel is not responding. Transparent proxy rules were removed to keep the LAN available."
+msgstr ""
+
+msgid "The kernel was not ready within 300 seconds. Check the Logs page."
+msgstr ""
+
+msgid "Could not open the test task lock"
+msgstr ""
+
+msgid "Could not lock the test task"
+msgstr ""
+
+msgid "Could not save the test task"
+msgstr ""
+
+msgid "Sign out of the current account first"
+msgstr ""
+
+msgid "Could not clear the previous account's cache"
+msgstr ""
+
+msgid "Could not open the account cache lock"
+msgstr ""
+
+msgid "Could not lock the account cache"
+msgstr ""
+
+msgid "Could not save the account cache"
+msgstr ""
+
+msgid "Could not save node usage data"
+msgstr ""
+
+msgid "Could not save the speed test inbound password"
+msgstr ""
+
+msgid "Could not open the network operation lock"
+msgstr ""
+
+msgid "Could not lock the network operation"
+msgstr ""
+
+msgid "Firewall rule validation or loading failed. Rules were not applied."
+msgstr ""
+
+msgid "Could not configure policy routing"
+msgstr ""
+
+msgid "dnsmasq configuration or restart failed. DNS is not routed through the kernel."
+msgstr ""
+
+msgid "Could not save the network takeover state"
+msgstr ""
+
+msgid "Could not read secure system random data"
+msgstr ""
+
+msgid "The TUN interface name must be 1–15 letters, digits, underscores, periods, or hyphens"
+msgstr ""
+
+msgid "The panel did not provide any usable nodes"
+msgstr ""
+
+msgid "Invalid node list format"
+msgstr ""
+
+msgid "Node %d has an incomplete configuration"
+msgstr ""
+
+msgid "Node %d has no name"
+msgstr ""
+
+msgid "Duplicate node name: %s"
+msgstr ""
+
+msgid "Node \"%s\" uses the mesh-network type %s, which would join the kernel to an outside network and is not supported"
+msgstr ""
+
+msgid "Node %d has no type"
+msgstr ""
+
+msgid "The panel profile has no proxy groups"
+msgstr ""
+
+msgid "Invalid proxy group list format"
+msgstr ""
+
+msgid "Proxy group %d has an incomplete configuration"
+msgstr ""
+
+msgid "Proxy group %d has no name"
+msgstr ""
+
+msgid "Duplicate proxy group name: %s"
+msgstr ""
+
+msgid "Proxy group %d has no type"
+msgstr ""
+
+msgid "Proxy group \"%s\" has an invalid member list"
+msgstr ""
+
+msgid "Proxy group \"%s\" has an invalid node provider list"
+msgstr ""
+
+msgid "Proxy group \"%s\" has no members"
+msgstr ""
+
+msgid "Proxy group \"%s\" references missing node provider \"%s\""
+msgstr ""
+
+msgid "Proxy group \"%s\" references missing member \"%s\""
+msgstr ""
+
+msgid "Node provider \"%s\" has an incomplete configuration"
+msgstr ""
+
+msgid "Rule provider \"%s\" has an incomplete configuration"
+msgstr ""
+
+msgid "Node provider \"%s\" must use a valid client local file format"
+msgstr ""
+
+msgid "Node provider \"%s\" has no type"
+msgstr ""
+
+msgid "Rule provider \"%s\" has no type"
+msgstr ""
+
+msgid "Rule provider \"%s\" has no storage path"
+msgstr ""
+
+msgid "The storage path for \"%s\" must be inside the runtime directory and must not overwrite client files"
+msgstr ""
+
+msgid "Node provider \"%s\" uses online downloads but has no URL"
+msgstr ""
+
+msgid "Rule provider \"%s\" uses online downloads but has no URL"
+msgstr ""
+
+msgid "\"%s\" stores inline rules in mrs format, which is not supported"
+msgstr ""
+
+msgid "The panel profile has no routing rules"
+msgstr ""
+
+msgid "Invalid routing rule list format"
+msgstr ""
+
+msgid "Routing rule %d must be a single line of text"
+msgstr ""
+
+msgid "Routing rule %d is invalid: %s"
+msgstr ""
+
+msgid "Routing rule %d references missing rule provider \"%s\""
+msgstr ""
+
+msgid "Rule \"%s\" points to a policy that does not exist: %s"
+msgstr ""
+
+msgid "Routing rules are missing a final fallback rule"
+msgstr ""
+
+msgid "The name \"%s\" is reserved for client speed tests. Rename the matching node or proxy group in the panel."
+msgstr ""
+
+msgid "The DNS settings are incomplete"
+msgstr ""
+
+msgid "%d additional issues are not shown"
+msgstr ""
+
+msgid "Account deletion is pending. Cancel deletion on the website before signing in."
+msgstr ""
+
+msgid "Your account has been banned: %s"
+msgstr ""
+
+msgid "Your account has been banned. Check the website for details."
+msgstr ""
+
+msgid "Could not clear traffic data for the previous account"
+msgstr ""
+
+msgid "Privacy policy"
+msgstr ""
+
+msgid "Terms of service"
 msgstr ""
 
 msgid "Downloaded"
@@ -980,4 +1319,31 @@ msgid "Destination port"
 msgstr ""
 
 msgid "Close connection"
+msgstr ""
+
+msgid "The background update was interrupted. Try again."
+msgstr ""
+
+msgid "Node provider \"%s\" must use an HTTPS download URL"
+msgstr ""
+
+msgid "Rule provider \"%s\" must use an HTTPS download URL"
+msgstr ""
+
+msgid "geox-url entry \"%s\" must use HTTPS"
+msgstr ""
+
+msgid "The GeoData mirror must use HTTPS"
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
+msgid "Save & Apply"
+msgstr ""
+
+msgid "Proxy"
+msgstr ""
+
+msgid "Grant access to the ECY Cloud client"
 msgstr ""

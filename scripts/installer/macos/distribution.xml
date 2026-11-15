@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- APP_VERSION 由 build-macos.sh 替换 -->
+<!-- APP_VERSION 由 build-macos.sh 替换；min="11.0" 只是 scripts/ 与 ECYCloud/Scripts/ 两份 build-macos.sh 的替换锚点，改字面量须同步两处 sed -->
 <installer-gui-script minSpecVersion="2">
     <title>ECY Cloud</title>
     <license file="LICENSE.txt" mime-type="text/plain"/>

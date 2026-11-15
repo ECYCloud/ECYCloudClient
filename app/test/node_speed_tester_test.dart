@@ -235,6 +235,8 @@ void main() {
       server.port,
       context: SecurityContext(withTrustedRoots: false)
         ..setTrustedCertificatesBytes(utf8.encode(_testCertificate)),
+      // macOS 拒绝有效期超过 825 天的 TLS 服务器证书，本用例不验证证书校验
+      onBadCertificate: (_) => true,
     );
     final SecureSocket peer = await server.first;
     final RawSecureSocket socket = await connecting;

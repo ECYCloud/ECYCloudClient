@@ -2,11 +2,7 @@ import 'package:ecycloud_client/data/models/announcement.dart';
 import 'package:ecycloud_client/state/announcement_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Announcement _item({
-  required int id,
-  required String date,
-  String? updatedAt,
-}) {
+Announcement _item({required int id, required String date, String? updatedAt}) {
   return Announcement(
     id: id,
     title: 't$id',
@@ -27,7 +23,7 @@ void main() {
     expect(item.updatedAt, '2026-08-01 00:00:00');
   });
 
-  test('点铃铛落到最近一条未读，而不是列表第一项', () {
+  test('点铃铛落到最新发布的未读，而不是列表第一项', () {
     final List<Announcement> items = <Announcement>[
       _item(id: 1, date: '2020-01-01 00:00:00'),
       _item(id: 3, date: '2026-08-20 00:00:00'),
@@ -39,10 +35,36 @@ void main() {
     ];
     final Map<String, String> seen = <String, String>{
       '1': '2020-01-01 00:00:00',
+      '3': '2026-08-20 00:00:00',
     };
 
     expect(AnnouncementController.focusUnreadIndex(items, seen), 2);
-    expect(AnnouncementController.focusUnreadIndex(items, <String, String>{}), 2);
+    expect(
+      AnnouncementController.focusUnreadIndex(items, <String, String>{}),
+      1,
+    );
+  });
+
+  test('切换语言后旧公告译文较新，仍打开最新发布的一条', () {
+    final List<Announcement> items = <Announcement>[
+      _item(
+        id: 5,
+        date: '2026-08-20 00:00:00',
+        updatedAt: '2026-08-21 00:00:00',
+      ),
+      _item(
+        id: 2,
+        date: '2026-01-01 00:00:00',
+        updatedAt: '2026-11-01 00:00:00',
+      ),
+    ];
+    final Map<String, String> seen = <String, String>{
+      '5': '2026-08-20 00:00:00',
+      '2': '2026-01-01 00:00:00',
+    };
+
+    expect(AnnouncementController.focusUnreadIndex(items, seen), 0);
+    expect(AnnouncementController.latestIndex(items), 0);
   });
 
   test('弹窗已读后若没有其它未读则不再有红点', () {
@@ -86,7 +108,7 @@ void main() {
     expect(AnnouncementController.latestIndex(items), 1);
   });
 
-  test('没有未读时打开最近更新的一条，而不是置顶第一条', () {
+  test('没有未读时打开最新发布的一条，而不是置顶第一条', () {
     final List<Announcement> items = <Announcement>[
       _item(id: 1, date: '2020-01-01 00:00:00'),
       _item(id: 3, date: '2026-08-20 00:00:00'),
@@ -101,6 +123,6 @@ void main() {
     };
 
     expect(AnnouncementController.focusUnreadIndex(items, seen), isNull);
-    expect(AnnouncementController.latestIndex(items), 2);
+    expect(AnnouncementController.latestIndex(items), 1);
   });
 }

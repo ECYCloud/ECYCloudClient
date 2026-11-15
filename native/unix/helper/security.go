@@ -21,7 +21,7 @@ func ensureRestrictedDir(path string) error {
 		return err
 	}
 	uid, gid := 0, 0
-	if path == runDir() {
+	if path == runRoot() || path == runDir() {
 		uid, gid = kernelUID, kernelGID
 	}
 	return ensureOwnedDir(path, uid, gid, 0o700)
@@ -96,11 +96,7 @@ func copyKernelFile(source, path string) error {
 }
 
 // 套接字权限管不到哪个进程；两侧都解软链，避免 /opt 或 /Applications 被绕过
-func verifyGUICaller(pid int) error {
-	actual, err := processExePath(pid)
-	if err != nil {
-		return err
-	}
+func verifyGUICaller(actual string) error {
 	if realPath(actual) != realPath(guiExePath()) {
 		return fmt.Errorf("拒绝来自非官方客户端的指令: %s", actual)
 	}

@@ -18,7 +18,9 @@ void main() {
   });
   tearDown(() => directory.deleteSync(recursive: true));
 
-  test('清理中断标记在销毁凭证和重新加载后仍存在', () {
+  test('退出时会话键随令牌一起删除，设备标识保留', () {
+    final String device = store.deviceId();
+    store.saveSessionKey('a' * 64);
     store.save(
       Credentials(
         token: 'test',
@@ -26,30 +28,23 @@ void main() {
         email: 'a@example.test',
       ),
     );
-    final String device = store.deviceId();
-    store.beginSessionCleanup();
-    store.clear();
     final CredentialStore restored = CredentialStore(
       store: JsonFileStore(file, 'test'),
     );
-    expect(restored.sessionCleanupPending, isTrue);
-    expect(restored.load(), isNull);
-    expect(restored.deviceId(), device);
-    restored.finishSessionCleanup();
-    expect(store.sessionCleanupPending, isFalse);
+    expect(restored.sessionKey, 'a' * 64);
+    restored.clear();
+    expect(store.sessionKey, isEmpty);
+    expect(store.load(), isNull);
+    expect(store.deviceId(), device);
   });
 
-  test('凭证文件损坏不能使清理标记失效', () {
-    store.beginSessionCleanup();
+  test('会话键会拼进目录路径，只接受 64 位小写十六进制', () {
+    expect(() => store.saveSessionKey('../escape'), throwsArgumentError);
+    expect(() => store.saveSessionKey('A' * 64), throwsArgumentError);
+    file.writeAsStringSync(jsonEncode(<String, String>{'session_key': '../x'}));
+    expect(store.sessionKey, isEmpty);
     file.writeAsStringSync('{broken');
-    expect(store.sessionCleanupPending, isTrue);
-  });
-
-  test('异常标记路径必须阻止开始和完成清理', () {
-    Directory('${file.path}.session-ending').createSync();
-    expect(store.sessionCleanupPending, isTrue);
-    expect(store.beginSessionCleanup, throwsA(isA<FileSystemException>()));
-    expect(store.finishSessionCleanup, throwsA(isA<FileSystemException>()));
+    expect(store.sessionKey, isEmpty);
   });
 
   test('新账户令牌不能把旧账户记住的密码配给新邮箱', () {

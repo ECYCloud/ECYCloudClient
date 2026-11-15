@@ -23,21 +23,20 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
             }
             "ping" -> Bridge.run(result) { KernelClient.call { it.ping() }.toMap() }
             "kernel.bind" -> Bridge.run(result) {
-                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
                 val key = call.argument<String>("cache_key").orEmpty()
                 require(Regex("[a-f0-9]{64}").matches(key)) { "缓存身份格式错误" }
+                KernelClient.bindSession(activity, key)
                 emptyMap<String, Any>()
             }
             "kernel.check" -> Bridge.run(result) {
                 KernelClient.call { it.check(call.argument<String>("config")) }.toMap()
             }
             "kernel.write" -> Bridge.run(result) {
-                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
                 val config = call.argument<String>("config").orEmpty()
                 if (config.isBlank()) {
                     error("缺少配置内容")
                 }
-                BoxState.writeConfig(activity, config)
+                BoxState.writeConfig(activity, BoxState.sessionKey(activity) ?: error("尚未登录"), config)
                 emptyMap<String, Any>()
             }
             "kernel.reload" -> Bridge.run(result) {
@@ -45,7 +44,6 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 emptyMap<String, Any>()
             }
             "kernel.read" -> Bridge.run(result) {
-                check(!BoxState.sessionCleanupPending(activity)) { "账户会话正在清理" }
                 val path = call.argument<String>("path").orEmpty()
                 if (path.isBlank()) {
                     error("缺少路径")
@@ -77,14 +75,33 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                     startKernel()
                 }
             }
-            "kernel.stop" -> Bridge.run(result) {
-                KernelClient.call { it.stop() }
-                emptyMap<String, Any>()
+            // 有启动排队时不等它：直接结束内核进程，进行中的启动随之失败
+            "kernel.stop" -> if (Bridge.idle) {
+                Bridge.run(result) {
+                    KernelClient.call { it.stop() }
+                    emptyMap<String, Any>()
+                }
+            } else {
+                generation++
+                Bridge.control(result) {
+                    KernelClient.clearSession(activity)
+                    emptyMap<String, Any>()
+                }
             }
             "kernel.clear" -> {
                 generation++
-                Bridge.run(result) {
-                    KernelClient.clearSession(activity)
+                Bridge.control(result) {
+                    val key = call.argument<String>("cache_key").orEmpty()
+                    require(key.isEmpty() || Regex("[a-f0-9]{64}").matches(key)) { "缓存身份格式错误" }
+                    try {
+                        // 晚到的旧账号退出不能结束已经属于新账号的内核
+                        val owner = KernelClient.poll { it.ping() }?.getString("session").orEmpty()
+                        if (key.isEmpty() || owner.isEmpty() || owner == key) {
+                            KernelClient.clearSession(activity)
+                        }
+                    } finally {
+                        if (key.isNotEmpty()) BoxState.dropRuntimeSecrets(activity, key)
+                    }
                     emptyMap<String, Any>()
                 }
             }

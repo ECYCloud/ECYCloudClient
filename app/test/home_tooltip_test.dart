@@ -108,7 +108,14 @@ void main() {
         );
         expect(bellBounds.center.dy, closeTo(avatarBounds.center.dy, 0.1));
         expect(bellBounds.right, lessThan(avatarBounds.left));
-        final Finder icon = find.byIcon(Icons.error_outline);
+        const String message =
+            '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。';
+        final Finder icon = find.byWidgetPredicate(
+          (widget) =>
+              widget is Icon &&
+              widget.icon == Icons.error_outline &&
+              widget.semanticLabel == message,
+        );
         await tester.ensureVisible(icon);
         await tester.pump();
         final Rect titleBounds = tester.getRect(find.text('流量排行'));
@@ -180,8 +187,6 @@ void main() {
             .controller!;
         controller.jumpTo(controller.offset - 40);
         await tester.pump();
-        const String message =
-            '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。';
         await tester.tap(icon);
         await tester.pumpAndSettle();
         expect(find.text(message), findsOneWidget);
@@ -304,6 +309,23 @@ void main() {
           expect(find.text(L10n.t('从未使用喵')), findsOneWidget);
           expect(find.text(L10n.t('从未签到')), findsOneWidget);
           expect(profile.trafficReset, '不重置');
+          final notice = language == AppLanguage.en
+              ? 'Shows traffic usage across all devices.'
+              : '統計所有裝置的流量使用情況';
+          final usageHelp = find.byWidgetPredicate(
+            (widget) =>
+                widget is Icon &&
+                widget.icon == Icons.error_outline &&
+                widget.semanticLabel == notice,
+          );
+          await tester.ensureVisible(usageHelp);
+          await tester.pumpAndSettle();
+          await tester.tap(usageHelp);
+          await tester.pumpAndSettle();
+          expect(find.text(notice), findsOneWidget);
+          await tester.tap(usageHelp);
+          await tester.pumpAndSettle();
+          expect(find.text(notice), findsNothing);
           expect(tester.takeException(), isNull);
           final nodes = _NodeConnection();
           addTearDown(nodes.dispose);

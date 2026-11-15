@@ -9,12 +9,15 @@ import 'package:ecycloud_client/state/connection_controller.dart';
 import 'package:ecycloud_client/state/update_controller.dart';
 import 'package:ecycloud_client/ui/app_scope.dart';
 import 'package:ecycloud_client/ui/node_labels.dart';
+import 'package:ecycloud_client/ui/pages/connections_page.dart';
 import 'package:ecycloud_client/ui/pages/logs_page.dart';
 import 'package:ecycloud_client/ui/theme.dart';
+import 'package:ecycloud_client/ui/widgets/flag_icon.dart';
 import 'package:ecycloud_client/ui/widgets/search_field.dart';
 import 'package:ecycloud_client/ui/widgets/tag_chip.dart';
 import 'package:ecycloud_client/ui/widgets/app_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // 级别一律取 info 及以下：Logger 的落盘门槛默认是 warn，测试因此不碰磁盘
@@ -363,8 +366,132 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(find.textContaining('主节点[香港 01]'), findsOneWidget);
+    expect(find.textContaining('主节点['), findsOneWidget);
+    expect(find.textContaining(' 香港 01]'), findsOneWidget);
+    expect(tester.widget<FlagIcon>(find.byType(FlagIcon)).code, 'hk');
     expect(find.textContaining('node-120'), findsNothing);
+  });
+
+  // 旗帜图标上叠着透明的原字符：选中复制拿到的仍是 emoji 原文，搜索与日志文件本来就用原文
+  testWidgets('日志里的旗帜图标选中复制仍得到原文', (WidgetTester tester) async {
+    NodeLabels.configure('', <String, String>{'node-120': '🇭🇰 香港 01'});
+    addTearDown(() => NodeLabels.configure(''));
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map<Object?, Object?>)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await _pumpPage(tester);
+    Logger.instance.info('mihomo', 'match Match using 主节点[node-120]');
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final Finder area = find
+        .ancestor(
+          of: find.textContaining('主节点['),
+          matching: find.byType(SelectionArea),
+        )
+        .first;
+    tester.widget<SelectionArea>(area).focusNode!.requestFocus();
+    await tester.pump();
+    tester
+        .state<SelectionAreaState>(area)
+        .selectableRegion
+        .selectAll(SelectionChangedCause.keyboard);
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(copied, contains('主节点[🇭🇰 香港 01]'));
+  });
+
+  // Windows 的表情字体画不出国旗，链路标签与详情里的旗帜一律画成 FlagIcon，不留 emoji
+  testWidgets('连接页链路保留节点名自带的旗帜，并画成旗帜图标', (WidgetTester tester) async {
+    NodeLabels.configure('', <String, String>{'node-120': '🇭🇰 香港 01'});
+    addTearDown(() => NodeLabels.configure(''));
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      _scoped(
+        const MaterialApp(home: AppScaffold(body: ConnectionsPage())),
+        _Connection(
+          connections: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'c1',
+              'chains': <String>['node-120', '主节点'],
+              'metadata': <String, dynamic>{
+                'host': 'example.com',
+                'destinationPort': '443',
+              },
+            },
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final Finder chip = find.byWidgetPredicate(
+      (Widget widget) => widget is TagChip && widget.icon == Icons.call_made,
+    );
+    expect(
+      find.descendant(of: chip, matching: find.textContaining('主节点 → ')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: chip, matching: find.textContaining(' 香港 01')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FlagIcon>(
+            find.descendant(of: chip, matching: find.byType(FlagIcon)),
+          )
+          .code,
+      'hk',
+    );
+    // emoji 只剩旗帜图标上那份透明原字符，供复制用
+    expect(find.textContaining('🇭🇰'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(FlagIcon), matching: find.text('🇭🇰')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('example.com:443'));
+    await tester.pumpAndSettle();
+    final Finder dialog = find.byType(Dialog);
+    expect(
+      find.descendant(of: dialog, matching: find.textContaining(' 香港 01')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.byType(FlagIcon)),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('🇭🇰'),
+      findsNWidgets(
+        tester
+            .widgetList(
+              find.descendant(
+                of: find.byType(FlagIcon),
+                matching: find.text('🇭🇰'),
+              ),
+            )
+            .length,
+      ),
+    );
   });
 }
 
@@ -410,6 +537,8 @@ class _Connection extends ChangeNotifier implements ConnectionController {
   @override
   List<Map<String, dynamic>> get closedConnections =>
       const <Map<String, dynamic>>[];
+  @override
+  ConnectionPhase get state => ConnectionPhase.connected;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

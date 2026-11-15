@@ -1,52 +1,29 @@
 import 'dart:io';
 
+import 'package:ecycloud_client/core/app_paths.dart';
 import 'package:ecycloud_client/core/logger.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('会话清理删除日志目录和内存记录', () {
-    final Directory dir = _tmpDir();
-    File('${dir.path}/old.log').writeAsStringSync('old-private');
-    Logger.instance.info('audit', 'old-private');
-    Logger.instance.clearSession(directory: dir);
+  test('退出清空内存日志，新会话的日志落进新会话目录', () async {
+    final String key = 'a' * 64;
+    AppPaths.useSession(key);
+    addTearDown(() => AppPaths.useSession(''));
+    Logger.instance.warn('audit', 'old-private');
+    final String oldLogs = AppPaths.logs.path;
+    Logger.instance.clearSession();
     expect(Logger.instance.entries, isEmpty);
-    expect(dir.existsSync(), isFalse);
-  });
-
-  test('日志根目录链接不能用于递归删除外部目录', () {
-    final Directory dir = _tmpDir();
-    final Directory outside = Directory('${dir.path}/outside')..createSync();
-    final File protected = File('${outside.path}/keep')
-      ..writeAsStringSync('keep');
-    final Link link = Link('${dir.path}/logs');
-    try {
-      link.createSync(outside.path);
-    } on FileSystemException {
-      markTestSkipped('当前系统无法创建目录链接');
-      return;
-    }
-    expect(
-      () => Logger.instance.clearSession(directory: Directory(link.path)),
-      throwsA(isA<FileSystemException>()),
-    );
-    expect(protected.readAsStringSync(), 'keep');
-  });
-
-  test('清理日志子链接时保留其外部目标', () {
-    final Directory dir = _tmpDir();
-    final Directory outside = Directory('${dir.path}/outside')..createSync();
-    final Directory logs = Directory('${dir.path}/logs')..createSync();
-    final File protected = File('${outside.path}/keep')
-      ..writeAsStringSync('keep');
-    try {
-      Link('${logs.path}/linked').createSync(outside.path);
-    } on FileSystemException {
-      markTestSkipped('当前系统无法创建目录链接');
-      return;
-    }
-    Logger.instance.clearSession(directory: logs);
-    expect(logs.existsSync(), isFalse);
-    expect(protected.readAsStringSync(), 'keep');
+    AppPaths.useSession('b' * 64);
+    Logger.instance.warn('audit', 'new-session');
+    await Logger.instance.flush();
+    expect(AppPaths.logs.path, isNot(oldLogs));
+    final String written = AppPaths.logs
+        .listSync()
+        .whereType<File>()
+        .map((File file) => file.readAsStringSync())
+        .join();
+    expect(written, contains('new-session'));
+    expect(written, isNot(contains('old-private')));
   });
 
   test('内核进程输出按 logrus 的 level= 归类', () {
@@ -124,6 +101,22 @@ void main() {
     expect(
       Logger.kernelMessage('configuration file test is successful'),
       'configuration file test is successful',
+    );
+  });
+
+  test('出站链改为策略组 → 节点，只改行尾的内核链', () {
+    expect(
+      Logger.kernelChain(
+        '[TCP] 127.0.0.1:55619(Cursor.exe) --> api2.cursor.sh:443 '
+        'match RuleSet(cursor) using Cursor[node-12]',
+      ),
+      '[TCP] 127.0.0.1:55619(Cursor.exe) --> api2.cursor.sh:443 '
+      'match RuleSet(cursor) using Cursor → node-12',
+    );
+    expect(Logger.kernelChain('using DIRECT'), 'using DIRECT');
+    expect(
+      Logger.kernelChain('match Match using Google 服务[主节点[node-9]]'),
+      'match Match using Google 服务[主节点[node-9]]',
     );
   });
 

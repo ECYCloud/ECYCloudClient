@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,9 @@ const (
 
 	// 不得为容纳 geox-url 现下载而抬高：缺 geodata 时内核每文件 90 秒同步下载
 	kernelCheckTimout = 30 * time.Second
+
+	// 与原先 GUI 直接热载时的等待上限一致
+	kernelReloadTimeout = 120 * time.Second
 )
 
 // mihomo MMDB() 认 Country.mmdb / geoip.db / geoip.metadb，GeoSite 认 GeoSite.dat
@@ -34,8 +39,18 @@ var geoDataFileNames = []string{"geoip.metadb", "GeoSite.dat"}
 
 var dataDirReady atomic.Bool
 
-func prepareRunDir() error {
+func prepareRunRoot() error {
 	if err := prepareDataDir(); err != nil {
+		return err
+	}
+	if err := ensureRestrictedDir(runRoot()); err != nil {
+		return fmt.Errorf("准备运行目录失败: %w", err)
+	}
+	return nil
+}
+
+func prepareRunDir() error {
+	if err := prepareRunRoot(); err != nil {
 		return err
 	}
 	if err := ensureRestrictedDir(runDir()); err != nil {
@@ -104,8 +119,63 @@ func (k *kernelManager) write(config string) error {
 	if err := writePanelProviders(config); err != nil {
 		return err
 	}
+	config, err = withoutPanelPayloads(config)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(configPath(), []byte(config), 0o600); err != nil {
 		return fmt.Errorf("写入配置失败: %w", err)
+	}
+	return nil
+}
+
+// 热载走特权侧：与 kernel.start 同一套净化落盘，再请内核按这份文件重载；GUI 不再向内核提交配置原文
+func (k *kernelManager) reload(config string) error {
+	k.mu.Lock()
+	running := k.running
+	k.mu.Unlock()
+	if !running {
+		return fmt.Errorf("内核未运行，无法热载")
+	}
+	if err := k.write(config); err != nil {
+		return err
+	}
+	return notifyKernelReload(config)
+}
+
+// 控制面地址与密钥按原键名精确读取（内核解析顶层键区分大小写），且只认回环地址；
+// 请求体只给默认路径，内核读回的是刚净化落盘的配置
+func notifyKernelReload(config string) error {
+	var top map[string]json.RawMessage
+	var controller, secret string
+	if json.Unmarshal([]byte(config), &top) != nil || json.Unmarshal(top["external-controller"], &controller) != nil {
+		return fmt.Errorf("配置缺少控制面地址，无法热载")
+	}
+	if raw, ok := top["secret"]; ok && json.Unmarshal(raw, &secret) != nil {
+		return fmt.Errorf("控制面密钥格式不合法")
+	}
+	host, port, err := net.SplitHostPort(controller)
+	if err != nil || !loopbackHost(host) {
+		return fmt.Errorf("控制面只能绑定本机回环地址")
+	}
+	request, err := http.NewRequest(http.MethodPut, "http://"+net.JoinHostPort(host, port)+"/configs?force=true", strings.NewReader(`{"path":""}`))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		request.Header.Set("Authorization", "Bearer "+secret)
+	}
+	transport := &http.Transport{Proxy: nil}
+	defer transport.CloseIdleConnections()
+	response, err := (&http.Client{Timeout: kernelReloadTimeout, Transport: transport}).Do(request)
+	if err != nil {
+		return fmt.Errorf("通知内核重载配置失败: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return fmt.Errorf("内核重载配置失败（HTTP %d）：%s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
@@ -129,6 +199,26 @@ func sanitizeKernelConfig(config string) (string, error) {
 	top["vmess-config"] = emptyString
 	top["tuic-server"] = json.RawMessage(`{"enable":false}`)
 	top["iptables"] = json.RawMessage(`{"enable":false}`)
+	// unix / pipe 控制口不校验 secret，unix 还会先以特权身份删除配置给的任意路径；tls / doh 另开端口
+	top["external-controller-unix"] = emptyString
+	top["external-controller-pipe"] = emptyString
+	top["external-controller-tls"] = emptyString
+	top["external-doh-server"] = emptyString
+	// 顶层入站口与端口转发会开出界面上不存在的监听，allow-lan 时还对局域网敞开
+	for _, key := range []string{"port", "socks-port", "redir-port", "tproxy-port"} {
+		top[key] = json.RawMessage(`0`)
+	}
+	top["tunnels"] = json.RawMessage(`[]`)
+	// GUI 只在回环上开带口令的测速入站，控制面也只绑回环；其余写法即非官方配置
+	if err := checkLoopbackInbounds(top); err != nil {
+		return "", err
+	}
+	if err := checkHTTPSDownloads(top); err != nil {
+		return "", err
+	}
+	if err := checkProviderPaths(top); err != nil {
+		return "", err
+	}
 
 	// ntp.write-to-system：内核会以特权身份改写系统时钟
 	if raw, ok := top["ntp"]; ok {
@@ -152,6 +242,8 @@ func sanitizeKernelConfig(config string) (string, error) {
 	}
 	for _, key := range []string{
 		"external-ui", "external-ui-url", "ss-config", "vmess-config", "tuic-server", "iptables",
+		"external-controller-unix", "external-controller-pipe", "external-controller-tls", "external-doh-server",
+		"port", "socks-port", "redir-port", "tproxy-port", "tunnels",
 	} {
 		if !seen[key] {
 			keys = append(keys, key)
@@ -173,6 +265,122 @@ func sanitizeKernelConfig(config string) (string, error) {
 		return "", fmt.Errorf("重写配置失败: %w", err)
 	}
 	return pretty.String(), nil
+}
+
+func checkLoopbackInbounds(top map[string]json.RawMessage) error {
+	if raw, ok := top["external-controller"]; ok {
+		var address string
+		if json.Unmarshal(raw, &address) != nil {
+			return fmt.Errorf("external-controller 必须是地址字符串")
+		}
+		if host, _, err := net.SplitHostPort(address); address != "" && (err != nil || !loopbackHost(host)) {
+			return fmt.Errorf("控制面只能绑定本机回环地址")
+		}
+	}
+	if raw, ok := top["listeners"]; ok {
+		var listeners []map[string]any
+		if json.Unmarshal(raw, &listeners) != nil {
+			return fmt.Errorf("listeners 必须是数组")
+		}
+		for _, listener := range listeners {
+			listen, _ := listener["listen"].(string)
+			kind, _ := listener["type"].(string)
+			if !loopbackHost(listen) || (kind != "mixed" && kind != "http" && kind != "socks") {
+				return fmt.Errorf("只允许本机回环上的代理入站")
+			}
+		}
+	}
+	return nil
+}
+
+func loopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// 明文下载会被链路上替换规则集、节点订阅与地理数据库：只检查不改写面板的值，与 GUI 结构检查同口径。
+// 内核取 provider 字段时名字不分大小写（mihomo common/structure），URL、Url 一样会被拿去下载
+func checkHTTPSDownloads(top map[string]json.RawMessage) error {
+	var geox map[string]any
+	if json.Unmarshal(top["geox-url"], &geox) == nil {
+		for key, url := range geox {
+			if !httpsURL(url) {
+				return fmt.Errorf("geox-url「%s」必须使用 https", key)
+			}
+		}
+	}
+	for _, section := range []string{"proxy-providers", "rule-providers"} {
+		var providers map[string]json.RawMessage
+		if json.Unmarshal(top[section], &providers) != nil {
+			continue
+		}
+		for name, raw := range providers {
+			var fields map[string]any
+			_ = json.Unmarshal(raw, &fields)
+			for key, url := range fields {
+				if strings.EqualFold(key, "url") && !httpsURL(url) {
+					return fmt.Errorf("%s「%s」的下载地址必须使用 https", section, name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// 与 Dart 侧 ProfileInspector._safeProviderPath 同一份保留名单与规则：provider 只能落在运行目录内且不得覆盖客户端文件。
+// 内核以特权身份下载落盘，盖掉 config.json 就能在下次热载或重启时带入未经净化的配置；字段名不分大小写（mihomo common/structure）
+func checkProviderPaths(top map[string]json.RawMessage) error {
+	for _, section := range []string{"proxy-providers", "rule-providers"} {
+		var providers map[string]json.RawMessage
+		if json.Unmarshal(top[section], &providers) != nil {
+			continue
+		}
+		for name, raw := range providers {
+			var fields map[string]any
+			_ = json.Unmarshal(raw, &fields)
+			for key, value := range fields {
+				if path, ok := value.(string); strings.EqualFold(key, "path") && (!ok || !safeProviderPath(path)) {
+					return fmt.Errorf("「%s」的保存路径必须位于运行目录内，且不能覆盖客户端文件", name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ~ 可组成 Windows 8.3 短文件名（CONFIG~1.JSO），绕过按字面比对的保留文件名
+var (
+	unsafeProviderPathChars = regexp.MustCompile(`[\\:~\x00-\x1f\x7f]`)
+	reservedDeviceName      = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)`)
+	reservedClientFile      = regexp.MustCompile(`(?i)^(config\.json|config\.check\.json|cache\.db|proxy-snapshot\.json|geoip\.metadb|geosite\.dat|geoip\.dat|asn\.mmdb|bundlemrs\.7z)(\.|$)|^\.validate-`)
+)
+
+func safeProviderPath(path string) bool {
+	if path == "" || strings.HasPrefix(path, "/") || unsafeProviderPathChars.MatchString(path) {
+		return false
+	}
+	var parts []string
+	for _, part := range strings.Split(path, "/") {
+		if part != "." {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || part == ".." || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || reservedDeviceName.MatchString(part) {
+			return false
+		}
+	}
+	return !reservedClientFile.MatchString(parts[0])
+}
+
+// 没有地址的本地 provider 不受影响
+func httpsURL(value any) bool {
+	text, ok := value.(string)
+	text = strings.ToLower(strings.TrimSpace(text))
+	return value == nil || (ok && (text == "" || strings.HasPrefix(text, "https://")))
 }
 
 func objectKeys(raw []byte) ([]string, error) {
@@ -240,6 +448,64 @@ func panelProviderFiles(config string) (map[string][]byte, error) {
 		files[provider.Path] = data
 	}
 	return files, nil
+}
+
+// 节点已写成各自的文件，内核按 path 读取；payload 留在配置里只会被内核当作后备节点再解析一遍
+func withoutPanelPayloads(config string) (string, error) {
+	out, err := filterObject([]byte(config), func(key string, value json.RawMessage) (json.RawMessage, bool, error) {
+		if key != "proxy-providers" || !bytes.HasPrefix(bytes.TrimSpace(value), []byte("{")) {
+			return value, true, nil
+		}
+		providers, err := filterObject(value, func(name string, provider json.RawMessage) (json.RawMessage, bool, error) {
+			if !strings.HasPrefix(name, "ecy-panel-") {
+				return provider, true, nil
+			}
+			stripped, err := filterObject(provider, func(field string, value json.RawMessage) (json.RawMessage, bool, error) {
+				return value, !strings.EqualFold(field, "payload"), nil
+			})
+			return stripped, true, err
+		})
+		return providers, true, err
+	})
+	if err != nil {
+		return "", err
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, out, "", "  "); err != nil {
+		return "", fmt.Errorf("重写配置失败: %w", err)
+	}
+	return pretty.String(), nil
+}
+
+// 按原有键顺序重写 JSON 对象，keep 为 false 的键被删除
+func filterObject(raw []byte, edit func(key string, value json.RawMessage) (json.RawMessage, bool, error)) ([]byte, error) {
+	keys, err := objectKeys(raw)
+	if err != nil {
+		return nil, err
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("配置不是合法 JSON: %w", err)
+	}
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for _, key := range keys {
+		value, keep, err := edit(key, values[key])
+		if err != nil {
+			return nil, err
+		}
+		if !keep {
+			continue
+		}
+		if buf.Len() > 1 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(strconv.Quote(key))
+		buf.WriteByte(':')
+		buf.Write(value)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 func writePanelProviders(config string) error {

@@ -48,13 +48,23 @@ function Get-Verified {
     return $path
 }
 
-# 上游滚动 tag、锁不住 sha256；只拦 404 与截断（体积下限 + MaxMind 魔数）
+# 上游滚动 latest、锁不住 sha256：按同一发布附带的 .sha256sum 核对，另拦体积异常与非 MaxMind 文件
 function Get-GeoData {
     param([string]$Url, [string]$Target, [int]$MinBytes)
 
     $path = Join-Path $cacheDir $Target
     Write-Host "下载 $Url"
     Invoke-WebRequest -Uri $Url -OutFile $path -UseBasicParsing
+
+    $sumPath = "$path.sha256sum"
+    Invoke-WebRequest -Uri "$Url.sha256sum" -OutFile $sumPath -UseBasicParsing
+    $expected = ((Get-Content $sumPath -Raw) -split '\s+')[0].ToLower()
+    Remove-Item $sumPath -Force
+    $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expected) {
+        Remove-Item $path -Force
+        throw "geodata 与上游校验值不符：$Url（上游每天重建 latest 发布，赶上重建时稍后重试）`n  期望 $expected`n  实际 $actual"
+    }
 
     $size = (Get-Item $path).Length
     if ($size -lt $MinBytes) {

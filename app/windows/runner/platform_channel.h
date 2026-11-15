@@ -23,6 +23,11 @@ class PlatformChannel {
   PlatformChannel(const PlatformChannel&) = delete;
   PlatformChannel& operator=(const PlatformChannel&) = delete;
 
+  // 重建引擎时换绑：托盘保留，Detach 必须在旧引擎销毁前调用
+  void Attach(flutter::BinaryMessenger* messenger, HWND view);
+  void Detach();
+  bool connected() const { return connected_; }
+
   bool HandleWindowMessage(UINT message,
                            WPARAM wparam,
                            LPARAM lparam,

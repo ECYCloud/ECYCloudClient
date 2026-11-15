@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 @MainActor @Observable
 public final class ClientPreferences {
@@ -55,12 +56,12 @@ public final class ClientPreferences {
 
 #if os(macOS)
 extension ClientPreferences {
-    public static func migrateMacDefaults(applicationID: String) throws {
+    public static func migrateMacDefaults(applicationID: String) {
         let legacy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Containers/\(applicationID)/Data/Library/Preferences/\(applicationID).plist")
-        try migrateMacDefaults(applicationID: applicationID, from: legacy, defaults: .standard)
+        migrateMacDefaults(applicationID: applicationID, from: legacy, defaults: .standard)
     }
-    static func migrateMacDefaults(applicationID: String, from legacy: URL, defaults: UserDefaults) throws {
+    static func migrateMacDefaults(applicationID: String, from legacy: URL, defaults: UserDefaults) {
         let marker = "apple.migratedSandboxPreferences"
         guard !defaults.bool(forKey: marker) else { return }
         if FileManager.default.fileExists(atPath: legacy.path) {
@@ -73,7 +74,10 @@ extension ClientPreferences {
                 for (key, value) in values where key.hasPrefix("apple.") || key.hasPrefix(applicationID + ".apple-native.") {
                     if defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
                 }
-            } catch { throw ClientError.input(L10n.t("无法读取旧版客户端设置，请关闭旧版后重试。")) }
+            } catch {
+                Logger(subsystem: applicationID, category: "Preferences").error("legacy_preferences_unreadable")
+                defaults.set(true, forKey: KeychainVault.logoutPendingKey(service: applicationID + ".apple-native"))
+            }
         }
         defaults.set(true, forKey: marker)
     }

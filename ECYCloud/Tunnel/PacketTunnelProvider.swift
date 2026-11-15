@@ -31,11 +31,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 let id = lease.configuration.withUnsafeBytes { buffer in
                     ECYStart(UnsafeMutableRawPointer(mutating: buffer.baseAddress), Int32(buffer.count), directory.path, 1500, "172.19.0.1/30", "fdfe:dcba:9876::1/126", "172.19.0.2:53")
                 }
-                guard id != 0 else { throw TunnelError.configuration }
+                guard id != 0 else { throw ECYStartError() == -4 ? TunnelError.noNodes : TunnelError.configuration }
                 setID(id)
                 TunnelFiles.keepCache(group: group, lease: lease, from: directory)
                 let logging = try JSONEncoder().encode(TunnelCommand(.logging, group: lease.owner, level: lease.logLevel ?? "warning"))
-                var loggingResponse = [UInt8](repeating: 0, count: 128)
+                var loggingResponse = [UInt8](repeating: 0, count: Int(ECY_CONTROL_CAPACITY))
                 let loggingCount = logging.withUnsafeBytes { input in
                     loggingResponse.withUnsafeMutableBytes { output in
                         ECYControl(id, UnsafeMutableRawPointer(mutating: input.baseAddress), Int32(input.count), output.baseAddress, Int32(output.count))
@@ -91,7 +91,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             guard currentID != 0, let envelope = try? JSONDecoder().decode(TunnelCommandEnvelope.self, from: messageData),
                   envelope.leaseID == leaseID,
                   let request = try? JSONEncoder().encode(envelope.command), request.count <= 4096 else { completionHandler?(nil); return }
-            var response = [UInt8](repeating: 0, count: 65536)
+            var response = [UInt8](repeating: 0, count: Int(ECY_CONTROL_CAPACITY))
             let count = request.withUnsafeBytes { input in
                 response.withUnsafeMutableBytes { output in
                     ECYControl(currentID, UnsafeMutableRawPointer(mutating: input.baseAddress), Int32(input.count), output.baseAddress, Int32(output.count))

@@ -79,8 +79,6 @@ class _Platform implements PlatformService {
   @override
   bool get supportsLaunchAtLogin => true;
   @override
-  bool get supportsPerAppProxy => false;
-  @override
   bool get isTelevision => false;
   @override
   Stream<TrayAction> get trayActions => const Stream.empty();

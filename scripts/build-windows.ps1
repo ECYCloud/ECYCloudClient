@@ -13,11 +13,14 @@ param(
     [ValidateSet('x64', 'arm64')]
     [string]$Arch = 'x64',
 
-    # 需要本机已安装 Inno Setup 7（iscc.exe 在 PATH 中）
+    # 需要本机已安装 Inno Setup 7.1.1（iscc.exe 在 PATH 中）
     [switch]$Installer,
 
     # CI 机器上没有面板仓库，直接用仓库里已有的随包素材
     [switch]$SkipAssetSync,
+
+    # 跳过构建，只签名并打包已有的 build\windows\<arch>（CI 签名作业用，不运行任何依赖代码）
+    [switch]$FromStage,
 
     [string]$Version = '1.0.1',
 
@@ -70,6 +73,18 @@ if (Test-Path 'D:\') {
     New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 }
 
+if ($Installer) {
+    $iscc = Get-Command 'iscc.exe' -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $iscc) {
+        throw '未找到 iscc.exe，请安装 Inno Setup 7.1.1 并加入 PATH'
+    }
+    $isccVersion = & $iscc.Source '--version' 2>&1
+    if ($LASTEXITCODE -ne 0 -or "$isccVersion".Trim() -ne '7.1.1') {
+        throw "安装器需要 Inno Setup 7.1.1，请检查 PATH 中的编译器：$($iscc.Source)"
+    }
+    Write-Host "安装器编译器：Inno Setup $isccVersion（$($iscc.Source)）"
+}
+
 # eSigner 凭据与 CodeSignTool 齐全才签名，全部缺省时照常出未签名包
 $signNames = @('ES_USERNAME', 'ES_PASSWORD', 'ES_CREDENTIAL_ID', 'ES_TOTP_SECRET', 'CODE_SIGN_TOOL_PATH')
 $signMissing = @($signNames | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
@@ -78,54 +93,61 @@ if ($signMissing.Count -gt 0 -and $signMissing.Count -lt $signNames.Count) {
 }
 $sign = $signMissing.Count -eq 0
 $signScript = Join-Path $scriptDir 'sign-windows.ps1'
-
-& (Join-Path $scriptDir 'fetch-kernel.ps1') -Arch $Arch
-& (Join-Path $scriptDir 'build-service.ps1') -Arch $Arch
-if (-not $SkipAssetSync) {
-    & (Join-Path $scriptDir 'sync-assets.ps1')
-}
-
-Push-Location $appDir
-try {
-    # --build-name 喂 VERSIONINFO，只能是纯号段；窗口标题另取环境变量里的展示串
-    $env:ECYCLOUD_VERSION = if ($Channel -eq 'pre') { "Pre $Version" } else { $Version }
-    # Flutter 目前只为宿主架构产出 Windows 产物，arm64 包需在 arm64 机器上构建
-    flutter build windows --release --build-name $Version `
-        --dart-define="ECYCLOUD_SITE_URL=$PanelUrl" `
-        --dart-define="ECYCLOUD_SUB_URL=$SubUrl" `
-        --dart-define="ECYCLOUD_VERSION=$env:ECYCLOUD_VERSION"
-    if ($LASTEXITCODE -ne 0) { throw 'flutter build windows 失败' }
-}
-finally {
-    Pop-Location
-}
-
-$flutterArch = if ($Arch -eq 'x64') { 'x64' } else { 'arm64' }
-$releaseDir = Join-Path $appDir "build\windows\$flutterArch\runner\Release"
-if (-not (Test-Path (Join-Path $releaseDir 'ECYCloud.exe'))) {
-    throw "未找到 Flutter 产物：$releaseDir"
-}
-
-if (Test-Path $stageDir) {
-    Remove-Item $stageDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
-
-Copy-Item (Join-Path $releaseDir '*') $stageDir -Recurse -Force
-
-# 服务按自身目录定位 mihomo.exe。逐个点名：build/deps 是增量的，换内核后旧文件还在
 $serviceDir = Join-Path $stageDir 'service'
-New-Item -ItemType Directory -Force -Path $serviceDir | Out-Null
-# geodata 与内核同目录：缺了内核会按 geox-url 同步下载，面板地址在目标网络不可达
-foreach ($name in @('ecycloud-service.exe', 'mihomo.exe', 'LICENSE.mihomo.txt', 'geoip.metadb', 'GeoSite.dat')) {
-    $source = Join-Path $depsDir $name
-    if (-not (Test-Path $source)) {
-        throw "缺少 $source"
-    }
-    Copy-Item $source $serviceDir -Force
-}
 
-Copy-Item (Join-Path $rootDir 'LICENSE') (Join-Path $stageDir 'LICENSE.txt') -Force
+if ($FromStage) {
+    if (-not (Test-Path (Join-Path $stageDir 'ECYCloud.exe')) -or -not (Test-Path (Join-Path $serviceDir 'ecycloud-service.exe'))) {
+        throw "未找到待签名的组装产物：$stageDir"
+    }
+}
+else {
+    & (Join-Path $scriptDir 'fetch-kernel.ps1') -Arch $Arch
+    & (Join-Path $scriptDir 'build-service.ps1') -Arch $Arch
+    if (-not $SkipAssetSync) {
+        & (Join-Path $scriptDir 'sync-assets.ps1')
+    }
+
+    Push-Location $appDir
+    try {
+        # --build-name 喂 VERSIONINFO，只能是纯号段；窗口标题另取环境变量里的展示串
+        $env:ECYCLOUD_VERSION = if ($Channel -eq 'pre') { "Pre $Version" } else { $Version }
+        # Flutter 目前只为宿主架构产出 Windows 产物，arm64 包需在 arm64 机器上构建
+        flutter build windows --release --build-name $Version `
+            --dart-define="ECYCLOUD_SITE_URL=$PanelUrl" `
+            --dart-define="ECYCLOUD_SUB_URL=$SubUrl" `
+            --dart-define="ECYCLOUD_VERSION=$env:ECYCLOUD_VERSION"
+        if ($LASTEXITCODE -ne 0) { throw 'flutter build windows 失败' }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $flutterArch = if ($Arch -eq 'x64') { 'x64' } else { 'arm64' }
+    $releaseDir = Join-Path $appDir "build\windows\$flutterArch\runner\Release"
+    if (-not (Test-Path (Join-Path $releaseDir 'ECYCloud.exe'))) {
+        throw "未找到 Flutter 产物：$releaseDir"
+    }
+
+    if (Test-Path $stageDir) {
+        Remove-Item $stageDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
+    Copy-Item (Join-Path $releaseDir '*') $stageDir -Recurse -Force
+
+    # 服务按自身目录定位 mihomo.exe。逐个点名：build/deps 是增量的，换内核后旧文件还在
+    New-Item -ItemType Directory -Force -Path $serviceDir | Out-Null
+    # geodata 与内核同目录：缺了内核会按 geox-url 同步下载，面板地址在目标网络不可达
+    foreach ($name in @('ecycloud-service.exe', 'mihomo.exe', 'LICENSE.mihomo.txt', 'geoip.metadb', 'GeoSite.dat')) {
+        $source = Join-Path $depsDir $name
+        if (-not (Test-Path $source)) {
+            throw "缺少 $source"
+        }
+        Copy-Item $source $serviceDir -Force
+    }
+
+    Copy-Item (Join-Path $rootDir 'LICENSE') (Join-Path $stageDir 'LICENSE.txt') -Force
+}
 
 # mihomo.exe 不签：在线升级会换成官方未签名的版本
 if ($sign) {
@@ -138,11 +160,6 @@ Write-Host "客户端产物已就绪：$stageDir"
 
 if (-not $Installer) {
     return
-}
-
-$iscc = Get-Command 'iscc.exe' -ErrorAction SilentlyContinue
-if (-not $iscc) {
-    throw '未找到 iscc.exe，请安装 Inno Setup 7 并加入 PATH'
 }
 
 $isccArgs = @(

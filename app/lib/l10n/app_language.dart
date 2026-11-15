@@ -54,31 +54,31 @@ enum AppLanguage {
         fromDevice(device ?? PlatformDispatcher.instance.locale);
   }
 
-  static AppSettings seed(SettingsStore store, AppSettings settings) {
-    final AppLanguage? language = tryParse(settings.locale);
-    if (language != null && settings.locale == language.code) {
+  // 每次运行安装器都会选一次语言并重写 installer-locale；比上次保存的设置新，说明这次安装晚于用户最后一次改设置
+  static AppSettings seed(
+    SettingsStore store,
+    AppSettings settings, {
+    String? Function(DateTime? after) installerLocale = readInstallerLocale,
+  }) {
+    final String? next =
+        installerLocale(store.savedAt) ??
+        tryParse(settings.locale)?.code ??
+        (store.hasPersistedSettings
+            ? resolve(stored: settings.locale).code
+            : null);
+    if (next == null || next == settings.locale) {
       return settings;
     }
-    final String? installer = language?.code ?? readInstallerLocale();
-    if (installer != null) {
-      final AppSettings next = settings.copyWith(locale: installer);
-      store.save(next);
-      return next;
-    }
-    if (store.hasPersistedSettings) {
-      final AppSettings next = settings.copyWith(
-        locale: resolve(stored: settings.locale).code,
-      );
-      store.save(next);
-      return next;
-    }
-    return settings;
+    final AppSettings seeded = settings.copyWith(locale: next);
+    store.save(seeded);
+    return seeded;
   }
 
-  static String? readInstallerLocale() {
+  static String? readInstallerLocale(DateTime? after) {
     try {
       final File file = AppPaths.installerLocale;
-      if (!file.existsSync()) {
+      if (!file.existsSync() ||
+          (after != null && !file.lastModifiedSync().isAfter(after))) {
         return null;
       }
       return tryParse(file.readAsStringSync())?.code;

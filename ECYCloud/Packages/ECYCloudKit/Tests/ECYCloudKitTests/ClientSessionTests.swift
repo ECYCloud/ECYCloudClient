@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 import Testing
@@ -16,9 +17,11 @@ private enum Fixture {
     """#
     static let catalog = #"""
     {"revision":"revision-1","config":{"proxies":[],"proxy-providers":{
-      "ecy-panel-nodes":{"type":"file","payload":[{"name":"node-12","type":"ss","password":"discarded-secret"}]}}},
-     "node_labels":{"node-12":"测试节点"}}
+      "ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-12","type":"ss","password":"discarded-secret"}]}},
+      "proxy-groups":[{"name":"主节点","type":"select","use":["ecy-panel-nodes"]}],"rules":["MATCH,主节点"]},
+     "node_labels":{"node-12":"测试节点"},"offline_authorization":{"issued_at":\#(fetchedAt)}}
     """#
+    static let fetchedAt = Int(Date().timeIntervalSince1970)
     static let options = #"{"reg_mode":"open","enable_change_email":true,"enable_kill":true,"enable_password_change_reset_subscription":false,"email_verify":true,"api_origin":"https://config.example.test","site_origin":"https://site.example.test"}"#
     static let login = #"{"token":"synthetic-token","expires_at":"2099-01-01T00:00:00+00:00","user":\#(profile)}"#
 
@@ -41,6 +44,8 @@ private actor FakeTransport: HTTPTransport {
         let path: String
         let result: Result<HTTPResult, ClientError>
         var paused = false
+        // 新地址探测在后台跑，与同一流程里的后续请求先后不定：只认领不带设备头的探测请求，按主机与路径匹配，不占顺序
+        var probeHost: String? = nil
     }
 
     private var steps: [Step]
@@ -52,11 +57,13 @@ private actor FakeTransport: HTTPTransport {
 
     func send(_ request: URLRequest) async throws -> HTTPResult {
         requests.append(request)
-        guard !steps.isEmpty else {
-            Issue.record("收到未预期的请求：\(request.url!.path)")
+        let probe = request.value(forHTTPHeaderField: "X-Device-Name") == nil
+            ? steps.firstIndex(where: { $0.probeHost == request.url!.host && request.url!.path == "/api/client/v1\($0.path)" }) : nil
+        guard let index = probe ?? steps.firstIndex(where: { $0.probeHost == nil }) else {
+            Issue.record("收到未预期的请求：\(request.url!.host ?? "")\(request.url!.path)")
             throw ClientError.network
         }
-        let step = steps.removeFirst()
+        let step = steps.remove(at: index)
         #expect(request.url!.path == "/api/client/v1\(step.path)")
         if step.paused {
             await withCheckedContinuation { continuation in
@@ -88,8 +95,14 @@ private final class MemoryVault: CredentialVault {
     func clearRemembered() throws { remembered = nil }
     var failSave = false
     var failClear = false
-    func load() throws -> StoredSession? { value }
+    var failLoad = false
+    var saveAttempts = 0
+    func load() throws -> StoredSession? {
+        if failLoad { throw ClientError.keychain(-1) }
+        return value
+    }
     func save(_ session: StoredSession) throws {
+        saveAttempts += 1
         if failSave { throw ClientError.keychain(-1) }
         value = session
     }
@@ -103,6 +116,11 @@ private func reply(_ path: String, _ json: String, paused: Bool = false) -> Fake
     .init(path: path, result: .success(Fixture.response(json)), paused: paused)
 }
 
+private func probe(_ host: String, _ path: String, reachable: Bool) -> FakeTransport.Step {
+    .init(path: path, result: reachable ? .success(HTTPResult(data: Data(#"{"ret":0,"msg":"缺少访问令牌"}"#.utf8), status: 401))
+                                         : .failure(.networkFailure(URLError.cannotConnectToHost.rawValue)), probeHost: host)
+}
+
 private func failure(_ path: String, status: Int, code: Int = 0, retry: Int? = nil) -> FakeTransport.Step {
     .init(path: path, result: .success(HTTPResult(
         data: Data(#"{"ret":\#(code),"msg":"合成错误"}"#.utf8), status: status, retryAfter: retry
@@ -114,7 +132,7 @@ private func makeSession(_ transport: FakeTransport, vault: MemoryVault = Memory
     ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport), vault: vault)
 }
 
-@Suite("认证与账户隔离", .timeLimit(.minutes(1)))
+@Suite("认证与账户隔离", .timeLimit(.minutes(1)), .isolatedUserData)
 @MainActor
 struct ClientSessionTests {
     @Test func profileRevisionsArePerPageAndOptional() throws {
@@ -138,22 +156,19 @@ struct ClientSessionTests {
         #expect(await transport.recorded().count == 2)
     }
 
-    @Test func missingOptionsRemainUnknownAndForegroundCanRecover() async {
+    @Test func missingOptionsAreFetchedBeforeSendingEmailCode() async {
         let lookup = FakeTransport.Step(path: "/auth/options", result: .failure(.networkFailure(URLError.cannotFindHost.rawValue)))
-        let transport = FakeTransport([lookup, lookup, lookup, reply("/auth/options", Fixture.options)])
+        let transport = FakeTransport([lookup, lookup, lookup, reply("/auth/options", Fixture.options), reply("/auth/send-login-verify", "{}")])
         let session = makeSession(transport)
         await session.start()
         #expect(session.options == nil && !session.busy && session.phase == .signedOut)
         #expect(session.message?.contains("-1003") == true)
         #expect(await transport.recorded().count == 3)
         await session.sendEmailCode(email: "member@example.test")
-        #expect(session.message == "尚未获取站点登录选项，请先重试。")
-        #expect(await transport.recorded().count == 3)
+        #expect(session.options?.emailVerify == true && session.emailCooldown(.login) > 0)
+        #expect(await transport.recorded().count == 5)
         await session.refresh()
-        #expect(session.options?.emailVerify == true && session.message == nil)
-        #expect(await transport.recorded().count == 4)
-        await session.refresh()
-        #expect(await transport.recorded().count == 4)
+        #expect(await transport.recorded().count == 5)
     }
 
     @Test func disabledEmailLoginDoesNotSendMailOrLogin() async {
@@ -284,19 +299,19 @@ struct ClientSessionTests {
         #expect(await transport.recorded().count == 1)
     }
 
-    @Test func emailLoginRespectsOptionsAndOmitsPassword() async throws {
+    @Test func emailLoginFetchesMissingOptionsFirstAndOmitsPassword() async throws {
         let transport = FakeTransport([
-            reply("/auth/options", Fixture.options), reply("/auth/send-login-verify", "{}"),
+            failure("/auth/options", status: 500), reply("/auth/options", Fixture.options),
             reply("/auth/login-with-verify-code", Fixture.login), reply("/config/clash", Fixture.catalog)
         ])
         let session = makeSession(transport)
         await session.restore()
         await session.login(email: "member@example.test", password: "", code: "ABC123", emailCode: true)
-        #expect(await transport.recorded().isEmpty)
-        await session.loadOptions()
-        await session.sendEmailCode(email: "member@example.test")
+        #expect(session.phase == .signedOut && session.options == nil && session.message != nil)
+        #expect(await transport.recorded().count == 1)
         await session.login(email: "member@example.test", password: "unused", code: "ABC123", emailCode: true)
         let requests = await transport.recorded()
+        #expect(requests[1].url?.path == "/api/client/v1/auth/options")
         let body = try #require(JSONSerialization.jsonObject(with: requests[2].httpBody!) as? [String: String])
         #expect(body["passwd"] == nil && body["code"] == "ABC123")
         #expect(session.phase == .signedIn)
@@ -385,6 +400,77 @@ struct ClientSessionTests {
         #expect(session.message?.contains("未能确认服务器会话撤销") == true)
     }
 
+    // 上次退出未清理完或启动时令牌已过期时并未进入已登录态，旧账户的日志与图标缓存仍要按本机会话清掉
+    @Test(arguments: [true, false]) func cleanupBeforeSignInRemovesOldAccountFiles(pending: Bool) async throws {
+        let vault = MemoryVault()
+        vault.value = pending ? Fixture.stored : StoredSession(token: "synthetic-expired-token", expiresAt: Date(timeIntervalSince1970: 1),
+                                                               email: "member@example.test", userID: 7, endpoints: Fixture.endpoints)
+        vault.logoutPending = pending
+        let owner = SHA256.hash(data: Data(vault.value!.token.utf8)).map { String(format: "%02x", $0) }.joined()
+        let root = try #require(UserDataDirectory.override)
+        let logs = try #require(ClientLogStore.directory(owner: owner))
+        let icons = root.appendingPathComponent("icons/\(owner)", isDirectory: true)
+        #expect(logs.path.hasPrefix(root.path))
+        for directory in [logs, icons] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("synthetic".utf8).write(to: directory.appendingPathComponent("entry"))
+        }
+        defer { for directory in [logs, icons] { try? FileManager.default.removeItem(at: directory) } }
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: FakeTransport([])),
+                                    vault: vault, connection: ConnectionController(driver: RecordingTunnelDriver()), nodeProbes: NodeProbeState(defaults: nil))
+        await session.restore()
+        #expect(session.phase == .signedOut && vault.value == nil)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while FileManager.default.fileExists(atPath: logs.path), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!FileManager.default.fileExists(atPath: logs.path) && !FileManager.default.fileExists(atPath: icons.path))
+    }
+
+    // 对应 panel_origin_fallback_test.dart：只有网络层失败算不可达，HTTP 错误与鉴权失败说明主机仍在应答
+    @Test func panelRequestsReportOnlyNetworkFailuresAsUnreachable() async {
+        let transport = FakeTransport([.init(path: "/announcements", result: .failure(.networkFailure(URLError.timedOut.rawValue))),
+                                       failure("/announcements", status: 500), failure("/announcements", status: 401, code: 0)])
+        let api = PanelAPI(device: Fixture.device, transport: transport)
+        var events: [Bool] = []
+        api.route.reached = { _, reachable in events.append(reachable) }
+        for _ in 0..<3 { _ = try? await api.perform("/announcements", origin: Fixture.endpoints.site, token: "synthetic-token") }
+        #expect(events == [false, true, true])
+    }
+
+    @Test func unreachablePersistedOriginFallsBackToBundledAndPersistsAfterRecovery() async throws {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        var instant = base
+        let vault = MemoryVault()
+        let moved = try PanelEndpoints(site: "https://moved.example.test", config: "https://moved-config.example.test")
+        vault.endpoints = moved
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: FakeTransport([])),
+                                    vault: vault, now: { instant })
+        let probe = moved.site.appendingPathComponent("api/client/v1/auth/options")
+        for minutes in [0.0, 9] { instant = base.addingTimeInterval(minutes * 60); session.api.route.reach(probe, false) }
+        session.api.route.reach(probe, true)
+        for minutes in [9.0, 18, 18] { instant = base.addingTimeInterval(minutes * 60); session.api.route.reach(probe, false) }
+        #expect(session.endpoints == moved)
+        instant = base.addingTimeInterval(20 * 60)
+        session.api.route.reach(probe, false)
+        #expect(session.endpoints.site == Fixture.endpoints.site && session.endpoints.config == moved.config)
+        #expect(vault.endpoints == moved)
+        session.api.route.reach(Fixture.endpoints.site.appendingPathComponent("api/client/v1/auth/options"), true)
+        #expect(vault.endpoints?.site == Fixture.endpoints.site && vault.endpoints?.config == moved.config)
+    }
+
+    @Test func unreachableBundledOriginSwitchesBackInsteadOfSticking() async throws {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        var instant = base
+        let vault = MemoryVault()
+        let moved = try PanelEndpoints(site: "https://moved.example.test", config: "https://moved-config.example.test")
+        vault.endpoints = moved
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: FakeTransport([])),
+                                    vault: vault, now: { instant })
+        for minutes in [0.0, 5, 10] { instant = base.addingTimeInterval(minutes * 60); session.api.route.reach(moved.config, false) }
+        #expect(session.endpoints.config == Fixture.endpoints.config && session.endpoints.site == moved.site)
+        for minutes in [10.0, 15, 20] { instant = base.addingTimeInterval(minutes * 60); session.api.route.reach(Fixture.endpoints.config, false) }
+        #expect(session.endpoints == moved && vault.endpoints == moved)
+    }
+
     @Test func keychainDeletionFailureCannotRestoreOldLogin() async {
         let vault = MemoryVault()
         vault.value = Fixture.stored
@@ -401,15 +487,68 @@ struct ClientSessionTests {
         #expect(session.phase == .signedOut && vault.value == nil && !vault.logoutPending)
     }
 
-    @Test func keychainSaveFailureRevokesIssuedTokenAndKeepsLoggedOut() async {
-        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/auth/logout", "{}")])
+    @Test func keychainSaveFailureKeepsLoginForThisRunWithoutRevokingIt() async {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
         let vault = MemoryVault()
         vault.failSave = true
         let session = makeSession(transport, vault: vault)
         await session.restore()
         await session.login(email: "member@example.test", password: "synthetic-password")
-        #expect(session.phase == .signedOut && vault.value == nil && session.profile == nil)
-        #expect(await transport.recorded().count == 2)
+        #expect(session.phase == .signedIn && vault.value == nil && session.profile?.id == 7 && session.catalog != nil)
+        #expect(await !transport.recorded().contains { $0.url?.path.hasSuffix("/auth/logout") == true })
+    }
+
+    @Test func keychainReadFailureOnLaunchShowsErrorAndCanBeRetried() async {
+        let transport = FakeTransport([reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile), reply("/config/clash", Fixture.catalog)])
+        let vault = MemoryVault()
+        vault.value = Fixture.stored
+        vault.failLoad = true
+        let session = makeSession(transport, vault: vault)
+        await session.start()
+        #expect(session.phase == .starting && !session.busy && !session.panelOffline)
+        #expect(session.message == ClientError.keychain(-1).localizedDescription)
+        #expect(await transport.recorded().isEmpty)
+        vault.failLoad = false
+        await session.start()
+        #expect(session.phase == .signedIn && session.message == nil && session.profile?.id == 7 && session.catalog != nil)
+    }
+
+    @Test func profileRefreshWritesKeychainOnlyOnChangeAndWriteFailureIsNotPanelOutage() async {
+        let transport = FakeTransport([
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile)
+        ])
+        let vault = MemoryVault()
+        vault.value = StoredSession(token: "synthetic-token", expiresAt: Fixture.stored.expiresAt, email: "member@example.test", userID: nil, endpoints: Fixture.endpoints)
+        vault.failSave = true
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        #expect(vault.saveAttempts == 1 && session.message == ClientError.keychain(-1).localizedDescription)
+        #expect(session.phase == .signedIn && !session.panelOffline && session.profile?.id == 7 && session.catalog != nil)
+        await session.refresh()
+        #expect(vault.saveAttempts == 1 && session.message == nil && !session.panelOffline && session.phase == .signedIn)
+    }
+
+    @Test func invalidDeliveredOriginsAreIgnoredAndValidOnesStillOffered() async {
+        let user = Fixture.profile.replacingOccurrences(of: #""api_origin":"https://config.example.test""#, with: #""api_origin":"""#)
+            .replacingOccurrences(of: "https://site.example.test", with: "http://plain.example.test")
+        let options = Fixture.options.replacingOccurrences(of: "https://site.example.test", with: "javascript:alert(1)")
+            .replacingOccurrences(of: "config.example.test", with: "next-config.example.test")
+        let transport = FakeTransport([
+            reply("/auth/login", #"{"token":"synthetic-token","expires_at":"2099-01-01T00:00:00+00:00","user":\#(user)}"#),
+            reply("/config/clash", Fixture.catalog),
+            reply("/auth/logout", "{}"),
+            reply("/auth/options", options), probe("next-config.example.test", "/config/revision", reachable: true)
+        ])
+        let vault = MemoryVault()
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        #expect(session.phase == .signedIn && session.endpoints == Fixture.endpoints && vault.value?.endpoints == Fixture.endpoints)
+        await session.logout()
+        await session.loadOptions()
+        await session.originProbe?.value
+        #expect(session.options != nil && session.endpoints.site == Fixture.endpoints.site && session.endpoints.config.host == "next-config.example.test")
     }
 
     @Test func malformedNodeRefreshPreservesPreviousCatalog() async {
@@ -423,6 +562,34 @@ struct ClientSessionTests {
         await session.loadNodes()
         #expect(session.catalog?.revision == "revision-1" && session.nodesError != nil)
         #expect(!session.nodesLoading && session.phase == .signedIn)
+    }
+
+    // 对应 connection_controller.dart 的 _acceptRemote：结构检查不通过时保留上一份目录与缓存，弹窗列出问题，同一组问题只弹一次
+    @Test func invalidNodeRefreshKeepsCatalogAndCacheAndAlertsOnce() async throws {
+        let invalid = Fixture.catalog.replacingOccurrences(of: "revision-1", with: "revision-2")
+            .replacingOccurrences(of: #""rules":["MATCH,主节点"]"#, with: #""rules":["MATCH,主节点"],"geox-url":{"mmdb":"http://example.test/geoip.metadb"}"#)
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            reply("/config/clash", invalid), reply("/config/clash", invalid)
+        ])
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ecycloud-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = PanelResponseCache(directory: directory)
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport), vault: MemoryVault(), cache: cache)
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        #expect(session.catalog?.revision == "revision-1" && session.configAlert == nil)
+        await session.loadNodes()
+        let issue = L10n.t("geox-url「{0}」必须使用 https", ["mmdb"])
+        #expect(session.catalog?.revision == "revision-1" && session.configAlert == issue && session.nodesError?.contains(issue) == true)
+        let binding = session.api.cacheBinding(Fixture.endpoints, token: "synthetic-token")
+        cache.saveProfile(Fixture.response(Fixture.profile).data, account: "member@example.test")
+        #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: session.api.cacheKey(token: "synthetic-token"),
+                              now: Date())?.catalog?.revision == "revision-1")
+        session.configAlert = nil
+        await session.loadNodes()
+        #expect(session.configAlert == nil && session.catalog?.revision == "revision-1")
+        #expect(await transport.recorded().count == 4)
     }
 
     @Test func rateLimitPreventsImmediateResubmission() async {
@@ -466,6 +633,75 @@ struct ClientSessionTests {
         #expect(await transport.recorded().count == 7)
     }
 
+    // 对应 connection_controller.dart 的 _remoteUpdateDue：revision 不变也按 profile-update-interval 定时重拉，内容相同不重连
+    @Test func refreshRefetchesUnchangedRevisionOnceUpdateIntervalElapses() async throws {
+        final class Clock { var value: Date; init(_ value: Date) { self.value = value } }
+        let issued = 1_800_000_000
+        let clock = Clock(Date(timeIntervalSince1970: TimeInterval(issued + 60)))
+        func clash(_ issuedAt: Int) -> FakeTransport.Step {
+            let json = Fixture.catalog.replacingOccurrences(of: "\(Fixture.fetchedAt)", with: "\(issuedAt)")
+            return .init(path: "/config/clash", result: .success(HTTPResult(data: Data(#"{"ret":1,"data":\#(json)}"#.utf8), status: 200, profileUpdateInterval: "2")))
+        }
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), clash(issued),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile), clash(issued + 7200),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile)
+        ])
+        let driver = RecordingTunnelDriver()
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                    vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil),
+                                    now: { clock.value })
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        #expect(session.catalog?.updateIntervalHours == 2)
+        await session.connect()
+        driver.statusChanged?(.connected)
+        #expect(driver.starts.count == 1 && session.connection?.state == .connected)
+        func clashCount() async -> Int { await transport.recorded().filter { $0.url?.path.hasSuffix("/config/clash") == true }.count }
+        clock.value = Date(timeIntervalSince1970: TimeInterval(issued + 7199))
+        await session.refresh()
+        #expect(await clashCount() == 1)
+        clock.value = Date(timeIntervalSince1970: TimeInterval(issued + 7200))
+        await session.refresh()
+        let due = await clashCount()
+        #expect(due == 2 && session.catalog?.revision == "revision-1")
+        #expect(driver.starts.count == 1 && driver.stopCount == 0 && session.connection?.state == .connected)
+        await session.refresh()
+        let after = await clashCount()
+        let total = await transport.recorded().count
+        #expect(after == 2 && total == 11)
+        session.connection?.disconnect()
+    }
+
+    @Test func invalidOrMissingUpdateIntervalFallsBackToDefault() throws {
+        for raw in [nil, "", "0", "-1", "8761", "abc", "1.5", "24h"] { #expect(NodeCatalog.updateIntervalHours(raw) == nil) }
+        #expect(NodeCatalog.updateIntervalHours("1") == 1 && NodeCatalog.updateIntervalHours(" 12 ") == 12 && NodeCatalog.updateIntervalHours("8760") == 8760)
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        var catalog = try decoder.decode(NodeCatalog.self, from: Data(Fixture.catalog.utf8))
+        let issued = Date(timeIntervalSince1970: TimeInterval(Fixture.fetchedAt))
+        catalog.updateIntervalHours = NodeCatalog.updateIntervalHours("0")
+        #expect(!catalog.updateDue(at: issued.addingTimeInterval(24 * 3600 - 1)) && catalog.updateDue(at: issued.addingTimeInterval(24 * 3600)))
+        catalog.updateIntervalHours = 2
+        #expect(catalog.updateDue(at: issued.addingTimeInterval(2 * 3600)))
+        let legacy = try decoder.decode(NodeCatalog.self, from: Data(#"{"revision":"r","config":{"proxies":[]},"node_labels":{}}"#.utf8))
+        #expect(legacy.updateDue(at: issued))
+    }
+
+    @Test func updateIntervalPersistsWithCachedConfig() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ecycloud-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = PanelResponseCache(directory: directory)
+        cache.saveProfile(Fixture.response(Fixture.profile).data, account: "member@example.test")
+        let key = SymmetricKey(size: .bits256)
+        cache.saveConfig(Fixture.response(Fixture.catalog).data, account: "member@example.test", binding: "binding", sealKey: key, updateIntervalHours: 6)
+        let restored = try #require(cache.restore(account: "member@example.test", binding: "binding", sealKey: key, now: Date())?.catalog)
+        #expect(restored.updateIntervalHours == 6 && restored.issuedAt == Date(timeIntervalSince1970: TimeInterval(Fixture.fetchedAt)))
+        cache.saveConfig(Fixture.response(Fixture.catalog).data, account: "member@example.test", binding: "binding", sealKey: key, updateIntervalHours: 9000)
+        #expect(cache.restore(account: "member@example.test", binding: "binding", sealKey: key, now: Date())?.catalog?.updateIntervalHours == nil)
+    }
+
     @Test func refreshRestrictionClearsPreviouslyLoadedNodes() async {
         let transport = FakeTransport([
             reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
@@ -478,19 +714,74 @@ struct ClientSessionTests {
         #expect(session.phase == .restricted && session.catalog == nil && session.profile == nil)
     }
 
+    // 新地址先探测可达再采用：采用后的请求打新地址并落盘，登录响应里的地址同样先探再切
     @Test func advertisedOriginsApplyToFollowingRequestsAndPersist() async {
         let options = Fixture.options.replacingOccurrences(of: "site.example.test", with: "next-site.example.test")
         let transport = FakeTransport([
-            reply("/auth/options", options), reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)
+            reply("/auth/options", options), probe("next-site.example.test", "/auth/options", reachable: true),
+            reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            probe("site.example.test", "/auth/options", reachable: true)
         ])
         let vault = MemoryVault()
         let session = makeSession(transport, vault: vault)
         await session.start()
+        await session.originProbe?.value
         #expect(vault.endpoints?.site.host == "next-site.example.test")
         await session.login(email: "member@example.test", password: "synthetic-password")
+        await session.originProbe?.value
         let requests = await transport.recorded()
-        #expect(requests[1].url?.host == "next-site.example.test")
+        #expect(requests.first { $0.url?.path == "/api/client/v1/auth/login" }?.url?.host == "next-site.example.test")
         #expect(vault.value?.endpoints == Fixture.endpoints)
+    }
+
+    // 回退到出包地址后面板仍下发那个连不上的旧地址：探测失败就留在出包地址，10 分钟内不再探；探测不带令牌、不计入回退计数
+    @Test func deliveredUnreachableOriginIsProbedInsteadOfSwitchingBack() async throws {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        var instant = base
+        let vault = MemoryVault()
+        let moved = try PanelEndpoints(site: "https://moved.example.test", config: "https://moved-config.example.test")
+        vault.endpoints = moved
+        let options = Fixture.options.replacingOccurrences(of: "https://site.example.test", with: moved.site.absoluteString)
+            .replacingOccurrences(of: "https://config.example.test", with: moved.config.absoluteString)
+        let transport = FakeTransport([
+            reply("/auth/options", options), probe("moved.example.test", "/auth/options", reachable: false),
+            reply("/auth/options", options),
+            reply("/auth/options", options), probe("moved.example.test", "/auth/options", reachable: false)
+        ])
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                    vault: vault, now: { instant })
+        await session.restore()
+        let movedProbe = moved.site.appendingPathComponent("api/client/v1/auth/options")
+        for minutes in [0.0, 5, 10] { instant = base.addingTimeInterval(minutes * 60); session.api.route.reach(movedProbe, false) }
+        session.api.route.reach(Fixture.endpoints.site.appendingPathComponent("api/client/v1/auth/options"), true)
+        #expect(session.endpoints.site == Fixture.endpoints.site && vault.endpoints?.site == Fixture.endpoints.site)
+        await session.loadOptions()
+        await session.originProbe?.value
+        #expect(session.endpoints.site == Fixture.endpoints.site && vault.endpoints?.site == Fixture.endpoints.site)
+        instant = base.addingTimeInterval(19 * 60)
+        await session.loadOptions()
+        await session.originProbe?.value
+        instant = base.addingTimeInterval(20 * 60)
+        await session.loadOptions()
+        await session.originProbe?.value
+        #expect(session.endpoints.site == Fixture.endpoints.site && vault.endpoints?.site == Fixture.endpoints.site)
+        let probes = await transport.recorded().filter { $0.url?.host == "moved.example.test" }
+        #expect(probes.count == 2 && probes.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+    }
+
+    // 配置域没有公开接口：不带令牌探 /config/revision，鉴权中间件回 401 也算可达，立即采用并落盘；站点地址不受影响
+    @Test func reachableDeliveredConfigOriginIsAdoptedAfterProbe() async throws {
+        let options = Fixture.options.replacingOccurrences(of: "config.example.test", with: "next-config.example.test")
+        let transport = FakeTransport([reply("/auth/options", options), probe("next-config.example.test", "/config/revision", reachable: true)])
+        let vault = MemoryVault()
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        await session.loadOptions()
+        await session.originProbe?.value
+        #expect(session.endpoints.config.host == "next-config.example.test" && session.endpoints.site == Fixture.endpoints.site)
+        #expect(vault.endpoints?.config.host == "next-config.example.test")
+        let probe = try #require(await transport.recorded().last)
+        #expect(probe.url?.path == "/api/client/v1/config/revision" && probe.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
     @Test(arguments: [
@@ -553,8 +844,120 @@ struct ParsingTests {
     }
 }
 
+private final class MemoryKeychain: @unchecked Sendable {
+    private var items: [String: [String: Any]] = [:]
 
-@Suite("注册、恢复与公共文档", .timeLimit(.minutes(1)))
+    func item(_ service: String, _ account: String) -> [String: Any]? { items["\(service)/\(account)"] }
+    func corrupt(_ service: String, _ account: String) { items["\(service)/\(account)"]?[kSecValueData as String] = Data("not json".utf8) }
+
+    private func key(_ query: CFDictionary) -> String {
+        let query = query as NSDictionary
+        return "\(query[kSecAttrService as String] ?? "")/\(query[kSecAttrAccount as String] ?? "")"
+    }
+
+    var calls: KeychainVault.Keychain {
+        KeychainVault.Keychain(
+            copy: { query, result in
+                guard let data = self.items[self.key(query)]?[kSecValueData as String] as? Data else { return errSecItemNotFound }
+                result?.pointee = data as NSData
+                return errSecSuccess
+            },
+            add: { attributes, _ in
+                let key = self.key(attributes)
+                guard self.items[key] == nil else { return errSecDuplicateItem }
+                self.items[key] = attributes as NSDictionary as? [String: Any]
+                return errSecSuccess
+            },
+            update: { query, changes in
+                let key = self.key(query)
+                guard let item = self.items[key], let changes = changes as NSDictionary as? [String: Any] else { return errSecItemNotFound }
+                self.items[key] = item.merging(changes) { _, new in new }
+                return errSecSuccess
+            },
+            delete: { query in self.items.removeValue(forKey: self.key(query)) == nil ? errSecItemNotFound : errSecSuccess }
+        )
+    }
+}
+
+@Suite("面板地址与钥匙串", .timeLimit(.minutes(1)), .isolatedUserData)
+@MainActor
+struct KeychainOriginTests {
+    @Test func corruptedStoredSessionIsDiscardedInsteadOfBlockingLaunch() async throws {
+        let suite = "ECYCloudTests.vault.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!; defer { defaults.removePersistentDomain(forName: suite) }
+        let keychain = MemoryKeychain(), service = "ECYCloudTests.corrupt.\(UUID())"
+        let vault = KeychainVault(service: service, defaults: defaults, keychain: keychain.calls)
+        try vault.save(Fixture.stored)
+        keychain.corrupt(service, "session")
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: FakeTransport([reply("/auth/options", Fixture.options)])), vault: vault)
+        await session.start()
+        #expect(session.phase == .signedOut && keychain.item(service, "session") == nil && session.options != nil)
+    }
+
+    @Test func tamperedLegacyPreferenceCannotRedirectPanelRequests() async throws {
+        let suite = "ECYCloudTests.vault.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!; defer { defaults.removePersistentDomain(forName: suite) }
+        let forged = try JSONEncoder().encode(PanelEndpoints(site: "https://attacker.example.test", config: "https://attacker-config.example.test"))
+        defaults.set(forged, forKey: "\(suite).origins")
+        let vault = KeychainVault(service: suite, defaults: defaults, keychain: MemoryKeychain().calls)
+        #expect(defaults.object(forKey: "\(suite).origins") == nil)
+        defaults.set(forged, forKey: "\(suite).origins")
+        let transport = FakeTransport([reply("/auth/options", Fixture.options)])
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport), vault: vault)
+        #expect(session.endpoints == Fixture.endpoints)
+        await session.start()
+        #expect(await transport.recorded().map(\.url?.host) == ["site.example.test"])
+        #expect(vault.endpoints == Fixture.endpoints)
+    }
+
+    @Test func savedOriginsReadBackFromKeychainWithCredentialProtection() throws {
+        let suite = "ECYCloudTests.vault.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!; defer { defaults.removePersistentDomain(forName: suite) }
+        let keychain = MemoryKeychain()
+        let vault = KeychainVault(service: suite, defaults: defaults, keychain: keychain.calls)
+        let next = try PanelEndpoints(site: "https://next-site.example.test", config: "https://next-config.example.test")
+        vault.endpoints = next
+        #expect(defaults.object(forKey: "\(suite).origins") == nil)
+        try vault.save(Fixture.stored)
+        #expect(KeychainVault(service: suite, defaults: defaults, keychain: keychain.calls).endpoints == next)
+        #expect(KeychainVault(service: suite + ".other", defaults: defaults, keychain: keychain.calls).endpoints == nil)
+        for account in ["origins", "session"] {
+            let item = try #require(keychain.item(suite, account))
+            #expect(item[kSecClass as String] as? String == kSecClassGenericPassword as String)
+            #expect(item[kSecUseDataProtectionKeychain as String] as? Bool == true)
+            #expect(item[kSecAttrSynchronizable as String] as? Bool == false)
+            #expect(item[kSecAttrAccessible as String] as? String == kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+        }
+    }
+
+    @Test func logoutClearsSessionButKeepsOriginsLikeRememberedLogin() async throws {
+        let suite = "ECYCloudTests.vault.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!; defer { defaults.removePersistentDomain(forName: suite) }
+        let keychain = MemoryKeychain()
+        let bundled = try PanelEndpoints(site: "https://bundled.example.test", config: "https://bundled-config.example.test")
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog), reply("/auth/logout", "{}"),
+                                       probe("site.example.test", "/auth/options", reachable: true),
+                                       probe("config.example.test", "/config/revision", reachable: true)])
+        let vault = KeychainVault(service: suite, defaults: defaults, keychain: keychain.calls)
+        let session = ClientSession(endpoints: bundled, api: PanelAPI(device: Fixture.device, transport: transport), vault: vault)
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password", rememberPassword: true)
+        await session.originProbe?.value
+        #expect(session.phase == .signedIn && keychain.item(suite, "session") != nil)
+        await session.logout()
+        #expect(session.phase == .signedOut && !vault.logoutPending)
+        #expect(keychain.item(suite, "session") == nil && keychain.item(suite, "remembered-login") != nil)
+        #expect(vault.endpoints == Fixture.endpoints)
+        let relaunched = ClientSession(endpoints: bundled, api: PanelAPI(device: Fixture.device, transport: transport),
+                                       vault: KeychainVault(service: suite, defaults: defaults, keychain: keychain.calls))
+        #expect(relaunched.endpoints == Fixture.endpoints)
+        vault.endpoints = nil
+        #expect(keychain.item(suite, "origins") == nil && vault.endpoints == nil)
+    }
+}
+
+
+@Suite("注册、恢复与公共文档", .timeLimit(.minutes(1)), .isolatedUserData)
 @MainActor
 struct AuthWorkflowTests {
     @Test func registrationUsesExistingContractAndStoresSession() async throws {
@@ -594,15 +997,15 @@ struct AuthWorkflowTests {
         #expect(await transport.recorded().count == 1)
     }
 
-    @Test func failedCredentialSaveRevokesNewRegistrationSession() async {
-        let transport = FakeTransport([reply("/auth/options", Fixture.options), reply("/auth/register", Fixture.login), reply("/auth/logout", "{}")])
+    @Test func failedCredentialSaveKeepsNewRegistrationForThisRun() async {
+        let transport = FakeTransport([reply("/auth/options", Fixture.options), reply("/auth/register", Fixture.login), reply("/config/clash", Fixture.catalog)])
         let vault = MemoryVault()
         vault.failSave = true
         let session = makeSession(transport, vault: vault)
         await session.start()
         await session.register(name: "测试", email: "member@example.test", password: "synthetic-password", confirmation: "synthetic-password", invite: "", emailCode: "123456", agreed: true)
-        #expect(session.phase == .signedOut && vault.value == nil)
-        #expect(await transport.recorded().last?.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-token")
+        #expect(session.phase == .signedIn && vault.value == nil && session.profile?.id == 7)
+        #expect(await !transport.recorded().contains { $0.url?.path.hasSuffix("/auth/logout") == true })
     }
 
     @Test func resetAcceptsEmailLinkAndUsesPasswordField() async throws {
@@ -616,6 +1019,44 @@ struct AuthWorkflowTests {
         let body = try #require(JSONSerialization.jsonObject(with: requests[0].httpBody!) as? [String: String])
         #expect(body["token"] == "synthetic-reset" && body["password"] == "synthetic-password")
         #expect(body["passwd"] == nil && body["repasswd"] == body["password"])
+    }
+
+    @Test func passwordChangedWithoutTokenShowsSuccessAndStaysSignedOut() async {
+        let reply = HTTPResult(data: Data(#"{"ret":0,"msg":"修改成功，请使用新密码重新登录","password_changed":true}"#.utf8), status: 200)
+        let transport = FakeTransport([.init(path: "/auth/password-reset/confirm", result: .success(reply))])
+        let vault = MemoryVault()
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        await session.resetPassword(tokenInput: "synthetic-reset", password: "synthetic-password", confirmation: "synthetic-password")
+        #expect(session.passwordResetNotice == L10n.message("修改成功，请使用新密码重新登录"))
+        #expect(session.message == nil && !session.needsTwoFactor)
+        #expect(session.phase == .signedOut && session.profile == nil && vault.value == nil)
+        #expect(await transport.recorded().count == 1)
+        session.dismissPasswordResetNotice()
+        #expect(session.passwordResetNotice == nil && session.phase == .signedOut)
+    }
+
+    @Test(arguments: [#"{"ret":0,"msg":"合成错误"}"#, #"{"ret":0,"msg":"合成错误","password_changed":false}"#])
+    func otherResetFailuresStayFailures(body: String) async {
+        let reply = HTTPResult(data: Data(body.utf8), status: 200)
+        let transport = FakeTransport([.init(path: "/auth/password-reset/confirm", result: .success(reply))])
+        let session = makeSession(transport)
+        await session.restore()
+        await session.resetPassword(tokenInput: "synthetic-reset", password: "synthetic-password", confirmation: "synthetic-password")
+        #expect(session.passwordResetNotice == nil && session.message == L10n.message("合成错误") && session.phase == .signedOut)
+    }
+
+    @Test func passwordChangedOnErrorStatusOrOtherEntryIsNotSuccess() async {
+        let denied = HTTPResult(data: Data(#"{"ret":0,"msg":"合成错误","password_changed":true}"#.utf8), status: 403)
+        let session = makeSession(FakeTransport([.init(path: "/auth/password-reset/confirm", result: .success(denied))]))
+        await session.restore()
+        await session.resetPassword(tokenInput: "synthetic-reset", password: "synthetic-password", confirmation: "synthetic-password")
+        #expect(session.passwordResetNotice == nil && session.message == L10n.message("合成错误"))
+        let register = HTTPResult(data: Data(#"{"ret":0,"msg":"合成错误","password_changed":true}"#.utf8), status: 200)
+        let other = makeSession(FakeTransport([.init(path: "/auth/register", result: .success(register))]))
+        await other.restore()
+        await other.register(name: "member", email: "member@example.test", password: "synthetic-password", confirmation: "synthetic-password", invite: "", emailCode: "", agreed: true)
+        #expect(other.passwordResetNotice == nil && other.phase == .signedOut)
     }
 
     @Test func resetReplyAfterLogoutCannotRestoreAccount() async {
@@ -696,7 +1137,7 @@ struct AuthParsingTests {
     }
 }
 
-@Suite("账户记录与设备操作", .timeLimit(.minutes(1)))
+@Suite("账户记录与设备操作", .timeLimit(.minutes(1)), .isolatedUserData)
 @MainActor
 struct AccountHistoryTests {
     private let devices = #"{"items":[{"ip":"192.0.2.1","location":"测试地点","datetime":"2026-10-20 10:00:00","device":"测试设备","app_version":"0.1.1","device_id":"synthetic-device","online":true}],"current_page":1,"last_page":1,"total":1,"per_page":10,"log_keep_days":30}"#
@@ -803,7 +1244,7 @@ struct AccountHistoryTests {
     }
 }
 
-@Suite("节点测试", .timeLimit(.minutes(1))) @MainActor
+@Suite("节点测试", .timeLimit(.minutes(1)), .isolatedUserData) @MainActor
 struct NodeProbeTests {
     @Test func signedInStandbyTestsWithoutReportingConnectedOrTakingDeviceSlot() async throws {
         let catalog = #"{"revision":"revision-1","config":{"proxies":[{"name":"node-12","type":"socks5","server":"127.0.0.1","port":9}],"proxy-groups":[{"name":"select","type":"select","proxies":["node-12"]}],"rules":["MATCH,select"]},"node_labels":{"node-12":"测试节点"}}"#
@@ -839,7 +1280,7 @@ struct NodeProbeTests {
     }
 
     @Test func unchangedRevisionRefreshStillRestoresStandby() async throws {
-        let catalog = #"{"revision":"revision-1","config":{"proxies":[{"name":"node-12","type":"socks5","server":"127.0.0.1","port":9}],"proxy-groups":[{"name":"select","type":"select","proxies":["node-12"]}],"rules":["MATCH,select"]},"node_labels":{"node-12":"测试节点"}}"#
+        let catalog = #"{"revision":"revision-1","config":{"proxies":[{"name":"node-12","type":"socks5","server":"127.0.0.1","port":9}],"proxy-groups":[{"name":"select","type":"select","proxies":["node-12"]}],"rules":["MATCH,select"]},"node_labels":{"node-12":"测试节点"},"offline_authorization":{"issued_at":\#(Fixture.fetchedAt)}}"#
         let transport = FakeTransport([
             reply("/auth/login", Fixture.login), reply("/config/clash", catalog),
             reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile)
@@ -1016,6 +1457,120 @@ struct NodeProbeTests {
         #expect(value.nodeProbes.canTestSpeed("node-12"))
         #expect(await transport.recorded().count == 3)
     }
+    @Test func selectingNodeGoesStraightToKernelAndLargeRepliesAreAccepted() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let driver = RecordingTunnelDriver()
+        let value = await session(transport, driver: driver)
+        try await value.selectActiveNode(group: "主节点", node: "node-12")
+        #expect(driver.commands.map(\.action) == [.select] && value.nodeSelections["主节点"] == "node-12")
+        let large = try JSONSerialization.data(withJSONObject: ["members": (1...8000).map { "node-\($0)" }])
+        #expect(large.count > 65536)
+        driver.controlResponses = [large]
+        #expect(try await value.connection?.request(.init(.version)) == large)
+    }
+
+    @Test func connectRunsDuringBackgroundRefreshAndIgnoresRepeatedTaps() async throws {
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            .init(path: "/user/account-status", result: .success(Fixture.response(Fixture.status())), paused: true), reply("/user/profile", Fixture.profile),
+            .init(path: "/user/account-status", result: .success(Fixture.response(Fixture.status())), paused: true), reply("/user/profile", Fixture.profile)
+        ])
+        let driver = RecordingTunnelDriver()
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        let background = Task { await value.refresh(silently: true) }
+        await transport.waitUntilPaused()
+        #expect(value.busy)
+        await value.connect()
+        #expect(driver.starts.count == 1)
+        await transport.resume()
+        await background.value
+        value.connection?.disconnect()
+        let first = Task { await value.connect() }
+        await transport.waitUntilPaused()
+        await value.connect()
+        #expect(driver.starts.count == 1)
+        await transport.resume()
+        await first.value
+        #expect(driver.starts.count == 2)
+        value.connection?.disconnect()
+    }
+
+    @Test func connectWithoutNodesExplainsWhy() async throws {
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), failure("/config/clash", status: 500),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile), failure("/config/clash", status: 500)
+        ])
+        let driver = RecordingTunnelDriver()
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        #expect(value.catalog == nil && value.nodesError != nil)
+        await value.connect()
+        #expect(driver.starts.isEmpty && value.message != nil && value.message == value.nodesError)
+    }
+
+    // 期望值由 Flutter SDK 的 Dart 原样运行 auth_controller.dart 的 _asOrigin 与 _accountDirKey 得出
+    @Test(arguments: [
+        ("https://site.example.test", "member@example.test", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://site.example.test", "Member@Example.TEST", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://site.example.test", "  member@example.test \t", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://site.example.test", "用户@例子.测试", "8d91174e8006cfe308bbc098367407ebd351289f2317ca0325d5e5a8fc54af25"),
+        ("https://site.example.test", "ÄÖÜ.Straße@Example.test", "4dafcecb80eb86fafa9a8937858eeb76491a6d8e36a7f3affa60ee5188c9ec84"),
+        ("https://site.example.test", "a\"b\\c/d@example.test", "38b340e0598685a6fa8028eafe283801bbd2c0adb13052b83fc2e62f266b7b7e"),
+        ("https://site.example.test:443", "member@example.test", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://site.example.test:8443", "member@example.test", "f64b5ae609598edb4cbd817cc52bb96085fde67e8a4a2256197c9702e764527a"),
+        ("https://site.example.test/", "member@example.test", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://Site.EXAMPLE.test", "member@example.test", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"),
+        ("https://site.example.test/panel/path?x=1", "member@example.test", "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99")
+    ]) func accountKeyMatchesFlutterByteForByte(site: String, email: String, expected: String) throws {
+        #expect(ClientSession.accountKey(site: try #require(URL(string: site)), email: email) == expected)
+        let endpoints = try PanelEndpoints(site: site, config: "https://config.example.test")
+        #expect(ClientSession.accountKey(site: endpoints.site, email: email) == expected)
+    }
+
+    @Test func leasesUseFlutterAccountKeyAcrossLoginsAndLogoutClearsOnlyThatAccount() async throws {
+        let expected = "73a246adf91c549c82079e4783ce5407fea9abf7a0b5b6517b1bb9d10110cd99"
+        #expect(ClientSession.accountKey(site: URL(string: "https://site.example.test")!, email: "member@example.test") == expected)
+        #expect(ClientSession.accountKey(site: URL(string: "https://site.example.test:443")!, email: " Member@Example.TEST ") == expected)
+        #expect(ClientSession.accountKey(site: URL(string: "https://Site.Example.test:8443")!, email: "member@example.test")
+                == "f64b5ae609598edb4cbd817cc52bb96085fde67e8a4a2256197c9702e764527a")
+        let renewed = Fixture.login.replacingOccurrences(of: "synthetic-token", with: "renewed-token")
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile), reply("/auth/logout", "{}"),
+            reply("/auth/login", renewed), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile)
+        ])
+        let driver = RecordingTunnelDriver()
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        await value.connect()
+        await value.logout()
+        while driver.clearedAccounts.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        await value.connect()
+        #expect(driver.starts.count == 2 && driver.starts.allSatisfy { $0.cacheKey == expected })
+        #expect(driver.starts[0].owner != driver.starts[1].owner && driver.clearedAccounts == [expected])
+        value.connection?.disconnect()
+    }
+
+    @Test func systemProxyChangeDoesNotRestartKernel() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let driver = RecordingTunnelDriver()
+        let value = await session(transport, driver: driver)
+        let stops = driver.stopCount
+        value.preferences.systemProxy = false
+        try await value.applySystemProxySettings()
+        #expect(driver.systemProxyChanges == [false] && driver.stopCount == stops && driver.starts.isEmpty)
+        #expect(value.connection?.state == .connected)
+    }
+
     @Test func kernelControlFailuresStayOnTheirOwnView() async throws {
         let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
         let driver = RecordingTunnelDriver()
@@ -1028,7 +1583,7 @@ struct NodeProbeTests {
     }
 }
 
-@Suite("账户资料修改", .timeLimit(.minutes(1))) @MainActor
+@Suite("账户资料修改", .timeLimit(.minutes(1)), .isolatedUserData) @MainActor
 struct AccountEditTests {
     @Test func liveModePersistsOnlyAfterCoreAcceptsTheChange() async throws {
         let suite = "ECYCloud.ModeTest.\(UUID())"
@@ -1096,7 +1651,7 @@ struct AccountEditTests {
     }
 }
 
-@Suite("原生业务契约与会话边界", .timeLimit(.minutes(1)))
+@Suite("原生业务契约与会话边界", .timeLimit(.minutes(1)), .isolatedUserData)
 @MainActor
 struct BusinessSessionTests {
     private func restored(_ steps: [FakeTransport.Step]) async -> (ClientSession, FakeTransport) {
@@ -1172,17 +1727,58 @@ struct BusinessSessionTests {
         try await session.updateEmail("next@example.test", oldCode: "123456", newCode: "654321")
         #expect(session.phase == .signedOut); #expect(session.profile == nil); #expect(session.catalog == nil)
     }
+    @Test func emailChangeSendsPasswordOnlyWhenProvided() async throws {
+        let (session, transport) = await restored([failure("/user/email", status: 200), reply("/user/email", "{}")])
+        await #expect(throws: ClientError.self) { try await session.updateEmail("next@example.test", oldCode: "", newCode: "", password: "Current-Test-Password") }
+        #expect(session.phase == .signedIn)
+        try await session.updateEmail("next@example.test", oldCode: "123456", newCode: "654321")
+        let requests = await transport.recorded()
+        let bodies = try [3, 4].map { try JSONDecoder().decode([String: String].self, from: #require(requests[$0].httpBody)) }
+        #expect(bodies == [["newemail": "next@example.test", "old_emailcode": "", "new_emailcode": "", "passwd": "Current-Test-Password"],
+                           ["newemail": "next@example.test", "old_emailcode": "123456", "new_emailcode": "654321"]])
+        #expect(session.phase == .signedOut)
+    }
     @Test func twoFactorCheckFailureNeverEnablesFactor() async throws {
-        let (session, transport) = await restored([failure("/user/ga-check", status: 200)])
-        await #expect(throws: ClientError.self) { try await session.enableTwoFactor(code: "123456") }
+        let (session, transport) = await restored([failure("/user/ga-set", status: 200)])
+        await #expect(throws: ClientError.self) { try await session.enableTwoFactor(code: "123456", password: "Current-Test-Password") }
         #expect(await transport.recorded().count == 4)
     }
     @Test func twoFactorEnableChecksPossessionFirst() async throws {
-        let (session, transport) = await restored([reply("/user/ga-check", "{}"), reply("/user/ga-set", "{}")])
-        _ = try await session.enableTwoFactor(code: "123456")
+        let (session, transport) = await restored([reply("/user/ga-set", "{}")])
+        _ = try await session.enableTwoFactor(code: "123456", password: "Current-Test-Password")
         let requests = await transport.recorded()
         let body = try #require(JSONSerialization.jsonObject(with: requests.last!.httpBody!) as? [String: String])
-        #expect(body == ["enable": "1"])
+        #expect(body == ["enable": "1", "code": "123456", "passwd": "Current-Test-Password"])
+    }
+    @Test func sensitiveFactorChangesSubmitPasswordAndRejectEmptyOnes() async throws {
+        let (session, transport) = await restored([
+            reply("/user/ga-reset", #"{"ga_token":"SYNTHETICSECRET","ga_url":"otpauth://synthetic"}"#),
+            .init(path: "/user/telegram-reset", result: .success(HTTPResult(data: Data(#"{"ret":1,"msg":"","data":{"bind_token":"synthetic-bind"}}"#.utf8), status: 200)))
+        ])
+        await #expect(throws: ClientError.self) { try await session.enableTwoFactor(code: "123456", password: "") }
+        await #expect(throws: ClientError.self) { try await session.resetTwoFactor(password: "") }
+        await #expect(throws: ClientError.self) { try await session.resetTelegram(password: "") }
+        #expect(await transport.recorded().count == 3)
+        #expect(try await session.resetTwoFactor(password: "Current-Test-Password").gaToken == "SYNTHETICSECRET")
+        let telegram = try await session.resetTelegram(password: "Current-Test-Password")
+        #expect(telegram.binding.bindToken == "synthetic-bind" && !telegram.binding.bound)
+        let requests = await transport.recorded()
+        let bodies = try requests.suffix(2).map { try JSONDecoder().decode([String: String].self, from: #require($0.httpBody)) }
+        #expect(bodies == [["passwd": "Current-Test-Password"], ["passwd": "Current-Test-Password"]])
+    }
+    @Test func editOptionsDecodeWithoutBindToken() async throws {
+        let (session, _) = await restored([reply("/user/edit-options", #"{"ga_enable":0,"ga_token":"","ga_url":"","enable_telegram":true,"telegram_unbind_kick":false,"telegram_bot":"synthetic_bot","im_value":"","bind_token":"","telegram_id":0,"mail_notify_settings":{},"mail_notify_preferences":{}}"#)])
+        #expect(try await session.editOptions().telegramId == 0)
+    }
+    @Test func accountDeletionSendsOnlyTheRequiredProof() async throws {
+        let (session, transport) = await restored([failure("/user/kill", status: 200), reply("/user/kill", "{}"), reply("/user/account-status", Fixture.status(-1))])
+        await #expect(throws: ClientError.self) { try await session.deleteAccount(password: "Current-Test-Password") }
+        #expect(session.phase == .signedIn)
+        _ = try await session.deleteAccount(emailCode: "ABC123")
+        let requests = await transport.recorded()
+        let bodies = try [3, 4].map { try JSONDecoder().decode([String: String].self, from: #require(requests[$0].httpBody)) }
+        #expect(bodies == [["passwd": "Current-Test-Password"], ["email_code": "ABC123"]])
+        #expect(session.phase == .restricted)
     }
     @Test func failedEmailSendDoesNotStartCooldownAndSuccessDoes() async throws {
         let (session, transport) = await restored([failure("/user/send-old-email-verify", status: 400), reply("/user/send-old-email-verify", "{}")])
@@ -1197,6 +1793,23 @@ struct BusinessSessionTests {
         let (session, _) = await restored([reply("/shop/payment-status", #"{"paid":false,"total":12.5,"card_key":""}"#)])
         #expect(try await session.paymentStatus("2026102000001").paid == false)
         await #expect(throws: ClientError.self) { try await session.paymentStatus("../another-user") }
+    }
+    @Test func orderRechargedToBalanceIsNotReportedAsPaymentSuccess() async throws {
+        let (session, _) = await restored([
+            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":"","recharged_to_balance":true}"#),
+            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":"","recharged_to_balance":false}"#),
+            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":""}"#)
+        ])
+        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("商品未能交付，款项已转入余额。"))
+        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("支付成功，订单已到账。"))
+        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("支付成功，订单已到账。"))
+    }
+    @Test(arguments: [("previous_plan", false), ("actual_price", false), ("30day_price", false), ("", false), ("fee_shortfall", true)])
+    func trafficFeeWordingFollowsBillingBaseType(type: String, shortfall: Bool) throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let quote = try decoder.decode(ShopQuote.self, from: Data(#"{"traffic_billing_base_price":"16.44","traffic_billing_base_type":"\#(type)"}"#.utf8))
+        #expect(quote.trafficFeeIsShortfall == shortfall)
+        #expect(quote.trafficBillingBaseLine(planName: "测试套餐") == L10n.t(type == "previous_plan" ? "计费基准价：{0} 元" : "新套餐：{0} 计费基准价：{1} 元", type == "previous_plan" ? ["16.44"] : ["测试套餐", "16.44"]))
     }
     @Test func noAutomaticRetryForRechargeAfterNetworkFailure() async throws {
         let (session, transport) = await restored([.init(path: "/user/recharge/epay", result: .failure(.networkFailure(URLError.networkConnectionLost.rawValue)))])
@@ -1238,7 +1851,7 @@ struct BusinessSessionTests {
     }
 }
 
-@Suite("业务响应解析")
+@Suite("业务响应解析", .isolatedUserData)
 struct BusinessModelTests {
     private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -1363,6 +1976,24 @@ extension BusinessModelTests {
             .init(url: "https://files.example.test/l.log", originalName: "l.log", kind: "file")])
         #expect(content == #"a<br>b<p><img src="https://files.example.test/p.png" alt="p&quot;.png"></p><p><video src="https://files.example.test/v.mp4" controls></video></p><p><a href="https://files.example.test/l.log">l.log</a></p>"#)
     }
+    @Test func nodeMemberListsRestoreFullProviderPayloads() throws {
+        let group = "ecy-panel-" + String(repeating: "a", count: 64)
+        func envelope(_ provider: String) -> Data {
+            Data(#"{"ret":1,"data":{"revision":"r","config":{"proxy-providers":{"ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-1","type":"vless","port":443},{"name":"node-2","type":"vless","port":8443}]},"\#(group)":\#(provider)}}}}"#.utf8)
+        }
+        func providers(_ data: Data) throws -> NSDictionary {
+            let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            return ((root["data"] as! [String: Any])["config"] as! [String: Any])["proxy-providers"] as! NSDictionary
+        }
+        let full = envelope(#"{"type":"file","path":"x.json","payload":[{"name":"node-2","type":"vless","port":8443},{"name":"node-1","type":"vless","port":443}]}"#)
+        let compact = envelope(#"{"type":"file","path":"x.json","members":["node-2","node-1"]}"#)
+        #expect(try providers(PanelAPI.withNodePayloads(compact)) == providers(full))
+        #expect(try PanelAPI.withNodePayloads(full) == full)
+        for invalid in [#"{"type":"file","path":"x.json","members":["node-9"]}"#, #"{"type":"file","path":"x.json","members":[]}"#,
+                        #"{"type":"file","path":"x.json","members":["node-1"],"payload":[{"name":"node-1"}]}"#] {
+            #expect(throws: ClientError.self) { try PanelAPI.withNodePayloads(envelope(invalid)) }
+        }
+    }
     @Test func ticketMessageNameFallsBackWhenMissing() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let messages = try decoder.decode([TicketDetail.Message].self, from: Data(#"[{"id":1,"is_admin":true,"user_name":" ","content":"","datetime":""},{"id":2,"is_admin":false,"content":"","datetime":""}]"#.utf8))
@@ -1374,12 +2005,14 @@ extension BusinessModelTests {
         let state = AnnouncementState(defaults: defaults)
         state.configure(site: URL(string: "https://site.example.test"), userID: 7)
         let items = [Announcement(id: 1, title: "", date: "2026-03-01", updatedAt: "2026-03-01 00:00:00", content: ""),
-                     Announcement(id: 2, title: "", date: "2026-01-01", updatedAt: "2026-01-01 08:00:00", content: ""),
-                     Announcement(id: 3, title: "", date: "2026-02-01", updatedAt: "2026-02-01T08:00:00Z", content: "")]
+                     Announcement(id: 3, title: "", date: "2026-02-01", updatedAt: "2026-02-01T08:00:00Z", content: ""),
+                     Announcement(id: 2, title: "", date: "2026-01-01", updatedAt: "2026-11-01 08:00:00", content: "")]
         state.accept(AnnouncementBundle(announcements: items, popup: nil))
+        #expect(state.openIndex(items) == 1)
+        state.markSeen(items[1])
         #expect(state.openIndex(items) == 2)
         state.markAllSeen()
-        #expect(state.openIndex(items) == 2)
+        #expect(state.openIndex(items) == 1)
         #expect(state.openIndex([items[0]]) == 0)
     }
     @Test func richMediaBecomesSafeLinksWithoutLoadingResources() throws {

@@ -55,9 +55,6 @@ class WindowsPlatformService implements PlatformService {
   bool get supportsLaunchAtLogin => true;
 
   @override
-  bool get supportsPerAppProxy => false;
-
-  @override
   bool get isTelevision => false;
 
   @override
@@ -70,10 +67,21 @@ class WindowsPlatformService implements PlatformService {
   Future<void> initialize() async {
     await _channel.invokeMethod<void>('tray.install');
 
-    final SystemProxyState state = await systemProxyState();
-    if (state.snapshotPresent) {
-      Logger.instance.warn(_source, '检测到上次未还原的系统代理，已自动还原');
-      await restoreSystemProxy();
+    // 后台服务可能要等十几秒才起来，不能挡住首屏；设置系统代理前须等它完成，否则会把新连接的代理还原掉
+    _leftoverProxyRestore = _restoreLeftoverProxy();
+  }
+
+  Future<void> _leftoverProxyRestore = Future<void>.value();
+
+  Future<void> _restoreLeftoverProxy() async {
+    try {
+      final SystemProxyState state = await systemProxyState();
+      if (state.snapshotPresent) {
+        Logger.instance.warn(_source, '检测到上次未还原的系统代理，已自动还原');
+        await restoreSystemProxy();
+      }
+    } on Object catch (e) {
+      Logger.instance.warn(_source, '检查上次未还原的系统代理失败: $e');
     }
   }
 
@@ -82,6 +90,7 @@ class WindowsPlatformService implements PlatformService {
     required int port,
     required List<String> bypass,
   }) async {
+    await _leftoverProxyRestore;
     await _pipe.request('proxy.set', <String, dynamic>{
       'port': port,
       'bypass': bypass,
@@ -164,7 +173,8 @@ class WindowsPlatformService implements PlatformService {
   }
 
   @override
-  Future<List<InstalledApp>> installedApps() async => const <InstalledApp>[];
+  Future<void> copySecret(String text) =>
+      Clipboard.setData(ClipboardData(text: text));
 
   @override
   Future<bool> runInstaller(String path) async =>

@@ -2,8 +2,26 @@ import Foundation
 import Testing
 @testable import ECYCloudKit
 
+/// 套件里的会话、图标、流量排行与日志一律落在本套件的临时目录，结束即删，不读写本机 Application Support/ECYCloud
+struct IsolatedUserData: SuiteTrait, TestScoping {
+    func provideScope(for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ecycloud-user-data-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await UserDataDirectory.$override.withValue(root, operation: function)
+    }
+}
+
+extension Trait where Self == IsolatedUserData {
+    static var isolatedUserData: Self { Self() }
+}
+
 @MainActor final class RecordingTunnelDriver: TunnelDriver {
     var statusChanged: (@MainActor (ConnectionState) -> Void)?
+    var failureOccurred: (@MainActor (TunnelError) -> Void)?
+    var clearedAccounts: [String] = []
+    var systemProxyChanges: [Bool] = []
+    func clearCache(account: String) async { clearedAccounts.append(account) }
+    func applySystemProxy(enabled: Bool, bypass: [String]) async throws { systemProxyChanges.append(enabled) }
     var starts: [TunnelLease] = []
     var stopCount = 0
     var suspended = false
@@ -194,6 +212,71 @@ extension ConnectionTests {
         driver.pending?.resume(); driver.pending = nil
         await work.value
         #expect(controller.state == .connecting)
+        controller.disconnect()
+    }
+    @Test func unexpectedKernelExitReconnectsWithBackoffAndGivesUp() async throws {
+        let driver = RecordingTunnelDriver()
+        let controller = ConnectionController(driver: driver), value = lease()
+        controller.restartBackoff = [.milliseconds(20), .milliseconds(20)]
+        await controller.reconcile(owner: value.owner, expiresAt: value.expiresAt)
+        await controller.connect(value)
+        driver.statusChanged?(.connected)
+        driver.failureOccurred?(.exited("合成内核退出"))
+        #expect(controller.state == .reconnecting && controller.message == "合成内核退出" && !controller.controlPlaneReady)
+        while driver.starts.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        driver.statusChanged?(.connected)
+        #expect(controller.state == .connected)
+        driver.failure = .start
+        driver.failureOccurred?(.exited("合成内核退出"))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while controller.message?.contains("2") != true && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(driver.starts.count == 3 && controller.state == .disconnected)
+        #expect(controller.message == L10n.t("{0}；连续重启 {1} 次仍未成功，已停止重试", [TunnelError.start.localizedDescription, "2"]))
+    }
+
+    @Test func standbyExitRestartsStandbyAndUserDisconnectCancelsRestart() async throws {
+        let driver = RecordingTunnelDriver(); driver.supportsStandby = true
+        let controller = ConnectionController(driver: driver), value = lease()
+        controller.restartBackoff = [.milliseconds(20), .milliseconds(300)]
+        await controller.reconcile(owner: value.owner, expiresAt: value.expiresAt)
+        try await controller.prepareStandby(value)
+        driver.failureOccurred?(.exited("合成内核退出"))
+        #expect(controller.state == .disconnected && !controller.controlPlaneReady)
+        while !controller.controlPlaneReady { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(driver.standbyStarts.count == 2 && driver.starts.isEmpty)
+        driver.failureOccurred?(.exited("合成内核退出"))
+        controller.disconnect()
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(driver.standbyStarts.count == 2 && !controller.controlPlaneReady)
+    }
+
+    @Test func offlineAuthorizationExpiryExplainsItself() async throws {
+        let driver = RecordingTunnelDriver()
+        let controller = ConnectionController(driver: driver)
+        let value = lease(expiry: .now.addingTimeInterval(0.2))
+        await controller.reconcile(owner: value.owner, expiresAt: value.expiresAt, authorizationExpiry: true)
+        await controller.connect(value)
+        var deadline = ContinuousClock.now + .seconds(5)
+        while controller.message == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(controller.state != .connected && AppLanguage.allCases.map { L10n.t("本地配置授权已到期，请连接面板更新后重试", language: $0) }.contains(controller.message ?? ""))
+        let other = lease(owner: "another-owner", expiry: .now.addingTimeInterval(0.2))
+        controller.disconnect()
+        #expect(controller.message == nil)
+        await controller.reconcile(owner: other.owner, expiresAt: other.expiresAt)
+        deadline = ContinuousClock.now + .seconds(5)
+        while controller.message == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(AppLanguage.allCases.map { L10n.t("登录已过期，请重新登录。", language: $0) }.contains(controller.message ?? ""))
+    }
+
+    @Test func standbyRequestDuringConnectionIsNotReportedAsKernelError() async throws {
+        let driver = RecordingTunnelDriver(); driver.supportsStandby = true; driver.suspended = true
+        let controller = ConnectionController(driver: driver), value = lease()
+        await controller.reconcile(owner: value.owner, expiresAt: value.expiresAt)
+        let work = Task { await controller.connect(value) }
+        while driver.pending == nil { await Task.yield() }
+        await #expect(throws: CancellationError.self) { try await controller.prepareStandby(value) }
+        driver.pending?.resume(); driver.pending = nil
+        await work.value
         controller.disconnect()
     }
 }

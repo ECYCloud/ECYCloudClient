@@ -10,7 +10,7 @@ import * as panel from 'ecycloud.panel';
 import * as profile from 'ecycloud.profile';
 
 import { build, clearKicked, coreRunning, instances, kickReason, lanDevices, log, origins,
-		 sessionLease, settings, state, wasKicked } from 'ecycloud.common';
+		 settings, state, wasKicked } from 'ecycloud.common';
 import * as release from 'ecycloud.release';
 import * as service from 'ecycloud.service';
 import * as statistics from 'ecycloud.statistics';
@@ -117,6 +117,7 @@ function statusView() {
 			statistics: { at: stats.at, up: stats.up, down: stats.down, total_up: stats.total_up,
 				total_down: stats.total_down, rank: stats.rank, today: stats.today, yesterday: stats.yesterday },
 			updates: release.cached(),
+			update_tasks: service.updateTasks(),
 			provider_progress: running && st.stage == 'starting' ? clash.providerProgress() : {},
 			version: build().version ?? '',
 			kernel_version: version.ok
@@ -157,10 +158,40 @@ function isNodeIdTag(name) {
 };
 
 function labeledName(name, labels) {
-	const label = labels[name];
-	if (length(label) && !isNodeIdTag(label))
-		return label;
-	return isNodeIdTag(name) ? '' : name;
+	const label = labels[name] ?? name;
+	return isNodeIdTag(label) ? '' : label;
+};
+
+/* Dart String.trim() 认的空白：Unicode White_Space 加 BOM */
+const SPACES = [ ' ', '\t', '\n', '\v', '\f', '\r', chr(0xC2, 0x85), chr(0xC2, 0xA0), chr(0xE1, 0x9A, 0x80),
+	...map([ 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0xA8, 0xA9, 0xAF ], byte => chr(0xE2, 0x80, byte)),
+	chr(0xE2, 0x81, 0x9F), chr(0xE3, 0x80, 0x80), chr(0xEF, 0xBB, 0xBF) ];
+
+function trimSpaces(text) {
+	let start = 0;
+	let end = length(text);
+	for (let moved = true; moved; ) {
+		moved = false;
+		for (let space in SPACES) {
+			const size = length(space);
+			if (end - start >= size && substr(text, start, size) == space) {
+				start += size;
+				moved = true;
+			}
+			if (end - start >= size && substr(text, end - size, size) == space) {
+				end -= size;
+				moved = true;
+			}
+		}
+	}
+	return substr(text, start, end - start);
+};
+
+/* 节点页对齐 node_labels.dart 的 displayName（国旗照常保留）；连接链路、日志与运行配置同 fullName，不去空白 */
+function shownName(name, labels) {
+	const label = labeledName(name, labels);
+	const trimmed = type(label) == 'string' ? trimSpaces(label) : '';
+	return length(trimmed) ? trimmed : label;
 };
 
 function labeledList(names, labels) {
@@ -172,30 +203,81 @@ function labeledList(names, labels) {
 	return out;
 };
 
+/* 对齐 node_labels.dart 的 [\p{L}\p{N}_-] 边界：ucode 只能按字节判断，非 ASCII 字符除这些标点、符号与表情区段外都按字母算 */
+const SEPARATORS = [ [ 0x80, 0xBF ], [ 0x300, 0x36F ], [ 0x2000, 0x2BFF ], [ 0x3000, 0x303F ], [ 0xFE00, 0xFE6F ],
+	[ 0xFF00, 0xFF0F ], [ 0xFF1A, 0xFF20 ], [ 0xFF3B, 0xFF40 ], [ 0xFF5B, 0xFF65 ], [ 0x1F000, 0x1FBFF ] ];
+
+function wordAt(text, at) {
+	while (at > 0 && (ord(text, at) & 0xC0) == 0x80)
+		at--;
+	let code = ord(text, at);
+	if (code == null)
+		return false;
+	if (code < 0x80)
+		return match(chr(code), /[A-Za-z0-9_-]/) != null;
+	const size = code >= 0xF0 ? 4 : code >= 0xE0 ? 3 : 2;
+	code &= 0x7F >> size;
+	for (let i = 1; i < size; i++)
+		code = code << 6 | ord(text, at + i) & 0x3F;
+	return !length(filter(SEPARATORS, range => code >= range[0] && code <= range[1]));
+};
+
+function replaceWord(text, key, value) {
+	const parts = split(text, key);
+	let out = parts[0];
+	for (let i = 1; i < length(parts); i++) {
+		const before = length(parts[i - 1]) || i == 1 ? parts[i - 1] : key;
+		const after = length(parts[i]) || i == length(parts) - 1 ? parts[i] : key;
+		out += (wordAt(before, length(before) - 1) || wordAt(after, 0) ? key : value) + parts[i];
+	}
+	return out;
+};
+
+function utf16Length(text) {
+	let units = 0;
+	for (let i = 0; i < length(text); i++) {
+		const byte = ord(text, i);
+		units += (byte & 0xC0) == 0x80 ? 0 : byte >= 0xF0 ? 2 : 1;
+	}
+	return units;
+};
+
+function labelEntries(labels) {
+	const entries = [];
+	for (let key in labels) {
+		const label = labeledName(key, labels);
+		if (length(key) && label != key)
+			push(entries, [ key, label, utf16Length(key), length(entries) ]);
+	}
+	/* 换上的显示名会被后面的标识接着替换，顺序须与 node_labels.dart 一致：按 Dart 字符串长度（UTF-16）从长到短，同长保持原顺序 */
+	return sort(entries, (a, b) => b[2] - a[2] || a[3] - b[3]);
+};
+
+/* 等价于 node_labels.dart 的 (?<![\w-])node-\d+(?![\w-])：整段 [A-Za-z0-9_-] 恰好是 node-数字 才删 */
+function stripNodeIds(text) {
+	return replace(text, /[A-Za-z0-9_-]*node-[0-9]+[A-Za-z0-9_-]*/g, word => match(word, /^node-[0-9]+$/) ? '' : word);
+};
+
 function annotateLabels(text, labels) {
 	if (!length(text))
 		return text;
 
 	let out = text;
+	for (let entry in labelEntries(labels))
+		if (index(out, entry[0]) >= 0)
+			out = replaceWord(out, entry[0], entry[1]);
 
-	if (length(labels)) {
-		const keys = [];
+	return stripNodeIds(out);
+};
 
-		for (let key, value in labels)
-			if (length(value) && value != key && !isNodeIdTag(value))
-				push(keys, key);
-
-		sort(keys, function(a, b) {
-			return length(b) - length(a);
-		});
-
-		for (let key in keys) {
-			const value = labels[key];
-			out = replace(out, key, () => value);
-		}
+function annotateRuntime(text, labels) {
+	let out = text;
+	for (let entry in labelEntries(labels)) {
+		const shown = replace(replace(entry[1], '\\', '\\\\'), '"', '\\"');
+		for (let edge in [ [ '"', '"' ], [ ',', '"' ], [ ',', ',' ] ])
+			out = replace(out, edge[0] + entry[0] + edge[1], () => edge[0] + shown + edge[1]);
 	}
-
-	return replace(out, /node-[0-9]+/g, '');
+	return stripNodeIds(out);
 };
 
 /* 键是 mihomo 配置里的类型名（ss / vless），查表前统一小写：内核 Clash API 给的是
@@ -435,7 +517,7 @@ function presentGroups(result) {
 
 	for (let group in (result.groups ?? [])) {
 		group.icon = paths[group.name] ?? '';
-		group.label = cache?.group_labels?.[group.name] ?? group.name;
+		group.label = shownName(group.name, cache?.group_labels ?? {});
 	}
 
 	result.flag_regex = type(cache?.flag_regex) == 'string' ? cache.flag_regex : '';
@@ -468,7 +550,7 @@ function groupsFromCache() {
 
 			push(members, {
 				name: member,
-				label: labeledName(member, labels),
+				label: shownName(member, labels),
 				type: isGroup ? nested[member] : proxyType(cfg.type ?? ''),
 				protocol: isGroup ? '' : proxyType(cfg.type ?? ''),
 				network: isGroup ? '' : (cfg.network ?? ''),
@@ -543,7 +625,7 @@ function groupsView() {
 
 			push(members, {
 				name: member,
-				label: labeledName(member, labels),
+				label: shownName(member, labels),
 				type: node.type ?? '',
 				protocol: nested ? '' : proxyType(node.type ?? cfg.type ?? ''),
 				network: nested ? '' : (cfg.network ?? ''),
@@ -552,7 +634,7 @@ function groupsView() {
 				is_group: nested,
 				group_selectable: nested && proxyType(node.type ?? '') == 'Selector',
 				via: target == member ? '' : target,
-				via_label: target == member ? '' : labeledName(target, labels),
+				via_label: target == member ? '' : shownName(target, labels),
 				delay: +(last?.delay ?? 0)
 			});
 		}
@@ -561,8 +643,8 @@ function groupsView() {
 			name,
 			type: proxyType(entry.type ?? ''),
 			now,
-			now_label: labeledName(now, labels),
-			now_via_label: leaf == now ? '' : labeledName(leaf, labels),
+			now_label: shownName(now, labels),
+			now_via_label: leaf == now ? '' : shownName(leaf, labels),
 			members
 		});
 	}
@@ -660,14 +742,12 @@ const methods = {
 	},
 
 	start: {
-		call: function() {
-			let cached = profile.cached(access(profile.PENDING_FILE));
-			if (coreRunning() && !cached) {
-				const refreshed = service.update(true);
-				if (!refreshed.ok)
-					return { ok: false, msg: refreshed.error };
-				cached = profile.cached(access(profile.PENDING_FILE));
-			}
+		args: { refreshed: false },
+		call: function(request) {
+			const cached = profile.cached(access(profile.PENDING_FILE));
+			/* 拉配置可能耗时数分钟，rpcd 不能同步等：交给后台任务，前端等到成功后带 refreshed 再来 */
+			if (coreRunning() && !cached && request.args.refreshed != true)
+				return service.enqueueUpdate('profile', '');
 			if (cached?.config) {
 				const checked = profile.inspect(cached.config);
 				if (!checked.ok)
@@ -676,7 +756,7 @@ const methods = {
 			const live = instances();
 			toggle(true);
 
-			if (live.core?.running && live.watchdog?.running)
+			if (live.core?.dir == settings().runDir && live.watchdog?.running)
 				return { ok: true, msg: '' };
 
 			return { ok: background(`${INIT} restart`) };
@@ -766,19 +846,8 @@ const methods = {
 		call: function(request) {
 			const what = `${request.args.what ?? ''}`;
 
-			if (what == 'geo') {
-				if (!clash.ready())
-					return { ok: false, msg: '内核未运行' };
-
-				const runDir = settings().runDir;
-				const before = profile.geoFingerprint(runDir);
-				const res = clash.updateGeo();
-				if (!res.ok)
-					return { ok: false, msg: res.error ?? '' };
-
-				const after = profile.geoFingerprint(runDir);
-				return { ok: true, changed: before != after, msg: '' };
-			}
+			if (what == 'geo')
+				return clash.ready() ? service.enqueueUpdate('geo', '') : { ok: false, msg: '内核未运行' };
 
 			if (what == 'runtime') {
 				const res = profile.runtimeConfig();
@@ -787,7 +856,7 @@ const methods = {
 					ok: res.ok == true,
 					msg: res.error ?? '',
 					text: res.ok
-						? annotateLabels(res.text ?? '', { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) })
+						? annotateRuntime(res.text ?? '', { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) })
 						: ''
 				};
 			}
@@ -809,14 +878,7 @@ const methods = {
 			if (what == 'announcements')
 				return panel.announcements(request.args.path, request.args.locale);
 
-			const res = service.update(request.args.what != 'language', null, request.args.locale);
-
-			return {
-				ok: res.ok == true,
-				msg: res.error ?? '',
-				changed: res.changed == true,
-				reloaded: res.reloaded == true
-			};
+			return service.enqueueUpdate(what == 'language' ? 'language' : 'profile', `${request.args.locale ?? ''}`);
 		}
 	},
 
@@ -1040,23 +1102,13 @@ function guard(name, inner) {
 	return function(request) {
 		if (name == 'login' || name == 'login_code' || name == 'logout') {
 			const result = service.changeSession(() => ({ ...inner(request), session: panel.session() }), name == 'logout');
-			return { ...result, session: result.session ?? { logged_in: false } };
+			return { ...result, session: result.session ?? panel.session() };
 		}
-		const lease = sessionLease();
-		if (!lease)
-			return { ok: false, msg: '账户正在切换，请稍后重试', session: { logged_in: false } };
-		let result;
-		try {
-			const checkUpdate = name == 'update' &&
-				(request.args.what == 'check_app' || request.args.what == 'check_kernel');
-			result = GUEST_OK[name] || checkUpdate || panel.session().logged_in
-				? inner(request) : guestReply();
-			result.session = panel.session();
-		} catch (e) {
-			lease.close();
-			die(e.message);
-		}
-		lease.close();
+		const checkUpdate = name == 'update' &&
+			(request.args.what == 'check_app' || request.args.what == 'check_kernel');
+		const result = GUEST_OK[name] || checkUpdate || panel.session().logged_in
+			? inner(request) : guestReply();
+		result.session = panel.session();
 		return result;
 	};
 };

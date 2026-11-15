@@ -112,7 +112,7 @@ ButtonNewFolder=新建文件夹(&M)
 
 ; *** "Select Language" dialog messages
 SelectLanguageTitle=选择安装语言
-SelectLanguageLabel=选择安装时使用的语言。
+SelectLanguageLabel=选择安装时使用的语言 / Select the language to use during the installation.
 
 ; *** Common wizard text
 ClickNext=点击“下一步”继续，或点击“取消”退出安装程序。

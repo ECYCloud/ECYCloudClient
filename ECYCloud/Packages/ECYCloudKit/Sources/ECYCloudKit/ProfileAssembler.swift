@@ -51,11 +51,17 @@ public struct ProfileValidationError: Error, LocalizedError, Sendable {
 public enum ProfileAssembler {
     private static let builtins: Set<String> = ["direct", "reject", "reject-drop", "reject-tinygif", "pass", "compatible", "dns"]
 
-    public static func assemble(_ remote: Data, options: ProfileOptions, selections: [String: String] = [:]) throws -> AssembledProfile {
+    // 对应 profile_inspector.dart 的 ensureValid：拉取节点时与装配时共用同一套结构检查
+    static func validate(_ remote: Data) throws -> [String: Any] {
         guard remote.count <= URLSessionTransport.maximumResponseBytes else { throw ClientError.responseTooLarge }
-        guard var config = try JSONSerialization.jsonObject(with: remote) as? [String: Any] else { throw ClientError.invalidResponse }
+        guard let config = try JSONSerialization.jsonObject(with: remote) as? [String: Any] else { throw ClientError.invalidResponse }
         let issues = inspect(config)
         guard issues.isEmpty else { throw ProfileValidationError(issues: issues) }
+        return config
+    }
+
+    public static func assemble(_ remote: Data, options: ProfileOptions, selections: [String: String] = [:]) throws -> AssembledProfile {
+        var config = try validate(remote)
         let probePort = options.mixedPort < 65535 ? options.mixedPort + 1 : options.mixedPort - 1
         let packetFlow = options.input == .packetFlow
         let validProxy = (1024...65535).contains(options.mixedPort) && (1024...65535).contains(options.controllerPort)
@@ -165,6 +171,13 @@ public enum ProfileAssembler {
         var names = Set<String>()
         func issue(_ value: String) { if issues.count < 20 { issues.append(value) } }
         let providers = config["proxy-providers"] as? [String: [String: Any]] ?? [:]
+        // 组网类出站会让内核加入外部 P2P 网络、开监听口或充当出口节点，等于替用户开了看不见的入站
+        for node in ([config["proxies"]] + providers.values.map { $0["payload"] }).compactMap({ $0 as? [[String: Any]] }).joined() {
+            let type = (node["type"] as? String ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            if ["easytier", "tailscale", "zerotier"].contains(type) {
+                issue(L10n.t("节点「{0}」是组网类型（{1}），会让内核加入外部网络，客户端不支持", [node["name"] as? String ?? "", type]))
+            }
+        }
         let nodes = providers["ecy-panel-nodes"]?["payload"] ?? config["proxies"]
         if let nodes = nodes as? [[String: Any]], !nodes.isEmpty {
             for (index, node) in nodes.enumerated() {
@@ -179,13 +192,17 @@ public enum ProfileAssembler {
             providerNames[section] = Set(map.keys)
             for (name, value) in map {
                 guard let type = value["type"] as? String, !type.isEmpty else { issue(L10n.t("{0} 存在缺少类型的条目", [String(describing: section)])); continue }
-                if section == "rule-providers" && (value["path"] as? String)?.isEmpty != false { issue(L10n.t("规则集缺少保存路径")) }
-                if let path = value["path"], !(path is String && safeProviderPath(path as! String)) { issue(L10n.t("规则或节点保存路径必须位于运行目录内，且不能覆盖客户端文件")) }
+                // 内核取 provider 字段名不分大小写（mihomo common/structure）：PATH、URL 这类变体一样会被拿去落盘、下载，各个变体逐一检查
+                let paths = value.filter { $0.key.lowercased() == "path" }.map(\.value)
+                let urls = value.filter { $0.key.lowercased() == "url" }.map(\.value)
+                if section == "rule-providers" && !paths.contains(where: { ($0 as? String)?.isEmpty == false }) { issue(L10n.t("规则集缺少保存路径")) }
+                if !paths.allSatisfy({ ($0 as? String).map(safeProviderPath) ?? false }) { issue(L10n.t("规则或节点保存路径必须位于运行目录内，且不能覆盖客户端文件")) }
                 if section == "proxy-providers", name.hasPrefix("ecy-panel-") {
                     let validName = name == "ecy-panel-nodes" || name.range(of: #"^ecy-panel-[a-f0-9]{64}$"#, options: .regularExpression) != nil
                     if !validName || type != "file" || value["path"] as? String != "\(name).json" || (value["payload"] as? [Any])?.isEmpty != false { issue(L10n.t("面板节点提供器不完整")) }
                 }
-                if type == "http", (value["url"] as? String)?.isEmpty != false { issue(L10n.t("在线规则或节点提供器缺少地址")) }
+                if type == "http", !urls.contains(where: { ($0 as? String)?.isEmpty == false }) { issue(L10n.t("在线规则或节点提供器缺少地址")) }
+                else if !urls.allSatisfy(httpsURL) { issue(L10n.t("规则或节点提供器的下载地址必须使用 https")) }
                 if (value["format"] as? String)?.lowercased() == "mrs", (value["behavior"] as? String)?.lowercased() == "classical" { issue(L10n.t("逐条规则不能使用 mrs 格式")) }
             }
         }
@@ -220,7 +237,16 @@ public enum ProfileAssembler {
             if !hasMatch { issue(L10n.t("分流规则缺少最后一条兜底规则")) }
         } else { issue(L10n.t("面板配置缺少有效分流规则")) }
         if let dns = config["dns"], !(dns is [String: Any]) { issue(L10n.t("DNS 设置格式不正确")) }
+        for (key, url) in config["geox-url"] as? [String: Any] ?? [:] where !httpsURL(url) { issue(L10n.t("geox-url「{0}」必须使用 https", [key])) }
         return issues
+    }
+
+    // 明文下载会被链路上替换规则集、节点订阅与地理数据库：只检查不改写，没有地址的本地 provider 不受影响。
+    // 内核取 provider 字段时名字不分大小写（mihomo common/structure），URL、Url 一样会被拿去下载
+    private static func httpsURL(_ value: Any) -> Bool {
+        if value is NSNull { return true }
+        guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return false }
+        return text.isEmpty || text.hasPrefix("https://")
     }
 }
 

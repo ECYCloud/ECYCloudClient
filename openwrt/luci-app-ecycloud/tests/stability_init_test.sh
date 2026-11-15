@@ -34,6 +34,7 @@ ctl() {
 	case "$1" in
 		prepare) prepared=$saved_enabled; return "$prepare_status" ;;
 		kernel) printf '/usr/libexec/mihomo\n' ;;
+		rundir) printf '/etc/ecycloud/run/fixture-session\n' ;;
 	esac
 }
 CTL=ctl

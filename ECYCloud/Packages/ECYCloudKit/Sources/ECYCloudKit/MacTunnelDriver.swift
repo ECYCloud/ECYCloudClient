@@ -16,6 +16,7 @@ import Security
     private var monitor: Task<Void, Never>?
     private var stopping: Task<Void, Never>?
     private var systemProxy = true
+    private var takeover = false
     private var proxyBypass = NetworkSegments.proxyDefaults
     private var ruleContent: (name: String, data: Data, version: String)?
     public var supportsStandby: Bool { true }
@@ -77,8 +78,8 @@ import Security
 
     private func start(_ lease: TunnelLease, takeover: Bool) async throws {
         guard installed() else { throw TunnelError.installation }
-        await stopping?.value
-        guard self.lease == nil, owner == lease.owner, lease.expiresAt > .now else { throw TunnelError.start }
+        try await waitUntilStopped()
+        guard owner == lease.owner, lease.expiresAt > .now else { throw TunnelError.failed(L10n.t("内核启动失败，请重试")) }
         try lease.validate(owner: lease.owner, id: lease.id)
         guard let validation = lease.validationConfiguration, validation.count <= URLSessionTransport.maximumResponseBytes,
               let config = try JSONSerialization.jsonObject(with: lease.configuration) as? [String: Any] else { throw TunnelError.configuration }
@@ -88,30 +89,51 @@ import Security
         epoch += 1
         let operation = epoch
         self.lease = lease
+        self.takeover = takeover
         runtime = client
         func current() throws {
             try Task.checkCancellation()
             guard epoch == operation, self.lease?.id == lease.id, lease.expiresAt > .now else { throw CancellationError() }
         }
         _ = try await helper.request("ping", payload: [:]); try current()
-        _ = try await helper.request("kernel.bind", payload: ["cache_key": lease.owner]); try current()
+        _ = try await helper.request("kernel.bind", payload: ["cache_key": lease.cacheKey]); try current()
         let check = try await helper.request("kernel.check", payload: ["config": String(decoding: validation, as: UTF8.self)])
         try current()
-        guard check["valid"] as? Bool == true else { throw TunnelError.configuration }
+        guard check["valid"] as? Bool == true else {
+            throw (check["error"] as? String).flatMap { $0.isEmpty ? nil : TunnelError.failed(L10n.t("配置校验未通过：{0}", [L10n.message($0)])) } ?? TunnelError.configuration
+        }
         if takeover { statusChanged?(.connecting) }
+        var cursor = try await helper.request("kernel.status", payload: ["log_cursor": 0])["log_cursor"] as? Int ?? 0
+        try current()
         _ = try await helper.request("kernel.start", payload: ["config": String(decoding: lease.configuration, as: UTF8.self)])
         try current()
         let deadline = ContinuousClock.now + .seconds(60)
-        var ready = false
+        var bound = false, ready = false
         while ContinuousClock.now < deadline {
             try current()
-            do { try await client.ready(); ready = true; break }
+            do {
+                if !bound {
+                    let status = try await helper.request("kernel.status", payload: ["log_cursor": cursor])
+                    try current()
+                    cursor = status["log_cursor"] as? Int ?? cursor
+                    let lines = status["log_lines"] as? [String] ?? []
+                    client.appendLogs(lines)
+                    guard status["running"] as? Bool != false else { throw TunnelError.exited(Self.exitReason(status)) }
+                    bound = try client.controllerBound(lines)
+                }
+                if bound { try await client.ready(); ready = true; break }
+            }
             catch is CancellationError { throw CancellationError() }
-            catch { try await Task.sleep(for: .milliseconds(250)) }
+            catch TunnelError.controllerPortInUse(let port) { throw TunnelError.controllerPortInUse(port) }
+            catch TunnelError.exited(let reason) { throw TunnelError.failed(reason) }
+            catch {}
+            try await Task.sleep(for: .milliseconds(250))
         }
         try current()
-        guard ready else { throw TunnelError.start }
+        guard ready else { throw TunnelError.failed(L10n.t("内核启动失败，请重试")) }
         if takeover && systemProxy {
+            guard try await client.listensOnMixedPort() else { throw TunnelError.mixedPortInUse(client.mixedPort) }
+            try current()
             _ = try await helper.request("proxy.set", payload: ["port": client.mixedPort,
                 "bypass": proxyBypass])
             try current()
@@ -119,15 +141,20 @@ import Security
         client.startMemoryProbe()
         client.startTrafficSampling()
         if takeover { statusChanged?(.connected) }
+        let logCursor = cursor
         monitor = Task { [weak self] in
-            var failures = 0, cursor = 0
+            var failures = 0, cursor = logCursor
             while let self, self.epoch == operation {
                 do {
                     let status = try await self.helper.request("kernel.status", payload: ["log_cursor": cursor])
                     guard self.epoch == operation else { return }
                     cursor = status["log_cursor"] as? Int ?? cursor
                     client.appendLogs(status["log_lines"] as? [String] ?? [])
-                    guard status["running"] as? Bool == true else { self.stop(); return }
+                    guard status["running"] as? Bool == true else {
+                        self.failureOccurred?(.exited(Self.exitReason(status)))
+                        self.stop()
+                        return
+                    }
                     failures = 0
                 } catch {
                     guard self.epoch == operation else { return }
@@ -140,6 +167,11 @@ import Security
     }
 
     public func waitUntilStopped() async throws {
+        await stopping?.value
+        if lease != nil, runtime == nil, stopping == nil {
+            let operation = epoch
+            stopping = Task { [weak self] in await self?.release(operation) }
+        }
         await stopping?.value
         guard lease == nil else { throw TunnelError.helperUnavailable }
     }
@@ -161,32 +193,60 @@ import Security
         stopping = Task { [weak self] in
             await previous?.value
             guard let self, self.epoch == operation else { return }
-            // 先撤销 TUN，再由 helper 停止进程、恢复系统代理；运行目录与规则集缓存留到退出或切换会话时由 clearCache 清理。
+            // 先撤销 TUN，再由 helper 停止进程、恢复系统代理；运行目录与规则集缓存按账号键保留，退出登录时由 clearCache 只清本账号配置。
             try? await client?.disableTUN()
-            for attempt in 0..<3 {
-                do {
-                    _ = try await self.helper.request("kernel.stop", payload: [:])
-                    _ = try await self.helper.request("proxy.restore", payload: [:])
-                    guard self.epoch == operation else { return }
-                    self.lease = nil; self.stopping = nil
-                    self.statusChanged?(.disconnected)
-                    return
-                } catch {
-                    guard self.epoch == operation else { return }
-                    if attempt < 2 { try? await Task.sleep(for: .seconds(1)) }
-                }
-            }
-            self.stopping = nil
-            self.failureOccurred?(.helperUnavailable)
+            await self.release(operation)
         }
     }
 
-    public func clearCache(owner: String) async {
+    private func release(_ operation: Int) async {
+        guard await retry("kernel.stop", operation: operation) else {
+            if epoch == operation { stopping = nil; failureOccurred?(.helperUnavailable) }
+            return
+        }
+        guard epoch == operation else { return }
+        lease = nil
+        let restored = await retry("proxy.restore", operation: operation)
+        guard epoch == operation else { return }
+        stopping = nil
+        statusChanged?(.disconnected)
+        if !restored { failureOccurred?(.proxyRestore) }
+    }
+
+    private func retry(_ command: String, operation: Int) async -> Bool {
+        for attempt in 0..<3 {
+            if (try? await helper.request(command, payload: [:])) != nil { return true }
+            guard epoch == operation else { return false }
+            if attempt < 2 { try? await Task.sleep(for: .seconds(1)) }
+        }
+        return false
+    }
+
+    private static func exitReason(_ status: [String: Any]) -> String {
+        if let error = status["error"] as? String, !error.isEmpty { return L10n.message(error) }
+        return L10n.t("内核异常退出（退出码 {0}）", [(status["exit_code"] as? Int).map(String.init) ?? "-"])
+    }
+
+    public func applySystemProxy(enabled: Bool, bypass: [String]) async throws {
+        guard installed() else { throw TunnelError.installation }
+        guard bypass.count <= 256, bypass.allSatisfy(NetworkSegments.validProxyBypass) else { throw TunnelError.configuration }
+        systemProxy = enabled
+        proxyBypass = NetworkSegments.unique(NetworkSegments.proxyDefaults + bypass)
+        guard takeover, let runtime, lease != nil, stopping == nil else { return }
+        if enabled {
+            guard try await runtime.listensOnMixedPort() else { throw TunnelError.mixedPortInUse(runtime.mixedPort) }
+            _ = try await helper.request("proxy.set", payload: ["port": runtime.mixedPort, "bypass": proxyBypass])
+        } else {
+            _ = try await helper.request("proxy.restore", payload: [:])
+        }
+    }
+
+    public func clearCache(account: String) async {
         guard lease == nil, stopping == nil, installed() else { return }
         epoch += 1
         let operation = epoch
         stopping = Task { [weak self] in
-            _ = try? await self?.helper.request("kernel.clear", payload: [:])
+            _ = try? await self?.helper.request("kernel.clear", payload: ["cache_key": account])
             if self?.epoch == operation { self?.stopping = nil }
         }
         await stopping?.value

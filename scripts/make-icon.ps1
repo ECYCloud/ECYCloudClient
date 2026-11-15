@@ -1,11 +1,13 @@
 ﻿#requires -Version 5.1
 <#
 .SYNOPSIS
-    从主图 assets/icon/app_icon.png 生成各端应用图标、登录页图标与安装器向导图。
+    从主图 assets/icon/app_icon.png 生成各端应用图标、登录页图标与安装器向导图；
+    从安装包主图 assets/icon/installer_icon.png 生成 Windows 安装包图标。
 
 .DESCRIPTION
     换图标时只改主图，跑一遍本脚本重新生成，不要手工塞二进制。
-    Windows：ICO 各尺寸以 PNG 负载嵌入（Vista 起支持），保留透明通道；
+    Windows：ICO 各尺寸以 PNG 负载嵌入（Vista 起支持），保留透明通道；安装包图标是盾牌从盒子中升起的
+    合成图，与应用图标同色系，应用主图改动后需按同一版式重做安装包主图；
     向导图按 Inno Setup 的缩放档位输出 24 位 BMP，白底以贴合向导页背景。
     macOS：macOS 26 起走分层图标 AppIcon.icon，本脚本只出其中的扁平图形，底色与材质由
     icon.json 描述、系统渲染；AppIcon.appiconset 是 macOS 25 及以下的回退，白底画满整块画布、
@@ -21,7 +23,9 @@
 param(
     [string]$Source,
     [string]$Output,
-    [string]$WizardDir
+    [string]$WizardDir,
+    [string]$InstallerSource,
+    [string]$InstallerOutput
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,9 +37,13 @@ $rootDir = Split-Path -Parent $scriptDir
 if (-not $Source) { $Source = Join-Path $rootDir 'assets\icon\app_icon.png' }
 if (-not $Output) { $Output = Join-Path $rootDir 'app\windows\runner\resources\app_icon.ico' }
 if (-not $WizardDir) { $WizardDir = Join-Path $scriptDir 'installer\wizard' }
+if (-not $InstallerSource) { $InstallerSource = Join-Path $rootDir 'assets\icon\installer_icon.png' }
+if (-not $InstallerOutput) { $InstallerOutput = Join-Path $scriptDir 'installer\installer_icon.ico' }
 
-if (-not (Test-Path $Source)) {
-    throw "未找到主图：$Source"
+foreach ($path in @($Source, $InstallerSource)) {
+    if (-not (Test-Path $path)) {
+        throw "未找到主图：$path"
+    }
 }
 
 $flutterIcon = Join-Path $rootDir 'app\assets\app_icon.png'
@@ -245,9 +253,65 @@ function Save-Png {
     }
 }
 
+function Save-Ico {
+    param(
+        [System.Drawing.Image]$Image,
+        [int[]]$Sizes,
+        [string]$Path
+    )
+
+    $payloads = New-Object 'System.Collections.Generic.List[byte[]]'
+    foreach ($size in $Sizes) {
+        $bitmap = New-Square -Image $Image -Size $size `
+            -Background ([System.Drawing.Color]::Transparent) `
+            -Format ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $stream = New-Object System.IO.MemoryStream
+        try {
+            $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+            $payloads.Add($stream.ToArray())
+        }
+        finally {
+            $stream.Dispose()
+            $bitmap.Dispose()
+        }
+    }
+
+    $file = [System.IO.File]::Create($Path)
+    $writer = New-Object System.IO.BinaryWriter($file)
+    try {
+        $writer.Write([uint16]0)
+        $writer.Write([uint16]1)
+        $writer.Write([uint16]$Sizes.Count)
+
+        # ICONDIRENTRY 定长 16 字节，图像数据紧随目录
+        $offset = 6 + 16 * $Sizes.Count
+        for ($i = 0; $i -lt $Sizes.Count; $i++) {
+            $size = $Sizes[$i]
+            # 256 在单字节字段里记作 0
+            $writer.Write([byte]($size % 256))
+            $writer.Write([byte]($size % 256))
+            $writer.Write([byte]0)
+            $writer.Write([byte]0)
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]32)
+            $writer.Write([uint32]$payloads[$i].Length)
+            $writer.Write([uint32]$offset)
+            $offset += $payloads[$i].Length
+        }
+
+        foreach ($payload in $payloads) {
+            $writer.Write($payload)
+        }
+    }
+    finally {
+        $writer.Dispose()
+        $file.Dispose()
+    }
+}
+
 $sizes = @(16, 20, 24, 32, 48, 64, 128, 256)
-# Inno Setup 按 100/150/200/250/300/350% 挑选向导图
-$wizardSizes = @(55, 83, 110, 138, 165, 192)
+# Inno Setup 7 向导小图区域：100/125/150/175/200/225/250% 依次为前七档，挑面积最接近的再拉伸；192 供更高缩放
+$wizardSizes = @(58, 77, 97, 116, 124, 143, 159, 192)
 # 与 app/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json 的档位一致
 $macSizes = @(16, 32, 64, 128, 256, 512, 1024)
 # 菜单栏按 18pt 画，1x / 2x 与 MenuBarIcon.imageset/Contents.json 的 filename 一致
@@ -295,23 +359,9 @@ $tvIconCoverage = 0.62
 $linuxIconDir = Join-Path $scriptDir 'installer\linux\icons'
 
 $master = [System.Drawing.Image]::FromFile($Source)
-$payloads = New-Object 'System.Collections.Generic.List[byte[]]'
 
 try {
-    foreach ($size in $sizes) {
-        $bitmap = New-Square -Image $master -Size $size `
-            -Background ([System.Drawing.Color]::Transparent) `
-            -Format ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        $stream = New-Object System.IO.MemoryStream
-        try {
-            $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
-            $payloads.Add($stream.ToArray())
-        }
-        finally {
-            $stream.Dispose()
-            $bitmap.Dispose()
-        }
-    }
+    Save-Ico -Image $master -Sizes $sizes -Path $Output
 
     New-Item -ItemType Directory -Force -Path $WizardDir | Out-Null
     foreach ($size in $wizardSizes) {
@@ -374,41 +424,17 @@ finally {
     $master.Dispose()
 }
 
-$file = [System.IO.File]::Create($Output)
-$writer = New-Object System.IO.BinaryWriter($file)
-
+$installerMaster = [System.Drawing.Image]::FromFile($InstallerSource)
 try {
-    $writer.Write([uint16]0)
-    $writer.Write([uint16]1)
-    $writer.Write([uint16]$sizes.Count)
-
-    # ICONDIRENTRY 定长 16 字节，图像数据紧随目录
-    $offset = 6 + 16 * $sizes.Count
-    for ($i = 0; $i -lt $sizes.Count; $i++) {
-        $size = $sizes[$i]
-        # 256 在单字节字段里记作 0
-        $writer.Write([byte]($size % 256))
-        $writer.Write([byte]($size % 256))
-        $writer.Write([byte]0)
-        $writer.Write([byte]0)
-        $writer.Write([uint16]1)
-        $writer.Write([uint16]32)
-        $writer.Write([uint32]$payloads[$i].Length)
-        $writer.Write([uint32]$offset)
-        $offset += $payloads[$i].Length
-    }
-
-    foreach ($payload in $payloads) {
-        $writer.Write($payload)
-    }
+    Save-Ico -Image $installerMaster -Sizes $sizes -Path $InstallerOutput
 }
 finally {
-    $writer.Dispose()
-    $file.Dispose()
+    $installerMaster.Dispose()
 }
 
 Write-Host "登录页图标已复制：$flutterIcon"
 Write-Host "图标已生成：$Output（$($sizes -join '/') px，$([math]::Round((Get-Item $Output).Length / 1KB, 1)) KB）"
+Write-Host "安装包图标已生成：$InstallerOutput（$($sizes -join '/') px）"
 Write-Host "向导图已生成：$WizardDir（$($wizardSizes -join '/') px）"
 Write-Host "macOS 图标已生成：$macIconDir（$($macSizes -join '/') px）"
 Write-Host "macOS 菜单栏图标已生成：$macMenuBarDir（$($macMenuBarSizes -join '/') px）"

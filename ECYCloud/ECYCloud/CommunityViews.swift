@@ -120,19 +120,10 @@ struct AnnouncementBody: View {
     }
 }
 
-struct AnnouncementPopup: View {
-    let session: ClientSession
-    let item: Announcement
-    let close: () -> Void
-    var body: some View {
-        ProductDialog(title: item.title, centeredTitle: true) { AnnouncementBody(session: session, item: item) } actions: {
-            Button(L10n.t("我知道了")) { session.announcementState.dismissPopup(item); close() }.buttonStyle(ProductButtonStyle(filled: true))
-        }
-    }
-}
-
+/// 公告翻页弹窗；传入 popup 时为后台设置的客户端弹窗公告，定位到该条，点「关闭」后同一版本不再自动弹出
 struct AnnouncementsView: View {
     let session: ClientSession
+    var popup: Announcement?
     var close: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -169,13 +160,20 @@ struct AnnouncementsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             if state.value == nil { state.value = session.announcementState.bundle }
-            if let items = state.value?.announcements { index = session.announcementState.openIndex(items) }
+            if let items = state.value?.announcements { index = initialIndex(items) }
             await state.load { try await session.announcements() }
-            if !browsed, let items = state.value?.announcements { index = session.announcementState.openIndex(items) }
+            if !browsed, let items = state.value?.announcements { index = initialIndex(items) }
         }
-        .onDisappear { session.announcementState.markAllSeen() }
+        .onDisappear { if popup == nil { session.announcementState.markAllSeen() } }
     }
-    private func finish() { if let close { close() } else { dismiss() } }
+    private func initialIndex(_ items: [Announcement]) -> Int {
+        if let popup { return items.firstIndex { $0.id == popup.id } ?? 0 }
+        return session.announcementState.openIndex(items)
+    }
+    private func finish() {
+        if let popup { session.announcementState.dismissPopup(popup) }
+        if let close { close() } else { dismiss() }
+    }
 }
 
 struct TrafficHistoryView: View {

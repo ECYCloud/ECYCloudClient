@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-const MaximumControlBytes = 65536
+const MaximumControlBytes = 1 << 20
 
 type controlRequest struct {
 	Action       string `json:"action"`
@@ -353,6 +353,7 @@ func Control(id uint64, data []byte) ([]byte, error) {
 		return nil, ErrStopped
 	}
 	var value any = map[string]bool{"ok": true}
+	var restoreRank func()
 	switch request.Action {
 	case "version":
 		value = map[string]string{"version": C.Version}
@@ -450,6 +451,8 @@ func Control(id uint64, data []byte) ([]byte, error) {
 		current.history.sample()
 		history := &current.history
 		snapshot := liveSnapshot{Upload: history.rateUp, Download: history.rateDown, UploadTotal: history.proxyUp, DownloadTotal: history.proxyDown, Connections: []liveConnection{}, Page: request.Page, Selections: map[string]string{}, Groups: []liveGroup{}, Delays: map[string]uint16{}, Memory: statistic.DefaultManager.Memory(), Mode: tunnel.Mode().String(), Rank: history.drainRank()}
+		// 快照超出上限时这批排行增量没交给应用，放回去等下一次快照
+		restoreRank = func() { history.rank = snapshot.Rank }
 		rows := []liveConnection{}
 		query := strings.ToLower(strings.TrimSpace(request.Query))
 		appendRow := func(c liveConnection) {
@@ -595,6 +598,9 @@ func Control(id uint64, data []byte) ([]byte, error) {
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil || len(encoded) > MaximumControlBytes {
+		if restoreRank != nil {
+			restoreRank()
+		}
 		return nil, ErrConfiguration
 	}
 	return encoded, nil

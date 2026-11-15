@@ -14,7 +14,6 @@ import 'package:http/http.dart' as http;
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
 import '../../core/safe_url.dart';
-import '../../l10n/l10n.dart';
 
 class LocalIcon extends StatelessWidget {
   const LocalIcon({
@@ -81,16 +80,31 @@ class RemoteIcon extends StatelessWidget {
   // 就会把整份响应读进内存
   static const int _maxBytes = 1 << 20;
 
+  // 一篇富文本里的图片同时开始加载，每张最多 50 MiB 整份进内存，同时下载的数量须封顶
+  static const int _maxFetching = 4;
+  static int _fetching = 0;
+  static final List<Completer<void>> _fetchQueue = <Completer<void>>[];
+
   static int _generation = 0;
   static bool _clearing = false;
   static final Set<Completer<void>> _downloads = <Completer<void>>{};
   static final Set<Completer<void>> _imageLoads = <Completer<void>>{};
+
+  // 富文本图片每会话合计的下载量，宽松封顶只挡失控的自动加载；用完后新的图片按加载失败显示。
+  // 视频由播放器自己拉流，应用数不到这部分流量，只在点击播放时检查预算是否已用完
+  static const int _mediaBudget = 200 << 20;
+  static int _mediaBytes = 0;
+
+  static bool get mediaBudgetLeft => _mediaBytes < _mediaBudget;
+
+  static bool chargeMedia(int bytes) => (_mediaBytes += bytes) <= _mediaBudget;
 
   static void resumeSession() => _clearing = false;
 
   static Future<void> clearSession() async {
     _clearing = true;
     _generation++;
+    _mediaBytes = 0;
     for (final Completer<void> abort in _downloads) {
       if (!abort.isCompleted) {
         abort.complete();
@@ -101,12 +115,6 @@ class RemoteIcon extends StatelessWidget {
       for (final Completer<void> load in _imageLoads) load.future,
     ]);
     _cache.clear();
-    final Directory directory = AppPaths.iconCache;
-    if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
-        FileSystemEntityType.directory) {
-      throw FileSystemException(L10n.t('图标缓存目录类型异常'), directory.path);
-    }
-    directory.deleteSync(recursive: true);
   }
 
   static final Map<String, Future<Uint8List?>> _cache =
@@ -162,56 +170,40 @@ class RemoteIcon extends StatelessWidget {
     Uri uri, {
     int maxBytes = _maxBytes,
     Duration timeout = _timeout,
+    bool media = false,
     void Function(int received, int? total)? onProgress,
   }) async {
-    if (!SafeUrl.canLoad(uri.toString())) {
+    final Completer<void> abort = Completer<void>();
+    _downloads.add(abort);
+    if (!await _acquire(abort)) {
+      _downloads.remove(abort);
       return null;
     }
     final http.Client client = http.Client();
-    final Completer<void> abort = Completer<void>();
-    _downloads.add(abort);
     final Timer timer = Timer(timeout, () {
       if (!abort.isCompleted) {
         abort.complete();
       }
     });
     try {
-      http.StreamedResponse response;
-      final bool requireHttps = uri.scheme == 'https';
-      int redirects = 0;
-      while (true) {
-        response = await client
-            .send(
-              http.AbortableRequest('GET', uri, abortTrigger: abort.future)
-                ..followRedirects = false,
-            )
-            .timeout(timeout);
-        if (!response.isRedirect) {
-          break;
-        }
-        await response.stream.listen(null).cancel();
-        final String? location = response.headers['location'];
-        if (location == null || redirects++ >= 5) {
-          return null;
-        }
-        final Uri? redirect = Uri.tryParse(location);
-        if (redirect == null) {
-          return null;
-        }
-        uri = uri.resolveUri(redirect);
-        if (!SafeUrl.canLoad(uri.toString()) ||
-            (requireHttps && uri.scheme != 'https')) {
-          return null;
-        }
+      if (abort.isCompleted || (media && !mediaBudgetLeft)) {
+        return null;
       }
-      if (response.statusCode != 200 ||
-          (response.contentLength ?? 0) > maxBytes) {
+      final http.StreamedResponse? response = await open(
+        client,
+        uri,
+        abort: abort.future,
+        timeout: timeout,
+        maxBytes: maxBytes,
+      );
+      if (response == null) {
         return null;
       }
 
       final BytesBuilder body = BytesBuilder(copy: false);
       await for (final List<int> chunk in response.stream) {
-        if (body.length + chunk.length > maxBytes) {
+        if (body.length + chunk.length > maxBytes ||
+            (media && !chargeMedia(chunk.length))) {
           return null;
         }
         body.add(chunk);
@@ -222,7 +214,77 @@ class RemoteIcon extends StatelessWidget {
       timer.cancel();
       _downloads.remove(abort);
       client.close();
+      _release();
     }
+  }
+
+  static Future<bool> _acquire(Completer<void> abort) async {
+    if (_fetching < _maxFetching) {
+      _fetching++;
+      return true;
+    }
+    final Completer<void> turn = Completer<void>();
+    _fetchQueue.add(turn);
+    await Future.any(<Future<void>>[turn.future, abort.future]);
+    if (turn.isCompleted) {
+      return true;
+    }
+    _fetchQueue.remove(turn);
+    return false;
+  }
+
+  // 名额直接交给排队中的下一个，不先归还，免得新来的请求插队超出上限
+  static void _release() {
+    if (_fetchQueue.isEmpty) {
+      _fetching--;
+    } else {
+      _fetchQueue.removeAt(0).complete();
+    }
+  }
+
+  static Future<http.StreamedResponse?> open(
+    http.Client client,
+    Uri uri, {
+    required Future<void> abort,
+    required Duration timeout,
+    required int maxBytes,
+  }) async {
+    if (!SafeUrl.canLoad(uri.toString())) {
+      return null;
+    }
+    http.StreamedResponse response;
+    final bool requireHttps = uri.scheme == 'https';
+    int redirects = 0;
+    while (true) {
+      response = await client
+          .send(
+            http.AbortableRequest('GET', uri, abortTrigger: abort)
+              ..followRedirects = false,
+          )
+          .timeout(timeout);
+      if (!response.isRedirect) {
+        break;
+      }
+      await response.stream.listen(null).cancel();
+      final String? location = response.headers['location'];
+      if (location == null || redirects++ >= 5) {
+        return null;
+      }
+      final Uri? redirect = Uri.tryParse(location);
+      if (redirect == null) {
+        return null;
+      }
+      uri = uri.resolveUri(redirect);
+      if (!SafeUrl.canLoad(uri.toString()) ||
+          (requireHttps && uri.scheme != 'https')) {
+        return null;
+      }
+    }
+    if (response.statusCode != 200 ||
+        (response.contentLength ?? 0) > maxBytes) {
+      return null;
+    }
+    return response;
   }
 
   // PNG / JPEG / GIF / WebP 按各自魔数认；SVG 必须以 <svg 或 <?xml 起头，
@@ -305,6 +367,7 @@ class RemoteImage extends ImageProvider<RemoteImage> {
         Uri.parse(url.trim()),
         maxBytes: 50 << 20,
         timeout: const Duration(seconds: 30),
+        media: true,
         onProgress: (int received, int? total) => chunks.add(
           ImageChunkEvent(
             cumulativeBytesLoaded: received,

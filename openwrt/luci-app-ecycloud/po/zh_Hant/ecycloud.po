@@ -15,29 +15,14 @@ msgstr "%d 個節點 · 目前 %s"
 msgid "%d ms"
 msgstr "%d 毫秒"
 
-msgid "%d nodes, fetched %s"
-msgstr "%d 個節點，取得於 %s"
-
-msgid "%s up / %s down"
-msgstr "上傳 %s / 下載 %s"
-
-msgid "%s used of %s, %s today"
-msgstr "已用 %s，共 %s，今日 %s"
-
 msgid "%s, %d days left"
 msgstr "%s，剩餘 %d 天"
-
-msgid "%s, current node: %s"
-msgstr "%s，目前節點：%s"
 
 msgid "Account"
 msgstr "帳號"
 
 msgid "Account info"
 msgstr "帳戶資訊"
-
-msgid "Advanced"
-msgstr "進階"
 
 msgid "Allow LAN"
 msgstr "允許區域網路"
@@ -54,8 +39,8 @@ msgstr "已生效"
 msgid "A verification code has been sent to your email"
 msgstr "驗證碼已寄出，請查看電子郵件"
 
-msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
-msgstr "geoip.metadb 與 GeoSite.dat 的下載位址前綴，留空則沿用面板提供的位址。不懂就請不要亂修改，位址無效會導致無法使用！"
+msgid "Base URL for geoip.metadb and GeoSite.dat. Must be https. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr "geoip.metadb 與 GeoSite.dat 的下載位址前綴，必須是 https。留空則沿用面板提供的位址。不懂就請不要亂修改，位址無效會導致無法使用！"
 
 msgid "Connection details"
 msgstr "連線詳情"
@@ -102,11 +87,17 @@ msgstr "失敗"
 msgid "Clash profile is invalid"
 msgstr "面板設定格式不正確"
 
-msgid "Fetching the profile in the background"
-msgstr "正在背景取得設定"
-
 msgid "Already up to date"
 msgstr "已是最新"
+
+msgid "No changes to save"
+msgstr "沒有需要儲存的變更"
+
+msgid "Reset"
+msgstr "重設"
+
+msgid "The router could not be reached, so the changes were rolled back"
+msgstr "無法連線至路由器，變更已自動還原"
 
 msgid "Update succeeded"
 msgstr "更新成功"
@@ -114,14 +105,11 @@ msgstr "更新成功"
 msgid "Update saved, takes effect the next time the kernel starts"
 msgstr "更新成功，下次啟動核心時生效"
 
-msgid "Update failed"
+msgid "Failed to update"
 msgstr "更新失敗"
 
 msgid "Firewall rules"
 msgstr "防火牆規則"
-
-msgid "General"
-msgstr "一般"
 
 msgid "GeoData mirror"
 msgstr "GeoData 鏡像站台"
@@ -147,14 +135,8 @@ msgstr "IPv6"
 msgid "Kernel"
 msgstr "核心"
 
-msgid "LAN devices"
-msgstr "區域網路裝置"
-
 msgid "LAN interfaces"
 msgstr "區域網路介面"
-
-msgid "Last %d syslog entries of the plugin and the kernel."
-msgstr "外掛與核心最近 %d 筆系統記錄。"
 
 msgid "Latency"
 msgstr "延遲"
@@ -179,9 +161,6 @@ msgstr "混合"
 
 msgid "Mixed port"
 msgstr "混合連接埠"
-
-msgid "No entries yet."
-msgstr "尚無記錄。"
 
 msgid "Node"
 msgstr "節點"
@@ -216,12 +195,6 @@ msgstr "密碼登入"
 msgid "Plan"
 msgstr "方案"
 
-msgid "Plugin version"
-msgstr "外掛版本"
-
-msgid "Ports"
-msgstr "連接埠"
-
 msgid "Preparing configuration"
 msgstr "正在準備設定"
 
@@ -229,7 +202,7 @@ msgid "Profile"
 msgstr "設定"
 
 msgid "Profile refresh"
-msgstr "設定重新整理"
+msgstr "設定更新"
 
 msgid "Proxy mode"
 msgstr "代理模式"
@@ -244,13 +217,10 @@ msgid "Redirect port 53 of LAN clients and point dnsmasq at the kernel resolver.
 msgstr "重新導向區域網路裝置的 53 連接埠，並讓 dnsmasq 轉送給核心 DNS。"
 
 msgid "Refresh profile"
-msgstr "重新整理"
+msgstr "更新"
 
 msgid "No matching connections"
 msgstr "沒有符合條件的連線"
-
-msgid "No matching log entries."
-msgstr "沒有符合條件的記錄。"
 
 msgid "Request failed"
 msgstr "請求失敗"
@@ -258,23 +228,14 @@ msgstr "請求失敗"
 msgid "Routing"
 msgstr "分流模式"
 
-msgid "Routing mode updated"
-msgstr "分流模式已更新"
-
 msgid "Search host, IP, process, rule"
 msgstr "搜尋網域、IP、處理程序、規則"
-
-msgid "Search logs"
-msgstr "搜尋記錄"
 
 msgid "Rule"
 msgstr "規則"
 
 msgid "Running"
 msgstr "執行中"
-
-msgid "Running (%s)"
-msgstr "執行中（%s）"
 
 msgid "Send code"
 msgstr "取得驗證碼"
@@ -284,12 +245,6 @@ msgstr "取得驗證碼（%d 秒）"
 
 msgid "Service"
 msgstr "服務"
-
-msgid "Service starting"
-msgstr "服務正在啟動"
-
-msgid "Service stopped"
-msgstr "服務已停止"
 
 msgid "Settings"
 msgstr "設定"
@@ -308,9 +263,6 @@ msgstr "登出後將中斷連線並清除本機儲存的登入憑證。"
 
 msgid "Signed in"
 msgstr "登入成功"
-
-msgid "Signed in, the service is starting"
-msgstr "登入成功，服務正在啟動"
 
 msgid "Signed out"
 msgstr "已登出"
@@ -341,9 +293,6 @@ msgstr "TPROXY 連接埠"
 
 msgid "TUN"
 msgstr "TUN"
-
-msgid "TUN device"
-msgstr "TUN 裝置"
 
 msgid "TUN stack"
 msgstr "TUN 堆疊"
@@ -384,12 +333,6 @@ msgstr "流量明細"
 msgid "Traffic from these interfaces is sent to the kernel."
 msgstr "這些介面的流量會被送進核心。"
 
-msgid "Traffic since start"
-msgstr "本次啟動流量"
-
-msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
-msgstr "透明代理設定。儲存會重新啟動服務，期間連線會短暫中斷。"
-
 msgid "Two-factor code"
 msgstr "兩步驟驗證碼"
 
@@ -426,12 +369,6 @@ msgstr "無有效方案"
 msgid "none"
 msgstr "無"
 
-msgid "not fetched yet"
-msgstr "尚未取得"
-
-msgid "unknown version"
-msgstr "版本未知"
-
 msgid "untested"
 msgstr "未測速"
 
@@ -448,7 +385,7 @@ msgid "Notice"
 msgstr "提示"
 
 msgid "Remember email"
-msgstr "記住信箱"
+msgstr "記住電子郵件"
 
 msgid "Sign in with your %s account to load available nodes"
 msgstr "使用 %s 帳號登入，登入後自動取得可用節點"
@@ -492,14 +429,8 @@ msgstr "正在中斷連線，請稍候"
 msgid "Current node"
 msgstr "目前節點"
 
-msgid "No node selected"
-msgstr "未選擇節點"
-
 msgid "Preparing kernel"
 msgstr "正在準備核心"
-
-msgid "Kernel not ready"
-msgstr "核心尚未就緒"
 
 msgid "Not selected"
 msgstr "未選擇"
@@ -507,11 +438,8 @@ msgstr "未選擇"
 msgid "Proxy group"
 msgstr "策略群組"
 
-msgid "Nodes ›"
-msgstr "節點 ›"
-
 msgid "Refresh nodes"
-msgstr "重新整理節點"
+msgstr "更新節點"
 
 msgid "Locate selected node"
 msgstr "定位到目前節點"
@@ -523,7 +451,7 @@ msgid "No matching nodes"
 msgstr "沒有符合條件的節點"
 
 msgid "This group is selected by the kernel in list order; tapping a node does not change the selection. Testing latency refreshes availability and lets the kernel reselect immediately"
-msgstr "本群組由核心依清單順序選用第一個可用節點，點選節點不改變選取項目；測延遲會重新整理可用性並讓核心立即重選"
+msgstr "本群組由核心依清單順序選用第一個可用節點，點選節點不改變選取項目；測延遲會更新可用性並讓核心立即重選"
 
 msgid "This group is selected by the kernel by latency; tapping a node does not change the selection. Testing latency lets the kernel reselect immediately"
 msgstr "本群組由核心依延遲自動選擇，點選節點不改變選取項目；測延遲會讓核心立即重選"
@@ -552,6 +480,9 @@ msgstr "已關閉連線"
 msgid "Traffic usage"
 msgstr "流量使用情況"
 
+msgid "Shows traffic usage across all devices."
+msgstr "統計所有裝置的流量使用情況"
+
 msgid "Today used"
 msgstr "今日已使用"
 
@@ -563,9 +494,6 @@ msgstr "剩餘流量"
 
 msgid "Account total traffic"
 msgstr "帳戶總流量"
-
-msgid "Need more traffic? Open the panel to buy a traffic pack"
-msgstr "流量不夠用？前往面板選購流量包"
 
 msgid "Next usage reset"
 msgstr "下次重設已使用流量日期"
@@ -723,9 +651,6 @@ msgstr "最近 %d 天的線上用戶端"
 msgid "No online clients in the last %d days"
 msgstr "最近 %d 天沒有線上用戶端記錄"
 
-msgid "Account info updated"
-msgstr "帳戶資訊已重新整理"
-
 msgid "TUN excluded networks"
 msgstr "TUN 排除自訂網段"
 
@@ -754,10 +679,10 @@ msgid "Start the kernel after reboot if this router is signed in."
 msgstr "已登入時，路由器重新啟動後自動啟動核心。"
 
 msgid "Refresh panel profile"
-msgstr "重新整理面板設定"
+msgstr "更新面板設定"
 
 msgid "Pull nodes and rules again. Node changes also follow the account refresh."
-msgstr "重新取得節點與分流規則；節點變更後隨帳戶資訊重新整理自動更新"
+msgstr "重新取得節點與分流規則；節點變更後會隨帳號資訊一併更新"
 
 msgid "Update GeoData"
 msgstr "更新 GeoData"
@@ -918,7 +843,7 @@ msgstr "複製全部"
 msgid "Copied"
 msgstr "已複製"
 
-msgid "Copy failed"
+msgid "Failed to copy"
 msgstr "複製失敗"
 
 msgid "Loading rule providers: %d/%d"
@@ -1089,9 +1014,6 @@ msgstr "Nikki 來源未提供 mihomo-meta 版本"
 msgid "The profile failed kernel validation: {message}"
 msgstr "設定未通過核心驗證：{message}"
 
-msgid "Profile validation failed: {message}"
-msgstr "設定驗證未通過：{message}"
-
 msgid "{message}; could not restore the previous profile"
 msgstr "{message}；舊設定還原失敗"
 
@@ -1108,7 +1030,7 @@ msgid "Account switching is in progress. Try again shortly."
 msgstr "正在切換帳戶，請稍後再試"
 
 msgid "Offline profile authorization is invalid. Refresh the profile."
-msgstr "設定的離線授權無效，請重新整理設定"
+msgstr "設定的離線授權無效，請更新設定"
 
 msgid "Could not stage the validated profile. Try again."
 msgstr "無法暫存已驗證的設定，請重試"
@@ -1141,7 +1063,7 @@ msgid "Starting the kernel"
 msgstr "正在啟動核心"
 
 msgid "Your session or offline profile authorization has expired. Sign in again or refresh the profile."
-msgstr "登入或設定的離線授權已失效，請重新登入或重新整理設定"
+msgstr "登入或設定的離線授權已失效，請重新登入或更新設定"
 
 msgid "Transparent proxy rules were not applied: {message}"
 msgstr "透明代理規則未生效：{message}"
@@ -1168,10 +1090,10 @@ msgid "Panel profile reloaded"
 msgstr "面板設定已重新載入"
 
 msgid "Could not commit the loaded profile. Refresh the profile."
-msgstr "無法送出已載入的設定，請重新整理設定"
+msgstr "無法送出已載入的設定，請更新設定"
 
 msgid "Offline profile authorization has expired. Refresh the profile."
-msgstr "設定的離線授權已到期，請重新整理設定"
+msgstr "設定的離線授權已到期，請更新設定"
 
 msgid "The kernel is not responding. Network recovery failed; retrying."
 msgstr "核心未回應，網路設定還原失敗，將繼續重試"
@@ -1194,44 +1116,8 @@ msgstr "無法儲存測試工作"
 msgid "Sign out of the current account first"
 msgstr "請先登出目前帳戶"
 
-msgid "Could not block new background tasks"
-msgstr "無法阻止新的背景工作"
-
-msgid "Could not close the previous account's connections"
-msgstr "無法關閉舊帳戶連線"
-
-msgid "Could not stop the previous account's service"
-msgstr "無法停止舊帳戶服務"
-
-msgid "Could not open the session lock"
-msgstr "無法開啟工作階段鎖"
-
-msgid "Could not stop the previous account's service completely"
-msgstr "舊帳戶服務停止失敗"
-
-msgid "Some tasks for the previous account are still running. Try again shortly."
-msgstr "舊帳戶工作尚未全部結束，請稍後再試"
-
-msgid "The previous account's network settings have not been restored"
-msgstr "舊帳戶網路設定尚未還原"
-
-msgid "Could not clear the previous account's runtime directory"
-msgstr "無法清除舊帳戶執行目錄"
-
-msgid "Could not clear the previous account's runtime data"
-msgstr "無法清除舊帳戶執行資料"
-
-msgid "Could not clear the previous account's request cache"
-msgstr "無法清除舊帳戶請求快取"
-
-msgid "Could not finish switching accounts"
-msgstr "無法完成帳戶切換"
-
 msgid "Could not clear the previous account's cache"
 msgstr "無法清除舊帳戶快取"
-
-msgid "Could not clear the previous account's credentials"
-msgstr "無法清除舊帳戶憑證"
 
 msgid "Could not open the account cache lock"
 msgstr "無法開啟帳戶快取鎖"
@@ -1269,9 +1155,6 @@ msgstr "無法儲存網路接管狀態"
 msgid "Could not read secure system random data"
 msgstr "無法讀取系統安全亂數"
 
-msgid "The runtime directory must be %s/run"
-msgstr "執行目錄必須為 %s/run"
-
 msgid "The TUN interface name must be 1–15 letters, digits, underscores, periods, or hyphens"
 msgstr "TUN 網路介面名稱只能包含 1 到 15 個英文字母、數字、底線、點或連字號"
 
@@ -1289,6 +1172,9 @@ msgstr "第 %d 個節點沒有名稱"
 
 msgid "Duplicate node name: %s"
 msgstr "節點名稱重複：%s"
+
+msgid "Node \"%s\" uses the mesh-network type %s, which would join the kernel to an outside network and is not supported"
+msgstr "節點「%s」是組網類型（%s），會讓核心加入外部網路，用戶端不支援"
 
 msgid "Node %d has no type"
 msgstr "第 %d 個節點沒有類型"
@@ -1325,12 +1211,6 @@ msgstr "策略群組「%s」的節點訂閱「%s」不存在"
 
 msgid "Proxy group \"%s\" references missing member \"%s\""
 msgstr "策略群組「%s」的成員「%s」不存在"
-
-msgid "The node provider section is incomplete"
-msgstr "節點訂閱區段設定不完整"
-
-msgid "The rule provider section is incomplete"
-msgstr "規則集區段設定不完整"
 
 msgid "Node provider \"%s\" has an incomplete configuration"
 msgstr "節點訂閱「%s」設定不完整"
@@ -1393,24 +1273,21 @@ msgid "%d additional issues are not shown"
 msgstr "另有 %d 項問題未列出"
 
 msgid "Account deletion is pending. Cancel deletion on the website before signing in."
-msgstr "帳戶正在等待刪除，請先到網站取消刪除再登入"
+msgstr "帳號正在等待刪除，請先到網站取消刪除再登入"
 
 msgid "Your account has been banned: %s"
-msgstr "帳戶已被停權：%s"
+msgstr "帳號已被停權：%s"
 
 msgid "Your account has been banned. Check the website for details."
-msgstr "帳戶已被停權，請到網站查看詳細資訊"
-
-msgid "Could not save traffic data for the current account"
-msgstr "無法儲存目前帳戶的流量紀錄"
+msgstr "帳號已被停權，請到網站查看詳細資訊"
 
 msgid "Could not clear traffic data for the previous account"
 msgstr "無法清除舊帳戶的流量紀錄"
 
-msgid "Privacy Policy"
+msgid "Privacy policy"
 msgstr "隱私權政策"
 
-msgid "Terms of Service"
+msgid "Terms of service"
 msgstr "服務條款"
 
 msgid "Downloaded"
@@ -1445,3 +1322,30 @@ msgstr "目標連接埠"
 
 msgid "Close connection"
 msgstr "關閉連線"
+
+msgid "The background update was interrupted. Try again."
+msgstr "背景更新已中斷，請重試"
+
+msgid "Node provider \"%s\" must use an HTTPS download URL"
+msgstr "節點訂閱「%s」的下載網址必須使用 https"
+
+msgid "Rule provider \"%s\" must use an HTTPS download URL"
+msgstr "規則集「%s」的下載網址必須使用 https"
+
+msgid "geox-url entry \"%s\" must use HTTPS"
+msgstr "geox-url「%s」必須使用 https"
+
+msgid "The GeoData mirror must use HTTPS"
+msgstr "GeoData 鏡像站台網址必須使用 https"
+
+msgid "Add"
+msgstr "新增"
+
+msgid "Save & Apply"
+msgstr "儲存並套用"
+
+msgid "Proxy"
+msgstr "代理"
+
+msgid "Grant access to the ECY Cloud client"
+msgstr "授予存取 ECY Cloud 用戶端的權限"

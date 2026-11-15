@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:ecycloud_client/core/app_paths.dart';
 import 'package:ecycloud_client/core/logger.dart';
 import 'package:ecycloud_client/data/api/api_exception.dart';
 import 'package:ecycloud_client/data/api/panel_api_client.dart';
@@ -34,7 +36,7 @@ void main() {
     final auth = AuthController(
       _SessionPlatform(),
       _SessionCredentials(),
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
       cache: cache,
       createClient: (_, _, _) => client,
     );
@@ -70,7 +72,7 @@ void main() {
     final auth = AuthController(
       _SessionPlatform(),
       _SessionCredentials(),
-      clearLocalSession: () async => Logger.instance.clearSession(),
+      clearLocalSession: (_) async => Logger.instance.clearSession(),
       cache: _SessionCache(),
       createClient: (_, _, _) => clients.removeAt(0),
     );
@@ -108,7 +110,7 @@ void main() {
     final auth = AuthController(
       platform,
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
     );
     addTearDown(auth.dispose);
     final save = auth.saveRememberedLogin(
@@ -134,7 +136,7 @@ void main() {
     final auth = AuthController(
       platform,
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
     );
     addTearDown(auth.dispose);
     final load = auth.loadRememberedLogin();
@@ -143,7 +145,7 @@ void main() {
     expect(await load, isNull);
   });
 
-  test('系统密码删除失败必须报告失败且保留可重试记录', () async {
+  test('系统密码删除失败只记日志，不弹提示，本地记录照常清掉', () async {
     final platform = _SessionPlatform()..deleteFails = true;
     final credentials = _SessionCredentials()
       ..remembered = const RememberedLogin(
@@ -153,133 +155,261 @@ void main() {
     final auth = AuthController(
       platform,
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
     );
     addTearDown(auth.dispose);
-    await expectLater(auth.clearRememberedLogin(), throwsA(isA<StateError>()));
-    expect(credentials.remembered, isNotNull);
+    await auth.clearRememberedLogin();
+    expect(credentials.remembered, isNull);
   });
 
-  test('本地清理失败时不发送登录请求并保留中断标记', () async {
-    final _SessionCredentials credentials = _SessionCredentials();
-    int clients = 0;
-    final AuthController auth = AuthController(
-      _SessionPlatform(),
+  test('没有记住的密码时读取不去删除系统密钥；读取失败只留空密码', () async {
+    final platform = _SessionPlatform();
+    final credentials = _SessionCredentials();
+    final auth = AuthController(
+      platform,
       credentials,
-      clearLocalSession: () async => throw StateError('旧内核未退出'),
-      createClient: (_, _, _) {
-        clients++;
-        return _SessionClient(101);
-      },
+      clearLocalSession: (_) async {},
     );
     addTearDown(auth.dispose);
-    expect(
-      await auth.login(email: 'new@example.test', password: 'test'),
-      isFalse,
+    expect(await auth.loadRememberedLogin(), isNull);
+    expect(platform.deletes, 0);
+    credentials.remembered = const RememberedLogin(
+      email: 'a@example.test',
+      password: 'ecy1:protected-a',
     );
-    expect(clients, 0);
-    expect(credentials.sessionCleanupPending, isTrue);
-    expect(auth.api, isNull);
-    expect(auth.busy, isFalse);
+    platform.revealError = PlatformServiceException('密钥环未解锁');
+    final RememberedLogin? loaded = await auth.loadRememberedLogin();
+    expect(loaded?.email, 'a@example.test');
+    expect(loaded?.password, isEmpty);
   });
 
-  test('清理完成前阻止并发登录，成功后才认证', () async {
-    final Completer<void> cleanup = Completer<void>();
-    final Completer<void> started = Completer<void>();
+  test('密钥环读取失败不按已退出处理，保留凭据并提示可重试', () async {
+    final _SessionCredentials credentials = _SessionCredentials()
+      ..saved = Credentials(
+        token: 'ecy1:test-token-101',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        email: '101@example.test',
+      );
+    int clears = 0;
+    final AuthController auth = AuthController(
+      _SessionPlatform()..revealError = PlatformServiceException('密钥环未解锁'),
+      credentials,
+      clearLocalSession: (_) async => clears++,
+      cache: _SessionCache(),
+      createClient: (_, _, _) => _SessionClient(101),
+    );
+    addTearDown(auth.dispose);
+    await auth.restore();
+    expect(clears, 0);
+    expect(credentials.saved, isNotNull);
+    expect(auth.stage, isNot(AuthStage.loggedOut));
+    expect(auth.error, isNotNull);
+  });
+
+  test('退出把已结束的账号键交给清理，内核绑定只认当前账号', () async {
     final _SessionCredentials credentials = _SessionCredentials();
-    int clients = 0;
+    String? ended;
     final AuthController auth = AuthController(
       _SessionPlatform(),
       credentials,
       cache: _SessionCache(),
-      clearLocalSession: () {
-        started.complete();
-        return cleanup.future;
-      },
-      createClient: (_, _, _) {
-        clients++;
-        return _SessionClient(101);
-      },
+      clearLocalSession: (String key) async => ended = key,
+      createClient: (_, _, _) => _SessionClient(101),
     );
     addTearDown(auth.dispose);
-    final Future<bool> login = auth.login(
-      email: '101@example.test',
-      password: 'test',
-    );
-    await started.future;
-    expect(clients, 0);
-    expect(
-      await auth.login(email: '202@example.test', password: 'test'),
-      isFalse,
-    );
-    cleanup.complete();
-    expect(await login, isTrue);
-    expect(clients, 1);
-    expect(credentials.sessionCleanupPending, isFalse);
-    expect(auth.profile?.id, 101);
+    await auth.login(email: '101@example.test', password: 'test');
+    final String key = credentials.key;
+    expect(AppPaths.session, key, reason: '内核绑定只认当前账号，与可替换的客户端对象无关');
+    await auth.logout();
+    expect(ended, key);
   });
 
-  test('登录等待清理时登出共用同一清理任务并取消认证', () async {
-    final Completer<void> cleanup = Completer<void>();
-    final Completer<void> started = Completer<void>();
-    int clears = 0;
-    int clients = 0;
-    final AuthController auth = AuthController(
-      _SessionPlatform(),
-      _SessionCredentials(),
-      clearLocalSession: () {
-        clears++;
-        started.complete();
-        return cleanup.future;
-      },
-      createClient: (_, _, _) {
-        clients++;
-        return _SessionClient(101);
-      },
-    );
-    addTearDown(auth.dispose);
-    final Future<bool> login = auth.login(
-      email: '101@example.test',
-      password: 'test',
-    );
-    await started.future;
-    final Future<void> logout = auth.logout();
-    cleanup.complete();
-    await logout;
-    expect(await login, isFalse);
-    expect(clears, 1);
-    expect(clients, 0);
-    expect(auth.stage, AuthStage.loggedOut);
-  });
-
-  test('启动遇到中断标记必须清理，不能恢复旧令牌', () async {
+  test('写会话键失败时整体登录失败，不留半登录状态', () async {
+    AppPaths.useSession('');
     final _SessionCredentials credentials = _SessionCredentials()
-      ..pending = true
-      ..saved = Credentials(
-        token: 'old',
-        expiresAt: DateTime.now().add(const Duration(hours: 1)),
-        email: 'old@example.test',
-      );
-    int clears = 0;
-    int clients = 0;
+      ..keyFails = true;
     final AuthController auth = AuthController(
       _SessionPlatform(),
       credentials,
-      clearLocalSession: () async {
+      cache: _SessionCache(),
+      clearLocalSession: (_) async {},
+      createClient: (_, _, _) => _SessionClient(101),
+    );
+    addTearDown(auth.dispose);
+    expect(
+      await auth.login(email: '101@example.test', password: 'test'),
+      isFalse,
+    );
+    expect(auth.api, isNull);
+    expect(auth.stage, AuthStage.loggedOut);
+    expect(credentials.saved, isNull);
+    expect(AppPaths.session, isEmpty);
+  });
+
+  test('登录不做任何清理，会话键随登录写入并切换数据目录', () async {
+    final _SessionCredentials credentials = _SessionCredentials();
+    int clears = 0;
+    final _SessionClient client = _SessionClient(101);
+    final AuthController auth = AuthController(
+      _SessionPlatform(),
+      credentials,
+      cache: _SessionCache(),
+      clearLocalSession: (_) async => clears++,
+      createClient: (_, _, _) => client,
+    );
+    addTearDown(auth.dispose);
+    expect(
+      await auth.login(email: '101@example.test', password: 'test'),
+      isTrue,
+    );
+    expect(clears, 0);
+    expect(auth.stage, AuthStage.loggedIn);
+    expect(credentials.key, matches(RegExp(r'^[0-9a-f]{64}$')));
+    expect(AppPaths.session, credentials.key);
+  });
+
+  testWidgets('退出立即回到登录页，清理失败也不报错、不重试', (tester) async {
+    final _SessionPlatform platform = _SessionPlatform();
+    final _SessionCredentials credentials = _SessionCredentials();
+    final Completer<void> stopping = Completer<void>();
+    int clears = 0;
+    final AuthController auth = AuthController(
+      platform,
+      credentials,
+      cache: _SessionCache(),
+      clearLocalSession: (_) async {
         clears++;
+        await stopping.future;
+        throw StateError('旧内核未退出');
       },
-      createClient: (_, _, _) {
-        clients++;
-        return _SessionClient(101);
-      },
+      createClient: (_, _, _) => _SessionClient(101),
+    );
+    addTearDown(auth.dispose);
+    await auth.login(email: '101@example.test', password: 'test');
+    final Future<void> logout = auth.logout();
+    await tester.pump();
+    expect(auth.stage, AuthStage.loggedOut);
+    expect(auth.busy, isFalse, reason: '停内核期间不能挡住新的登录');
+    expect(credentials.saved, isNull);
+    expect(credentials.key, isEmpty);
+    expect(AppPaths.session, isEmpty);
+    stopping.complete();
+    await logout;
+    expect(auth.error, isNull);
+    await tester.pump(const Duration(minutes: 30));
+    expect(clears, 1);
+  });
+
+  test('系统凭据删除失败仍完成退出', () async {
+    final _SessionCredentials credentials = _SessionCredentials();
+    final AuthController auth = AuthController(
+      _SessionPlatform()..deleteFails = true,
+      credentials,
+      cache: _SessionCache(),
+      clearLocalSession: (_) async {},
+      createClient: (_, _, _) => _SessionClient(101),
+    );
+    addTearDown(auth.dispose);
+    await auth.login(email: '101@example.test', password: 'test');
+    await auth.logout();
+    expect(auth.stage, AuthStage.loggedOut);
+    expect(credentials.saved, isNull);
+    expect(credentials.key, isEmpty);
+    expect(auth.busy, isFalse);
+    expect(auth.error, isNull);
+  });
+
+  test('旧账户停内核未完成时新账号立即登录，旧清理不碰新会话', () async {
+    final _SessionCredentials credentials = _SessionCredentials();
+    final Completer<void> stopping = Completer<void>();
+    final clients = <_SessionClient>[_SessionClient(101), _SessionClient(202)];
+    final AuthController auth = AuthController(
+      _SessionPlatform(),
+      credentials,
+      cache: _SessionCache(),
+      clearLocalSession: (_) => stopping.future,
+      createClient: (_, _, _) => clients.removeAt(0),
+    );
+    addTearDown(auth.dispose);
+    await auth.login(email: '101@example.test', password: 'test');
+    final String first = credentials.key;
+    final Future<void> logout = auth.logout();
+    while (auth.busy) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(
+      await auth.login(email: '202@example.test', password: 'test'),
+      isTrue,
+    );
+    stopping.complete();
+    await logout;
+    expect(auth.stage, AuthStage.loggedIn);
+    expect(credentials.saved?.email, '202@example.test');
+    expect(credentials.key, isNot(first));
+    expect(AppPaths.session, credentials.key);
+  });
+
+  test('同一账号重新登录回到同一目录，不同账号目录不同', () async {
+    final _SessionCredentials credentials = _SessionCredentials();
+    final clients = <_SessionClient>[
+      _SessionClient(101),
+      _SessionClient(101),
+      _SessionClient(202),
+    ];
+    final AuthController auth = AuthController(
+      _SessionPlatform(),
+      credentials,
+      cache: _SessionCache(),
+      clearLocalSession: (_) async {},
+      createClient: (_, _, _) => clients.removeAt(0),
+    );
+    addTearDown(auth.dispose);
+    await auth.login(email: '101@example.test', password: 'test');
+    final String first = credentials.key;
+    await auth.logout();
+    await auth.login(email: '101@EXAMPLE.test', password: 'test');
+    expect(credentials.key, first);
+    expect(AppPaths.session, first);
+    await auth.logout();
+    await auth.login(email: '202@example.test', password: 'test');
+    expect(credentials.key, isNot(first));
+  });
+
+  test('旧版凭据没有会话键时按站点与邮箱补上，与登录得到的一致', () async {
+    final client = _SessionClient(101)
+      ..pendingStatus = (Completer<AccountStatus>()
+        ..complete(AccountStatus.fromJson(<String, dynamic>{'enable': 1})));
+    client.pendingProfile.complete(client.profile);
+    final _SessionCredentials credentials = _SessionCredentials()
+      ..saved = Credentials(
+        token: 'ecy1:test-token-101',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        email: '101@example.test',
+      );
+    final AuthController auth = AuthController(
+      _SessionPlatform(),
+      credentials,
+      clearLocalSession: (_) async {},
+      cache: _SessionCache(),
+      createClient: (_, _, _) => client,
     );
     addTearDown(auth.dispose);
     await auth.restore();
-    expect(clears, 1);
-    expect(clients, 0);
-    expect(credentials.saved, isNull);
-    expect(credentials.pending, isFalse);
-    expect(auth.stage, AuthStage.loggedOut);
+    expect(auth.stage, AuthStage.loggedIn);
+    final String restored = credentials.key;
+    expect(restored, matches(RegExp(r'^[0-9a-f]{64}$')));
+    expect(AppPaths.session, restored);
+    await auth.logout();
+    final AuthController next = AuthController(
+      _SessionPlatform(),
+      credentials,
+      clearLocalSession: (_) async {},
+      cache: _SessionCache(),
+      createClient: (_, _, _) => _SessionClient(101),
+    );
+    addTearDown(next.dispose);
+    await next.login(email: '101@example.test', password: 'test');
+    expect(credentials.key, restored);
   });
 
   for (final bool cached in <bool>[true, false]) {
@@ -296,7 +426,7 @@ void main() {
       final auth = AuthController(
         _SessionPlatform(),
         credentials,
-        clearLocalSession: () async {},
+        clearLocalSession: (_) async {},
         cache: cache,
         createClient: (_, _, _) => client,
       );
@@ -349,7 +479,7 @@ void main() {
       final auth = AuthController(
         _SessionPlatform(),
         credentials,
-        clearLocalSession: () async {},
+        clearLocalSession: (_) async {},
         cache: _SessionCache()..last = client.profile,
         createClient: (_, _, _) => client,
       );
@@ -384,7 +514,7 @@ void main() {
     final auth = AuthController(
       _SessionPlatform(),
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
       cache: _SessionCache()..last = client.profile,
       createClient: (_, _, _) => client,
     );
@@ -419,7 +549,7 @@ void main() {
       final auth = AuthController(
         _SessionPlatform(),
         credentials,
-        clearLocalSession: () async {},
+        clearLocalSession: (_) async {},
         cache: _SessionCache()..last = first.profile,
         createClient: (_, _, _) => clients.removeAt(0),
       );
@@ -466,7 +596,7 @@ void main() {
       final auth = AuthController(
         _SessionPlatform(),
         credentials,
-        clearLocalSession: () async => clears++,
+        clearLocalSession: (_) async => clears++,
         cache: _SessionCache(),
         createClient: (_, _, _) => clients.removeAt(0),
       );
@@ -508,7 +638,7 @@ void main() {
     final auth = AuthController(
       _SessionPlatform()..deviceError = StateError('读取失败'),
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
       cache: _SessionCache(),
       createClient: (_, _, _) => throw StateError('不应创建请求'),
     );
@@ -533,7 +663,7 @@ void main() {
       final auth = AuthController(
         _SessionPlatform(),
         credentials,
-        clearLocalSession: () async {},
+        clearLocalSession: (_) async {},
         cache: _SessionCache(),
         createClient: (_, _, _) => client,
       );
@@ -582,7 +712,7 @@ void main() {
         final auth = AuthController(
           platform,
           credentials,
-          clearLocalSession: () async {},
+          clearLocalSession: (_) async {},
           cache: _SessionCache(),
           createClient: (_, _, _) => clients.removeAt(0),
         );
@@ -620,21 +750,6 @@ void main() {
     }
   }
 
-  test('系统凭据删除失败不能完成账户交接', () async {
-    final _SessionCredentials credentials = _SessionCredentials();
-    final AuthController auth = AuthController(
-      _SessionPlatform()..deleteFails = true,
-      credentials,
-      clearLocalSession: () async {},
-      createClient: (_, _, _) => _SessionClient(101),
-    );
-    addTearDown(auth.dispose);
-    await expectLater(auth.logout(), throwsA(isA<ApiException>()));
-    expect(credentials.pending, isTrue);
-    expect(auth.busy, isFalse);
-    expect(auth.error, isNotEmpty);
-  });
-
   for (final bool unauthorized in <bool>[false, true]) {
     test('旧账户延迟${unauthorized ? '鉴权失败' : '资料响应'}不能影响新账户', () async {
       final _SessionClient first = _SessionClient(101);
@@ -644,7 +759,7 @@ void main() {
       final AuthController auth = AuthController(
         _SessionPlatform(),
         _SessionCredentials(),
-        clearLocalSession: () async {},
+        clearLocalSession: (_) async {},
         cache: cache,
         createClient: (_, _, _) => clients.removeAt(0),
       );
@@ -685,7 +800,7 @@ void main() {
     final AuthController auth = AuthController(
       platform,
       credentials,
-      clearLocalSession: () async {},
+      clearLocalSession: (_) async {},
       cache: _SessionCache(),
       createClient: (_, _, _) => _SessionClient(101),
     );
@@ -736,6 +851,114 @@ void main() {
     expect(keepSession[401], isFalse);
     expect(keepSession[429], isTrue);
   });
+
+  test('密码错误、两步验证与登录成功都不触发会话清理', () async {
+    int clears = 0;
+    final clients = <_SessionClient>[
+      _SessionClient(101)..loginError = ApiException('密码错误'),
+      _SessionClient(101)..loginError = ApiException('需要两步验证', ret: 2),
+      _SessionClient(101),
+    ];
+    final auth = AuthController(
+      _SessionPlatform(),
+      _SessionCredentials()
+        ..saved = Credentials(
+          token: 'ecy1:old-token',
+          expiresAt: DateTime.now().subtract(const Duration(hours: 1)),
+          email: 'old@example.test',
+        ),
+      clearLocalSession: (_) async => clears++,
+      cache: _SessionCache(),
+      createClient: (_, _, _) => clients.removeAt(0),
+    );
+    addTearDown(auth.dispose);
+    expect(
+      await auth.login(email: '101@example.test', password: 'wrong'),
+      isFalse,
+    );
+    expect(
+      await auth.login(email: '101@example.test', password: 'test'),
+      isFalse,
+    );
+    expect(auth.stage, AuthStage.needsTwoFactor);
+    expect(
+      await auth.login(
+        email: '101@example.test',
+        password: 'test',
+        twoFactorCode: '123456',
+      ),
+      isTrue,
+    );
+    expect(clears, 0);
+  });
+
+  test('退出不等面板登出通知超时，先完成本地清理', () async {
+    final client = _SessionClient(101)..pendingLogout = Completer<void>();
+    bool clearedWhileNotifying = false;
+    final auth = AuthController(
+      _SessionPlatform(),
+      _SessionCredentials(),
+      clearLocalSession: (_) async =>
+          clearedWhileNotifying = client.loggedOut && !client.closed,
+      cache: _SessionCache(),
+      createClient: (_, _, _) => client,
+    );
+    addTearDown(auth.dispose);
+    await auth.login(email: '101@example.test', password: 'test');
+    final Stopwatch watch = Stopwatch()..start();
+    await auth.logout();
+    expect(clearedWhileNotifying, isTrue);
+    expect(watch.elapsed, lessThan(const Duration(seconds: 6)));
+    expect(client.closed, isTrue);
+    expect(auth.stage, AuthStage.loggedOut);
+  });
+
+  testWidgets('启动接管运行中内核失败仍继续恢复登录', (tester) async {
+    final client = _SessionClient(101)
+      ..pendingStatus = (Completer<AccountStatus>()
+        ..complete(AccountStatus.fromJson(<String, dynamic>{'enable': 0})));
+    final credentials = _SessionCredentials()
+      ..saved = Credentials(
+        token: 'ecy1:test-token-101',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        email: '101@example.test',
+      );
+    final auth = AuthController(
+      _SessionPlatform(),
+      credentials,
+      clearLocalSession: (_) async {},
+      cache: _SessionCache(),
+      createClient: (_, _, _) => client,
+    );
+    final connection = _StartupConnection(ThemeMode.light)
+      ..adoptError = StateError('测试接管失败');
+    final announcements = _StartupAnnouncements();
+    final update = _StartupUpdate();
+    addTearDown(() {
+      auth.dispose();
+      connection.dispose();
+      announcements.dispose();
+      update.dispose();
+    });
+    await tester.pumpWidget(
+      AppScope(
+        auth: auth,
+        connection: connection,
+        announcements: announcements,
+        update: update,
+        platform: _SessionPlatform(),
+        settingsStore: SettingsStore(),
+        child: const EcyCloudApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(auth.stage, AuthStage.accountRestricted);
+    expect(find.byType(AccountStatusPage), findsOneWidget);
+    expect(connection.shutdowns, <bool>[false], reason: '受限只停内核，完整清理留到退出');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 class _SessionClient extends PanelApiClient {
@@ -760,6 +983,8 @@ class _SessionClient extends PanelApiClient {
   final Completer<String> pendingRevision = Completer<String>();
   bool loggedOut = false;
   bool closed = false;
+  ApiException? loginError;
+  Completer<void>? pendingLogout;
 
   UserProfile get profile => UserProfile.fromJson(<String, dynamic>{
     'id': userId,
@@ -778,6 +1003,7 @@ class _SessionClient extends PanelApiClient {
     required String password,
     String? twoFactorCode,
   }) async {
+    if (loginError != null) throw loginError!;
     token = 'test-token-$userId';
     return LoginResult(
       token!,
@@ -805,6 +1031,7 @@ class _SessionClient extends PanelApiClient {
   Future<void> logout() async {
     loggedOut = true;
     token = null;
+    await pendingLogout?.future;
   }
 
   @override
@@ -823,13 +1050,15 @@ class _SessionCredentials extends CredentialStore {
   @override
   void clearRemembered() => remembered = null;
   Credentials? saved;
-  bool pending = false;
+  String key = '';
   @override
-  bool get sessionCleanupPending => pending;
+  String get sessionKey => key;
+  bool keyFails = false;
   @override
-  void beginSessionCleanup() => pending = true;
-  @override
-  void finishSessionCleanup() => pending = false;
+  void saveSessionKey(String key) {
+    if (keyFails) throw const FileSystemException('测试磁盘已满');
+    this.key = key;
+  }
   @override
   String? loadApiOrigin() => 'https://panel.example.test';
   @override
@@ -846,6 +1075,7 @@ class _SessionCredentials extends CredentialStore {
   @override
   void clear() {
     saved = null;
+    key = '';
   }
 }
 
@@ -864,8 +1094,13 @@ class _SessionPlatform implements PlatformService {
   Object? deviceError;
   Completer<String>? pendingReveal;
   @override
-  Future<String?> unprotectSecret(String name, String protected) async =>
-      pendingReveal == null ? protected : await pendingReveal!.future;
+  Future<String?> unprotectSecret(String name, String protected) async {
+    if (revealError != null) throw revealError!;
+    return pendingReveal == null ? protected : await pendingReveal!.future;
+  }
+
+  Object? revealError;
+  int deletes = 0;
   bool deleteFails = false;
   String? storedSecret;
   Completer<String>? pendingProtection;
@@ -903,6 +1138,7 @@ class _SessionPlatform implements PlatformService {
 
   @override
   Future<void> deleteSecret(String name) async {
+    deletes++;
     if (deleteFails) throw StateError('测试凭据删除失败');
     storedSecret = null;
   }
@@ -913,8 +1149,14 @@ class _SessionPlatform implements PlatformService {
 
 class _StartupConnection extends ChangeNotifier
     implements ConnectionController {
+  final List<bool> shutdowns = <bool>[];
+  Object? adoptError;
   @override
-  Future<void> shutdown({bool clearSession = false}) async {}
+  Future<void> shutdown({
+    bool clearSession = false,
+    String endedSession = '',
+  }) async =>
+      shutdowns.add(clearSession);
   _StartupConnection(ThemeMode theme)
     : settings = const AppSettings.defaults().copyWith(
         locale: AppLanguage.zhCN.code,
@@ -932,7 +1174,10 @@ class _StartupConnection extends ChangeNotifier
   @override
   Future<void> syncPlatformSettings() async {}
   @override
-  Future<void> adoptRunningKernel() async {}
+  Future<void> adoptRunningKernel({bool takeover = false}) async {
+    if (adoptError != null) throw adoptError!;
+  }
+
   @override
   Future<void> runPreflight() async {}
   @override

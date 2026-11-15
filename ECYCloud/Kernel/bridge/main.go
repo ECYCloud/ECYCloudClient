@@ -7,11 +7,14 @@ package main
 import "C"
 import (
 	"ecycloud/apple/Kernel"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
 
-// Result: 0 = success/timeout, -1 = stopped, -2 = invalid, -3 = queue full.
+var lastStart atomic.Int32
+
+// Result: 0 = success/timeout, -1 = stopped, -2 = invalid, -3 = queue full, -4 = no nodes.
 func result(err error) C.int {
 	switch err {
 	case nil:
@@ -20,6 +23,8 @@ func result(err error) C.int {
 		return -1
 	case kernel.ErrQueueFull:
 		return -3
+	case kernel.ErrNoNodes:
+		return -4
 	default:
 		return -2
 	}
@@ -28,14 +33,19 @@ func result(err error) C.int {
 //export ECYStart
 func ECYStart(data unsafe.Pointer, size C.int, directory *C.char, mtu C.int, ipv4, ipv6, dns *C.char) C.uint64_t {
 	if data == nil || size <= 0 || size > kernel.MaximumConfigBytes || directory == nil || ipv4 == nil || ipv6 == nil || dns == nil {
+		lastStart.Store(-2)
 		return 0
 	}
 	id, err := kernel.Start(C.GoBytes(data, size), C.GoString(directory), int(mtu), C.GoString(ipv4), C.GoString(ipv6), C.GoString(dns))
+	lastStart.Store(int32(result(err)))
 	if err != nil {
 		return 0
 	}
 	return C.uint64_t(id)
 }
+
+//export ECYStartError
+func ECYStartError() C.int { return C.int(lastStart.Load()) }
 
 //export ECYStop
 func ECYStop(id C.uint64_t) { kernel.Stop(uint64(id)) }

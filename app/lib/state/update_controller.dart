@@ -154,8 +154,11 @@ class UpdateController extends ChangeNotifier {
       return http.Client();
     }
     final int port = _connection.settings.mixedPort;
+    final String? credential = _connection.mixedProxyCredential;
     return IOClient(
-      HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port',
+      HttpClient()
+        ..findProxy = (Uri _) =>
+            'PROXY ${credential == null ? '' : '$credential@'}127.0.0.1:$port',
     );
   }
 
@@ -420,7 +423,7 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<File> _download(GithubAsset asset) async {
-    if (!asset.url.startsWith(AppUpdate.downloadPrefix)) {
+    if (!AppUpdate.isOfficialDownload(asset.url)) {
       throw GithubReleaseException('下载地址不在官方发布路径下，已中止更新');
     }
     if (asset.size <= 0 || asset.size > 1 << 30) {

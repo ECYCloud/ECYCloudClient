@@ -166,6 +166,7 @@ class PlanQuote {
     required this.trafficResetFee,
     required this.trafficCurrentShopName,
     required this.trafficBillingBasePrice,
+    required this.trafficBillingBaseType,
     required this.trafficUsed,
     required this.trafficTotal,
     required this.trafficUsagePercent,
@@ -191,6 +192,7 @@ class PlanQuote {
   final String trafficResetFee;
   final String trafficCurrentShopName;
   final String trafficBillingBasePrice;
+  final String trafficBillingBaseType;
   final double trafficUsed;
   final double trafficTotal;
   final double trafficUsagePercent;
@@ -219,6 +221,7 @@ class PlanQuote {
     trafficCurrentShopName: json['traffic_current_shop_name'] as String? ?? '',
     trafficBillingBasePrice:
         json['traffic_billing_base_price'] as String? ?? '0.00',
+    trafficBillingBaseType: json['traffic_billing_base_type'] as String? ?? '',
     trafficUsed: (json['traffic_used'] as num?)?.toDouble() ?? 0,
     trafficTotal: (json['traffic_total'] as num?)?.toDouble() ?? 0,
     trafficUsagePercent:
@@ -322,15 +325,18 @@ class PaymentStatus {
     required this.paid,
     required this.total,
     required this.cardKey,
+    required this.rechargedToBalance,
   });
 
   final bool paid;
   final double total;
   final String cardKey;
+  final bool rechargedToBalance;
 
   factory PaymentStatus.fromJson(Map<String, dynamic> json) => PaymentStatus(
     paid: json['paid'] as bool? ?? false,
     total: (json['total'] as num?)?.toDouble() ?? 0,
     cardKey: json['card_key'] as String? ?? '',
+    rechargedToBalance: json['recharged_to_balance'] as bool? ?? false,
   );
 }

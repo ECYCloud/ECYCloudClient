@@ -79,6 +79,17 @@ import CryptoKit
     }
 
     var probePort: Int { mixedPort < 65535 ? mixedPort + 1 : mixedPort - 1 }
+    // 控制端口在分配后、内核监听前可能被本机其它进程抢先占住：内核只记一行日志照常运行，
+    // 此后带 secret 的请求都会交给对方，只能以 helper 转交的内核输出为准
+    func controllerBound(_ lines: [String]) throws -> Bool {
+        for message in lines.map(Self.message) {
+            if message == "RESTful API listening at: 127.0.0.1:\(port)" { return true }
+            if message.hasPrefix("External controller listen error") { throw TunnelError.controllerPortInUse(port) }
+        }
+        return false
+    }
+    // 内核只在监听成功时回报混合端口（listener.GetPorts），被其它程序抢先占用时为 0
+    func listensOnMixedPort() async throws -> Bool { try await api("/configs", timeout: 3)["mixed-port"] as? Int == mixedPort }
     var speedCredential: String {
         "ecy-speed:" + SHA256.hash(data: Data("ecy-speed\0\(secret)".utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -134,16 +145,17 @@ import CryptoKit
         for line in lines {
             sequence += 1
             let level = line.range(of: #"(?<=level=)[a-z]+"#, options: .regularExpression).map { String(line[$0]) } ?? "info"
-            var message = line
-            if let range = line.range(of: "msg=") {
-                let raw = String(line[range.upperBound...])
-                message = (try? JSONDecoder().decode(String.self, from: Data(raw.utf8))) ?? raw
-            }
-            let time = ISO8601DateFormatter().string(from: .now), safe = redactor.redact(message)
+            let time = ISO8601DateFormatter().string(from: .now), safe = redactor.redact(Self.message(line))
             logs.append(["id": sequence, "time": time, "level": level, "message": safe])
             logStore?.append(time: time, level: level, message: safe)
         }
         if logs.count > 2000 { logs.removeFirst(logs.count - 2000) }
+    }
+
+    private static func message(_ line: String) -> String {
+        guard let range = line.range(of: "msg=") else { return line }
+        let raw = String(line[range.upperBound...])
+        return (try? JSONDecoder().decode(String.self, from: Data(raw.utf8))) ?? raw
     }
 
     func request(_ command: TunnelCommand) async throws -> Data {
@@ -187,8 +199,9 @@ import CryptoKit
             guard ["rule", "global", "direct"].contains(command.mode) else { throw TunnelError.control }
             _ = try await api("/configs", method: "PATCH", body: ["mode": command.mode]); result = ["ok": true]
         case .select:
+            guard try await api("/proxies/" + encoded(command.group))["type"] as? String == "Selector" else { throw TunnelError.control }
             _ = try await api("/proxies/" + encoded(command.group), method: "PUT", body: ["name": command.node])
-            try await closeConnections(via: command.group)
+            try? await closeConnections(via: command.group)
             result = ["ok": true]
         case .close:
             _ = try await api("/connections/" + encoded(command.connectionID), method: "DELETE"); result = ["ok": true]
@@ -201,7 +214,7 @@ import CryptoKit
         }
         guard !stopped else { throw CancellationError() }
         let data = try JSONSerialization.data(withJSONObject: result)
-        guard data.count <= 65536 else { throw TunnelError.control }
+        guard data.count <= URLSessionTransport.maximumResponseBytes else { throw TunnelError.control }
         return data
     }
 
@@ -377,7 +390,10 @@ struct MacLogRedactor {
     init(configuration: [String: Any]) {
         var values = Set<String>()
         func walk(_ value: Any, key: String = "") {
-            if let string = value as? String, ["password", "passwd", "token", "secret", "uuid", "private-key", "client-fingerprint"].contains(key.lowercased()), !string.isEmpty { values.insert(string) }
+            // 与 Kernel/control.go 的 newLogBuffer 同一口径：obfs-password 等复合键名同样收集
+            let lower = key.lowercased()
+            if let string = value as? String, !string.isEmpty,
+               ["password", "passwd", "token", "secret"].contains(where: lower.contains) || ["uuid", "private-key", "authorization", "client-fingerprint"].contains(lower) { values.insert(string) }
             else if let object = value as? [String: Any] { for (key, value) in object { walk(value, key: key) } }
             else if let array = value as? [Any] { for item in array { walk(item) } }
         }
@@ -392,7 +408,7 @@ struct MacLogRedactor {
         for match in pattern.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed() {
             guard let range = Range(match.range, in: result) else { continue }
             var url = URLComponents(string: String(result[range]))
-            url?.user = nil; url?.password = nil; url?.query = nil; url?.fragment = nil
+            url?.user = nil; url?.password = nil; url?.path = ""; url?.query = nil; url?.fragment = nil
             result.replaceSubrange(range, with: url?.string ?? L10n.t("[链接]"))
         }
         return String(result.prefix(4096))

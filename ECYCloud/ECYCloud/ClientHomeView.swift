@@ -113,7 +113,7 @@ struct ClientHomeView: View {
             guard session.phase == .signedIn, session.profile?.deviceKickNotice == true else { return }
             if session.profile?.deviceKickReason == "limit_denied" { await loadSlotDevices() } else { kickNotice = true }
         }
-        .productDialog(item: $popup) { item in AnnouncementPopup(session: session, item: item) { popup = nil } }
+        .productDialog(item: $popup) { item in AnnouncementsView(session: session, popup: item) { popup = nil } }
         .onChange(of: menu.shopTrafficRequest) {
             showTraffic = false; restrictedTickets = false; menu.rootRequest += 1
             shopCategory = .trafficPackage; selection = .shop
@@ -126,6 +126,11 @@ struct ClientHomeView: View {
             Button(L10n.t("取消"), role: .cancel) {}
         } message: {
             Text(L10n.t("退出后将断开连接并清除本机保存的登录凭据。"))
+        }
+        .alert(L10n.t("面板配置不规范"), isPresented: Binding(get: { session.configAlert != nil }, set: { if !$0 { session.configAlert = nil } })) {
+            Button(L10n.t("知道了")) {}
+        } message: {
+            Text(verbatim: session.configAlert ?? "")
         }
         .alert(L10n.t("设备已下线"), isPresented: $kickNotice) {
             Button(L10n.t("知道了")) { Task { try? await session.acknowledgeDeviceKick() } }
@@ -558,7 +563,7 @@ struct AccountInfoPage: View {
                     Spacer(minLength: 0)
                 }
                 divider.padding(.vertical, 8)
-                metric(L10n.t("余额"), "¥ " + String(format: "%.2f", profile.money))
+                metric(L10n.t("余额"), L10n.t("¥ {0}", [String(format: "%.2f", profile.money)]))
                 metric(L10n.t("注册时间"), profile.regDate.flatMap { $0.isEmpty ? nil : $0 } ?? "—")
                 metric(L10n.t("套餐"), profile.plan?.name ?? (profile.class > 0 ? "VIP \(profile.class)" : L10n.t("免费用户")))
                 if let plan = profile.plan {
@@ -569,13 +574,17 @@ struct AccountInfoPage: View {
                 metric(L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit))
                 metric(L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
                     : "\(profile.onlineClientCount) / \(profile.nodeConnector)")
-                if let plan = profile.plan, plan.canToggleAutoRenew == true, plan.id != nil {
+                // 不能开启时显示禁用开关与原因，与网页购买记录一致
+                if let plan = profile.plan, plan.id != nil,
+                   plan.canToggleAutoRenew == true || plan.autoRenewUnavailableReason?.isEmpty == false {
+                    let canToggle = plan.canToggleAutoRenew == true
                     Toggle(isOn: Binding(get: { plan.autoRenew == true }, set: { renewal = $0 })) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(L10n.t("自动续费"))
-                            Text(plan.autoRenew == true ? plan.renewAt ?? "—" : L10n.t("已关闭")).font(.system(size: 13)).foregroundStyle(colors.secondary)
+                            Text(plan.autoRenew == true ? plan.renewAt ?? "—" : canToggle ? L10n.t("已关闭") : L10n.t(plan.autoRenewUnavailableReason ?? ""))
+                                .font(.system(size: 13)).foregroundStyle(colors.secondary)
                         }
-                    }.toggleStyle(ProductToggleStyle()).padding(.top, 4)
+                    }.toggleStyle(ProductToggleStyle()).disabled(!canToggle).productForbiddenCursor(!canToggle).padding(.top, 4)
                 }
             }
         }.headerAction {

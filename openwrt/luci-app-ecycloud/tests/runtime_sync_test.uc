@@ -1,7 +1,7 @@
 'use strict';
 
 import { testState } from 'fs';
-import { ACCOUNT_FILE, ANNOUNCE_FILE, API_FILE, CRED_FILE, KICK_FILE, PROFILE_FILE, SPEED_FILE, STATE_FILE, readJson, sessionBinding, sessionValid,
+import { ACCOUNT_FILE, ANNOUNCE_FILE, API_FILE, CRED_FILE, KICK_FILE, PROFILE_FILE, SPEED_FILE, STATE_FILE, coreRunning, origins, readJson, sessionBinding, sessionValid,
          setState, settings, timestamp } from 'ecycloud.common';
 import { cached, store } from 'ecycloud.profile';
 import { endpoint, providerProgress } from 'ecycloud.clash';
@@ -12,7 +12,7 @@ import * as panel from 'ecycloud.panel';
 import * as clash from 'ecycloud.clash';
 import * as profile from 'ecycloud.profile';
 import * as release from 'ecycloud.release';
-import { changeSession, noteSpeedSuccess } from 'ecycloud.service';
+import { changeSession, collectGarbage, ensureUpdateWorker, noteSpeedSuccess, retireSignedOut, runUpdates, shareGeodata } from 'ecycloud.service';
 
 const rpc = length(ARGV[0]) ? loadfile(ARGV[0], { raw_mode: true })()['luci.ecycloud'] : null;
 
@@ -21,13 +21,13 @@ function check(ok, message) { assertions++; if (!ok) die(message); };
 let now = 1791126000;
 global.time = () => now;
 global.system = command => { push(testState.commands, command); return 0; };
-testState.config = { run_dir: '/etc/ecycloud/run', site_url: 'https://panel.test', sub_url: 'https://sub.test',
+testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', site_url: 'https://panel.test', sub_url: 'https://sub.test',
 	enabled: '1', mode: 'tun', device: 'br-lan' };
 const credentials = { email: 'fixture@test', token: 'synthetic-token', device_id: 'fixture',
-	session_id: 'fixture-session', expires_at: '2030-01-01T00:00:00Z' };
+	session_id: 'fixture-session', account_key: 'fixture-session', expires_at: '2030-01-01T00:00:00Z' };
 testState.files[CRED_FILE] = sprintf('%J', credentials);
 testState.files[API_FILE] = sprintf('%J', { port: 19090, secret: 'synthetic-secret' });
-const runFile = '/etc/ecycloud/run/config.json';
+const runFile = '/etc/ecycloud/run/fixture-session/config.json';
 const remote = { revision: 'r1', config: { proxies: [{ name: 'fixture-node', type: 'ss', server: 'node.test',
 	port: 10001, cipher: 'aes-128-gcm', password: 'fixture' }],
 	'proxy-groups': [{ name: 'Fixture', type: 'select', proxies: [ 'fixture-node' ] }], rules: [ 'MATCH,Fixture' ],
@@ -61,7 +61,7 @@ check(readJson(STATE_FILE).connected_at == since, '节点热更新不能重置�
 setState('stopped', '');
 check(readJson(STATE_FILE).connected_at == 0, '实际断开必须清除连接计时');
 
-testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 let requests = [];
 testState.onRequest = () => {
 	for (let path, text in testState.files)
@@ -177,6 +177,37 @@ testState.files['/var/run/ecycloud/connections.json'] = 'invalid-json';
 statistics.clear();
 check(testState.files['/etc/ecycloud/traffic_rank.json'] == null && testState.files['/var/run/ecycloud/connections.json'] == null,
 	'损坏的旧账户统计文件也必须清除');
+const rankFile = '/etc/ecycloud/traffic_rank.json';
+const crowdDay = statistics.read().today;
+const crowdHosts = {};
+const crowd = [];
+for (let n = 1; n <= 150; n++) {
+	crowdHosts[`h${n}.test`] = n;
+	push(crowd, { ...connection, id: `h${n}`, upload: n, download: 0, metadata: { host: `h${n}.test` } });
+}
+const longHost = sprintf('%0254d', 0);
+push(crowd, { ...connection, id: 'long', upload: 100000, download: 0, metadata: { host: longHost } });
+testState.files[rankFile] = sprintf('%J', { accounts: { 'other@test': { '2020-01-01': { groups: {}, hosts: { 'stale.test': 1 } },
+	[crowdDay]: { groups: {}, hosts: crowdHosts } } } });
+statistics.collect({ connections: [] });
+now += 5;
+statistics.collect({ connections: crowd });
+const crowdRank = statistics.read().rank[crowdDay];
+check(length(keys(crowdRank.hosts)) == 100 && crowdRank.hosts['h150.test'] == 150 && crowdRank.hosts['h51.test'] == 51 &&
+	crowdRank.hosts['h50.test'] == null, '运行快照与状态接口每天只能保留流量最高的 100 个主机');
+check(length(keys(readJson('/var/run/ecycloud/connections.json').rank[crowdDay].hosts)) == 100, 'rpcd 每次读取的运行快照文件也只能写入前 100 个主机');
+check(!exists(crowdRank.hosts, longHost), '超过域名长度上限的主机名不能计入排行');
+now += 5;
+crowd[0] = { ...crowd[0], upload: 1001 };
+statistics.collect({ connections: crowd });
+check(statistics.read().rank[crowdDay].hosts['h1.test'] == 1001, '今天排在前 100 之外的主机必须继续累计，不能因截断丢掉已有流量');
+const savedRank = readJson(rankFile)?.accounts;
+check(length(keys(savedRank?.[credentials.email]?.[crowdDay]?.hosts ?? {})) == 100 && savedRank['other@test']['2020-01-01'] == null &&
+	length(keys(savedRank['other@test'][crowdDay].hosts)) == 100, '落盘排行每天只保留前 100 项，其它账户也不能保留过期日期');
+delete testState.files['/var/run/ecycloud/connections.json'];
+testState.files[rankFile] = sprintf('%J', { accounts: { [credentials.email]: { [crowdDay]: { groups: {}, hosts: crowdHosts } } } });
+check(length(keys(statistics.read().rank[crowdDay].hosts)) == 100, '旧版落盘的完整排行也不能整份回传给界面');
+statistics.clear();
 
 delete testState.files[PROFILE_FILE];
 delete testState.files['/proc/41/cmdline'];
@@ -205,11 +236,11 @@ function securityFixture(enabled) {
 	testState.responseHeaders = '';
 	testState.commandStatus = 0;
 	testState.httpStatus = 200;
-	testState.config = { run_dir: '/etc/ecycloud/run', site_url: 'https://panel.test', sub_url: 'https://sub.test',
+	testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', site_url: 'https://panel.test', sub_url: 'https://sub.test',
 		enabled, mode: 'tproxy', refresh_interval: '0' };
 	testState.files[CRED_FILE] = sprintf('%J', credentials);
 	testState.files[API_FILE] = sprintf('%J', { port: 19090, secret: 'synthetic-secret', speed: 'synthetic-speed' });
-	testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+	testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 	testState.files[STATE_FILE] = sprintf('%J', { stage: enabled == '1' ? 'running' : 'stopped' });
 	testState.response = { version: 'fixture' };
 	store(remote);
@@ -308,6 +339,31 @@ testState.onRequest = () => {
 global.sleep = () => { testState.files['/var/run/ecycloud/stopping'] = ''; };
 refresh();
 check(connectedHeaders == 3, '实际接管网络的身份和账户同步必须继续上报已连接');
+
+for (let migrate in [ () => refreshAccount(true), () => panel.checkin() ]) {
+	securityFixture('1');
+	testState.files['/var/run/ecycloud/network.json'] = sprintf('%J', { active: true });
+	store(remote, true);
+	testState.onRequest = () => {
+		for (let path, text in testState.files)
+			if (match(path, /\/req-[a-f0-9]+\.conf$/))
+				testState.response = index(text, 'http://127.0.0.1:19090/') >= 0 ? { version: 'fixture' } :
+					{ ret: 1, data: { enable: 1, config_revision: 'r1', site_origin: 'https://moved.test', api_origin: 'https://moved-sub.test' } };
+	};
+	testState.files['/proc/self/status'] = 'Name:\tucode\nPid:\t4242\n';
+	check(migrate().ok && origins().site == 'https://panel.test' && origins().sub == 'https://sub.test', '面板下发的新地址要等后台探测通过后才切换');
+	ensureUpdateWorker();
+	runUpdates();
+	check(migrate().ok && origins().site == 'https://moved.test' && origins().sub == 'https://moved-sub.test', '面板下发的新地址必须生效');
+	check(cached() != null && cached(true) != null, '面板经已鉴权响应迁移地址后，同一会话的配置缓存与候选配置必须继续有效');
+	global.sleep = () => { testState.files['/var/run/ecycloud/stopping'] = ''; };
+	watchdog();
+	check(testState.config.enabled == '1' && !length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud stop') >= 0)),
+		'面板迁移地址后看门狗不能停服或撤销连接');
+	delete testState.files['/var/run/ecycloud/stopping'];
+	testState.config.site_url = 'https://manual.test';
+	check(cached() == null, '手动改写面板地址仍须使旧授权失效');
+}
 
 for (let enabled in [ '1', '0' ]) {
 	for (let reason in [ 'limit_denied', 'limit' ]) {
@@ -467,7 +523,7 @@ check(prepare() && cached() == null && cached(true) != null, '校验通过后只
 if (rpc != null) {
 	check(rpc.start.call({ args: {} }).ok, '启动接口必须接受当前会话已校验的候选配置');
 }
-testState.files['/proc/42/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+testState.files['/proc/42/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 testState.onRequest = () => {
 	testState.response = index(latestRequest(), '/user/') >= 0 ? { ret: 1, data: { enable: 1, config_revision: 'r1' } } : {};
 };
@@ -569,6 +625,134 @@ check(length(keys(statistics.read().rank)) == 0, '其他账户不能读取原账
 now -= 10;
 
 securityFixture('0');
+statistics.clear();
+statistics.collect({ connections: [] });
+now += 5;
+statistics.collect({ connections: [connection] });
+now += 5;
+statistics.collect({ connections: [{ ...connection, download: 500 }] });
+testState.failedRename = true;
+let rankSaveBlocked = false;
+try { statistics.clear(true); } catch (e) { rankSaveBlocked = true; }
+testState.failedRename = false;
+check(!rankSaveBlocked && testState.files['/var/run/ecycloud/connections.json'] == null && length(statistics.read().closed ?? []) == 0,
+	'流量排行保存失败不能阻止清除旧账户快照');
+now -= 10;
+
+function emulateRemoval(fails) {
+	global.system = command => {
+		push(testState.commands, command);
+		const target = match(command, /^rm -rf -- '([^']+)'$/);
+		if (target && !fails)
+			for (let path in keys(testState.files))
+				if (path == target[1] || index(path, `${target[1]}/`) == 0)
+					delete testState.files[path];
+		return target && fails ? 1 : 0;
+	};
+}
+
+if (rpc != null) {
+	securityFixture('0');
+	const previousSystem = global.system;
+	emulateRemoval(true);
+	testState.response = { ret: 1, data: {} };
+	const logout = rpc.logout.call({ args: {} });
+	check(logout.ok && !logout.session.logged_in && !sessionValid() && testState.config.enabled == '0',
+		'退出必须立即删除凭据并关闭连接，不等待旧服务停止');
+	const retireCommand = filter(testState.commands, c => index(c, 'ecycloud-ctl retire') >= 0)[0] ?? '';
+	check(index(retireCommand, "ecycloud-ctl retire '/etc/ecycloud/run/fixture-session'") >= 0 && index(retireCommand, '&') >= 0 &&
+		!length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud stop') >= 0)),
+		'退出只在后台交给 retire 停服务，不在 rpcd 里同步等待');
+	check(testState.files[API_FILE] == null, '旧账号的控制面与测试结果必须在切换锁内同步删除');
+	testState.files['/etc/ecycloud/run/fixture-session/config.json'] = 'old-config';
+	testState.files['/etc/ecycloud/run/fixture-session/ecy-panel-nodes.json'] = 'old-nodes';
+	testState.files['/etc/ecycloud/run/fixture-session/.last-used'] = `${now}`;
+	testState.files['/etc/ecycloud/run/fixture-session/cache.db'] = 'cache';
+	testState.commands = [];
+	check(retireSignedOut('/etc/ecycloud/run/fixture-session'), '后台退出必须完成');
+	const stopCommand = join('\n', testState.commands);
+	check(index(stopCommand, '/etc/init.d/ecycloud stop') >= 0 &&
+		index(stopCommand, "rm -f -- '/etc/ecycloud/run/fixture-session'/config.json") >= 0 &&
+		index(stopCommand, "'/etc/ecycloud/run/fixture-session'/ecy-panel-*.json") >= 0 &&
+		index(stopCommand, "rm -rf -- '/etc/ecycloud/run/fixture-session'") < 0,
+		'仍无会话时停服务并只删带节点凭据的配置，账号目录本身留给同账号复用');
+	check(!retireSignedOut('/etc/passwd') && !retireSignedOut('/etc/ecycloud/run/../x'), '后台退出只接受账号运行目录');
+	testState.files[CRED_FILE] = sprintf('%J', { ...credentials, token: 'next-token', session_id: 'next-session', account_key: 'next-session' });
+	testState.commands = [];
+	retireSignedOut('/etc/ecycloud/run/fixture-session');
+	check(!length(filter(testState.commands, c => index(c, 'ecycloud stop') >= 0)), '新账号已登录时晚到的后台退出不能停掉服务');
+	testState.files[CRED_FILE] = sprintf('%J', { device_id: 'fixture' });
+	testState.commands = [];
+	testState.files['/etc/ecycloud/run/fixture-session/geoip.metadb'] = 'geo';
+	shareGeodata('/etc/ecycloud/run/fixture-session');
+	check(length(filter(testState.commands, c => index(c, "ln -f -- '/etc/ecycloud/run/fixture-session/geoip.metadb' '/etc/ecycloud/geodata/geoip.metadb'") == 0)) == 1,
+		'账号目录里下载到的 geodata 必须硬链接到共享位置，回收账号目录不会删掉它');
+	testState.files['/etc/ecycloud/geodata/GeoSite.dat'] = 'geo';
+	testState.commands = [];
+	shareGeodata('/etc/ecycloud/run/new-account');
+	check(length(filter(testState.commands, c => index(c, "ln -f -- '/etc/ecycloud/geodata/GeoSite.dat' '/etc/ecycloud/run/new-account/GeoSite.dat'") == 0)) == 1,
+		'新账号目录必须从共享位置链接 geodata，首次连接不用在线下载');
+	testState.files['/etc/ecycloud/run/stale-account/.last-used'] = `${now - 31 * 86400}`;
+	testState.files['/etc/ecycloud/run/stale-account/cache.db'] = 'stale';
+	collectGarbage();
+	check(testState.files['/etc/ecycloud/run/stale-account/cache.db'] != null, '删除过期目录失败只记日志，不能抛错');
+	testState.commands = [];
+	rpc.status.call({ args: {} });
+	check(!length(filter(testState.commands, c => index(c, 'ecycloud-ctl') >= 0)), '查询状态不能再触发后台清理');
+	check(!coreRunning(), '退出后旧账号目录里的内核不能当作当前内核');
+	testState.files[CRED_FILE] = sprintf('%J', { ...credentials, token: 'next-token', session_id: 'next-session', account_key: 'next-session' });
+	check(settings().runDir == '/etc/ecycloud/run/next-session' && !coreRunning(),
+		'新账号只能使用自己的运行目录，旧账号仍在跑的内核不属于新账号');
+	emulateRemoval(false);
+	testState.files['/etc/ecycloud/run/next-session/cache.db'] = 'new-account-cache';
+	testState.files['/etc/ecycloud/run/fixture-session/.last-used'] = `${now - 29 * 86400}`;
+	testState.files['/etc/ecycloud/run/fixture-session/cache.db'] = 'recent-account-cache';
+	testState.files['/etc/ecycloud/run/old-login/config.json'] = 'unmarked';
+	testState.files['/etc/ecycloud/run/config.json'] = 'legacy-shared-config';
+	collectGarbage();
+	check(testState.files['/etc/ecycloud/run/stale-account/cache.db'] == null && testState.files['/etc/ecycloud/run/old-login/config.json'] == null &&
+		testState.files['/etc/ecycloud/run/config.json'] == null, '超过 30 天未用的账号目录、无使用记录的旧目录与旧版共享数据必须回收');
+	check(testState.files['/etc/ecycloud/run/fixture-session/cache.db'] != null && testState.files['/etc/ecycloud/run/next-session/cache.db'] != null,
+		'30 天内用过的账号与当前账号的目录不能回收');
+	testState.files[CRED_FILE] = sprintf('%J', { device_id: 'fixture' });
+	testState.response = { ret: 1, data: { token: 'again-1', expires_at: '2030-01-01T00:00:00Z' } };
+	check(changeSession(() => panel.login('Fixture@Test', 'pw', ''), false).ok, '登录必须成功');
+	const firstKey = readJson(CRED_FILE).account_key;
+	check(settings().runDir == `/etc/ecycloud/run/${firstKey}` && +(testState.files[`/etc/ecycloud/run/${firstKey}/.last-used`] ?? 0) == now,
+		'登录必须记录账号目录的使用时间');
+	testState.files[CRED_FILE] = sprintf('%J', { device_id: 'fixture' });
+	testState.response = { ret: 1, data: { token: 'again-2', expires_at: '2030-01-01T00:00:00Z' } };
+	panel.login('fixture@test', 'pw', '');
+	check(readJson(CRED_FILE).account_key == firstKey && readJson(CRED_FILE).session_id != null,
+		'同一账号重新登录必须回到同一个运行目录');
+	testState.files[CRED_FILE] = sprintf('%J', { device_id: 'fixture' });
+	panel.login('other@test', 'pw', '');
+	check(length(readJson(CRED_FILE).account_key) == 64 && readJson(CRED_FILE).account_key != firstKey, '不同账号必须使用不同运行目录');
+	const legacy = { ...credentials, token: 'legacy' };
+	delete legacy.account_key;
+	testState.files[CRED_FILE] = sprintf('%J', legacy);
+	panel.session();
+	check(length(readJson(CRED_FILE).account_key) == 64, '旧版凭据缺少账号键时必须按站点与邮箱补上');
+	global.system = previousSystem;
+}
+
+securityFixture('0');
+testState.files[CRED_FILE] = sprintf('%J', { device_id: 'fixture' });
+testState.authBusy = true;
+const busyLogin = changeSession(() => ({ ok: true }), false);
+testState.authBusy = false;
+check(!busyLogin.ok && busyLogin.msg == '账户正在切换，请稍后重试', '另一请求正在切换账户时登录必须立即返回，不能等待');
+testState.commands = [];
+check(changeSession(() => ({ ok: true }), false).ok && !length(filter(testState.commands, c => index(c, 'rm -rf') >= 0 || index(c, 'ecycloud stop') >= 0)),
+	'登录前不能做任何清理或停止服务');
+securityFixture('0');
+testState.files[CRED_FILE] = sprintf('%J', { ...credentials, token: 'next-token', session_id: 'next-session', account_key: 'next-session' });
+testState.commands = [];
+watchdog();
+check(length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud stop') >= 0)) == 1,
+	'看门狗发现内核跑在其他会话的目录里，必须停掉服务而不是继续接管');
+
+securityFixture('0');
 const selectedRemote = { ...remote.config, proxies: [ ...remote.config.proxies, { ...remote.config.proxies[0], name: 'node-2' } ],
 	'proxy-groups': [{ name: 'Fixture', type: 'select', proxies: ['fixture-node', 'node-2'] }] };
 const assembledSelection = profile.assemble(selectedRemote, settings(), endpoint(), { Fixture: 'node-2' });
@@ -611,5 +795,85 @@ release.checkPeriodic();
 check(readJson('/var/run/ecycloud/updates.json').next_check == now + 11, 'GitHub 限流必须按恢复时间重试，不能固定等一小时');
 release.checkApp();
 check(githubRequests == 1, '限流恢复前手动检查也不能重复请求 GitHub');
+
+if (rpc != null) {
+	securityFixture('0');
+	const updateFile = '/var/run/ecycloud/update.json';
+	testState.files['/proc/self/status'] = 'Name:\tucode\nPid:\t4242\n';
+	let profileFetches = 0;
+	let geoRequests = 0;
+	testState.onRequest = () => {
+		const request = latestRequest();
+		if (index(request, '/config/clash') >= 0) {
+			profileFetches++;
+			testState.response = { ret: 1, data: remote };
+		} else if (index(request, '/configs/geo') >= 0) {
+			geoRequests++;
+			testState.response = {};
+		} else
+			testState.response = index(request, '/user/') >= 0 ? { ret: 1, data: { enable: 1, config_revision: 'r1' } } : { version: 'fixture' };
+	};
+	const workerStarts = () => length(filter(testState.commands, c => index(c, 'ecycloud-ctl update-tasks') >= 0));
+	const taskOf = id => filter(rpc.status.call({ args: {} }).update_tasks ?? [], task => task.id == id)[0];
+	testState.commands = [];
+	const queued = rpc.update.call({ args: { what: '', path: '', locale: 'zh-CN' } });
+	check(queued.ok && queued.pending == true && length(queued.id) == 16 && profileFetches == 0 && workerStarts() == 1,
+		'刷新配置的 RPC 必须立即返回并交给后台任务，rpcd 里不能拉取配置');
+	testState.random = 'fedcba9876543210fedcba9876543210';
+	check(rpc.update.call({ args: { what: '', path: '', locale: 'zh-CN' } }).id == queued.id && length(readJson(updateFile).tasks) == 1 &&
+		workerStarts() == 2, '排队中的同类刷新必须合并成同一个任务');
+	const geo = rpc.update.call({ args: { what: 'geo', path: '', locale: 'zh-CN' } });
+	testState.random = '0123456789abcdef0123456789abcdef';
+	check(geo.pending == true && geo.id != queued.id && geoRequests == 0, 'GeoData 更新也必须交给后台任务');
+	check(taskOf(queued.id)?.state == 'queued' && taskOf(geo.id)?.state == 'queued', 'status 必须带上排队中的后台任务');
+	testState.files['/var/run/ecycloud/stopping'] = '';
+	runUpdates();
+	delete testState.files['/var/run/ecycloud/stopping'];
+	const profileTask = taskOf(queued.id);
+	const geoTask = taskOf(geo.id);
+	check(profileTask?.state == 'done' && profileTask.ok && profileTask.changed && profileFetches == 1 &&
+		geoTask?.state == 'done' && geoTask.ok && geoTask.changed == false && geoRequests == 1 && readJson(updateFile).pid == 0,
+		'后台任务必须逐个执行，停机标记期间也要把刷新与 GeoData 的结果写回 status');
+	testState.files[updateFile] = sprintf('%J', { pid: 999, tasks: [
+		{ id: 'lost', session: credentials.session_id, kind: 'profile', locale: '', state: 'running' },
+		{ id: 'other', session: 'other-session', kind: 'profile', locale: '', state: 'done', ok: true } ] });
+	const lost = taskOf('lost');
+	check(lost?.state == 'done' && !lost.ok && lost.msg == '后台更新已中断，请重试' && taskOf('other') == null,
+		'后台进程意外退出时必须报告任务中断，其他会话的任务不能出现在当前会话');
+	testState.httpStatus = 0;
+	const offline = rpc.update.call({ args: { what: 'geo', path: '', locale: '' } });
+	testState.httpStatus = 200;
+	check(!offline.ok && offline.msg == '内核未运行' && offline.pending == null, '内核控制面不可用时 GeoData 更新必须立即报错，不排后台任务');
+	testState.files[updateFile] = sprintf('%J', { pid: 0, tasks: [ { id: 'old', session: credentials.session_id, kind: 'profile', locale: '', state: 'queued' } ] });
+	check(rpc.logout.call({ args: {} }).ok, '面板通知失败也必须退出成功');
+	collectGarbage();
+	check(testState.files[updateFile] == null, '退出后的回收必须清掉旧账户的后台更新任务');
+
+	const fetchProfile = testState.onRequest;
+	securityFixture('0');
+	testState.onRequest = fetchProfile;
+	testState.files['/proc/self/status'] = 'Name:\tucode\nPid:\t4242\n';
+	delete testState.files[PROFILE_FILE];
+	delete testState.files[profile.PENDING_FILE];
+	profileFetches = 0;
+	testState.commands = [];
+	const starting = rpc.start.call({ args: {} });
+	check(starting.ok && starting.pending == true && length(starting.id) == 16 && profileFetches == 0 && workerStarts() == 1 &&
+		testState.config.enabled == '0', '内核在运行但没有缓存时，启动接口必须把拉配置交给后台任务并立即返回，不能先开启服务');
+	runUpdates();
+	check(taskOf(starting.id)?.state == 'done' && taskOf(starting.id).ok && profileFetches == 1 && cached(true) != null,
+		'启动前的配置刷新必须在后台任务里完成并写回结果');
+	testState.commands = [];
+	check(rpc.start.call({ args: { refreshed: true } }).ok && testState.config.enabled == '1' && workerStarts() == 0 &&
+		length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud restart') >= 0)) == 1,
+		'后台刷新成功后带 refreshed 再次启动必须照原流程开启服务');
+	delete testState.files[PROFILE_FILE];
+	delete testState.files[profile.PENDING_FILE];
+	testState.config.enabled = '0';
+	testState.commands = [];
+	check(cached(true) == null && rpc.start.call({ args: { refreshed: true } }).ok && profileFetches == 1 && workerStarts() == 0 && testState.config.enabled == '1',
+		'带 refreshed 的启动不能再次排队刷新');
+	testState.onRequest = null;
+}
 
 printf('OpenWrt 运行逻辑同步回归通过：%d 项断言。\n', assertions);

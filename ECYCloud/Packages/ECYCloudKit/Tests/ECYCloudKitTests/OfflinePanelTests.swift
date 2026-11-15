@@ -23,7 +23,8 @@ private enum Offline {
     static func catalog(until: Int = 1_600_000_000) -> String {
         #"""
         {"revision":"revision-1","config":{"proxies":[],"proxy-providers":{
-          "ecy-panel-nodes":{"type":"file","payload":[{"name":"node-12","type":"ss"}]}}},
+          "ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-12","type":"ss"}]}},
+          "proxy-groups":[{"name":"主节点","type":"select","use":["ecy-panel-nodes"]}],"rules":["MATCH,主节点"]},
          "node_labels":{"node-12":"测试节点"},
          "offline_authorization":{"issued_at":1400000000,"valid_until":\#(until)}}
         """#
@@ -74,7 +75,18 @@ private final class PortDriver: TunnelDriver {
     func stop() { statusChanged?(.disconnected) }
 }
 
-@Suite("面板离线缓存与代理回退", .timeLimit(.minutes(1)))
+@MainActor
+private final class OrderedDriver: TunnelDriver {
+    var statusChanged: (@MainActor (ConnectionState) -> Void)?
+    let transport: Script
+    var requestsBeforeStart: Int?
+    init(_ transport: Script) { self.transport = transport }
+    func reconcile(owner: String?) async {}
+    func start(_ lease: TunnelLease) async throws { requestsBeforeStart = await transport.count() }
+    func stop() { statusChanged?(.disconnected) }
+}
+
+@Suite("面板离线缓存与代理回退", .timeLimit(.minutes(1)), .isolatedUserData)
 @MainActor
 struct OfflinePanelTests {
     private func withCache(_ body: (PanelResponseCache) async throws -> Void) async rethrows {
@@ -84,9 +96,10 @@ struct OfflinePanelTests {
     }
 
     private func seed(_ cache: PanelResponseCache, token: String = "synthetic-token", kick: String? = nil, until: Int = 1_600_000_000) {
-        let binding = PanelAPI(device: Offline.device, transport: Script([])).cacheBinding(Offline.endpoints, token: token)
+        let api = PanelAPI(device: Offline.device, transport: Script([]))
         cache.saveProfile(Offline.envelope(Offline.profile(kick: kick)), account: "Member@Example.test")
-        cache.saveConfig(Offline.envelope(Offline.catalog(until: until)), account: "member@example.test", binding: binding)
+        cache.saveConfig(Offline.envelope(Offline.catalog(until: until)), account: "member@example.test", binding: api.cacheBinding(Offline.endpoints, token: token),
+                         sealKey: api.cacheKey(token: token), updateIntervalHours: nil)
     }
 
     private func session(_ transport: Script, cache: PanelResponseCache, vault: Vault = Vault(), connection: ConnectionController? = nil) -> ClientSession {
@@ -105,7 +118,26 @@ struct OfflinePanelTests {
         }
     }
 
-    // 授权窗口外、令牌已换或设备被移除时仍凭缓存资料与节点进入界面，但面板更新前不得拉起内核
+    // 对应 connection_controller.dart 的 _hydrateRemoteFromCache：缓存里结构检查不通过的节点目录不用，也不能凭它离线拉起内核
+    @Test func invalidCachedCatalogIsIgnoredOnRestore() async {
+        await withCache { cache in
+            let api = PanelAPI(device: Offline.device, transport: Script([]))
+            let binding = api.cacheBinding(Offline.endpoints, token: "synthetic-token")
+            cache.saveProfile(Offline.envelope(Offline.profile()), account: "member@example.test")
+            let invalid = Offline.catalog(until: 1_600_000_000)
+                .replacingOccurrences(of: #""rules":["MATCH,主节点"]"#, with: #""rules":["MATCH,主节点"],"geox-url":{"mmdb":"http://example.test/geoip.metadb"}"#)
+            cache.saveConfig(Offline.envelope(invalid), account: "member@example.test", binding: binding,
+                             sealKey: api.cacheKey(token: "synthetic-token"), updateIntervalHours: nil)
+            let driver = PortDriver()
+            let value = session(Script([Offline.unreachable(.cannotConnectToHost)]), cache: cache, connection: ConnectionController(driver: driver))
+            await value.restore()
+            #expect(value.phase == .signedIn && value.profile?.id == 7 && value.catalog == nil)
+            await value.connect()
+            #expect(!driver.started)
+        }
+    }
+
+    // 授权窗口外或设备被移除时仍凭缓存资料与节点进入界面，令牌已换时节点缓存解不开、只显示资料，面板更新前都不得拉起内核
     @Test(arguments: [("another-token", nil, 1_600_000_000), ("synthetic-token", nil, 1_400_000_001),
                       ("synthetic-token", "remove", 1_600_000_000)] as [(String, String?, Int)])
     func unusableConfigIsShownButCannotStartKernel(token: String, kick: String?, until: Int) async {
@@ -114,10 +146,43 @@ struct OfflinePanelTests {
             let driver = PortDriver()
             let value = session(Script([Offline.unreachable(.cannotConnectToHost)]), cache: cache, connection: ConnectionController(driver: driver))
             await value.restore()
-            #expect(value.phase == .signedIn && value.profile?.id == 7 && value.catalog?.revision == "revision-1")
+            let sameLogin = token == "synthetic-token"
+            #expect(value.phase == .signedIn && value.profile?.id == 7 && value.catalog?.revision == (sameLogin ? "revision-1" : nil))
             await value.connect()
             #expect(!driver.started)
-            if kick == nil { #expect(value.message == L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
+            if sameLogin && kick == nil { #expect(value.message == L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
+        }
+    }
+
+    @Test func validOfflineWindowConnectsBeforeVerifyingWithPanel() async {
+        await withCache { cache in
+            seed(cache, until: 4_000_000_000)
+            let transport = Script([Offline.unreachable(.cannotConnectToHost), Offline.ok(Offline.status), Offline.ok(Offline.profile())])
+            let driver = OrderedDriver(transport)
+            let value = session(transport, cache: cache, connection: ConnectionController(driver: driver))
+            await value.restore()
+            #expect(await transport.count() == 1)
+            await value.connect()
+            #expect(driver.requestsBeforeStart == 1)
+            while await transport.count() < 3 { await Task.yield() }
+            while value.panelOffline { await Task.yield() }
+            #expect(value.phase == .signedIn && value.profile?.id == 7)
+            value.connection?.disconnect()
+        }
+    }
+
+    @Test func expiredOfflineWindowCannotStartKernelAndSaysWhy() async {
+        await withCache { cache in
+            seed(cache, until: 4_000_000_000)
+            var instant = Offline.now
+            let driver = PortDriver()
+            let value = ClientSession(endpoints: Offline.endpoints, api: PanelAPI(device: Offline.device, transport: Script([Offline.unreachable(.cannotConnectToHost)])),
+                                      vault: Vault(), connection: ConnectionController(driver: driver), cache: cache, now: { instant })
+            await value.restore()
+            #expect(value.catalog != nil)
+            instant = Date(timeIntervalSince1970: 4_000_000_001)
+            await value.connect()
+            #expect(!driver.started && value.message == L10n.t("本地配置授权已到期，请连接面板更新后重试"))
         }
     }
 
@@ -175,8 +240,9 @@ struct OfflinePanelTests {
             let value = session(Script([.success(HTTPResult(data: Data(#"{"ret":0,"msg":"合成错误"}"#.utf8), status: 401))]), cache: cache)
             await value.restore()
             #expect(value.phase == .signedOut)
-            let binding = PanelAPI(device: Offline.device, transport: Script([])).cacheBinding(Offline.endpoints, token: "synthetic-token")
-            #expect(cache.restore(account: "member@example.test", binding: binding, now: Offline.now) == nil)
+            let api = PanelAPI(device: Offline.device, transport: Script([]))
+            let binding = api.cacheBinding(Offline.endpoints, token: "synthetic-token")
+            #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: api.cacheKey(token: "synthetic-token"), now: Offline.now) == nil)
         }
     }
 
@@ -185,10 +251,40 @@ struct OfflinePanelTests {
             let value = session(Script([Offline.ok(Offline.status), Offline.ok(Offline.profile()), Offline.ok(Offline.catalog())]), cache: cache)
             await value.restore()
             #expect(value.phase == .signedIn && value.catalog?.revision == "revision-1")
-            let binding = PanelAPI(device: Offline.device, transport: Script([])).cacheBinding(Offline.endpoints, token: "synthetic-token")
-            #expect(cache.restore(account: "member@example.test", binding: binding, now: Offline.now)?.profile.id == 7)
-            #expect(cache.restore(account: "member@example.test", binding: binding, now: Date(timeIntervalSince1970: 1_600_000_000))?.validUntil == nil)
+            let api = PanelAPI(device: Offline.device, transport: Script([]))
+            let binding = api.cacheBinding(Offline.endpoints, token: "synthetic-token")
+            let key = api.cacheKey(token: "synthetic-token")
+            #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Offline.now)?.profile.id == 7)
+            #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Date(timeIntervalSince1970: 1_600_000_000))?.validUntil == nil)
         }
+    }
+
+    // 配置缓存只以令牌派生的密钥加密落盘：文件里没有节点凭据原文，换了登录或拷到别的设备都解不开，旧版本明文缓存读到即删除
+    @Test func cachedConfigIsSealedWithTokenDerivedKey() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ecycloud-offline-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = PanelResponseCache(directory: directory)
+        seed(cache)
+        let file = directory.appendingPathComponent("config.json")
+        let raw = try String(contentsOf: file, encoding: .utf8)
+        let plain = Offline.envelope(Offline.catalog(until: 1_600_000_000))
+        #expect(!raw.contains(plain.base64EncodedString().prefix(64)) && !raw.contains("revision-1"))
+        let api = PanelAPI(device: Offline.device, transport: Script([]))
+        let binding = api.cacheBinding(Offline.endpoints, token: "synthetic-token")
+        #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: api.cacheKey(token: "synthetic-token"), now: Offline.now)?.catalog?.revision == "revision-1")
+        let otherDevice = PanelAPI(device: DeviceInfo(id: "other-device", name: Offline.device.name, model: Offline.device.model, os: Offline.device.os,
+                                                      platform: Offline.device.platform, version: Offline.device.version), transport: Script([]))
+        #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: otherDevice.cacheKey(token: "synthetic-token"), now: Offline.now)?.catalog == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+
+        seed(cache)
+        #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: api.cacheKey(token: "other-token"), now: Offline.now)?.catalog == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+
+        struct Legacy: Encodable { let account: String; let binding: String; let response: Data }
+        try JSONEncoder().encode(Legacy(account: "member@example.test", binding: binding, response: plain)).write(to: file)
+        #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: api.cacheKey(token: "synthetic-token"), now: Offline.now)?.catalog == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 
     @Test func directFailureRetriesThroughLocalProxyOnlyWhenSafe() async throws {
@@ -263,6 +359,59 @@ struct OfflinePanelTests {
         """#))
         let text = catalog.annotateRuntimeConfiguration(#"{"proxies":["node-12","node-120"],"rules":["MATCH,main"],"note":"node-12 via","host":"main.example"}"#)
         #expect(text == #"{"proxies":["德国 \"A1\"",""],"rules":["MATCH,主节点"],"note":" via","host":"main.example"}"#)
+    }
+
+    // 对应 assets_test.dart 的日志用例：完整标识才换，保留名字自带的国旗，名字为 node-数字 或空时换成空，空键不参与
+    @Test func logsShowNodeAndGroupLabelsLikeFlutter() throws {
+        let catalog: NodeCatalog = try PanelAPI.decode(Offline.envelope(#"""
+        {"revision":"r","config":{"proxies":[{"name":"node-120","type":"ss"},{"name":"node-12","type":"ss"},{"name":"node-9","type":"ss"},
+         {"name":"node-5","type":"ss"},{"name":"node-6","type":"ss"}],
+         "proxy-groups":[{"name":"主节点","type":"select","proxies":["node-120"]},{"name":"Google服务","type":"select","proxies":["主节点"]}]},
+         "node_labels":{"node-120":"🇭🇰 香港 01","node-12":"备用","node-9":"Fixture node","node-5":"node-7","node-6":"","":"空键节点"},
+         "group_labels":{"主节点":"Main nodes","Google服务":"Google services","":"空键分组"}}
+        """#))
+        #expect(catalog.annotateLogs([
+            "[TCP] 198.18.0.1:23016(ECYCloud.exe) --> owo.ecycloud.com:443 match Match using 主节点[node-120]",
+            "node-12 and node-120", "match Match using Google服务[主节点[node-9]] (a, b)", "Match using 主节点备份[node-9]",
+            "via node-5|node-6|node-99", "DIRECT"
+        ]) == [
+            "[TCP] 198.18.0.1:23016(ECYCloud.exe) --> owo.ecycloud.com:443 match Match using Main nodes → 🇭🇰 香港 01",
+            "备用 and 🇭🇰 香港 01", "match Match using Google services[Main nodes[Fixture node]] (a, b)", "Match using 主节点备份 → Fixture node",
+            "via ||", "DIRECT"
+        ])
+    }
+
+    // 空标签键在每个边界都能匹配，运行配置里的空串与逗号会被改写成标签
+    @Test func emptyLabelKeysDoNotRewriteRuntimeConfiguration() throws {
+        let catalog: NodeCatalog = try PanelAPI.decode(Offline.envelope(#"""
+        {"revision":"r","config":{"proxies":[{"name":"node-12","type":"ss"}],"proxy-groups":[{"name":"main","type":"select","proxies":["node-12"]}]},
+         "node_labels":{"node-12":"德国","":"空键节点"},"group_labels":{"":"空键分组"}}
+        """#))
+        let text = catalog.annotateRuntimeConfiguration(#"{"external-ui":"","proxies":["node-12"],"rules":["MATCH,main"]}"#)
+        #expect(text == #"{"external-ui":"","proxies":["德国"],"rules":["MATCH,main"]}"#)
+    }
+
+    @Test func runtimeConfigurationHidesControlSecrets() throws {
+        let raw = Data(#"{"secret":"control-secret","external-controller":"127.0.0.1:9090","listeners":[{"name":"ecy-speed","port":10204,"users":[{"username":"ecy-speed","password":"speed-digest"}]}],"proxies":[{"name":"node-1","server":"node.example.test","uuid":"device-uuid"}],"proxy-providers":{"ecy-panel-nodes":{"type":"inline","payload":[{"name":"node-2","password":"device-password","plugin-opts":{"password":"nested-secret"}},{"name":"node-3","auth":"device-auth"}]}}}"#.utf8)
+        let text = try ClientSession.maskedRuntimeConfiguration(raw)
+        #expect(!text.contains("control-secret") && !text.contains("speed-digest"))
+        #expect(!text.contains("device-uuid") && !text.contains("device-password") && !text.contains("nested-secret") && !text.contains("device-auth"))
+        #expect(text.contains("node.example.test") && text.contains("node-3"))
+        #expect(text.contains("127.0.0.1:9090") && text.contains("10204") && text.contains("******"))
+        #expect(throws: TunnelError.self) { try ClientSession.maskedRuntimeConfiguration(Data("[]".utf8)) }
+    }
+
+    @Test func runtimeConfigurationListsPanelNodesOnce() throws {
+        let group = "ecy-panel-" + String(repeating: "a", count: 64)
+        let raw = Data(#"{"proxy-providers":{"ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-1","server":"node.example.test","uuid":"node-credential","reality-opts":{"public-key":"reality-public-key","short-id":"0123abcd"}}]},"\#(group)":{"type":"file","path":"\#(group).json","payload":[{"name":"node-1","server":"node.example.test","uuid":"node-credential"}]},"custom":{"type":"inline","payload":[{"name":"c","password":"custom-secret"}]}}}"#.utf8)
+        let text = try ClientSession.maskedRuntimeConfiguration(raw)
+        let providers = (try JSONSerialization.jsonObject(with: Data(text.utf8)) as! [String: Any])["proxy-providers"] as! [String: [String: Any]]
+        #expect((providers["ecy-panel-nodes"]?["payload"] as? [Any])?.count == 1)
+        #expect(providers[group]?["payload"] == nil && providers[group]?["path"] as? String == "\(group).json")
+        #expect((providers["custom"]?["payload"] as? [Any])?.count == 1)
+        #expect(text.components(separatedBy: "node.example.test").count == 2)
+        #expect(!text.contains("node-credential") && !text.contains("custom-secret"))
+        #expect(!text.contains("reality-public-key") && !text.contains("0123abcd"))
     }
 
     @Test func proxyPortOnlyWhileConnected() async {

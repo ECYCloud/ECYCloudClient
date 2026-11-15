@@ -27,6 +27,7 @@ class DeleteAccountPage extends StatefulWidget {
 
 class _DeleteAccountPageState extends State<DeleteAccountPage> {
   final TextEditingController _emailCode = TextEditingController();
+  final TextEditingController _password = TextEditingController();
 
   AuthOptions? _options;
   bool _loading = true;
@@ -47,6 +48,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
   void dispose() {
     _cooldownTimer?.cancel();
     _emailCode.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -128,6 +130,10 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
             .showSnackBar(SnackBar(content: Text(L10n.t('请先输入邮箱验证码'))));
         return;
       }
+    } else if (_password.text.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(L10n.t('请填写密码'))));
+      return;
     }
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -161,6 +167,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     try {
       final AccountStatus status = await api.killAccount(
         emailCode: options.emailVerify ? _emailCode.text.trim() : null,
+        passwd: options.emailVerify ? null : _password.text,
       );
       if (!identical(api, auth.api)) {
         return;
@@ -265,7 +272,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                             icon: Icons.verified_user_outlined,
                             title: options.emailVerify
                                 ? L10n.t('输入邮箱验证码以验证身份')
-                                : L10n.t('提交删除请求'),
+                                : L10n.t('请验证登录密码'),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
@@ -308,9 +315,39 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                                           );
                                         },
                                   ),
-                                ],
-                                if (options.emailVerify)
-                                  const SizedBox(height: 14),
+                                ] else
+                                  EmailOtpIme(
+                                    builder:
+                                        (
+                                          BuildContext context,
+                                          FocusNode focusNode,
+                                        ) {
+                                          return AppTextField(
+                                            controller: _password,
+                                            focusNode: focusNode,
+                                            enabled: !_busy,
+                                            obscureText: true,
+                                            keyboardType:
+                                                TextInputType.visiblePassword,
+                                            autocorrect: false,
+                                            enableSuggestions: false,
+                                            autofillHints: const <String>[
+                                              AutofillHints.password,
+                                            ],
+                                            inputFormatters:
+                                                <TextInputFormatter>[
+                                                  asciiOnlyFormatter,
+                                                ],
+                                            decoration: InputDecoration(
+                                              labelText: L10n.t('登录密码'),
+                                              prefixIcon: const Icon(
+                                                Icons.lock_outline,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                  ),
+                                const SizedBox(height: 14),
                                 Wrap(
                                   spacing: 12,
                                   runSpacing: 8,

@@ -15,29 +15,14 @@ msgstr "%d 个节点 · 当前 %s"
 msgid "%d ms"
 msgstr "%d 毫秒"
 
-msgid "%d nodes, fetched %s"
-msgstr "%d 个节点，拉取于 %s"
-
-msgid "%s up / %s down"
-msgstr "上传 %s / 下载 %s"
-
-msgid "%s used of %s, %s today"
-msgstr "已用 %s，共 %s，今日 %s"
-
 msgid "%s, %d days left"
 msgstr "%s，剩余 %d 天"
-
-msgid "%s, current node: %s"
-msgstr "%s，当前节点：%s"
 
 msgid "Account"
 msgstr "账号"
 
 msgid "Account info"
 msgstr "账户信息"
-
-msgid "Advanced"
-msgstr "高级"
 
 msgid "Allow LAN"
 msgstr "允许局域网"
@@ -54,8 +39,8 @@ msgstr "已生效"
 msgid "A verification code has been sent to your email"
 msgstr "验证码已发送，请查收邮件"
 
-msgid "Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
-msgstr "geoip.metadb 与 GeoSite.dat 的下载地址前缀，留空则沿用面板下发的地址。不懂就请不要乱修改，地址无效会导致无法使用！"
+msgid "Base URL for geoip.metadb and GeoSite.dat. Must be https. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
+msgstr "geoip.metadb 与 GeoSite.dat 的下载地址前缀，必须是 https。留空则沿用面板下发的地址。不懂就请不要乱修改，地址无效会导致无法使用！"
 
 msgid "Connection details"
 msgstr "连接详情"
@@ -102,11 +87,17 @@ msgstr "失败"
 msgid "Clash profile is invalid"
 msgstr "面板配置不规范"
 
-msgid "Fetching the profile in the background"
-msgstr "正在后台拉取配置"
-
 msgid "Already up to date"
 msgstr "已是最新"
+
+msgid "No changes to save"
+msgstr "没有需要保存的改动"
+
+msgid "Reset"
+msgstr "复位"
+
+msgid "The router could not be reached, so the changes were rolled back"
+msgstr "连不上路由器，改动已自动回滚"
 
 msgid "Update succeeded"
 msgstr "更新成功"
@@ -114,14 +105,11 @@ msgstr "更新成功"
 msgid "Update saved, takes effect the next time the kernel starts"
 msgstr "更新成功，下次启动内核时生效"
 
-msgid "Update failed"
+msgid "Failed to update"
 msgstr "更新失败"
 
 msgid "Firewall rules"
 msgstr "防火墙规则"
-
-msgid "General"
-msgstr "常规"
 
 msgid "GeoData mirror"
 msgstr "GeoData 镜像"
@@ -147,14 +135,8 @@ msgstr "IPv6"
 msgid "Kernel"
 msgstr "内核"
 
-msgid "LAN devices"
-msgstr "局域网设备"
-
 msgid "LAN interfaces"
 msgstr "局域网接口"
-
-msgid "Last %d syslog entries of the plugin and the kernel."
-msgstr "插件与内核最近 %d 条系统日志。"
 
 msgid "Latency"
 msgstr "延迟"
@@ -179,9 +161,6 @@ msgstr "混合"
 
 msgid "Mixed port"
 msgstr "混合端口"
-
-msgid "No entries yet."
-msgstr "暂无日志。"
 
 msgid "Node"
 msgstr "节点"
@@ -216,12 +195,6 @@ msgstr "密码登录"
 msgid "Plan"
 msgstr "套餐"
 
-msgid "Plugin version"
-msgstr "插件版本"
-
-msgid "Ports"
-msgstr "端口"
-
 msgid "Preparing configuration"
 msgstr "正在准备配置"
 
@@ -249,32 +222,20 @@ msgstr "刷新"
 msgid "No matching connections"
 msgstr "没有符合条件的连接"
 
-msgid "No matching log entries."
-msgstr "没有符合条件的日志。"
-
 msgid "Request failed"
 msgstr "请求失败"
 
 msgid "Routing"
 msgstr "分流模式"
 
-msgid "Routing mode updated"
-msgstr "分流模式已更新"
-
 msgid "Search host, IP, process, rule"
 msgstr "搜索域名、IP、进程、规则"
-
-msgid "Search logs"
-msgstr "搜索日志"
 
 msgid "Rule"
 msgstr "规则"
 
 msgid "Running"
 msgstr "运行中"
-
-msgid "Running (%s)"
-msgstr "运行中（%s）"
 
 msgid "Send code"
 msgstr "获取验证码"
@@ -284,12 +245,6 @@ msgstr "获取验证码（%d 秒）"
 
 msgid "Service"
 msgstr "服务"
-
-msgid "Service starting"
-msgstr "服务正在启动"
-
-msgid "Service stopped"
-msgstr "服务已停止"
 
 msgid "Settings"
 msgstr "设置"
@@ -308,9 +263,6 @@ msgstr "退出后将断开连接并清除本机保存的登录凭据。"
 
 msgid "Signed in"
 msgstr "登录成功"
-
-msgid "Signed in, the service is starting"
-msgstr "登录成功，服务正在启动"
 
 msgid "Signed out"
 msgstr "已退出登录"
@@ -341,9 +293,6 @@ msgstr "TPROXY 端口"
 
 msgid "TUN"
 msgstr "TUN"
-
-msgid "TUN device"
-msgstr "TUN 设备"
 
 msgid "TUN stack"
 msgstr "TUN 栈"
@@ -384,12 +333,6 @@ msgstr "流量明细"
 msgid "Traffic from these interfaces is sent to the kernel."
 msgstr "这些接口的流量会被送进内核。"
 
-msgid "Traffic since start"
-msgstr "本次启动流量"
-
-msgid "Transparent proxy settings. Saving restarts the service, connections are dropped for a moment."
-msgstr "透明代理设置。保存会重启服务，期间连接会短暂中断。"
-
 msgid "Two-factor code"
 msgstr "两步验证码"
 
@@ -425,12 +368,6 @@ msgstr "无有效套餐"
 
 msgid "none"
 msgstr "无"
-
-msgid "not fetched yet"
-msgstr "尚未拉取"
-
-msgid "unknown version"
-msgstr "版本未知"
 
 msgid "untested"
 msgstr "未测速"
@@ -492,23 +429,14 @@ msgstr "正在断开连接，请稍候"
 msgid "Current node"
 msgstr "当前节点"
 
-msgid "No node selected"
-msgstr "未选择节点"
-
 msgid "Preparing kernel"
 msgstr "正在准备内核"
-
-msgid "Kernel not ready"
-msgstr "内核尚未就绪"
 
 msgid "Not selected"
 msgstr "未选择"
 
 msgid "Proxy group"
 msgstr "策略组"
-
-msgid "Nodes ›"
-msgstr "节点 ›"
 
 msgid "Refresh nodes"
 msgstr "刷新节点"
@@ -552,6 +480,9 @@ msgstr "已关闭连接"
 msgid "Traffic usage"
 msgstr "流量使用情况"
 
+msgid "Shows traffic usage across all devices."
+msgstr "统计所有设备的流量使用情况"
+
 msgid "Today used"
 msgstr "今日已使用"
 
@@ -563,9 +494,6 @@ msgstr "剩余流量"
 
 msgid "Account total traffic"
 msgstr "账户总流量"
-
-msgid "Need more traffic? Open the panel to buy a traffic pack"
-msgstr "流量不够用？前往面板选购流量包"
 
 msgid "Next usage reset"
 msgstr "下次重置已使用流量日期"
@@ -722,9 +650,6 @@ msgstr "最近 %d 天的在线客户端"
 
 msgid "No online clients in the last %d days"
 msgstr "最近 %d 天没有在线客户端记录"
-
-msgid "Account info updated"
-msgstr "账户信息已刷新"
 
 msgid "TUN excluded networks"
 msgstr "TUN 排除自定义网段"
@@ -918,7 +843,7 @@ msgstr "复制全部"
 msgid "Copied"
 msgstr "已复制"
 
-msgid "Copy failed"
+msgid "Failed to copy"
 msgstr "复制失败"
 
 msgid "Loading rule providers: %d/%d"
@@ -1089,9 +1014,6 @@ msgstr "Nikki 源未给出 mihomo-meta 版本"
 msgid "The profile failed kernel validation: {message}"
 msgstr "配置未通过内核校验：{message}"
 
-msgid "Profile validation failed: {message}"
-msgstr "配置校验未通过：{message}"
-
 msgid "{message}; could not restore the previous profile"
 msgstr "{message}；恢复旧配置失败"
 
@@ -1194,44 +1116,8 @@ msgstr "无法保存测试任务"
 msgid "Sign out of the current account first"
 msgstr "请先退出当前账户"
 
-msgid "Could not block new background tasks"
-msgstr "无法阻止新的后台任务"
-
-msgid "Could not close the previous account's connections"
-msgstr "无法关闭旧账户连接"
-
-msgid "Could not stop the previous account's service"
-msgstr "无法停止旧账户服务"
-
-msgid "Could not open the session lock"
-msgstr "无法打开会话锁"
-
-msgid "Could not stop the previous account's service completely"
-msgstr "旧账户服务停止失败"
-
-msgid "Some tasks for the previous account are still running. Try again shortly."
-msgstr "旧账户任务尚未全部退出，请稍后重试"
-
-msgid "The previous account's network settings have not been restored"
-msgstr "旧账户网络设置尚未恢复"
-
-msgid "Could not clear the previous account's runtime directory"
-msgstr "无法清除旧账户运行目录"
-
-msgid "Could not clear the previous account's runtime data"
-msgstr "无法清除旧账户运行数据"
-
-msgid "Could not clear the previous account's request cache"
-msgstr "无法清除旧账户请求缓存"
-
-msgid "Could not finish switching accounts"
-msgstr "无法结束账户切换"
-
 msgid "Could not clear the previous account's cache"
 msgstr "无法清除旧账户缓存"
-
-msgid "Could not clear the previous account's credentials"
-msgstr "无法清除旧账户凭据"
 
 msgid "Could not open the account cache lock"
 msgstr "无法打开账户缓存锁"
@@ -1269,9 +1155,6 @@ msgstr "无法保存网络接管状态"
 msgid "Could not read secure system random data"
 msgstr "无法读取系统安全随机数"
 
-msgid "The runtime directory must be %s/run"
-msgstr "运行目录必须为 %s/run"
-
 msgid "The TUN interface name must be 1–15 letters, digits, underscores, periods, or hyphens"
 msgstr "TUN 网卡名只能包含 1 到 15 个字母、数字、下划线、点或连字符"
 
@@ -1289,6 +1172,9 @@ msgstr "第 %d 个节点没有名称"
 
 msgid "Duplicate node name: %s"
 msgstr "节点名重复：%s"
+
+msgid "Node \"%s\" uses the mesh-network type %s, which would join the kernel to an outside network and is not supported"
+msgstr "节点「%s」是组网类型（%s），会让内核加入外部网络，客户端不支持"
 
 msgid "Node %d has no type"
 msgstr "第 %d 个节点没有类型"
@@ -1325,12 +1211,6 @@ msgstr "策略组「%s」的节点订阅「%s」不存在"
 
 msgid "Proxy group \"%s\" references missing member \"%s\""
 msgstr "策略组「%s」的成员「%s」不存在"
-
-msgid "The node provider section is incomplete"
-msgstr "节点订阅这一段不是一组完整设置"
-
-msgid "The rule provider section is incomplete"
-msgstr "规则集这一段不是一组完整设置"
 
 msgid "Node provider \"%s\" has an incomplete configuration"
 msgstr "节点订阅「%s」不是一条完整配置"
@@ -1401,16 +1281,13 @@ msgstr "账号已被封禁：%s"
 msgid "Your account has been banned. Check the website for details."
 msgstr "账号已被封禁，请到网站查看详情"
 
-msgid "Could not save traffic data for the current account"
-msgstr "无法保存当前账户流量记录"
-
 msgid "Could not clear traffic data for the previous account"
 msgstr "无法清除旧账户流量记录"
 
-msgid "Privacy Policy"
+msgid "Privacy policy"
 msgstr "隐私政策"
 
-msgid "Terms of Service"
+msgid "Terms of service"
 msgstr "服务条款"
 
 msgid "Downloaded"
@@ -1445,3 +1322,30 @@ msgstr "目标端口"
 
 msgid "Close connection"
 msgstr "关闭连接"
+
+msgid "The background update was interrupted. Try again."
+msgstr "后台更新已中断，请重试"
+
+msgid "Node provider \"%s\" must use an HTTPS download URL"
+msgstr "节点订阅「%s」的下载地址必须使用 https"
+
+msgid "Rule provider \"%s\" must use an HTTPS download URL"
+msgstr "规则集「%s」的下载地址必须使用 https"
+
+msgid "geox-url entry \"%s\" must use HTTPS"
+msgstr "geox-url「%s」必须使用 https"
+
+msgid "The GeoData mirror must use HTTPS"
+msgstr "GeoData 镜像地址必须使用 https"
+
+msgid "Add"
+msgstr "添加"
+
+msgid "Save & Apply"
+msgstr "保存并应用"
+
+msgid "Proxy"
+msgstr "代理"
+
+msgid "Grant access to the ECY Cloud client"
+msgstr "授予访问 ECY Cloud 客户端的权限"

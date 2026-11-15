@@ -87,7 +87,7 @@ struct ShopView: View {
     @ViewBuilder private func content(_ catalog: ShopCatalog) -> some View {
         let colors = ProductPalette(scheme: scheme)
         ProductCard(title: L10n.t("账户余额"), icon: "account_balance_wallet_outlined") {
-            DetailLine(title: L10n.t("当前余额"), value: String(format: "¥ %.2f", catalog.money))
+            DetailLine(title: L10n.t("当前余额"), value: L10n.t("¥ {0}", [String(format: "%.2f", catalog.money)]))
         }.headerAction {
             Button(L10n.t("余额充值 ›")) { recharging = true }.buttonStyle(ProductButtonStyle()).fontWeight(.semibold)
         }
@@ -129,7 +129,7 @@ struct ShopView: View {
                 .background(colors.accent.opacity(scheme == .dark ? 0.06 : 0.10))
                 .overlay(alignment: .bottom) { Rectangle().fill(colors.segment.opacity(0.6)).frame(height: 1) }
             VStack(spacing: 0) {
-                Text(verbatim: "¥ " + product.price).font(.system(size: 26, weight: .bold)).foregroundStyle(colors.accent)
+                Text(verbatim: L10n.t("¥ {0}", [product.price])).font(.system(size: 26, weight: .bold)).foregroundStyle(colors.accent)
                     .frame(maxWidth: .infinity)
                 if product.type == .plan, let days = product.classExpire, days > 1 && days != 36500 {
                     Text(L10n.t("≈ {0} 元 / 天", [String(format: "%.2f", shopAmount(product.price) / Double(days))]))
@@ -290,7 +290,7 @@ struct ShopView: View {
     }
     private func paymentClosed() {
         if let paid {
-            purchaseMessage = PurchaseMessage(message: L10n.t("支付成功，订单已到账。"), cardKey: paid.cardKey)
+            purchaseMessage = PurchaseMessage(message: paid.purchaseNotice, cardKey: paid.cardKey)
             self.paid = nil
         } else {
             Task { await refreshAfterPurchase() }
@@ -421,10 +421,10 @@ struct CheckoutView: View {
     @ViewBuilder private var planSection: some View {
         let colors = ProductPalette(scheme: scheme)
         if quote.hasTrafficResetFee == true {
-            detailBlock(L10n.t("流量重置费用"), lines: [
+            detailBlock(L10n.t("流量重置费用"), lines: quote.trafficFeeIsShortfall ? [L10n.t("此前更换套餐时未收齐的流量重置费：{0} 元", [quote.trafficResetFee ?? ""])] : [
                 L10n.t("现有套餐：{0} 已使用：{1} / {2}（{3}%）", [quote.trafficCurrentShopName ?? "", ProductFormat.bytes(Int64(quote.trafficUsed ?? 0)),
                                                          ProductFormat.bytes(Int64(quote.trafficTotal ?? 0)), String(format: "%.2f", quote.trafficUsagePercent ?? 0)]),
-                L10n.t("新套餐：{0} 计费基准价：{1} 元", [quote.name ?? product.name, quote.trafficBillingBasePrice ?? ""]),
+                quote.trafficBillingBaseLine(planName: quote.name ?? product.name),
                 L10n.t("流量重置费：{0} x {1}%{2} = {3} 元", [quote.trafficBillingBasePrice ?? "", String(format: "%.2f", quote.trafficFeePercent ?? 0),
                                                        quote.trafficFeeIsCapped == true ? L10n.t("（费用上限）") : "", quote.trafficResetFee ?? ""]),
                 L10n.t("费用规则：按已用流量比例计算，50% 封顶")
@@ -551,8 +551,8 @@ struct RechargeView: View {
         FeatureScreen(state: state, reload: load, topPadding: 0) { info in
             VStack(spacing: 10) {
                 ProductCard(title: L10n.t("账户余额"), icon: "account_balance_wallet_outlined") {
-                    DetailLine(title: L10n.t("当前余额"), value: String(format: "¥ %.2f", info.money))
-                    DetailLine(title: L10n.t("累计消费"), value: "¥ " + info.totalTopUp)
+                    DetailLine(title: L10n.t("当前余额"), value: L10n.t("¥ {0}", [String(format: "%.2f", info.money)]))
+                    DetailLine(title: L10n.t("累计消费"), value: L10n.t("¥ {0}", [info.totalTopUp]))
                 }
                 ProductCard(title: L10n.t("充值码兑换"), icon: "confirmation_number_outlined") {
                     ProductField(title: L10n.t("充值码"), icon: "vpn_key_outlined", hasValue: !code.isEmpty) {

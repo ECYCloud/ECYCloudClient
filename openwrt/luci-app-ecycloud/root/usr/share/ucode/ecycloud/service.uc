@@ -1,6 +1,6 @@
 'use strict';
 
-import { access, lsdir, mkdir, open, readfile, rename, rmdir, unlink, writefile } from 'fs';
+import { access, lsdir, lstat, mkdir, open, readfile, rename, rmdir, unlink, writefile } from 'fs';
 import { cursor } from 'uci';
 
 import * as clash from 'ecycloud.clash';
@@ -11,8 +11,8 @@ import * as profile from 'ecycloud.profile';
 import * as statistics from 'ecycloud.statistics';
 import * as release from 'ecycloud.release';
 
-import { API_FILE, CONF_DIR, DELAY_FILE, KICK_FILE, PROFILE_FILE, SESSION_CHANGE, SPEED_FILE, STATE_DIR,
-		 coreRunning, creds, ensurePrivateDir, instances, log, panelDirectHosts, randomHex, sessionBinding,
+import { API_FILE, CONF_DIR, DELAY_FILE, KICK_FILE, PROFILE_FILE, RUN_ROOT, SPEED_FILE, STATE_DIR,
+		 coreRunning, creds, ensurePrivateDir, instances, log, panelDirectHosts, randomHex, sessionBinding, sessionKey, sessionValid, touchAccountDir,
 		 markKicked, readJson, setError, setState, settings, shellquote, state,
 		 writeJson, writePrivateJson } from 'ecycloud.common';
 
@@ -20,6 +20,10 @@ const SELECTOR_FILE = `${CONF_DIR}/selectors.json`;
 const SPEED_QUOTA_FILE = `${CONF_DIR}/speed_quota.json`;
 const DELAY_LOCK = `${STATE_DIR}/delay.lock`;
 const SPEED_LOCK = `${STATE_DIR}/speed.lock`;
+const UPDATE_FILE = `${STATE_DIR}/update.json`;
+const UPDATE_LOCK = `${STATE_DIR}/update.lock`;
+const UPDATE_KEEP = 8;
+const UPDATE_INTERRUPTED = '后台更新已中断，请重试';
 const INIT = '/etc/init.d/ecycloud';
 
 /* 与面板 /user/speed-test 同一口径：同账号同节点 1 小时 5 次成功，超级管理员（id=1）不限 */
@@ -52,8 +56,10 @@ function build(remote, cfg, api) {
 		return assembled;
 
 	const json = sprintf('%J', assembled.config);
-	if (readfile(`${cfg.runDir}/config.json`) == json && !profile.geodataMissing(cfg.runDir))
-		return { ...profile.writeNodeProviders(cfg.runDir, assembled.config), json };
+	if (readfile(`${cfg.runDir}/config.json`) == json && !profile.geodataMissing(cfg.runDir)) {
+		const kernel = profile.writeKernel(cfg.runDir, assembled.config);
+		return kernel.ok ? { ...profile.writeNodeProviders(cfg.runDir, assembled.config), json } : kernel;
+	}
 
 	const written = profile.write(cfg.runDir, assembled.config);
 	if (!written.ok)
@@ -213,7 +219,62 @@ export function closeViaLater(outbound) {
 	system(`${shellquote('/usr/libexec/ecycloud-ctl')} close-via ${shellquote(outbound)} >/dev/null 2>&1 &`);
 };
 
+function keepTrafficRank() {
+	try {
+		statistics.clear(true);
+	} catch (e) {
+		log('warning', `traffic rank not saved: ${e.message}`);
+	}
+};
+
+/* 账号目录 30 天未用才回收，当前账号的目录永不回收 */
+const ACCOUNT_RETENTION = 30 * 86400;
+
+function recentlyUsed(dir) {
+	const used = +(readfile(`${dir}/.last-used`) ?? 0);
+	return lstat(dir)?.type == 'directory' && used > 0 && time() - used < ACCOUNT_RETENTION;
+};
+
+export function collectGarbage() {
+	const keep = sessionKey();
+	for (let name in (lsdir(RUN_ROOT) ?? []))
+		if (name != keep && !recentlyUsed(`${RUN_ROOT}/${name}`) &&
+			system(`rm -rf -- ${shellquote(`${RUN_ROOT}/${name}`)}`) != 0)
+			log('warning', `stale run data not removed: ${name}`);
+};
+
+/* tmpfs 里这些结果只属于刚退出的账号，必须在切换锁内删完，新账号才不会读到 */
+function dropAccountState() {
+	for (let path in [ API_FILE, DELAY_FILE, SPEED_FILE, UPDATE_FILE, KICK_FILE ])
+		unlink(path);
+	for (let name in (lsdir(STATE_DIR) ?? []))
+		if (match(name, /^(req|resp)-[a-f0-9]+\.(json|conf|err)$/))
+			unlink(`${STATE_DIR}/${name}`);
+	rmdir(DELAY_LOCK);
+	rmdir(SPEED_LOCK);
+	rmdir(UPDATE_LOCK);
+};
+
+/* geodata 与账号无关，存一份共享，再硬链接进账号目录；回收账号目录不会删掉它 */
+const GEO_DIR = `${CONF_DIR}/geodata`;
+
+export function shareGeodata(runDir) {
+	ensurePrivateDir(GEO_DIR);
+	ensurePrivateDir(runDir);
+	for (let name in [ 'geoip.metadb', 'GeoSite.dat' ]) {
+		const shared = `${GEO_DIR}/${name}`;
+		const local = `${runDir}/${name}`;
+		if (!access(shared))
+			for (let source in [ local, `${RUN_ROOT}/${name}` ])
+				if (access(source) && system(`ln -f -- ${shellquote(source)} ${shellquote(shared)}`) == 0)
+					break;
+		if (access(shared) && !access(local) && system(`ln -f -- ${shellquote(shared)} ${shellquote(local)}`) != 0)
+			log('warning', `geodata not linked: ${name}`);
+	}
+};
+
 export function prepare(retrying) {
+	panel.ensureAccountKey();
 	const cfg = settings();
 
 	if (!retrying) {
@@ -227,6 +288,9 @@ export function prepare(retrying) {
 		setError(panel.session().expired ? '登录已失效，请重新登录' : '尚未登录面板，请先在 LuCI 的「概览」页登录');
 		return false;
 	}
+	touchAccountDir();
+	shareGeodata(settings().runDir);
+	collectGarbage();
 
 	setState('preparing', '正在准备内核配置');
 
@@ -407,6 +471,10 @@ export function speedJob() {
 	return readJson(SPEED_FILE) ?? emptySpeedJob();
 };
 
+function updateJob() {
+	return readJson(UPDATE_FILE) ?? { tasks: [], pid: 0 };
+};
+
 function currentPid() {
 	const m = match(readfile('/proc/self/status') ?? '', /Pid:\s+(\d+)/);
 	return m ? +m[1] : 0;
@@ -423,12 +491,14 @@ function writeTestJob(path, update, owner) {
 	}
 
 	let saved = null;
+	/* 后台更新可能自己触发内核重启，停机标记期间也要写回结果 */
+	const writable = path == UPDATE_FILE || !stopping();
 	try {
 		if (update == null) {
 			unlink(path);
 			rmdir(path == DELAY_FILE ? DELAY_LOCK : SPEED_LOCK);
-		} else if (!stopping()) {
-			const job = path == DELAY_FILE ? delayJob() : speedJob();
+		} else if (writable) {
+			const job = path == DELAY_FILE ? delayJob() : path == SPEED_FILE ? speedJob() : updateJob();
 			if ((owner == null || job.pid == owner) && update(job) !== false) {
 				const temporary = path + '.' + currentPid() + '.tmp';
 				if (!writeJson(temporary, job) || !rename(temporary, path)) {
@@ -464,6 +534,36 @@ export function cleanup() {
 	return true;
 };
 
+/* 不等旧服务停下：内核只认当前账号目录。带节点凭据的配置随后删掉，规则集与缓存留给同账号下次登录 */
+function retire(dir) {
+	const uci = cursor();
+	if (!uci.set('ecycloud', 'config', 'enabled', '0') || !uci.commit('ecycloud'))
+		log('warning', 'connection flag not cleared');
+	system(`(trap "" HUP; /usr/libexec/ecycloud-ctl retire ${shellquote(dir)}) >/dev/null 2>&1 &`);
+};
+
+/* 后台执行：拿到切换锁后若已有新账号登录或又开了连接就放弃，不能停掉新账号刚起的内核 */
+export function retireSignedOut(dir) {
+	if (!match(dir, /^\/etc\/ecycloud\/run\/(\.none|[A-Za-z0-9][A-Za-z0-9_-]{0,63})$/))
+		return false;
+	ensurePrivateDir(STATE_DIR);
+	const authLock = open(`${STATE_DIR}/account-switch.lock`, 'ae', 0600);
+	if (!authLock || !authLock.lock('x')) {
+		authLock?.close();
+		return false;
+	}
+	if (sessionValid() || settings().enabled)
+		log('notice', 'new session active, old service left running');
+	else {
+		system(`${INIT} stop >/dev/null 2>&1`);
+		const quoted = shellquote(dir);
+		system(`rm -f -- ${quoted}/config.json ${quoted}/config.json.bak ${quoted}/kernel.json ${quoted}/ecy-panel-*.json`);
+		collectGarbage();
+	}
+	authLock.close();
+	return true;
+};
+
 export function changeSession(action, logout) {
 	ensurePrivateDir(STATE_DIR);
 	const authLock = open(`${STATE_DIR}/account-switch.lock`, 'ae', 0600);
@@ -473,61 +573,21 @@ export function changeSession(action, logout) {
 		authLock.close();
 		return { ok: false, msg: '账户正在切换，请稍后重试' };
 	}
-	let lease = null;
 	let result;
 	try {
 		if (!logout && panel.session().logged_in)
 			die('请先退出当前账户');
-		if (writefile(SESSION_CHANGE, '') == null)
-			die('无法阻止新的后台任务');
-		const uci = cursor();
-		if (!uci.set('ecycloud', 'config', 'enabled', '0') || !uci.commit('ecycloud'))
-			die('无法关闭旧账户连接');
-		const stopped = `${STATE_DIR}/session-stop-${randomHex(6)}`;
-		/* procd 自身的服务锁串行化 start / stop；不在 rpcd 内同步等待 ubus。 */
-		if (system(`(${INIT} stop >/dev/null 2>&1; printf '%s' "$?" >${shellquote(stopped)}) &`) != 0)
-			die('无法停止旧账户服务');
-		lease = open(`${STATE_DIR}/session.lock`, 'ae', 0600);
-		if (!lease)
-			die('无法打开会话锁');
-		let ready = false;
-		for (let i = 0; i < 80; i++) {
-			const status = readfile(stopped);
-			if (length(status) && status != '0')
-				die('旧账户服务停止失败');
-			const live = instances();
-			if (status == '0' && !live.core?.running && !live.watchdog?.running && lease.lock('xn')) {
-				ready = true;
-				break;
-			}
-			sleep(100);
-		}
-		if (!ready)
-			die('旧账户任务尚未全部退出，请稍后重试');
-		unlink(stopped);
-		if (!network.revert())
-			die('旧账户网络设置尚未恢复');
-		const runDir = settings().runDir;
-		if (system(`rm -rf -- ${shellquote(runDir)}`) != 0 || access(runDir))
-			die('无法清除旧账户运行目录');
-		panel.clearCache();
-		statistics.clear(true);
-		for (let path in [ API_FILE, DELAY_FILE, SPEED_FILE, KICK_FILE ])
-			if (access(path) && !unlink(path))
-				die('无法清除旧账户运行数据');
-		for (let name in (lsdir(STATE_DIR) ?? []))
-			if (match(name, /^(req|resp)-[a-f0-9]+\.(json|conf|err)$/) && !unlink(`${STATE_DIR}/${name}`))
-				die('无法清除旧账户请求缓存');
-		rmdir(DELAY_LOCK);
-		rmdir(SPEED_LOCK);
-		setState('stopped', '');
+		const dir = settings().runDir;
+		if (logout)
+			keepTrafficRank();
 		result = action();
-		if (!unlink(SESSION_CHANGE))
-			die('无法结束账户切换');
+		if (logout) {
+			dropAccountState();
+			retire(dir);
+		}
 	} catch (e) {
 		result = { ok: false, msg: e.message };
 	}
-	lease?.close();
 	authLock.close();
 	return result;
 };
@@ -954,9 +1014,10 @@ export function update(force, accountResponse, locale) {
 	const speedReady = previous?.listeners?.[0]?.users?.[0]?.password == api.speed;
 
 	/* config_revision 与 /config/revision 同值，profile 已经拿过：
-	   /config/clash 是 90 秒超时、60 秒内只给 20 次的重接口，自动刷新时戳没变就别去打 */
+	   /config/clash 是 90 秒超时、60 秒内只给 20 次的重接口，自动刷新时戳没变且未到面板给的更新间隔就别去打 */
 	if (!force && speedReady && cached?.config?.['proxy-providers']?.[profile.NODE_PROVIDER] != null &&
-	    length(account.data?.config_revision) && account.data.config_revision == cached?.revision && profile.authorized(cached, 3600))
+	    length(account.data?.config_revision) && account.data.config_revision == cached?.revision && profile.authorized(cached, 3600) &&
+	    !profile.updateDue(cached))
 		return { ok: true, changed: false };
 
 	const fetched = panel.clashProfile(locale);
@@ -1017,7 +1078,7 @@ export function update(force, accountResponse, locale) {
 		return { ok: true, changed: true, reloaded: false };
 	}
 
-	const reloaded = clash.applyPayload(built.json);
+	const reloaded = clash.applyPayload(sprintf('%J', profile.kernelConfig(next)));
 	if (!reloaded.ok) {
 		profile.rollback(cfg.runDir);
 		return { ok: false, error: reloaded.error };
@@ -1031,6 +1092,119 @@ export function update(force, accountResponse, locale) {
 		setState('running', '面板配置已热载');
 
 	return { ok: true, changed: true, reloaded: true };
+};
+
+function updateWorkerAlive() {
+	const job = updateJob();
+	return job.pid > 0 && access(`/proc/${job.pid}`);
+};
+
+function finishTask(task, result) {
+	task.state = 'done';
+	task.ok = result.ok == true;
+	task.msg = result.msg ?? '';
+	task.changed = result.changed == true;
+	task.reloaded = result.reloaded == true;
+};
+
+function startUpdateWorker() {
+	const job = writeTestJob(UPDATE_FILE, function(job) {
+		if (updateWorkerAlive())
+			return false;
+		rmdir(UPDATE_LOCK);
+		for (let task in job.tasks)
+			if (task.state == 'running')
+				finishTask(task, { msg: UPDATE_INTERRUPTED });
+		job.pid = 0;
+	});
+	if (job)
+		detachCtl('update-tasks');
+};
+
+export function enqueueUpdate(kind, locale) {
+	const session = panel.session().id;
+	let id;
+	writeTestJob(UPDATE_FILE, function(job) {
+		const same = filter(job.tasks, task => task.state != 'done' && task.session == session &&
+			task.kind == kind && task.locale == locale)[0];
+		id = same?.id ?? randomHex(8);
+		if (!same)
+			push(job.tasks, { id, session, kind, locale, state: 'queued' });
+		while (length(job.tasks) > UPDATE_KEEP && job.tasks[0].state == 'done')
+			shift(job.tasks);
+	});
+	startUpdateWorker();
+	return { ok: true, msg: '', pending: true, id };
+};
+
+export function ensureUpdateWorker() {
+	if (length(panel.pendingProbes()))
+		enqueueUpdate('probe', '');
+	else if (length(filter(updateJob().tasks, task => task.state == 'queued')) && !updateWorkerAlive())
+		startUpdateWorker();
+};
+
+export function updateTasks() {
+	const alive = updateWorkerAlive();
+	const session = panel.session().id;
+	return map(filter(updateJob().tasks, task => task.session == session), task => {
+		const lost = task.state == 'running' && !alive;
+		return { id: task.id, kind: task.kind, state: lost ? 'done' : task.state, ok: task.ok == true,
+			msg: lost ? UPDATE_INTERRUPTED : task.msg ?? '', changed: task.changed == true, reloaded: task.reloaded == true };
+	});
+};
+
+function runUpdateTask(task) {
+	if (task.session != panel.session().id)
+		return { msg: UPDATE_INTERRUPTED };
+	if (task.kind == 'probe') {
+		panel.runProbes();
+		return { ok: true };
+	}
+	if (task.kind == 'geo') {
+		if (!clash.ready())
+			return { msg: '内核未运行' };
+		const runDir = settings().runDir;
+		const before = profile.geoFingerprint(runDir);
+		const res = clash.updateGeo();
+		return res.ok ? { ok: true, changed: before != profile.geoFingerprint(runDir) } : { msg: res.error };
+	}
+	const res = update(task.kind == 'profile', null, task.locale);
+	return { ok: res.ok, msg: res.error, changed: res.changed, reloaded: res.reloaded };
+};
+
+export function runUpdates() {
+	const self = currentPid();
+	let job = writeTestJob(UPDATE_FILE, function(job) {
+		if (!mkdir(UPDATE_LOCK))
+			return false;
+		job.pid = self;
+	});
+	while (job) {
+		let task = null;
+		job = writeTestJob(UPDATE_FILE, function(job) {
+			task = filter(job.tasks, item => item.state == 'queued')[0];
+			if (task)
+				task.state = 'running';
+			else {
+				job.pid = 0;
+				rmdir(UPDATE_LOCK);
+			}
+		}, self);
+		if (!job || !task)
+			return;
+		let result;
+		try {
+			result = runUpdateTask(task);
+		} catch (e) {
+			result = { msg: e.message };
+		}
+		job = writeTestJob(UPDATE_FILE, function(job) {
+			for (let item in job.tasks)
+				if (item.id == task.id)
+					finishTask(item, result);
+		}, self);
+	}
 };
 
 export function refresh() {
@@ -1116,8 +1290,14 @@ export function watchdog() {
 			break;
 		}
 		const cfg = settings();
+		const core = instances().core;
+		if (core && core.dir != cfg.runDir) {
+			log('warning', 'kernel of a signed-out session stopped');
+			system(`trap "" HUP; ${INIT} stop >/dev/null 2>&1 &`);
+			break;
+		}
 		const record = network.applied();
-		let active = record != null && record.active != false;
+		let active = record != null && record.active != false && network.intact(record);
 		const running = coreRunning();
 		const alive = running && clash.ready();
 		const wait = (alive && active && cfg.enabled) ? 5 : 1;
@@ -1160,6 +1340,7 @@ export function watchdog() {
 			ensureDelayWorker();
 			ensureSpeedWorker();
 		}
+		ensureUpdateWorker();
 		icons.ensure();
 
 		sleep(wait * 1000);

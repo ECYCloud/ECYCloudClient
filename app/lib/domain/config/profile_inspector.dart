@@ -30,6 +30,13 @@ class ProfileInspector {
     'sub-rule',
   };
 
+  // 组网类出站会让内核加入外部 P2P 网络、开监听口或充当出口节点，等于替用户开了看不见的入站
+  static const Set<String> _meshTypes = <String>{
+    'easytier',
+    'tailscale',
+    'zerotier',
+  };
+
   static List<String> inspect(Map<String, dynamic> remote) {
     final List<String> issues = <String>[];
     final Set<String> names = <String>{};
@@ -51,6 +58,12 @@ class ProfileInspector {
       issues,
       nodeProviders,
     );
+    _inspectMeshNodes(<Object?>[
+      remote['proxies'],
+      if (proxyProviders is Map)
+        for (final Object? provider in proxyProviders.values)
+          if (provider is Map) provider['payload'],
+    ], issues);
     _inspectGroups(remote['proxy-groups'], issues, names, nodeProviders);
     if (names.contains(SpeedProbeConfig.groupName)) {
       issues.add(
@@ -65,6 +78,14 @@ class ProfileInspector {
     );
     _inspectRules(remote['rules'], issues, names, providers);
     _inspectDns(remote['dns'], issues);
+    final Object? geox = remote['geox-url'];
+    if (geox is Map) {
+      geox.forEach((Object? key, Object? url) {
+        if (!_httpsUrl(url)) {
+          issues.add(L10n.t('geox-url「{0}」必须使用 https', <Object>['$key']));
+        }
+      });
+    }
 
     if (issues.length <= _maxIssues) {
       return issues;
@@ -115,6 +136,25 @@ class ProfileInspector {
       }
       if (type.isEmpty) {
         issues.add(L10n.t('第 {0} 个节点没有类型', <Object>[i + 1]));
+      }
+    }
+  }
+
+  static void _inspectMeshNodes(List<Object?> lists, List<String> issues) {
+    for (final Object? list in lists) {
+      if (list is! List) {
+        continue;
+      }
+      for (final Object? item in list) {
+        if (item is Map &&
+            _meshTypes.contains('${item['type'] ?? ''}'.trim().toLowerCase())) {
+          issues.add(
+            L10n.t('节点「{0}」是组网类型（{1}），会让内核加入外部网络，客户端不支持', <Object>[
+              '${item['name'] ?? ''}',
+              '${item['type']}'.trim(),
+            ]),
+          );
+        }
       }
     }
   }
@@ -248,11 +288,13 @@ class ProfileInspector {
           ),
         );
       }
+      final Iterable<Object?> paths = _fields(value, 'path');
+      final Iterable<Object?> urls = _fields(value, 'url');
       if (section == 'rule-providers' &&
-          '${value['path'] ?? ''}'.trim().isEmpty) {
+          !paths.any((Object? path) => '${path ?? ''}'.trim().isNotEmpty)) {
         issues.add(L10n.t('规则集「{0}」没有保存路径', <Object>[name]));
       }
-      if (value.containsKey('path') && !_safeProviderPath(value['path'])) {
+      if (!paths.every(_safeProviderPath)) {
         issues.add(L10n.t('「{0}」的保存路径必须位于运行目录内，且不能覆盖客户端文件', <Object>[name]));
       }
       if (section == 'proxy-providers' &&
@@ -265,12 +307,22 @@ class ProfileInspector {
               (value['payload'] as List).isEmpty)) {
         issues.add(L10n.t('节点订阅「{0}」不是一条完整配置', <Object>[name]));
       }
-      if (type == 'http' && '${value['url'] ?? ''}'.trim().isEmpty) {
+      if (type == 'http' &&
+          !urls.any((Object? url) => '${url ?? ''}'.trim().isNotEmpty)) {
         issues.add(
           L10n.t(
             section == 'proxy-providers'
                 ? '节点订阅「{0}」是在线下载，但没有地址'
                 : '规则集「{0}」是在线下载，但没有地址',
+            <Object>[name],
+          ),
+        );
+      } else if (!urls.every(_httpsUrl)) {
+        issues.add(
+          L10n.t(
+            section == 'proxy-providers'
+                ? '节点订阅「{0}」的下载地址必须使用 https'
+                : '规则集「{0}」的下载地址必须使用 https',
             <Object>[name],
           ),
         );
@@ -283,11 +335,28 @@ class ProfileInspector {
     });
   }
 
+  // 内核取 provider 字段时名字不分大小写（mihomo common/structure）：URL、PATH 这类变体一样会被拿去下载、落盘，
+  // 同时存在多个变体时逐个检查
+  static Iterable<Object?> _fields(Map<Object?, Object?> value, String key) =>
+      value.entries
+          .where(
+            (MapEntry<Object?, Object?> field) =>
+                '${field.key}'.toLowerCase() == key,
+          )
+          .map((MapEntry<Object?, Object?> field) => field.value);
+
+  // 明文下载会被链路上替换规则集、节点订阅与地理数据库：只检查不改写，没有地址的本地 provider 不受影响
+  static bool _httpsUrl(Object? value) {
+    final String url = '${value ?? ''}'.trim().toLowerCase();
+    return url.isEmpty || url.startsWith('https://');
+  }
+
   static bool _safeProviderPath(Object? path) {
     if (path is! String ||
         path.isEmpty ||
         path.startsWith('/') ||
-        RegExp(r'[\\:\x00-\x1f\x7f]').hasMatch(path)) {
+        // ~ 可组成 Windows 8.3 短文件名（CONFIG~1.JSO），绕过下面按字面比对的保留文件名
+        RegExp(r'[\\:~\x00-\x1f\x7f]').hasMatch(path)) {
       return false;
     }
     final List<String> parts = path

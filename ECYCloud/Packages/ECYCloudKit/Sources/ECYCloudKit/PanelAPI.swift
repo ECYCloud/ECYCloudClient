@@ -6,11 +6,13 @@ public struct HTTPResult: Sendable {
     public let data: Data
     public let status: Int
     public let retryAfter: Int?
+    public let profileUpdateInterval: String?
 
-    public init(data: Data, status: Int, retryAfter: Int? = nil) {
+    public init(data: Data, status: Int, retryAfter: Int? = nil, profileUpdateInterval: String? = nil) {
         self.data = data
         self.status = status
         self.retryAfter = retryAfter
+        self.profileUpdateInterval = profileUpdateInterval
     }
 }
 
@@ -52,7 +54,8 @@ public struct URLSessionTransport: HTTPTransport {
             try Task.checkCancellation()
             return HTTPResult(
                 data: data, status: http.statusCode,
-                retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init)
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init),
+                profileUpdateInterval: http.value(forHTTPHeaderField: "profile-update-interval")
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -83,8 +86,10 @@ final class NoRedirects: NSObject, URLSessionTaskDelegate {
 @MainActor public final class PanelRoute {
     var connected: () -> Bool = { false }
     var proxyPort: () -> Int? = { nil }
+    var reached: (URL, Bool) -> Void = { _, _ in }
     nonisolated init() {}
     func takeover() -> (connected: Bool, port: Int?) { (connected(), proxyPort()) }
+    func reach(_ url: URL?, _ reachable: Bool) { if let url { reached(url, reachable) } }
 }
 
 public struct PanelAPI: Sendable {
@@ -130,16 +135,35 @@ public struct PanelAPI: Sendable {
         return SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined()
     }
 
+    // 对应 panel_api_client.dart 的 cacheKey：只能留在内存，写进任何文件配置缓存就不再随钥匙串里的登录令牌绑定在本机
+    func cacheKey(token: String) -> SymmetricKey {
+        SymmetricKey(data: HMAC<SHA256>.authenticationCode(for: Data("remote-config-cache|\(device.id)".utf8),
+                                                           using: SymmetricKey(data: Data(token.utf8))))
+    }
+
     // 对应 panel_api_client.dart 的 _viaDirectThenProxy：连接未建立时短暂等待后整轮重来，最多 3 轮；
     // 账户状态不重试，启动恢复要尽快退回离线缓存
+    // 每个请求重试结束后报告所用地址是否可达，只有网络层失败报告 false，供 ClientSession 判断是否回退到出包地址
     private func send(_ request: URLRequest, retryUnreachable: Bool) async throws -> HTTPResult {
         var attempt = 1
         while true {
-            do { return try await sendOnce(request) }
-            catch ClientError.networkFailure(let code) where retryUnreachable && Self.connectFailures.contains(URLError.Code(rawValue: code)) {
-                guard attempt < 3 else { throw ClientError.unreachable(code) }
+            do {
+                let result = try await sendOnce(request)
+                await route.reach(request.url, true)
+                return result
+            } catch ClientError.networkFailure(let code) where retryUnreachable && Self.connectFailures.contains(URLError.Code(rawValue: code)) {
+                guard attempt < 3 else {
+                    await route.reach(request.url, false)
+                    throw ClientError.unreachable(code)
+                }
                 attempt += 1
                 try await Task.sleep(for: .milliseconds(400))
+            } catch let error as ClientError {
+                switch error {
+                case .network, .networkFailure, .unreachable: await route.reach(request.url, false)
+                default: await route.reach(request.url, true)
+                }
+                throw error
             }
         }
     }
@@ -164,6 +188,29 @@ public struct PanelAPI: Sendable {
             return try await proxyTransport(port).send(request)
         }
     }
+
+    // 对应 panel_api_client.dart 的 probe：面板下发的新地址先探一次再采用。不带令牌、不重试、不经 route.reach，不计入回退计数；
+    // 收到任何 HTTP 响应即可达，只有网络层失败返回 false。配置域只承载 /config/clash 与 /config/revision，
+    // 不带令牌请求后者会在面板鉴权中间件第一步直接回 401，不查库也不生成配置
+    func probe(_ origin: URL, config: Bool) async -> Bool {
+        var request = URLRequest(url: origin.appendingPathComponent(config ? "api/client/v1/config/revision" : "api/client/v1/auth/options"))
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        do {
+            _ = try await sendOnce(request)
+            return true
+        } catch let error as ClientError {
+            switch error {
+            case .network, .networkFailure, .unreachable: return false
+            default: return true
+            }
+        } catch {
+            return false
+        }
+    }
+
+    private var userAgent: String { "ECYCloud/\(device.version.replacingOccurrences(of: "Pre ", with: "Pre")) (\(device.platform))" }
 
     func options(_ endpoints: PanelEndpoints) async throws -> AuthOptions {
         do {
@@ -279,8 +326,36 @@ public struct PanelAPI: Sendable {
     }
 
     func nodes(_ endpoints: PanelEndpoints, token: String) async throws -> (value: NodeCatalog, data: Data) {
-        let data = try await perform("/config/clash", origin: endpoints.config, token: token, nodeProviders: true).data
-        return (try Self.decode(data), data)
+        let response = try await perform("/config/clash", origin: endpoints.config, token: token, nodeProviders: true)
+        let data = try Self.withNodePayloads(response.data)
+        var catalog: NodeCatalog = try Self.decode(data)
+        catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(response.profileUpdateInterval)
+        return (catalog, data)
+    }
+
+    // 对应 panel_api_client.dart 的 withNodePayloads：各组节点 provider 只带成员名单时，按 ecy-panel-nodes 还原成完整格式再校验与缓存
+    static func withNodePayloads(_ data: Data) throws -> Data {
+        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var body = root["data"] as? [String: Any], var config = body["config"] as? [String: Any],
+              var providers = config["proxy-providers"] as? [String: Any],
+              providers.contains(where: { $0.key.hasPrefix("ecy-panel-") && ($0.value as? [String: Any])?["members"] != nil })
+        else { return data }
+        let source = (providers["ecy-panel-nodes"] as? [String: Any])?["payload"] as? [[String: Any]] ?? []
+        var nodes: [String: [String: Any]] = [:]
+        for node in source { if let name = node["name"] as? String, nodes[name] == nil { nodes[name] = node } }
+        for (name, value) in providers where name.hasPrefix("ecy-panel-") {
+            guard var provider = value as? [String: Any], let members = provider.removeValue(forKey: "members") else { continue }
+            guard let names = members as? [String], !names.isEmpty, provider["payload"] == nil else { throw ClientError.invalidResponse }
+            provider["payload"] = try names.map { name -> [String: Any] in
+                guard let node = nodes[name] else { throw ClientError.invalidResponse }
+                return node
+            }
+            providers[name] = provider
+        }
+        config["proxy-providers"] = providers
+        body["config"] = config
+        root["data"] = body
+        return try JSONSerialization.data(withJSONObject: root, options: [.withoutEscapingSlashes])
     }
 
     func logout(_ endpoints: PanelEndpoints, token: String) async throws {
@@ -290,6 +365,8 @@ public struct PanelAPI: Sendable {
     private struct EnvelopeHeader: Decodable {
         let ret: Int
         let msg: String?
+        let passwordChanged: Bool?
+        private enum CodingKeys: String, CodingKey { case ret, msg, passwordChanged = "password_changed" }
     }
 
     private struct Envelope<Value: Decodable>: Decodable { let data: Value }
@@ -315,7 +392,7 @@ public struct PanelAPI: Sendable {
     func perform(
         _ path: String, origin: URL, token: String? = nil,
         body: [String: String]? = nil, nodeProviders: Bool = false, query: [URLQueryItem] = [], method: String? = nil, jsonBody: Data? = nil, contentType: String = "application/json; charset=utf-8", timeout: TimeInterval = 20, connected: Bool = false
-    ) async throws -> (data: Data, message: String) {
+    ) async throws -> (data: Data, message: String, profileUpdateInterval: String?) {
         var url = URLComponents(url: origin.appendingPathComponent("api/client/v1\(path)"), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { url.queryItems = query }
         var request = URLRequest(url: url.url!)
@@ -323,8 +400,7 @@ public struct PanelAPI: Sendable {
         request.httpMethod = method ?? (body == nil && jsonBody == nil ? "GET" : "POST")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(L10n.language.rawValue, forHTTPHeaderField: "Accept-Language")
-        let version = device.version.replacingOccurrences(of: "Pre ", with: "Pre")
-        request.setValue("ECYCloud/\(version) (\(device.platform))", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         let componentCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!~*'()")
         for (key, value) in [
             "X-Device-Name": device.name, "X-Device-Model": device.model,
@@ -337,7 +413,10 @@ public struct PanelAPI: Sendable {
             request.setValue("1", forHTTPHeaderField: "X-ECY-Connected")
             request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Used")
         }
-        if nodeProviders { request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Providers") }
+        if nodeProviders {
+            request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Providers")
+            request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Members")
+        }
         if body != nil || jsonBody != nil {
             request.httpBody = try jsonBody ?? JSONEncoder().encode(body!)
             guard request.httpBody!.count <= (path == "/tickets/upload" && contentType.hasPrefix("multipart/form-data;") ? TicketUpload.maximumBytes + 4096 : 1_048_576) else { throw ClientError.responseTooLarge }
@@ -354,12 +433,15 @@ public struct PanelAPI: Sendable {
         }
         message = String(message.prefix(512))
         message = L10n.message(message)
+        if (200..<300).contains(response.status), header?.ret == 0, header?.passwordChanged == true {
+            throw ClientError.passwordChanged(message: message)
+        }
         guard (200..<300).contains(response.status), header?.ret == 1 else {
             throw ClientError.server(
                 status: response.status, code: header?.ret ?? 0, message: message,
                 retryAfter: response.status == 429 ? response.retryAfter.flatMap { $0 > 0 ? $0 : nil } : nil
             )
         }
-        return (response.data, header?.msg == nil ? "" : message)
+        return (response.data, header?.msg == nil ? "" : message, response.profileUpdateInterval)
     }
 }

@@ -8,6 +8,7 @@ import 'rich_html_view.dart';
 import '../../l10n/l10n.dart';
 import 'app_alert_dialog.dart';
 
+/// 后台设置的客户端弹窗公告：以翻页公告弹窗展示并定位到该条，点「关闭」后同一版本不再自动弹出。
 Future<void> showAnnouncementPopup(
   BuildContext context, {
   required Announcement announcement,
@@ -15,36 +16,16 @@ Future<void> showAnnouncementPopup(
   bool dismissible = true,
 }) {
   controller.markAnnouncementSeen(announcement);
+  final List<Announcement> items = controller.items;
   return showDialog<void>(
     context: context,
     barrierDismissible: dismissible,
-    builder: (BuildContext context) => AppAlertDialog(
-      title: Text(announcement.title, textAlign: TextAlign.center),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (announcement.id != 1 && announcement.date.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                announcement.date,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          RichHtmlView(announcement.content),
-        ],
+    builder: (BuildContext context) => _AnnouncementBrowser(
+      items: items,
+      initialIndex: items.indexWhere(
+        (Announcement item) => item.id == announcement.id,
       ),
-      actions: <Widget>[
-        FilledButton(
-          onPressed: () {
-            controller.dismissPopup(announcement);
-            Navigator.of(context).pop();
-          },
-          child: Text(L10n.t('我知道了')),
-        ),
-      ],
+      onClose: () => controller.dismissPopup(announcement),
     ),
   );
 }
@@ -112,10 +93,12 @@ class _AnnouncementBrowser extends StatefulWidget {
     super.key,
     required this.items,
     this.initialIndex = 0,
+    this.onClose,
   });
 
   final List<Announcement> items;
   final int initialIndex;
+  final VoidCallback? onClose;
 
   @override
   State<_AnnouncementBrowser> createState() => _AnnouncementBrowserState();
@@ -200,7 +183,10 @@ class _AnnouncementBrowserState extends State<_AnnouncementBrowser> {
             ),
           ),
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            widget.onClose?.call();
+            Navigator.of(context).pop();
+          },
           child: Text(L10n.t('关闭')),
         ),
       ],

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
 import 'json_file_store.dart';
@@ -18,6 +20,12 @@ class TrafficRankStore {
 
   static const int topLimit = 10;
   static const Duration _saveInterval = Duration(seconds: 30);
+
+  // 与 OpenWrt statistics.uc 同一口径：当天内存计数受键数上限约束，落盘只留每类前 100
+  static const int _keepLimit = 100;
+  static const int _groupLimit = 512;
+  static const int _hostLimit = 10000;
+  static const int _hostBytes = 253;
 
   final JsonFileStore _store;
   final DateTime Function() _clock;
@@ -63,12 +71,16 @@ class TrafficRankStore {
     final DateTime now = _clock();
     final _DayBucket bucket = _days.putIfAbsent(dayKey(now), _DayBucket.new);
     for (final String group in groups) {
-      if (group.isEmpty) {
+      if (group.isEmpty ||
+          (!bucket.groups.containsKey(group) &&
+              bucket.groups.length >= _groupLimit)) {
         continue;
       }
       bucket.groups[group] = (bucket.groups[group] ?? 0) + bytes;
     }
-    if (host.isNotEmpty) {
+    if (host.isNotEmpty &&
+        utf8.encode(host).length <= _hostBytes &&
+        (bucket.hosts.containsKey(host) || bucket.hosts.length < _hostLimit)) {
       bucket.hosts[host] = (bucket.hosts[host] ?? 0) + bytes;
     }
     _prune(now);
@@ -154,6 +166,7 @@ class TrafficRankStore {
     _days.removeWhere((String key, _DayBucket _) => !keep.contains(key));
   }
 
+  // 其它账户只留今天与昨天：过期日期一并清掉，同账户再登录仍能恢复近两天排行
   void _write() {
     final Map<String, dynamic> raw = _store.read();
     final Map<String, dynamic> accounts =
@@ -164,12 +177,30 @@ class TrafficRankStore {
     if (oldAccount is String && oldAccount.isNotEmpty && raw['days'] is Map) {
       accounts[oldAccount] = raw['days'];
     }
-    accounts[_account] = <String, dynamic>{
-      for (final MapEntry<String, _DayBucket> entry in _days.entries)
-        entry.key: entry.value.toJson(),
-    };
-    _store.write(<String, dynamic>{'accounts': accounts});
+    final DateTime now = _clock();
+    _store.write(<String, dynamic>{
+      'accounts': <String, dynamic>{
+        for (final MapEntry<String, dynamic> entry in accounts.entries)
+          if (entry.key != _account)
+            if (_recentJson(entry.value, now)
+                case final Map<String, dynamic> days when days.isNotEmpty)
+              entry.key: days,
+        _account: <String, dynamic>{
+          for (final MapEntry<String, _DayBucket> entry in _days.entries)
+            entry.key: entry.value.toJson(),
+        },
+      },
+    });
   }
+
+  static Map<String, dynamic> _recentJson(Object? days, DateTime now) =>
+      <String, dynamic>{
+        if (days is Map)
+          for (final String key in <String>[dayKey(now), yesterdayKey(now)])
+            if (days[key] case final Map<dynamic, dynamic> bucket)
+              key: _DayBucket.fromJson(Map<String, dynamic>.from(bucket))
+                  .toJson(),
+      };
 }
 
 class _DayBucket {
@@ -186,9 +217,24 @@ class _DayBucket {
   final Map<String, int> hosts;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'groups': groups,
-    'hosts': hosts,
+    'groups': _kept(groups),
+    'hosts': _kept(hosts),
   };
+
+  static Map<String, int> _kept(Map<String, int> map) {
+    if (map.length <= TrafficRankStore._keepLimit) {
+      return map;
+    }
+    final List<MapEntry<String, int>> entries = map.entries.toList()
+      ..sort(
+        (MapEntry<String, int> a, MapEntry<String, int> b) => b.value == a.value
+            ? a.key.compareTo(b.key)
+            : b.value.compareTo(a.value),
+      );
+    return Map<String, int>.fromEntries(
+      entries.take(TrafficRankStore._keepLimit),
+    );
+  }
 
   static Map<String, int> _intMap(Object? raw) {
     if (raw is! Map) {

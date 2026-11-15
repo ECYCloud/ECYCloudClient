@@ -20,6 +20,17 @@ class AppUpdate {
   static const String downloadPrefix =
       'https://github.com/$repo/releases/download/';
 
+  // 只比较前缀会放过 releases/download/../../ 之类解析后落到别的仓库的地址
+  static bool isOfficialDownload(String url) {
+    final Uri? uri = Uri.tryParse(url);
+    return uri != null &&
+        url.startsWith(downloadPrefix) &&
+        uri.toString().startsWith(downloadPrefix) &&
+        uri.userInfo.isEmpty &&
+        !uri.hasPort &&
+        !uri.pathSegments.any((String part) => part == '.' || part == '..');
+  }
+
   static const String _prePrefix = 'Pre ';
 
   final String current;

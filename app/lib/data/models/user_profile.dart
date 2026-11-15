@@ -8,6 +8,7 @@ class UserPlan {
     required this.autoRenew,
     required this.renewAt,
     required this.canToggleAutoRenew,
+    required this.autoRenewUnavailableReason,
   });
 
   factory UserPlan.fromJson(Map<String, dynamic> json) => UserPlan(
@@ -19,6 +20,8 @@ class UserPlan {
     autoRenew: json['auto_renew'] == true,
     renewAt: json['renew_at'] as String? ?? '',
     canToggleAutoRenew: json['can_toggle_auto_renew'] == true,
+    autoRenewUnavailableReason:
+        json['auto_renew_unavailable_reason'] as String? ?? '',
   );
 
   final int id;
@@ -29,6 +32,7 @@ class UserPlan {
   final bool autoRenew;
   final String renewAt;
   final bool canToggleAutoRenew;
+  final String autoRenewUnavailableReason;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -39,6 +43,7 @@ class UserPlan {
     'auto_renew': autoRenew,
     'renew_at': renewAt,
     'can_toggle_auto_renew': canToggleAutoRenew,
+    'auto_renew_unavailable_reason': autoRenewUnavailableReason,
   };
 }
 

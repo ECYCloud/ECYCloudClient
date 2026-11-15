@@ -116,7 +116,7 @@ struct InviteView: View {
             PageButtons(current: value.withdrawCurrentPage, last: value.withdrawLastPage, total: value.withdrawTotal) { pages[2] = $0 }
         }
     }
-    private func money(_ value: Double) -> String { String(format: "¥ %.2f", value) }
+    private func money(_ value: Double) -> String { L10n.t("¥ {0}", [String(format: "%.2f", value)]) }
     private func request() async throws -> InviteSummary {
         let terms = searches.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         return try await session.invite(invitedPage: pages[0], invitedSearch: terms[0], paybackPage: pages[1], paybackSearch: terms[1],

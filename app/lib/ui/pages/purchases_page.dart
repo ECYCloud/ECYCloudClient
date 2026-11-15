@@ -173,7 +173,7 @@ class _PurchasesPageState extends State<PurchasesPage>
                       child: SimpleDataTable(
                         minWidth: 1280,
                         columns: <String>[
-                          L10n.t('操作'),
+                          L10n.t('续费'),
                           L10n.t('订单号'),
                           L10n.t('商品名称'),
                           L10n.t('购买价格'),
@@ -197,7 +197,19 @@ class _PurchasesPageState extends State<PurchasesPage>
                                             : L10n.t('开启自动续费'),
                                       ),
                                     )
-                                  : const TableText('-', muted: true),
+                                  : item.autoRenewUnavailableReason.isEmpty
+                                  ? const TableText('-', muted: true)
+                                  // 不能操作时显示灰色原因、悬浮禁止光标，与网页购买记录一致
+                                  // 表格可选文字会给 Text 套文字光标，须经 DefaultSelectionStyle 改成禁止光标
+                                  : DefaultSelectionStyle.merge(
+                                      mouseCursor: SystemMouseCursors.forbidden,
+                                      child: TableText(
+                                        L10n.t(
+                                          item.autoRenewUnavailableReason,
+                                        ),
+                                        muted: true,
+                                      ),
+                                    ),
                               TableText(item.orderNo),
                               TableText(
                                 item.shopName.isEmpty

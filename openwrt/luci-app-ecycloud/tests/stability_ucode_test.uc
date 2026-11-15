@@ -2,7 +2,7 @@
 
 import { testState } from 'fs';
 import { API_FILE, CRED_FILE, NETWORK_FILE, PROFILE_FILE, readJson, sessionBinding, settings, writeJson } from 'ecycloud.common';
-import { apply, revert } from 'ecycloud.network';
+import { apply, intact, revert } from 'ecycloud.network';
 import { assemble, rollback, write } from 'ecycloud.profile';
 import { cleanup, refresh, standby, watchdog } from 'ecycloud.service';
 
@@ -11,6 +11,14 @@ function check(ok, message) {
 		die(message);
 };
 
+const routerDnsConf = '/var/run/ecycloud/router-dns.conf';
+const routerDnsRuleset = '/var/run/ecycloud/router-dns.nft';
+const routerDnsStart = `/usr/sbin/dnsmasq -C ${routerDnsConf} >/dev/null 2>&1`;
+const routerDnsLoad = `nft -f ${routerDnsRuleset} >/dev/null 2>&1`;
+const routerDnsDelete = 'nft delete table inet ecycloud_dns 2>/dev/null';
+const routerDnsProcess = '/proc/77/cmdline';
+const routerDnsCmdline = `/usr/sbin/dnsmasq\0-C\0${routerDnsConf}\0`;
+const dnsmasqRestart = '/etc/init.d/dnsmasq restart >/dev/null 2>&1';
 let failedCommand = '';
 let failures = 0;
 global.system = command => {
@@ -19,18 +27,24 @@ global.system = command => {
 		failures--;
 		return 1;
 	}
+	if (command == routerDnsStart)
+		testState.files[routerDnsProcess] = routerDnsCmdline;
+	else if (command == 'kill 77 2>/dev/null')
+		delete testState.files[routerDnsProcess];
 	return 0;
 };
 
-testState.config = { run_dir: '/etc/ecycloud/run', device: 'br-lan', enabled: '1', ipv6: '1' };
-testState.files[CRED_FILE] = sprintf('%J', { email: 'router@test', token: 'synthetic-token', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
+testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', device: 'br-lan', enabled: '1', ipv6: '1' };
+testState.files[CRED_FILE] = sprintf('%J', { email: 'router@test', token: 'synthetic-token', session_id: 'fixture-session', account_key: 'fixture-session', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
 
 const paths = [
 	'/usr/share/nftables.d/ruleset-post/ecycloud.nft',
 	'/usr/share/nftables.d/chain-pre/input/ecycloud.nft',
 	'/usr/share/nftables.d/chain-pre/forward/ecycloud.nft',
 	'/usr/share/nftables.d/chain-pre/dstnat/ecycloud.nft',
-	'/tmp/dnsmasq.test.d/ecycloud.conf'
+	'/tmp/dnsmasq.test.d/ecycloud.conf',
+	routerDnsConf,
+	routerDnsRuleset
 ];
 const cases = [
 	{ label: '防火墙规则校验失败', command: 'fw4 check >/dev/null 2>&1' },
@@ -39,7 +53,9 @@ const cases = [
 	{ label: 'IPv4 路由失败', command: 'ip route add local default dev lo table 1936' },
 	{ label: 'IPv6 策略规则失败', command: 'ip -6 rule add fwmark 502 lookup 1936' },
 	{ label: 'IPv6 路由失败', command: 'ip -6 route add local default dev lo table 1936' },
-	{ label: 'DNS 重启失败', command: '/etc/init.d/dnsmasq restart >/dev/null 2>&1' }
+	{ label: '路由器自身解析实例启动失败', command: routerDnsStart },
+	{ label: '路由器自身解析转发表载入失败', command: routerDnsLoad },
+	{ label: 'DNS 重启失败', command: dnsmasqRestart }
 ];
 for (let path in paths)
 	push(cases, { label: `写入失败：${path}`, path });
@@ -54,6 +70,7 @@ for (let item in cases) {
 	check(testState.files[NETWORK_FILE] == null, `恢复成功后不能残留网络记录：${item.label}`);
 	for (let path in paths)
 		check(testState.files[path] == null, `接管失败后必须清除 ${path}：${item.label}`);
+	check(testState.files[routerDnsProcess] == null, `接管失败后必须停掉路由器自身的解析实例：${item.label}`);
 }
 failedCommand = '';
 testState.failedWrite = '';
@@ -101,7 +118,7 @@ testState.failedRename = false;
 for (let path in testState.files)
 	check(index(path, snapshot + '.') != 0, 'JSON 写入失败不能残留临时文件');
 
-const runDir = '/etc/ecycloud/run';
+const runDir = '/etc/ecycloud/run/fixture-session';
 const runtimePath = `${runDir}/config.json`;
 testState.files[runtimePath] = sprintf('%J', { mode: 'rule' });
 targetTouched = false;
@@ -132,9 +149,9 @@ check(!apply(settings()).ok && readJson(NETWORK_FILE) == null && testState.files
 	'TUN 本机接收规则写入失败必须回滚全部接管');
 testState.failedWrite = '';
 testState.files[runtimePath] = sprintf('%J', tunConfig.config);
-testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 testState.commands = [];
-check(apply(settings()).ok && !length(filter(testState.commands, command => index(command, 'rule flush pref') >= 0)),
+check(apply(settings()).ok && !length(filter(testState.commands, command => match(command, /rule flush pref 19(3[7-9]|4[0-7]) /))),
 	'接管时不能清除正在运行的 TUN 路由');
 delete testState.files['/proc/41/cmdline'];
 failedCommand = 'ip -6 rule flush pref 1947 2>/dev/null';
@@ -150,12 +167,69 @@ testState.responses['ip -N rule show 2>/dev/null'] = { status: 0, text: '1947: f
 check(!revert() && readJson(NETWORK_FILE) != null, '命令返回成功但 TUN 规则仍残留时不能报告恢复成功');
 delete testState.responses['ip -N rule show 2>/dev/null'];
 check(revert(), '残留规则消失后必须可以完成恢复');
-testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 testState.files[runtimePath] = sprintf('%J', { tun: { enable: false } });
 testState.commands = [];
 check(revert() && length(filter(testState.commands, command => index(command, 'rule flush pref 1937 ') >= 0)) == 2,
 	'待机内核已重启时仍必须清除前一个内核的 TUN 残留');
 delete testState.files['/proc/41/cmdline'];
+
+testState.config.local = '/lan/';
+for (let mode in [ 'tproxy', 'tun' ]) {
+	testState.config.mode = mode;
+	testState.commands = [];
+	testState.writes = {};
+	check(apply(settings()).ok && readJson(NETWORK_FILE).router_dns == true && intact(readJson(NETWORK_FILE)),
+		`${mode}：不代理路由器自身时必须另起路由器自身的解析实例`);
+	const routerConf = testState.files[routerDnsConf];
+	const routerNft = testState.writes[routerDnsRuleset];
+	check(index(routerConf, 'port=10200\ninterface=lo\nbind-interfaces\n') == 0 && index(routerConf, 'pid-file=\n') >= 0 &&
+		index(routerConf, 'resolv-file=/tmp/resolv.conf.d/resolv.conf.auto\n') >= 0 && index(routerConf, 'server=/lan/127.0.0.1#53\n') >= 0,
+		`${mode}：路由器自身的解析实例只听回环口，沿用主实例原上游，本地域转回主实例`);
+	check(index(routerNft, 'table inet ecycloud_dns {\n\tchain output {\n\t\ttype nat hook output priority -100; policy accept;\n') >= 0 &&
+		index(routerNft, 'ip daddr 127.0.0.1 meta l4proto { tcp, udp } th dport 53 redirect to :10200') >= 0 &&
+		index(routerNft, 'ip6 daddr ::1 meta l4proto { tcp, udp } th dport 53 redirect to :10200') >= 0 &&
+		index(routerNft, 'meta skuid dnsmasq accept') < index(routerNft, 'redirect') &&
+		testState.files[routerDnsRuleset] == null && index(testState.files[paths[0]] ?? '', ':10200') < 0,
+		`${mode}：本机发往回环 53 口的查询改投该实例，转发表独立于 TPROXY 规则且不经 fw4 include 落盘`);
+	const startAt = index(testState.commands, routerDnsStart);
+	check(startAt >= 0 && startAt < index(testState.commands, routerDnsLoad) &&
+		index(testState.commands, routerDnsLoad) < index(testState.commands, dnsmasqRestart),
+		`${mode}：路由器自身的解析必须先就位，再把主 dnsmasq 指向内核`);
+	delete testState.files[routerDnsProcess];
+	check(!intact(readJson(NETWORK_FILE)), `${mode}：路由器自身的解析实例退出后接管必须视为失效`);
+	testState.files[routerDnsProcess] = routerDnsCmdline;
+	testState.responses['nft list tables 2>/dev/null'] = { status: 0, text: 'table inet fw4\ntable inet ecycloud_dns\n' };
+	failedCommand = routerDnsDelete;
+	failures = 1;
+	check(!revert() && readJson(NETWORK_FILE) != null, `${mode}：转发表删除失败必须保留恢复记录`);
+	testState.commands = [];
+	check(revert() && testState.files[routerDnsProcess] == null && testState.files[routerDnsConf] == null &&
+		index(testState.commands, dnsmasqRestart) < index(testState.commands, routerDnsDelete) &&
+		index(testState.commands, routerDnsDelete) < index(testState.commands, 'kill 77 2>/dev/null'),
+		`${mode}：断开时先恢复主 dnsmasq，再删转发表、停实例并删配置`);
+	delete testState.responses['nft list tables 2>/dev/null'];
+	for (let option in [ { router_proxy: '1' }, { dns_hijack: '0' } ]) {
+		testState.config = { ...testState.config, ...option };
+		testState.commands = [];
+		check(apply(settings()).ok && readJson(NETWORK_FILE).router_dns == false &&
+			!length(filter(testState.commands, command => index(command, 'router-dns') >= 0)),
+			`${mode}：代理路由器自身或未劫持 DNS 时不另起路由器自身的解析实例`);
+		check(revert(), `${mode}：未另起解析实例时必须可以恢复`);
+		delete testState.config.router_proxy;
+		delete testState.config.dns_hijack;
+	}
+}
+testState.writes = {};
+failedCommand = routerDnsStart;
+failures = 1;
+const routerDnsFailed = apply(settings());
+check(!routerDnsFailed.ok && index(routerDnsFailed.error, '127.0.0.1:10200') >= 0 && readJson(NETWORK_FILE) == null &&
+	testState.files[paths[2]] == null && testState.files[routerDnsConf] == null &&
+	testState.writes['/tmp/dnsmasq.test.d/ecycloud.conf'] == null,
+	'路由器自身的解析实例启动失败必须回滚全部接管，主 dnsmasq 不能被指向内核');
+failedCommand = '';
+delete testState.config.local;
 
 for (let mode in [ 'tun', 'tproxy' ]) {
 	testState.config.mode = mode;
@@ -197,7 +271,7 @@ check(revert() && locked == 2, '接管和撤销必须使用同一把网络锁');
 testState.onLock = null;
 
 testState.config.enabled = '1';
-testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run\0';
+testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 testState.files['/var/run/ecycloud/api.json'] = sprintf('%J', { port: 19090, secret: 'fixture' });
 testState.response = { version: 'fixture' };
 check(apply(settings()).ok, '快速重连测试必须先接管');
@@ -221,6 +295,23 @@ watchdog();
 check(reapplied, '两轮看门狗之间断开再重连后必须重新接管');
 delete testState.files['/var/run/ecycloud/stopping'];
 testState.onRequest = null;
+
+const runtimeBeforeTun = testState.files[runtimePath];
+testState.config.mode = 'tun';
+testState.files[runtimePath] = sprintf('%J', tunConfig.config);
+check(apply(settings()).ok && readJson(NETWORK_FILE).router_dns == true, '看门狗自愈测试必须先以 TUN 接管');
+delete testState.files[routerDnsProcess];
+testState.commands = [];
+global.sleep = () => {
+	testState.files['/var/run/ecycloud/stopping'] = '';
+};
+watchdog();
+check(routerDnsStart in testState.commands && readJson(NETWORK_FILE)?.active == true && intact(readJson(NETWORK_FILE)),
+	'路由器自身的解析实例退出后看门狗必须重新接管');
+delete testState.files['/var/run/ecycloud/stopping'];
+testState.config.mode = 'tproxy';
+testState.files[runtimePath] = runtimeBeforeTun;
+check(revert(), '看门狗自愈测试结束必须可以恢复');
 
 let tunClosed = false;
 testState.onRequest = () => {
@@ -304,5 +395,21 @@ watchdog();
 check(length(filter(testState.commands, command => index(command, '内核 300 秒内未就绪') >= 0)) == 1,
 	'长期内核失联不能每秒重复写同一条错误日志');
 delete testState.files['/var/run/ecycloud/stopping'];
+
+testState.config.mode = 'tproxy';
+check(apply(settings()).ok && readJson(NETWORK_FILE)?.dnsmasq == paths[4], '非法 UCI 恢复测试必须先接管 DNS');
+testState.config.tun_device = 'tun" accept\n}';
+testState.config.run_dir = '/tmp/other-run';
+check(cleanup() && readJson(NETWORK_FILE) == null && testState.files[paths[4]] == null && testState.files[routerDnsProcess] == null,
+	'UCI 写入非法网卡名或运行目录后，停止流程仍须撤销 dnsmasq 转发与全部接管');
+delete testState.files['/var/run/ecycloud/stopping'];
+check(settings().runDir == runDir && apply(settings()).ok && revert(), '非法 TUN 网卡名不能影响 TPROXY 接管与恢复');
+testState.config.mode = 'tun';
+const invalidTun = apply(settings());
+check(!invalidTun.ok && index(invalidTun.error, 'TUN 网卡名') >= 0 && readJson(NETWORK_FILE) == null &&
+	!length(filter(paths, path => testState.files[path] != null)), '非法 TUN 网卡名必须拒绝 TUN 接管，且不写入任何规则');
+testState.config.mode = 'tproxy';
+delete testState.config.tun_device;
+testState.config.run_dir = runDir;
 
 print('OpenWrt 稳定性回归通过：接管失败恢复、原子写入、TUN 断开与启动中断、恢复重试、快速重连及面板任务隔离。\n');

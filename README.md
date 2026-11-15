@@ -5,7 +5,7 @@
 | 平台 | 最低版本 | 架构 | 安装包 |
 | ---- | ---- | ---- | ---- |
 | Windows | 10 1809 | x64 / arm64 | `windows-x64.exe` / `windows-arm64.exe` |
-| macOS | 11 | Intel / Apple Silicon（分包） | `macos-x64.pkg` / `macos-arm64.pkg` |
+| macOS | 13 | Intel / Apple Silicon（分包） | `macos-x64.pkg` / `macos-arm64.pkg` |
 | Linux（deb） | Debian 12+ / Ubuntu 22.04+ 及衍生版 | x64 / arm64 | `linux-x64.deb` / `linux-arm64.deb` |
 | Linux（rpm） | Fedora 36+ / openSUSE Leap 15.6+ / RHEL 10+ 系 | x64 / arm64 | `linux-x64.rpm` / `linux-arm64.rpm` |
 | Linux（tar.gz） | 其它带 systemd 与 GTK3 的发行版（Arch 等），glibc 2.35+ | x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` |
@@ -45,7 +45,7 @@
 通用前置：Flutter stable（版本见 `.github/workflows/release.yml`）、Go（版本见各原生模块的 `go.mod`）、`jq`。构建脚本按 `scripts/kernel.lock.json` 下载官方内核发布包并校验 SHA-256，不使用任何非官方内核。
 
 ```powershell
-# Windows：另需 Inno Setup 7.1+
+# Windows：另需 Inno Setup 7.1.1，iscc.exe 须加入 PATH
 pwsh scripts/build-windows.ps1 -Arch x64 -Installer
 ```
 

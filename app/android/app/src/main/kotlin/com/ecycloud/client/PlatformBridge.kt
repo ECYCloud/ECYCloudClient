@@ -1,13 +1,16 @@
 package com.ecycloud.client
 
 import android.app.UiModeManager
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.PersistableBundle
 import android.provider.DocumentsContract.Root
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
@@ -47,23 +50,26 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
                 Autostart.setEnabled(context, call.argument<Boolean>("enabled") == true)
                 result.success(null)
             }
-            "apps.list" -> Bridge.run(result) { installedApps() }
-            "installer.run" -> Bridge.run(result) { runInstaller(call.argument<String>("path")) }
-            "url.open" -> Bridge.run(result) { openUrl(call.argument<String>("url")) }
-            "dir.open" -> Bridge.run(result) { openDirectory(call.argument<String>("path")) }
-            "secret.protect" -> Bridge.run(result) {
+            "clipboard.copySecret" -> {
+                copySecret(call.argument<String>("text").orEmpty())
+                result.success(null)
+            }
+            "installer.run" -> Bridge.platform(result) { runInstaller(call.argument<String>("path")) }
+            "url.open" -> Bridge.platform(result) { openUrl(call.argument<String>("url")) }
+            "dir.open" -> Bridge.platform(result) { openDirectory(call.argument<String>("path")) }
+            "secret.protect" -> Bridge.platform(result) {
                 protectSecret(
                     call.argument<String>("name"),
                     call.argument<String>("value"),
                 )
             }
-            "secret.unprotect" -> Bridge.run(result) {
+            "secret.unprotect" -> Bridge.platform(result) {
                 unprotectSecret(
                     call.argument<String>("name"),
                     call.argument<String>("value"),
                 )
             }
-            "secret.delete" -> Bridge.run(result) {
+            "secret.delete" -> Bridge.platform(result) {
                 deleteSecret(call.argument<String>("name"))
                 null
             }
@@ -112,18 +118,20 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
         "os" to "Android ${Build.VERSION.RELEASE}",
     )
 
-    private fun installedApps(): List<Map<String, Any>> {
-        val packages = context.packageManager
-        return packages.getInstalledApplications(0)
-            .filter { it.packageName != context.packageName }
-            .map {
-                mapOf(
-                    "package" to it.packageName,
-                    "label" to packages.getApplicationLabel(it).toString(),
-                    "system" to (it.flags and ApplicationInfo.FLAG_SYSTEM != 0),
-                )
-            }
-            .sortedBy { it["label"] as String }
+    // Android 13 起复制会弹出内容预览，输入法也会记录剪贴板历史；标记为敏感后两处都不显示原文
+    private fun copySecret(text: String) {
+        val clip = ClipData.newPlainText("", text)
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ClipDescription.EXTRA_IS_SENSITIVE
+                } else {
+                    "android.content.extra.IS_SENSITIVE"
+                },
+                true,
+            )
+        }
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
     }
 
     private fun runInstaller(path: String?): Boolean {

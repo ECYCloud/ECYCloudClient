@@ -1,7 +1,7 @@
 export const testState = global.ecycloudTestState ?? {
 	files: {}, writes: {}, commands: [], paths: {}, info: {},
 	random: '0123456789abcdef0123456789abcdef',
-	config: { run_dir: '/etc/ecycloud/run' },
+	config: { run_dir: '/etc/ecycloud/run/fixture-session' },
 	onRequest: null, response: null, log: '',
 	authBusy: false, workBusy: false, failedUnlink: '', commandStatus: 0, commandText: '', responses: {}
 };
@@ -46,7 +46,8 @@ export function popen(command) {
 	}
 	if (index(command, 'sha256sum ') == 0) {
 		let hash = 5381;
-		const text = testState.files['/etc/ecycloud/credentials.json'] ?? '';
+		const target = match(command, /^sha256sum '([^']+)'/);
+		const text = testState.files[target?.[1] ?? '/etc/ecycloud/credentials.json'] ?? '';
 		for (let i = 0; i < length(text); i++)
 			hash = ((hash * 33) + ord(substr(text, i, 1))) & 0xffffffff;
 		return { read: () => join('', map([1,2,3,4,5,6,7,8], () => sprintf('%08x', hash))) + '  fixture', close: () => 0 };

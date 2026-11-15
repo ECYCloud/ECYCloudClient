@@ -16,7 +16,7 @@
 #define AppName "ECY Cloud"
 #define AppExeName "ECYCloud.exe"
 #define ServiceExeName "ecycloud-service.exe"
-#define IconFile "..\..\app\windows\runner\resources\app_icon.ico"
+#define IconFile "installer_icon.ico"
 
 [Setup]
 AppId={{8F3C4A21-7B65-4D0E-9C2A-1E6B5D4F3A80}
@@ -38,7 +38,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile={#IconFile}
 ; 逗号分隔的多尺寸供 Inno 按显示缩放挑选，缺档位会被拉伸糊掉
-WizardSmallImageFile=wizard\shield-55.bmp,wizard\shield-83.bmp,wizard\shield-110.bmp,wizard\shield-138.bmp,wizard\shield-165.bmp,wizard\shield-192.bmp
+WizardSmallImageFile=wizard\shield-58.bmp,wizard\shield-77.bmp,wizard\shield-97.bmp,wizard\shield-116.bmp,wizard\shield-124.bmp,wizard\shield-143.bmp,wizard\shield-159.bmp,wizard\shield-192.bmp
 PrivilegesRequired=admin
 MinVersion=10.0.17763
 ; esigner 与 build-windows.ps1 传入的 /Sesigner 同名；重试由 sign-windows.ps1 负责，这里不再叠加
@@ -64,6 +64,8 @@ Name: "chinesetraditional"; MessagesFile: "lang\ChineseTraditional.isl"; License
 [LangOptions]
 chinese.DialogFontName=Microsoft YaHei UI
 chinesetraditional.DialogFontName=Microsoft JhengHei UI
+chinese.WelcomeFontName=Microsoft YaHei UI
+chinesetraditional.WelcomeFontName=Microsoft JhengHei UI
 
 [Messages]
 ; 只有 CloseRunningApp 连强杀都没关掉客户端时才会看到；关窗口只是缩到托盘，必须点明从托盘退出
@@ -233,11 +235,10 @@ end;
 procedure InitializeWizard;
 var
   Bitmap: TBitmap;
-  Theme: Integer;
+  Theme, Extra: Integer;
   Size: TCheckSize;
 begin
   WizardForm.LicenseAcceptedRadio.Checked := True;
-  WizardForm.TasksList.Offset := 0;
   Theme := OpenThemeData(WizardForm.TasksList.Handle, 'Button');
   if Theme <> 0 then
   begin
@@ -247,7 +248,10 @@ begin
         Bitmap := TBitmap.Create;
         try
           Bitmap.Handle := LoadBitmap(0, OBM_CHECKBOXES);
-          WizardForm.TasksList.Offset := Size.cx - Bitmap.Width div 4;
+          // Offset 同时是勾选框左边距与文字间距：小于主题框超出位图的差值会裁掉勾选框，小于默认值会让文字贴住勾选框
+          Extra := Size.cx - Bitmap.Width div 4;
+          if Extra > WizardForm.TasksList.Offset then
+            WizardForm.TasksList.Offset := Extra;
         finally
           Bitmap.Free;
         end;

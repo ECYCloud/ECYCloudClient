@@ -322,7 +322,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ],
                         decoration: InputDecoration(
                           labelText: options.inviteRequired
-                              ? L10n.t('邀请码')
+                              ? L10n.t('邀请码（必填）')
                               : L10n.t('邀请码（可选）'),
                           prefixIcon: const Icon(Icons.card_giftcard_outlined),
                         ),

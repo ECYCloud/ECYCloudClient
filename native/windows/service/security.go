@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -130,16 +131,36 @@ func pipeClientPID(conn net.Conn) (int, error) {
 
 // 管道 DACL 只能收到交互用户，必须再核对接官方 GUI 可执行文件路径
 func verifyGUICaller(pid int) error {
-	_, err := guiCallerSID(pid)
+	process, _, err := guiCallerSID(pid, time.Now())
+	if err == nil {
+		windows.CloseHandle(process)
+	}
 	return err
 }
 
-func guiCallerSID(pid int) (string, error) {
+// 管道只记下连接时的 PID：先开句柄钉住进程，再要求它早于本次连接创建，排除 PID 已被复用；
+// 返回的句柄须保持到指令处理完，持有期间系统不会把这个 PID 分给别的进程
+func guiCallerSID(pid int, accepted time.Time) (windows.Handle, string, error) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return "", fmt.Errorf("打开调用方进程失败: %w", err)
+		return 0, "", fmt.Errorf("打开调用方进程失败: %w", err)
 	}
-	defer windows.CloseHandle(handle)
+	user, err := checkGUIProcess(handle, accepted)
+	if err != nil {
+		windows.CloseHandle(handle)
+		return 0, "", err
+	}
+	return handle, user, nil
+}
+
+func checkGUIProcess(handle windows.Handle, accepted time.Time) (string, error) {
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &created, &exited, &kernel, &user); err != nil {
+		return "", fmt.Errorf("查询调用方进程创建时间失败: %w", err)
+	}
+	if time.Unix(0, created.Nanoseconds()).After(wallClockAt(accepted.Round(0), accepted.Sub(serviceStarted))) {
+		return "", fmt.Errorf("调用方进程晚于本次连接创建，拒绝执行")
+	}
 
 	buf := make([]uint16, windows.MAX_PATH)
 	size := uint32(len(buf))
@@ -151,6 +172,16 @@ func guiCallerSID(pid int) (string, error) {
 		return "", fmt.Errorf("拒绝来自非官方客户端的指令: %s", actual)
 	}
 	return clientUserSID(handle)
+}
+
+var serviceStarted = time.Now()
+
+// 进程创建时间记的是当时的墙钟：服务运行中墙钟被往回调时，按服务启动时的墙钟加单调时长推算并取较晚者，免得误拒调时前启动的 GUI
+func wallClockAt(wall time.Time, sinceStart time.Duration) time.Time {
+	if steady := serviceStarted.Round(0).Add(sinceStart); steady.After(wall) {
+		return steady
+	}
+	return wall
 }
 
 // 句柄保持至服务进程退出，异常退出也会结束继承此作业的内核子进程。

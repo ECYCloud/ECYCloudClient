@@ -18,12 +18,13 @@ void main() {
       await kernel.start(configJson: '{}', clashApi: _options);
       if (failed) {
         await expectLater(
-          kernel.clearSession(),
+          kernel.clearSession(_key),
           throwsA(isA<KernelException>()),
         );
         expect(kernel.status.state, KernelState.failed);
       } else {
-        await kernel.clearSession();
+        await kernel.clearSession(_key);
+        expect(transport.clearedKey, _key, reason: '特权侧据此删掉该账号目录里带节点凭据的配置');
         expect(kernel.status.state, KernelState.stopped);
         expect(kernel.clashApi, isNull);
         expect(kernel.cacheReady, isFalse);
@@ -33,6 +34,24 @@ void main() {
       expect(kernel.status.running, isFalse);
     });
   }
+
+  test('后台服务暂不可用时配置校验抛出可重试错误而非配置错误', () async {
+    final _Transport transport = _Transport()..checkFails = true;
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+    );
+    addTearDown(kernel.dispose);
+    await expectLater(
+      kernel.validate('{}'),
+      throwsA(
+        isA<KernelException>().having(
+          (KernelException e) => e.message,
+          'message',
+          allOf(contains('后台服务暂不可用'), isNot(contains('配置校验未通过'))),
+        ),
+      ),
+    );
+  });
 
   for (final bool failed in <bool>[false, true]) {
     test('停止后丢弃旧状态请求：失败=$failed', () async {
@@ -55,7 +74,7 @@ void main() {
       }
       await Future<void>.delayed(Duration.zero);
       expect(kernel.status.state, KernelState.stopped);
-      expect(logs, isEmpty);
+      expect(logs, <String>[_bound]);
     });
   }
 
@@ -133,16 +152,19 @@ void main() {
     expect(kernel.status.state, KernelState.running);
   });
 
-  test('停止命令失败不能伪装成已停止', () async {
+  test('停止命令失败不能伪装成已停止，也不能推成崩溃触发自动重启', () async {
     final _Transport transport = _Transport()..stopFails = true;
     final ServiceKernelController kernel = ServiceKernelController(
       transport: transport,
     );
     addTearDown(kernel.dispose);
     await kernel.start(configJson: '{}', clashApi: _options);
+    final KernelState before = kernel.status.state;
 
     await expectLater(kernel.stop(), throwsA(isA<KernelException>()));
-    expect(kernel.status.state, KernelState.failed);
+    expect(kernel.status.state, before);
+    expect(kernel.status.state, isNot(KernelState.failed));
+    expect(kernel.status.state, isNot(KernelState.stopped));
   });
 
   test('停止后迟到的启动响应不能恢复控制面和轮询', () async {
@@ -180,10 +202,71 @@ void main() {
     transport.status.complete(_running);
     await Future<void>.delayed(Duration.zero);
     expect(kernel.status.state, KernelState.running);
-    expect(logs, <String>['INFO old-private.test']);
+    expect(logs, <String>[_bound, 'INFO old-private.test']);
+    await kernel.stop();
+  });
+
+  // 端口被本机其它进程抢先占住时内核照常运行，只有它自己的输出能说明控制面没起来；
+  // 此时不能返回成功，否则随后带 secret 的请求与热载的整份配置都会发给占位者
+  test('控制面端口被抢占时启动失败且不进入轮询', () async {
+    final _Transport transport = _Transport()
+      ..bindLines = <String>[
+        'time="2026-10-30T12:00:00.000000000+08:00" level=error msg="External controller listen error: listen tcp 127.0.0.1:4567: bind: address already in use"',
+      ];
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+    );
+    addTearDown(kernel.dispose);
+    await expectLater(
+      kernel.start(configJson: '{}', clashApi: _options),
+      throwsA(
+        isA<KernelException>().having(
+          (KernelException e) => e.message,
+          'message',
+          contains('4567'),
+        ),
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    expect(transport.statusCalls, 0);
+  });
+
+  test('其它端口或连接日志里的监听字样不算控制面就绪', () async {
+    final _Transport transport = _Transport()
+      ..bindLines = <String>[
+        'time="2026-10-30T12:00:00.000000000+08:00" level=info msg="RESTful API listening at: 127.0.0.1:45670"',
+        'time="2026-10-30T12:00:00.000000000+08:00" level=info msg="[TCP] 127.0.0.1:50000 --> RESTful API listening at: 127.0.0.1:4567 match Match using DIRECT"',
+      ]
+      ..bindRunning = false;
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+    );
+    addTearDown(kernel.dispose);
+    await expectLater(
+      kernel.start(configJson: '{}', clashApi: _options),
+      throwsA(isA<KernelException>()),
+    );
+    expect(kernel.status.state, KernelState.failed);
+    expect(transport.statusCalls, 0);
+  });
+
+  test('Android 同进程内核由封装模块确认控制面，不等特权侧日志', () async {
+    final _Transport transport = _Transport()..bindLines = <String>[];
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+      logFromClashApi: true,
+    );
+    addTearDown(kernel.dispose);
+    await kernel
+        .start(configJson: '{}', clashApi: _options)
+        .timeout(const Duration(seconds: 2));
+    expect(kernel.clashApi, same(_options));
     await kernel.stop();
   });
 }
+
+const String _bound =
+    'time="2026-10-30T12:00:00.000000000+08:00" level=info msg="RESTful API listening at: 127.0.0.1:4567"';
 
 const ClashApiOptions _options = ClashApiOptions(
   port: 4567,
@@ -196,6 +279,8 @@ const Map<String, dynamic> _running = <String, dynamic>{
   'log_cursor': 1,
 };
 
+final String _key = 'a' * 64;
+
 class _Transport implements ServiceTransport {
   Completer<Map<String, dynamic>> status = Completer<Map<String, dynamic>>();
   final Completer<Map<String, dynamic>> config =
@@ -204,8 +289,14 @@ class _Transport implements ServiceTransport {
   final Completer<void> startRequested = Completer<void>();
   Completer<Map<String, dynamic>>? startWait;
   int statusCalls = 0;
+  int bindChecks = 0;
+  bool binding = false;
+  bool bindRunning = true;
+  List<String> bindLines = <String>[_bound];
   bool clearFails = false;
+  String? clearedKey;
   bool stopFails = false;
+  bool checkFails = false;
 
   @override
   Future<Map<String, dynamic>> request(
@@ -217,9 +308,22 @@ class _Transport implements ServiceTransport {
         if (stopFails) throw ServiceException('测试停止失败');
         return <String, dynamic>{};
       case 'kernel.clear':
+        clearedKey = payload['cache_key'] as String?;
         if (clearFails) throw ServiceException('测试清理失败');
         return <String, dynamic>{};
+      case 'kernel.check':
+        if (checkFails) throw ServiceException('测试服务未运行');
+        return <String, dynamic>{'valid': true};
       case 'kernel.status':
+        if (binding) {
+          binding = false;
+          bindChecks++;
+          return <String, dynamic>{
+            'running': bindRunning,
+            'log_lines': bindLines,
+            'log_cursor': bindLines.length,
+          };
+        }
         statusCalls++;
         return status.future;
       case 'kernel.read':
@@ -227,6 +331,7 @@ class _Transport implements ServiceTransport {
         return config.future;
       case 'kernel.start':
         if (!startRequested.isCompleted) startRequested.complete();
+        binding = true;
         return startWait?.future ?? <String, dynamic>{};
       default:
         return <String, dynamic>{};

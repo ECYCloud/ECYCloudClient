@@ -822,6 +822,10 @@ html body .ecycloud-modal-card.is-wide {
 	max-height: calc(100vh - 2rem);
 }
 
+html body .ecycloud-modal.is-detail .ecycloud-modal-card {
+	width: min(508px, calc(100vw - 2rem));
+}
+
 html body .ecycloud-textview {
 	margin: 0;
 	padding: 10px 12px;
@@ -829,12 +833,45 @@ html body .ecycloud-textview {
 	overflow: auto;
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	font-size: 12px;
-	line-height: 1.45;
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-	word-break: break-word;
 	border-radius: 8px;
 	background: rgba(102, 112, 133, 0.12);
+}
+
+html body .ecycloud-textview-meta {
+	margin: -4px 0 8px;
+	font-size: 12px;
+	opacity: .68;
+}
+
+html body .ecycloud-textview-space {
+	position: relative;
+}
+
+html body .ecycloud-textview-rows {
+	position: absolute;
+	top: 0;
+	left: 0;
+	display: flex;
+	gap: 12px;
+}
+
+html body .ecycloud-textview-rows pre {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	overflow: visible;
+	font: inherit;
+	line-height: 18px;
+	white-space: pre;
+}
+
+html body .ecycloud-textview-numbers {
+	flex: none;
+	text-align: right;
+	opacity: .6;
+	-webkit-user-select: none;
+	user-select: none;
 }
 
 html body .ecycloud-modal-card.is-announce {
@@ -996,6 +1033,7 @@ body[data-theme="dark"] .ecycloud-modal-card {
 	transform: rotate(180deg);
 }
 
+.ecycloud-ui .ecycloud-group.is-open,
 .ecycloud-ui .ecycloud-group.is-open .ecycloud-group-head {
 	border-radius: 20px 20px 0 0;
 }
@@ -1017,7 +1055,7 @@ body[data-theme="dark"] .ecycloud-modal-card {
 
 .ecycloud-ui .ecycloud-node-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
 	gap: 8px;
 	width: 100%;
 	max-width: 100%;
@@ -1125,7 +1163,8 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	white-space: nowrap;
 }
 
-.ecycloud-ui .ecycloud-flag {
+.ecycloud-ui .ecycloud-flag,
+.ecycloud-modal .ecycloud-flag {
 	flex: none;
 	width: 18px;
 	height: 14px;
@@ -1133,6 +1172,25 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	border: 0;
 	border-radius: 2px;
 	object-fit: cover;
+}
+
+.ecycloud-ui .ecycloud-flag-glyph,
+.ecycloud-modal .ecycloud-flag-glyph {
+	position: relative;
+	display: inline-block;
+	line-height: 0;
+	vertical-align: middle;
+}
+
+.ecycloud-ui .ecycloud-flag-glyph > span,
+.ecycloud-modal .ecycloud-flag-glyph > span {
+	position: absolute;
+	inset: 0 4px 0 0;
+	overflow: hidden;
+	color: transparent;
+	font-size: 10px;
+	line-height: 14px;
+	white-space: nowrap;
 }
 
 .ecycloud-ui .ecycloud-group-icon {
@@ -1330,6 +1388,13 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	align-items: center;
 	gap: 4px;
 	flex: none;
+}
+
+.ecycloud-ui .ecycloud-section-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
 }
 
 .ecycloud-ui .ecycloud-gap {

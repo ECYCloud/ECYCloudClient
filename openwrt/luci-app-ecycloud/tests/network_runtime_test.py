@@ -56,8 +56,9 @@ def pid():
 
 
 def geo_fingerprint():
-    return remote('''sha256sum /etc/ecycloud/run/geoip.metadb /etc/ecycloud/run/GeoSite.dat
-ucode -e 'let fs=require("fs");for(let path in ["/etc/ecycloud/run/geoip.metadb","/etc/ecycloud/run/GeoSite.dat"])print(fs.stat(path).mtime,"\\n");' ''')
+    return remote('''export dir="$(/usr/libexec/ecycloud-ctl rundir)"
+sha256sum "$dir/geoip.metadb" "$dir/GeoSite.dat"
+ucode -e 'let fs=require("fs");for(let name in ["geoip.metadb","GeoSite.dat"])print(fs.stat(getenv("dir")+"/"+name).mtime,"\\n");' ''')
 
 
 def configure(**values):

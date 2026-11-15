@@ -16,7 +16,8 @@ class QuickToggleService : TileService() {
         val tile = qsTile ?: return
         when (tile.state) {
             Tile.STATE_INACTIVE -> startTunnel()
-            Tile.STATE_ACTIVE -> stopTunnel()
+            // 锁屏下拉面板谁都能点，断开代理要先解锁（TileService API 24 起提供，minSdk 即 24）
+            Tile.STATE_ACTIVE -> if (isLocked) unlockAndRun { stopTunnel() } else stopTunnel()
         }
     }
 
@@ -36,8 +37,8 @@ class QuickToggleService : TileService() {
         if (KernelService.requestToggle()) {
             return
         }
-        if (BoxState.sessionCleanupPending(this) ||
-            BoxState.starting || !BoxState.configFile(this).isFile) {
+        val session = BoxState.sessionKey(this) ?: return
+        if (BoxState.starting || !BoxState.configFile(this, session).isFile) {
             return
         }
         // 已获 VPN 授权时 API 31+ 允许后台起前台服务（REASON_OP_ACTIVATE_VPN）；授权被抢走仍会抛

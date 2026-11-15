@@ -4,12 +4,13 @@ import Observation
 public struct TunnelLease: Codable, Sendable {
     public let id: UUID
     public let owner: String
+    public let cacheKey: String
     public let expiresAt: Date
     public let configuration: Data
     public let validationConfiguration: Data?
     public let logLevel: String?
-    public init(owner: String, expiresAt: Date, configuration: Data, validationConfiguration: Data? = nil, logLevel: String? = nil) {
-        id = UUID(); self.owner = owner; self.expiresAt = expiresAt; self.configuration = configuration
+    public init(owner: String, cacheKey: String? = nil, expiresAt: Date, configuration: Data, validationConfiguration: Data? = nil, logLevel: String? = nil) {
+        id = UUID(); self.owner = owner; self.cacheKey = cacheKey ?? owner; self.expiresAt = expiresAt; self.configuration = configuration
         self.validationConfiguration = validationConfiguration
         self.logLevel = logLevel
     }
@@ -51,13 +52,15 @@ public protocol StandbyRuntime: Actor {
     func stop()
     func waitUntilStopped() async throws
     func request(_ command: TunnelCommand) async throws -> Data
-    func clearCache(owner: String) async
+    func clearCache(account: String) async
+    func applySystemProxy(enabled: Bool, bypass: [String]) async throws
     var panelProxyPort: Int? { get }
 }
 
 public extension TunnelDriver {
     var failureOccurred: (@MainActor (TunnelError) -> Void)? { get { nil } set {} }
-    func clearCache(owner: String) async {}
+    func clearCache(account: String) async {}
+    func applySystemProxy(enabled: Bool, bypass: [String]) async throws {}
     func profileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions { preferences.packetProfile }
     var supportsStandby: Bool { false }
     var restoredConfiguration: Data? { nil }
@@ -68,7 +71,9 @@ public extension TunnelDriver {
 }
 
 public enum TunnelError: Error, LocalizedError, Equatable {
-    case configuration, permission, unavailable, start, expired, control, helperUnavailable, installation
+    case configuration, permission, unavailable, start, expired, control, helperUnavailable, installation, proxyRestore, noNodes
+    case mixedPortInUse(Int), controllerPortInUse(Int)
+    case failed(String), exited(String)
     public var errorDescription: String? {
         switch self {
         case .configuration: L10n.t("VPN 配置无效，请刷新节点后重试。")
@@ -79,6 +84,11 @@ public enum TunnelError: Error, LocalizedError, Equatable {
         case .expired: L10n.t("登录已过期，请重新登录。")
         case .helperUnavailable: L10n.t("后台服务未安装或不可用，请重新运行完整的 macOS 安装包。")
         case .installation: L10n.t("请运行完整的 macOS 安装包，然后从“应用程序”打开 ECYCloud。")
+        case .proxyRestore: L10n.t("系统代理还原失败，请在系统设置中检查网络代理。")
+        case .noNodes: L10n.t("面板未下发任何可用节点")
+        case .failed(let text), .exited(let text): text
+        case .mixedPortInUse(let port): L10n.t("混合端口 {0} 已被其它程序占用，请在设置中更换端口后重新连接", [String(port)])
+        case .controllerPortInUse(let port): L10n.t("控制面端口 {0} 已被其它程序占用，请重新连接", [String(port)])
         }
     }
 }
@@ -101,6 +111,13 @@ public enum TunnelError: Error, LocalizedError, Equatable {
     @ObservationIgnored private var expiration: Task<Void, Never>?
     @ObservationIgnored private var standbyTask: Task<Void, Error>?
     @ObservationIgnored private var transitioning = false
+    @ObservationIgnored private var authorizationExpiry = false
+    @ObservationIgnored private var lastLaunch: (lease: TunnelLease, takeover: Bool)?
+    @ObservationIgnored private var restartAttempt = 0
+    @ObservationIgnored private var restartTask: Task<Void, Never>?
+    @ObservationIgnored private var relaunching = false
+    // 与 connection_controller.dart 的 _backoff 一致
+    @ObservationIgnored var restartBackoff: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(30)]
     @ObservationIgnored var runtimeDidReset: ((_ keepingResults: Bool) -> Void)?
     public init(driver: any TunnelDriver) {
         self.driver = driver
@@ -113,13 +130,22 @@ public enum TunnelError: Error, LocalizedError, Equatable {
             self.controlPlaneReady = state == .connected
             if state == .disconnected { self.generation += 1; self.runtimeConfiguration = nil; self.runtimeDidReset?(false) }
         }
-        driver.failureOccurred = { [weak self] error in self?.message = error.localizedDescription }
+        driver.failureOccurred = { [weak self] error in
+            guard let self else { return }
+            if case .exited(let reason) = error, self.owner != nil, let launch = self.lastLaunch { self.kernelExited(reason, launch) }
+            else { self.message = error.localizedDescription }
+        }
     }
-    public func reconcile(owner: String?, expiresAt: Date?) async {
+    private var expiryNotice: String {
+        authorizationExpiry ? L10n.t("本地配置授权已到期，请连接面板更新后重试") : TunnelError.expired.localizedDescription
+    }
+    public func reconcile(owner: String?, expiresAt: Date?, authorizationExpiry: Bool = false) async {
+        self.authorizationExpiry = authorizationExpiry
         if let expiresAt, expiresAt <= Date() { disconnect(); return }
         if let owner, owner == self.owner, expiresAt == expirationDate { return }
         let ownerChanged = owner != self.owner
         if ownerChanged {
+            cancelRestart()
             runtimeConfiguration = nil
             generation += 1
             standbyTask?.cancel(); standbyTask = nil; preparingStandby = false
@@ -134,8 +160,9 @@ public enum TunnelError: Error, LocalizedError, Equatable {
             guard duration > 0 else { disconnect(); return }
             expiration = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(duration)) } catch { return }
-                self?.disconnect()
-                self?.message = TunnelError.expired.localizedDescription
+                guard let self else { return }
+                self.disconnect()
+                self.message = self.expiryNotice
             }
         }
         if ownerChanged || owner == nil {
@@ -146,7 +173,8 @@ public enum TunnelError: Error, LocalizedError, Equatable {
     }
     public func connect(_ lease: TunnelLease) async {
         guard state == .disconnected, owner == lease.owner else { return }
-        guard lease.expiresAt > Date() else { message = TunnelError.expired.localizedDescription; return }
+        guard lease.expiresAt > Date() else { message = expiryNotice; return }
+        if !relaunching { cancelRestart() }
         generation += 1
         let operation = generation
         let pending = standbyTask
@@ -167,6 +195,7 @@ public enum TunnelError: Error, LocalizedError, Equatable {
             transitioning = false
             try await driver.start(lease)
             guard operation == generation else { return }
+            lastLaunch = (lease, true)
             runtimeConfiguration = lease.configuration
             if state == .preparing { state = .connecting }
         } catch {
@@ -175,14 +204,16 @@ public enum TunnelError: Error, LocalizedError, Equatable {
             standbyTask = nil; preparingStandby = false
             driver.stop()
             if state != .disconnecting { state = .disconnected }
-            if !(error is CancellationError) { message = (error as? TunnelError)?.localizedDescription ?? TunnelError.start.localizedDescription }
+            if !(error is CancellationError) { message = (error as? TunnelError)?.localizedDescription ?? Self.startFailure }
         }
     }
     public func prepareStandby(_ lease: TunnelLease) async throws {
         guard owner == lease.owner, lease.expiresAt > Date() else { throw TunnelError.expired }
         if controlPlaneReady { return }
         if let standbyTask { return try await standbyTask.value }
-        guard supportsStandby, state == .disconnected, !transitioning else { throw TunnelError.control }
+        guard supportsStandby else { throw TunnelError.control }
+        guard state == .disconnected, !transitioning else { throw CancellationError() }
+        if !relaunching { cancelRestart() }
         generation += 1
         let operation = generation
         preparingStandby = true
@@ -195,6 +226,7 @@ public enum TunnelError: Error, LocalizedError, Equatable {
                 try Task.checkCancellation()
                 guard operation == generation, owner == lease.owner else { throw CancellationError() }
                 controlPlaneReady = true
+                lastLaunch = (lease, false)
                 runtimeConfiguration = lease.configuration
                 message = nil
             } catch {
@@ -214,12 +246,14 @@ public enum TunnelError: Error, LocalizedError, Equatable {
     }
     public func restart(_ lease: TunnelLease, takeover: Bool) async throws {
         guard (state == .connected || state == .disconnected), controlPlaneReady, owner == lease.owner else { throw TunnelError.control }
+        cancelRestart()
         generation += 1
         let operation = generation
         transitioning = true
         controlPlaneReady = false
         runtimeDidReset?(true)
         state = .disconnecting
+        message = nil
         driver.stop()
         do { try await driver.waitUntilStopped() }
         catch {
@@ -230,21 +264,27 @@ public enum TunnelError: Error, LocalizedError, Equatable {
         transitioning = false
         state = .disconnected
         runtimeConfiguration = nil
+        let notice = message
         if takeover { await connect(lease) }
-        else { try await prepareStandby(lease) }
+        else { try await prepareStandby(lease); message = message ?? notice }
     }
     public func profileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions { try driver.profileOptions(preferences) }
+    public func applySystemProxy(_ preferences: ClientPreferences) async throws {
+        try await driver.applySystemProxy(enabled: preferences.systemProxy, bypass: preferences.systemProxyBypass)
+    }
     public func request(_ command: TunnelCommand) async throws -> Data {
         guard controlPlaneReady, owner != nil else { throw TunnelError.control }
         let operation = generation
         let data = try await driver.request(command)
         try Task.checkCancellation()
         guard operation == generation, controlPlaneReady, owner != nil else { throw CancellationError() }
-        guard !data.isEmpty, data.count <= 65536 else { throw TunnelError.control }
+        guard !data.isEmpty, data.count <= URLSessionTransport.maximumResponseBytes else { throw TunnelError.control }
         return data
     }
-    public func disconnect(clearLogsFor previousOwner: String? = nil) {
+    public func disconnect(clearLogsFor previousOwner: String? = nil, account: String? = nil) {
         let logs = previousOwner.flatMap(ClientLogStore.directory)
+        cancelRestart()
+        lastLaunch = nil
         generation += 1
         transitioning = false
         controlPlaneReady = false
@@ -261,10 +301,56 @@ public enum TunnelError: Error, LocalizedError, Equatable {
                 do {
                     try await driver.waitUntilStopped()
                     guard owner != previousOwner else { return }
-                    await driver.clearCache(owner: previousOwner)
+                    if let account { await driver.clearCache(account: account) }
                     if let logs { try FileManager.default.removeItem(at: logs) }
                 } catch {}
             }
+        }
+    }
+    #if os(macOS)
+    static var startFailure: String { L10n.t("内核启动失败，请重试") }
+    #else
+    static var startFailure: String { TunnelError.start.localizedDescription }
+    #endif
+    private func cancelRestart() {
+        restartTask?.cancel(); restartTask = nil
+        restartAttempt = 0
+    }
+    // 对应 connection_controller.dart 的 _onKernelStatus / _scheduleRestart：非用户停止的内核退出按退避重启，接管与待机各自恢复
+    private func kernelExited(_ reason: String, _ launch: (lease: TunnelLease, takeover: Bool)) {
+        generation += 1
+        standbyTask?.cancel(); standbyTask = nil; preparingStandby = false
+        transitioning = true
+        controlPlaneReady = false
+        runtimeConfiguration = nil
+        runtimeDidReset?(true)
+        state = launch.takeover ? .reconnecting : .disconnected
+        guard restartAttempt < restartBackoff.count else {
+            transitioning = false
+            state = .disconnected
+            lastLaunch = nil
+            restartAttempt = 0
+            message = L10n.t("{0}；连续重启 {1} 次仍未成功，已停止重试", [reason, String(restartBackoff.count)])
+            return
+        }
+        message = reason
+        let delay = restartBackoff[restartAttempt]
+        restartAttempt += 1
+        let operation = generation
+        restartTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self else { return }
+            try? await self.driver.waitUntilStopped()
+            guard !Task.isCancelled, operation == self.generation, self.owner == launch.lease.owner, launch.lease.expiresAt > Date() else { return }
+            self.restartTask = nil
+            self.transitioning = false
+            self.state = .disconnected
+            self.relaunching = true
+            if launch.takeover { await self.connect(launch.lease) } else { try? await self.prepareStandby(launch.lease) }
+            self.relaunching = false
+            guard !Task.isCancelled, [.disconnected, .disconnecting].contains(self.state), !self.controlPlaneReady,
+                  self.lastLaunch != nil, self.owner == launch.lease.owner else { return }
+            self.kernelExited(self.message ?? reason, launch)
         }
     }
     public func shutdown() async throws {

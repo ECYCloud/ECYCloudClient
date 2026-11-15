@@ -83,12 +83,28 @@ class AssembledProfile {
     if (group['use'] is List && filter is String && filter.contains('`')) {
       final Set<String> ordered = <String>{};
       for (final String pattern in filter.split('`')) {
-        ordered.addAll(members.where(RegExp(pattern).hasMatch));
+        final RegExp? expression = _filterExpression(pattern);
+        if (expression != null) {
+          ordered.addAll(members.where(expression.hasMatch));
+        }
       }
       ordered.addAll(members);
       return ordered.toList();
     }
     return members;
+  }
+
+  // filter 是 mihomo 的 regexp2 语法（常带 (?i) 前缀）：Dart 正则不认的写法只放弃排序，不能让装配失败
+  static RegExp? _filterExpression(String pattern) {
+    final bool ignoreCase = pattern.startsWith('(?i)');
+    try {
+      return RegExp(
+        ignoreCase ? pattern.substring(4) : pattern,
+        caseSensitive: !ignoreCase,
+      );
+    } on FormatException {
+      return null;
+    }
   }
 
   static bool canUpdateNodes(

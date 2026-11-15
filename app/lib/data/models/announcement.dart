@@ -13,10 +13,6 @@ class Announcement {
   final String updatedAt;
   final String content;
 
-  DateTime? get revisedAt => DateTime.tryParse(
-    updatedAt.isNotEmpty ? updatedAt : date,
-  );
-
   factory Announcement.fromJson(Map<String, dynamic> json) => Announcement(
     id: (json['id'] as num).toInt(),
     title: json['title'] as String? ?? '',

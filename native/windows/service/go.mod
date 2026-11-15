@@ -1,8 +1,8 @@
 module ecycloud/service
 
-go 1.27.1
+go 1.27.4
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
-	golang.org/x/sys v0.48.0
+	github.com/Microsoft/go-winio v0.6.4
+	golang.org/x/sys v0.50.0
 )

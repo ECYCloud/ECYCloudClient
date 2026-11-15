@@ -5,11 +5,16 @@ import (
 	"ecycloud/apple/Kernel"
 	"encoding/json"
 	"fmt"
+	"github.com/metacubex/mihomo/component/geodata/router"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel/statistic"
+	"google.golang.org/protobuf/proto"
+	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +199,76 @@ func TestNodeProbesRejectInvalidTargetsAndDoNotBlockControl(t *testing.T) {
 	kernel.Stop(id)
 	if _, err := kernel.Control(id, []byte(`{"action":"probes","node":"REJECT","scope":"delay"}`)); err != kernel.ErrStopped {
 		t.Fatal("stopped lease retained probe access")
+	}
+}
+
+// geox-url 下载不接受取消，单个文件最长 90 秒；断开不能被一次进行中的 GeoData 更新拖住
+func TestStopDoesNotWaitForGeoDataDownload(t *testing.T) {
+	stalled, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan net.Conn, 8)
+	go func() {
+		for {
+			conn, err := stalled.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+	t.Cleanup(func() {
+		stalled.Close()
+		for len(accepted) > 0 {
+			(<-accepted).Close()
+		}
+	})
+	sites, err := proto.Marshal(&router.GeoSiteList{Entry: []*router.GeoSite{{
+		CountryCode: "CN", Domain: []*router.Domain{{Type: router.Domain_Full, Value: "synthetic.example.test"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "GeoSite.dat"), sites, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// geox-url 只收 https：卡在 TLS 握手同样是一次停滞的下载
+	base := "https://" + stalled.Addr().String() + "/"
+	profile := packetProfile(9)
+	profile["rules"] = []string{"GEOSITE,cn,DIRECT", "MATCH,DIRECT"}
+	profile["geox-url"] = map[string]string{"geosite": base + "GeoSite.dat", "geoip": base + "geoip.dat", "mmdb": base + "geoip.metadb", "asn": base + "asn.mmdb"}
+	data, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := kernel.Start(data, directory, 0, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kernel.Stop(id) })
+	if _, err := kernel.Control(id, []byte(`{"action":"geodata"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case conn := <-accepted:
+		accepted <- conn
+	case <-time.After(5 * time.Second):
+		t.Fatal("GeoData 更新没有开始下载")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		kernel.Stop(id)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("断开被进行中的 GeoData 下载阻塞")
 	}
 }
 
@@ -531,6 +606,9 @@ func TestSettingsControlAndAccountScopedLogPersistence(t *testing.T) {
 }
 
 func TestRuleReaderOnlyReadsDeclaredFilesInsideRuntime(t *testing.T) {
+	if isolated(t) {
+		return
+	}
 	base := t.TempDir()
 	directory := base + "/runtime"
 	if err := os.Mkdir(directory, 0700); err != nil {
@@ -580,4 +658,62 @@ func TestRuleReaderOnlyReadsDeclaredFilesInsideRuntime(t *testing.T) {
 	if _, err := kernel.Control(id, []byte(`{"action":"rules","scope":"content","group":"declared","page":1}`)); err == nil {
 		t.Fatal("symlink escaped runtime")
 	}
+}
+
+func TestLargeSnapshotFitsControlCapacity(t *testing.T) {
+	profile := packetProfile(9)
+	var proxies []any
+	members := []string{"REJECT"}
+	for i := 0; i < 3000; i++ {
+		name := fmt.Sprintf("synthetic-node-%04d", i)
+		proxies = append(proxies, map[string]any{"name": name, "type": "socks5", "server": "127.0.0.1", "port": 9})
+		members = append(members, name)
+	}
+	profile["proxies"] = proxies
+	profile["proxy-groups"] = []any{map[string]any{"name": "select", "type": "select", "proxies": members}}
+	id := startPacketCore(t, profile)
+	data, err := kernel.Control(id, []byte(`{"action":"snapshot","page":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) <= 65536 || len(data) > kernel.MaximumControlBytes {
+		t.Fatalf("snapshot size %d", len(data))
+	}
+	if _, err := kernel.Control(id, []byte(`{"action":"select","group":"select","node":"synthetic-node-2999"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kernel.Control(id, []byte(`{"action":"select","group":"select","node":"missing"}`)); err == nil {
+		t.Fatal("selected a node outside the group")
+	}
+}
+
+func TestEmptyNodeProviderRefusesButEmptyRuleSetStarts(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "rules.yaml"), []byte("payload: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profile := packetProfile(9)
+	profile["rule-providers"] = map[string]any{"empty": map[string]any{"type": "file", "behavior": "domain", "path": "rules.yaml"}}
+	profile["rules"] = []string{"RULE-SET,empty,REJECT", "MATCH,select"}
+	data, _ := json.Marshal(profile)
+	id, err := kernel.Start(data, directory, 0, "", "", "")
+	if err != nil {
+		t.Fatalf("empty rule set blocked start: %v", err)
+	}
+	kernel.Stop(id)
+	if err := os.WriteFile(filepath.Join(directory, "nodes.yaml"), []byte("proxies: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profile = packetProfile(9)
+	profile["proxy-providers"] = map[string]any{"ecy-panel-nodes": map[string]any{"type": "file", "path": "nodes.yaml"}}
+	data, _ = json.Marshal(profile)
+	if _, err := kernel.Start(data, directory, 0, "", "", ""); err != kernel.ErrNoNodes {
+		t.Fatalf("empty node provider: %v", err)
+	}
+	// 已停止内核的出站在终结器里写日志，与下一个用例 ApplyConfig 改日志级别竞争（mihomo log 包未加锁）
+	runtime.GC()
+	time.Sleep(200 * time.Millisecond)
 }

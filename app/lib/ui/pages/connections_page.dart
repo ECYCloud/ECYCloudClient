@@ -249,8 +249,7 @@ class _Row {
 
   String get outbound => chains.isEmpty ? '' : chains.first;
 
-  String get chainLabel =>
-      chains.reversed.map(NodeLabels.displayName).join(' → ');
+  String get chainLabel => chains.reversed.map(NodeLabels.fullName).join(' → ');
 
   String get lifetime {
     final DateTime? start = startedAt;
@@ -543,30 +542,39 @@ class _ConnectionDetailDialogState extends State<_ConnectionDetailDialog> {
 
     return AppAlertDialog(
       title: Text(L10n.t('连接详情')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 6,
-        children: <Widget>[
-          for (final (String label, String value) in fields)
-            Text.rich(
-              TextSpan(
-                children: <InlineSpan>[
-                  TextSpan(
-                    text: '$label: ',
-                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  TextSpan(text: value.isEmpty ? '—' : value),
-                ],
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 6,
+          children: <Widget>[
+            for (final (String label, String value) in fields)
+              Text.rich(
+                TextSpan(
+                  children: <InlineSpan>[
+                    TextSpan(
+                      text: '$label: ',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    TextSpan(
+                      children: NodeLabels.flagSpans(
+                        value.isEmpty ? '—' : value,
+                      ),
+                    ),
+                  ],
+                ),
+                textAlign: TextAlign.start,
               ),
-              textAlign: TextAlign.start,
-            ),
-          if (_closeError != null)
-            Text(
-              _closeError!,
-              style: TextStyle(color: theme.colorScheme.error),
-            ),
-        ],
+            if (_closeError != null)
+              Text(
+                _closeError!,
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+          ],
+        ),
       ),
       actions: <Widget>[
         if (row.active)

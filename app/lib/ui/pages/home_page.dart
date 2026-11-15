@@ -634,11 +634,13 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
     final ThemeData theme = Theme.of(context);
     final UserProfile? user = widget.profile;
     final AuthController auth = widget.auth;
+    final Widget help = _TrafficHelp(notice: L10n.t('统计所有设备的流量使用情况'));
 
     if (user == null) {
       return SectionCard(
         icon: Icons.pie_chart_outline,
         title: L10n.t('流量使用情况'),
+        titleTrailing: help,
         action: RefreshButton(
           tooltip: L10n.t('刷新流量'),
           onRefresh: auth.refreshProfile,
@@ -653,6 +655,7 @@ class _TrafficUsageCardState extends State<_TrafficUsageCard> {
     return SectionCard(
       icon: Icons.pie_chart_outline,
       title: L10n.t('流量使用情况'),
+      titleTrailing: help,
       action: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -953,7 +956,6 @@ class _TrafficRankCard extends StatefulWidget {
 
 class _TrafficRankCardState extends State<_TrafficRankCard> {
   TrafficRankDay _day = TrafficRankDay.today;
-  final GlobalKey<TooltipState> _hintKey = GlobalKey<TooltipState>();
 
   @override
   Widget build(BuildContext context) {
@@ -962,74 +964,13 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
       _day,
     );
     final List<TrafficRankRow> hosts = widget.connection.trafficRankHosts(_day);
-    final String notice = L10n.t(
-      '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。',
-    );
 
     return SectionCard(
       icon: Icons.leaderboard_outlined,
       title: L10n.t('流量排行'),
-      titleTrailing: Transform.translate(
-        offset: const Offset(0, (14 - AppTheme.sectionTitleSize) / 2),
-        child: Tooltip(
-          key: _hintKey,
-          richMessage: WidgetSpan(
-            child: TextFieldTapRegion(
-              child: AppTextSelection(child: Text(notice)),
-            ),
-          ),
-          excludeFromSemantics: true,
-          enableTapToDismiss: false,
-          triggerMode: TooltipTriggerMode.manual,
-          showDuration: const Duration(seconds: 8),
-          constraints: const BoxConstraints(maxWidth: 320),
-          positionDelegate: (TooltipPositionContext position) {
-            final double x =
-                position.target.dx + position.targetSize.width / 2 + 8;
-            if (x + position.tooltipSize.width >
-                position.overlaySize.width - 10) {
-              return positionDependentBox(
-                size: position.overlaySize,
-                childSize: position.tooltipSize,
-                target: position.target,
-                verticalOffset: position.verticalOffset,
-                preferBelow: position.preferBelow,
-              );
-            }
-            return Offset(
-              x,
-              (position.target.dy - position.tooltipSize.height / 2)
-                  .clamp(
-                    10.0,
-                    position.overlaySize.height -
-                        position.tooltipSize.height -
-                        10,
-                  )
-                  .toDouble(),
-            );
-          },
-          child: TextFieldTapRegion(
-            onTapOutside: (_) => Tooltip.dismissAllToolTips(),
-            child: IconButton(
-              icon: Icon(
-                Icons.error_outline,
-                size: 14,
-                color: theme.colorScheme.onSurfaceVariant,
-                semanticLabel: notice,
-              ),
-              visualDensity: VisualDensity.standard,
-              constraints: BoxConstraints.tightFor(
-                width: AppTheme.minTapTarget,
-                height: AppTheme.minTapTarget,
-              ),
-              padding: EdgeInsets.zero,
-              onPressed: () {
-                if (!_hintKey.currentState!.ensureTooltipVisible()) {
-                  Tooltip.dismissAllToolTips();
-                }
-              },
-            ),
-          ),
+      titleTrailing: _TrafficHelp(
+        notice: L10n.t(
+          '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。',
         ),
       ),
       child: Column(
@@ -1075,6 +1016,88 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TrafficHelp extends StatefulWidget {
+  const _TrafficHelp({required this.notice});
+
+  final String notice;
+
+  @override
+  State<_TrafficHelp> createState() => _TrafficHelpState();
+}
+
+class _TrafficHelpState extends State<_TrafficHelp> {
+  final GlobalKey<TooltipState> _hintKey = GlobalKey<TooltipState>();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final String notice = widget.notice;
+    return Transform.translate(
+      offset: const Offset(0, (14 - AppTheme.sectionTitleSize) / 2),
+      child: Tooltip(
+        key: _hintKey,
+        richMessage: WidgetSpan(
+          child: TextFieldTapRegion(
+            child: AppTextSelection(child: Text(notice)),
+          ),
+        ),
+        excludeFromSemantics: true,
+        enableTapToDismiss: false,
+        triggerMode: TooltipTriggerMode.manual,
+        showDuration: const Duration(seconds: 8),
+        constraints: const BoxConstraints(maxWidth: 320),
+        positionDelegate: (TooltipPositionContext position) {
+          final double x =
+              position.target.dx + position.targetSize.width / 2 + 8;
+          if (x + position.tooltipSize.width >
+              position.overlaySize.width - 10) {
+            return positionDependentBox(
+              size: position.overlaySize,
+              childSize: position.tooltipSize,
+              target: position.target,
+              verticalOffset: position.verticalOffset,
+              preferBelow: position.preferBelow,
+            );
+          }
+          return Offset(
+            x,
+            (position.target.dy - position.tooltipSize.height / 2)
+                .clamp(
+                  10.0,
+                  position.overlaySize.height -
+                      position.tooltipSize.height -
+                      10,
+                )
+                .toDouble(),
+          );
+        },
+        child: TextFieldTapRegion(
+          onTapOutside: (_) => Tooltip.dismissAllToolTips(),
+          child: IconButton(
+            icon: Icon(
+              Icons.error_outline,
+              size: 14,
+              color: theme.colorScheme.onSurfaceVariant,
+              semanticLabel: notice,
+            ),
+            visualDensity: VisualDensity.standard,
+            constraints: BoxConstraints.tightFor(
+              width: AppTheme.minTapTarget,
+              height: AppTheme.minTapTarget,
+            ),
+            padding: EdgeInsets.zero,
+            onPressed: () {
+              if (!_hintKey.currentState!.ensureTooltipVisible()) {
+                Tooltip.dismissAllToolTips();
+              }
+            },
+          ),
+        ),
       ),
     );
   }

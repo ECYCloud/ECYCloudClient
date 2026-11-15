@@ -299,11 +299,12 @@ return view.extend({
 						var line = now
 							? _('%d nodes · current %s').format(group.members.length, now)
 							: _('%d nodes').format(group.members.length);
-						var parts = String(line).split(' · ');
-						return [
-							E('span', { 'class': 'ecycloud-group-count' }, [ parts[0] || line ]),
-							parts[1] ? E('span', { 'class': 'ecycloud-group-sep' }, [ ' · ' ]) : '',
-							parts[1] ? E('span', { 'class': 'ecycloud-group-now' }, [ parts[1] ]) : ''
+						line = String(line);
+						var cut = line.indexOf(' · ');
+						return cut < 0 ? [ E('span', { 'class': 'ecycloud-group-count' }, [ line ]) ] : [
+							E('span', { 'class': 'ecycloud-group-count' }, [ line.slice(0, cut) ]),
+							E('span', { 'class': 'ecycloud-group-sep' }, [ ' · ' ]),
+							E('span', { 'class': 'ecycloud-group-now' }, [ line.slice(cut + 3) ])
 						];
 					})())
 				]),

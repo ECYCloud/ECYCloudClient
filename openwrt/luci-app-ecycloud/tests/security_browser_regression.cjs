@@ -8,7 +8,7 @@ const { chromium } = require('playwright-core');
 const source = fs.readFileSync(process.argv[2] || path.join(__dirname,
     '../htdocs/luci-static/resources/ecycloud/api.js'), 'utf8');
 const start = source.indexOf('\tannounceHtml: function(');
-const end = source.indexOf('\n\tannouncePopup:', start);
+const end = source.indexOf('\n\tannounceBrowser:', start);
 assert.ok(start >= 0 && end > start);
 const implementation = source.slice(start, end);
 const overview = fs.readFileSync(process.argv[3] || path.join(__dirname,
@@ -38,6 +38,8 @@ const attacks = [
     });
     try {
         const context = await browser.newContext();
+        // LuCI 运行时把每个模块包在 (function(window, document, L, ...)) 中执行，页头也会声明全局 L；测试页没有加载 LuCI，这里补上模块用到的最小桩
+        await context.addInitScript(() => { window.L = { resource: value => value }; window.E = tag => document.createElement(tag); });
         const page = await context.newPage();
         await page.route('**/*', route => route.abort());
         const result = await page.evaluate(({ implementation, attacks }) => {
@@ -222,6 +224,10 @@ const attacks = [
         await peer.goto('https://router.test');
         const initialize = async target => target.evaluate(source => {
             window._ = value => value;
+            String.prototype.format = function(...args) {
+                let index = 0;
+                return this.replace(/%[sd]/g, () => String(args[index++]));
+            };
             window.baseclass = { extend: value => value };
             window.E = (tag, attrs = {}, children = []) => {
                 const element = document.createElement(tag);
@@ -242,7 +248,8 @@ const attacks = [
         await initialize(page);
         await initialize(peer);
         await page.evaluate(() => auditApi.showText('配置', 'private-account-a'));
-        assert.equal(await page.locator('.ecycloud-textview').textContent(), 'private-account-a');
+        assert.equal(await page.locator('.ecycloud-textview-lines').textContent(), 'private-account-a');
+        assert.equal(await page.locator('.ecycloud-textview-numbers').textContent(), '1');
         await page.evaluate(() => {
             Object.defineProperty(navigator, 'clipboard', { configurable: true, value: null });
             document.execCommand = () => {
@@ -253,6 +260,9 @@ const attacks = [
         await page.locator('.ecycloud-modal-copy').click();
         assert.equal(await page.evaluate(() => window.copiedText), 'private-account-a');
         assert.equal(await page.locator('.ecycloud-modal-copy').textContent(), 'Copied');
+        await page.evaluate(() => auditApi.showText('运行配置', '{"proxies":[{"uuid":"******"}]}'));
+        assert.equal(await page.locator('.ecycloud-modal-copy').count(), 1);
+        assert.equal(await page.locator('.ecycloud-textview').evaluate(node => getComputedStyle(node.querySelector('.ecycloud-textview-lines')).userSelect), 'auto');
         const clock = await page.evaluate(() => ({ age: auditApi.connectedSince(true), now: Date.now(), stopped: auditApi.connectedSince(false) }));
         assert.ok(Math.abs(clock.age - (clock.now - 1000000)) < 50);
         assert.equal(clock.stopped, 0);

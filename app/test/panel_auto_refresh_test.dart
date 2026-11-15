@@ -47,6 +47,7 @@ class _Api implements PanelApiClient {
   Future<BalanceListPage> Function()? balance;
   Future<ShopCatalog> Function()? shop;
   final Completer<AccountStatus> deletion = Completer<AccountStatus>();
+  final List<String?> deletionPasswords = <String?>[];
   final List<(int, String)> queries = <(int, String)>[];
   final List<Map<String, dynamic>> withdrawRecords = <Map<String, dynamic>>[];
 
@@ -91,7 +92,10 @@ class _Api implements PanelApiClient {
   }
 
   @override
-  Future<AccountStatus> killAccount({String? emailCode}) => deletion.future;
+  Future<AccountStatus> killAccount({String? emailCode, String? passwd}) {
+    deletionPasswords.add(passwd);
+    return deletion.future;
+  }
 
   @override
   Future<UnlockListPage> fetchUnlockResults({
@@ -255,7 +259,10 @@ class _Connection extends ChangeNotifier implements ConnectionController {
   }
 
   @override
-  Future<void> shutdown({bool clearSession = false}) => disconnect();
+  Future<void> shutdown({
+    bool clearSession = false,
+    String endedSession = '',
+  }) => disconnect();
 
   List<RuleProviderRef> rules = const <RuleProviderRef>[];
   @override
@@ -619,11 +626,17 @@ void main() {
         AppScope.of(tester.element(find.byType(DeleteAccountPage))).auth
             as _Auth;
     auth.stage = AuthStage.loggedIn;
-    expect(find.byType(TextField), findsNothing);
+    expect(find.text('请验证登录密码'), findsOneWidget);
+    await tester.tap(find.text('提交删除请求').last);
+    await tester.pumpAndSettle();
+    expect(find.text('请填写密码'), findsOneWidget);
+    expect(find.text('确定'), findsNothing);
+    await tester.enterText(find.byType(TextField), 'audit-password');
     await tester.tap(find.text('提交删除请求').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('确定'));
     await tester.pump();
+    expect(api.deletionPasswords, <String?>['audit-password']);
     auth.api = _Api();
     await tester.pumpWidget(const SizedBox.shrink());
     api.deletion.complete(

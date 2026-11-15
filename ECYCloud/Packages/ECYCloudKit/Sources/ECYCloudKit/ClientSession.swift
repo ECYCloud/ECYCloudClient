@@ -25,6 +25,9 @@ public final class ClientSession {
     public private(set) var options: AuthOptions?
     public private(set) var message: String?
     public private(set) var nodesError: String?
+    // 对应 connection_controller.dart 的 onConfigAlert：结构检查不通过时弹窗列出问题，同一组问题只弹一次
+    public var configAlert: String?
+    @ObservationIgnored private var lastConfigAlert: String?
     public private(set) var updatedAt: Date?
     public private(set) var panelOffline = false
     public private(set) var endpoints: PanelEndpoints
@@ -37,6 +40,12 @@ public final class ClientSession {
 
     @ObservationIgnored let api: PanelAPI
     @ObservationIgnored private let vault: any CredentialVault
+    @ObservationIgnored private let bundled: PanelEndpoints
+    @ObservationIgnored private var unreachable: [String: (failures: Int, since: Date)] = [:]
+    @ObservationIgnored private var probedAt: [String: Date] = [:]
+    @ObservationIgnored private var offered: [Bool: URL] = [:]
+    // 最近一轮新地址探测；测试据此等探测结束
+    @ObservationIgnored var originProbe: Task<Void, Never>?
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var saved: StoredSession?
     @ObservationIgnored private let cache: PanelResponseCache?
@@ -48,12 +57,14 @@ public final class ClientSession {
     @ObservationIgnored private var rememberedGeneration = 0
     @ObservationIgnored private var loggingOut = false
     @ObservationIgnored private var runtimeActive = true
+    @ObservationIgnored private var connecting = false
     public private(set) var emailCodeAvailableAt: [EmailPurpose: Date] = [:]
     @ObservationIgnored var accountMailDates: [String: Date] = [:]
     @ObservationIgnored private var cooldown: Date?
 
     public init(endpoints: PanelEndpoints, api: PanelAPI, vault: any CredentialVault, connection: ConnectionController? = nil, preferences: ClientPreferences? = nil, announcementState: AnnouncementState? = nil, nodeProbes: NodeProbeState? = nil, trafficRank: TrafficRankStore? = nil, cache: PanelResponseCache? = nil, now: @escaping () -> Date = Date.init) {
         self.endpoints = vault.endpoints ?? endpoints
+        self.bundled = endpoints
         self.api = api
         self.vault = vault
         self.cache = cache
@@ -66,6 +77,7 @@ public final class ClientSession {
         connection?.runtimeDidReset = { [weak self] keepingResults in self?.nodeProbes.clear(keepingResults: keepingResults) }
         api.route.connected = { [weak connection] in connection?.state == .connected }
         api.route.proxyPort = { [weak connection] in connection?.panelProxyPort }
+        api.route.reached = { [weak self] url, reachable in self?.reached(url, reachable) }
     }
 
     public func start() async {
@@ -85,7 +97,7 @@ public final class ClientSession {
         do {
             let value = try await api.options(endpoints)
             guard operation == generation else { return }
-            try applyOrigins(site: value.siteOrigin, config: value.apiOrigin)
+            applyOrigins(site: value.siteOrigin, config: value.apiOrigin)
             options = value
             #if DEBUG
             Logger(subsystem: Bundle.main.bundleIdentifier ?? "ECYCloudKit", category: "LoginOptions")
@@ -125,12 +137,18 @@ public final class ClientSession {
             endpoints = try PanelEndpoints(site: session.endpoints.site.absoluteString, config: session.endpoints.config.absoluteString)
             saved = session
             // 对应 auth_controller.dart：本机登录有效即凭缓存进入界面，不等面板；账户状态与资料随后由面板覆盖
-            if let restored = cache?.restore(account: session.email, binding: api.cacheBinding(endpoints, token: session.token), now: now()),
+            if let restored = cache?.restore(account: session.email, binding: api.cacheBinding(endpoints, token: session.token),
+                                             sealKey: api.cacheKey(token: session.token), now: now()),
                restored.profile.email == session.email, session.userID == nil || restored.profile.id == session.userID {
+                // 对应 connection_controller.dart 的 _hydrateRemoteFromCache：缓存的节点目录同样先过结构检查，不通过就不用这份缓存
+                let usable = restored.catalog.flatMap { (try? $0.validate()) != nil ? $0 : nil }
+                if restored.catalog != nil, usable == nil {
+                    Logger(subsystem: Bundle.main.bundleIdentifier ?? "ECYCloudKit", category: "PanelCache").warning("cached_catalog_invalid")
+                }
                 profile = restored.profile
-                catalog = restored.catalog
-                offlineUntil = restored.validUntil
-                catalogExpired = restored.catalog != nil && restored.validUntil == nil
+                catalog = usable
+                offlineUntil = usable == nil ? nil : restored.validUntil
+                catalogExpired = usable != nil && restored.validUntil == nil
             }
             let userID = profile?.id ?? session.userID
             announcementState.configure(site: endpoints.site, userID: userID)
@@ -164,6 +182,9 @@ public final class ClientSession {
             guard operation == generation else { return }
             if (error as? ClientError)?.unauthorized == true {
                 if clearLocal() { message = L10n.t("登录已失效，请重新登录。") }
+            } else if phase == .restoring {
+                phase = .starting
+                message = errorText(error)
             } else {
                 // 面板暂时不可达或响应异常：保持登录与缓存，由定时刷新继续向面板核实
                 panelOffline = true
@@ -179,7 +200,8 @@ public final class ClientSession {
             message = emailCode ? L10n.t("请输入邮箱和验证码。") : L10n.t("请输入邮箱和密码。")
             return
         }
-        guard !emailCode || canUseEmailLogin() else { return }
+        if emailCode, options == nil { await loadOptions() }
+        guard phase == .signedOut, !busy, !emailCode || canUseEmailLogin() else { return }
         let operation = generation + 1
         let rememberedOperation = rememberedGeneration
         await authenticate(.login) { try await api.login(endpoints, email: email, password: password, code: code, emailCode: emailCode) }
@@ -380,6 +402,8 @@ public final class ClientSession {
 
     public enum Authentication: Sendable { case login, registration, reset }
     public private(set) var authentication: Authentication?
+    public private(set) var passwordResetNotice: String?
+    public func dismissPasswordResetNotice() { passwordResetNotice = nil }
 
     private func authenticate(_ kind: Authentication, _ request: () async throws -> LoginResult) async {
         busy = true
@@ -393,7 +417,7 @@ public final class ClientSession {
             let expiration = try result.expiration()
             guard expiration > now() else { throw ClientError.invalidResponse }
             if let user = result.user {
-                try applyOrigins(site: user.siteOrigin, config: user.apiOrigin)
+                applyOrigins(site: user.siteOrigin, config: user.apiOrigin)
             }
             let session = StoredSession(
                 token: result.token, expiresAt: expiration,
@@ -401,10 +425,7 @@ public final class ClientSession {
                 userID: result.user?.id, endpoints: endpoints
             )
             do { try vault.save(session) }
-            catch {
-                try? await api.logout(endpoints, token: result.token)
-                throw error
-            }
+            catch { Logger(subsystem: Bundle.main.bundleIdentifier ?? "ECYCloudKit", category: "Session").warning("session_save_failed") }
             guard operation == generation else { return }
             saved = session
             offlineUntil = nil
@@ -422,6 +443,8 @@ public final class ClientSession {
             message = result.message.flatMap { $0.isEmpty ? nil : $0 }
             await reconcileConnection()
             if phase == .signedIn { await loadNodes() }
+        } catch ClientError.passwordChanged(let notice) where kind == .reset {
+            if operation == generation { passwordResetNotice = notice }
         } catch {
             guard operation == generation else { return }
             if (error as? ClientError)?.needsTwoFactor == true { needsTwoFactor = true }
@@ -440,6 +463,8 @@ public final class ClientSession {
     @discardableResult
     public func sendEmail(email: String, purpose: EmailPurpose) async -> Bool {
         guard phase == .signedOut, !busy, !sendingEmail, canRequest(), emailCooldown(purpose) == 0 else { return false }
+        if options == nil { await loadOptions() }
+        guard phase == .signedOut, !busy, !sendingEmail else { return false }
         if purpose == .login && !canUseEmailLogin() { return false }
         if purpose == .registration {
             guard let options else { message = L10n.t("尚未获取站点注册选项，请先重试。"); return false }
@@ -501,7 +526,7 @@ public final class ClientSession {
             offlineUntil = nil
             phase = .signedIn
             await reconcileConnection()
-            if catalog?.revision != value.configRevision {
+            if catalog?.revision != value.configRevision || catalog?.updateDue(at: now()) == true {
                 await loadNodes()
             } else if runtimeActive, connection?.supportsStandby == true, connection?.state == .disconnected {
                 Task { [weak self] in
@@ -535,10 +560,14 @@ public final class ClientSession {
             let response = try await api.nodes(endpoints, token: session.token)
             guard operation == generation, phase == .signedIn else { return }
             let result = response.value
+            // 对应 connection_controller.dart 的 _acceptRemote：结构检查不通过就保留上一份目录与缓存
+            try result.validate()
+            lastConfigAlert = nil
             let previousRevision = catalog?.revision
             catalog = result
             catalogExpired = false
-            cache?.saveConfig(response.data, account: session.email, binding: api.cacheBinding(endpoints, token: session.token))
+            cache?.saveConfig(response.data, account: session.email, binding: api.cacheBinding(endpoints, token: session.token),
+                              sealKey: api.cacheKey(token: session.token), updateIntervalHours: result.updateIntervalHours)
             if offlineUntil != nil {
                 offlineUntil = nil
                 await reconcileConnection()
@@ -569,6 +598,10 @@ public final class ClientSession {
                 handleAuthenticatedError(error)
             } else {
                 nodesError = errorText(error)
+                if let invalid = error as? ProfileValidationError, invalid.issues.joined(separator: "\n") != lastConfigAlert {
+                    lastConfigAlert = invalid.issues.joined(separator: "\n")
+                    configAlert = lastConfigAlert
+                }
                 recordCooldown(error)
             }
         }
@@ -576,9 +609,26 @@ public final class ClientSession {
 
     private var connectionOwner: String? {
         guard let saved, phase == .signedIn else { return nil }
-        return SHA256.hash(data: Data(saved.token.utf8)).map { String(format: "%02x", $0) }.joined()
+        return Self.owner(of: saved)
     }
+    private static func owner(of session: StoredSession) -> String {
+        SHA256.hash(data: Data(session.token.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    // 与 auth_controller.dart 的 _accountDirKey 逐字节一致：sha256(jsonEncode([Uri.origin, email.trim().toLowerCase()]))
+    nonisolated static func accountKey(site: URL, email: String) -> String {
+        var origin = "https://" + (site.host ?? "").lowercased()
+        if let port = site.port, port != 443 { origin += ":\(port)" }
+        let key = [origin, email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()]
+        let data = (try? JSONSerialization.data(withJSONObject: key, options: [.withoutEscapingSlashes])) ?? Data()
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    private static func accountKey(of session: StoredSession) -> String { accountKey(site: session.endpoints.site, email: session.email) }
     public var logDirectory: URL? { connectionOwner.flatMap(ClientLogStore.directory) }
+
+    private var authorizationLimitsSession: Bool {
+        guard let offlineUntil, let expiresAt = saved?.expiresAt else { return false }
+        return offlineUntil < expiresAt
+    }
 
     private var sessionExpiry: Date? {
         guard let expiresAt = saved?.expiresAt else { return nil }
@@ -587,7 +637,7 @@ public final class ClientSession {
 
     private func reconcileConnection() async {
         if let owner = connectionOwner { icons.configure(owner: owner) }
-        await connection?.reconcile(owner: connectionOwner, expiresAt: sessionExpiry)
+        await connection?.reconcile(owner: connectionOwner, expiresAt: sessionExpiry, authorizationExpiry: authorizationLimitsSession)
     }
 
     public func selectNode(group: String, node: String) {
@@ -633,6 +683,11 @@ public final class ClientSession {
         } catch { if operation == generation { report(error) } }
     }
 
+    public func applySystemProxySettings() async throws {
+        guard let connection, phase == .signedIn else { return }
+        try await connection.applySystemProxy(preferences)
+    }
+
     public func applyProxySettings() async throws {
         guard let connection, phase == .signedIn, connection.controlPlaneReady else { return }
         let operation = generation
@@ -647,25 +702,58 @@ public final class ClientSession {
 
     public func runtimeConfigurationText() throws -> String {
         guard phase == .signedIn, let data = connection?.runtimeConfiguration else { throw TunnelError.control }
-        let object = try JSONSerialization.jsonObject(with: data)
-        let text = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+        let text = try Self.maskedRuntimeConfiguration(data)
         return catalog?.annotateRuntimeConfiguration(text) ?? text
+    }
+
+    // 运行配置只供查看：控制面 secret、本设备的节点凭据与测速入站口令都不得出现在界面上。
+    // 与 connection_controller.dart 的 maskRuntimeSecrets 一致：节点只在 ecy-panel-nodes 下列一次，各组节点 provider 不再重复列出
+    nonisolated static func maskedRuntimeConfiguration(_ data: Data) throws -> String {
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw TunnelError.control }
+        if object["secret"] != nil { object["secret"] = "******" }
+        for key in ["proxies", "listeners"] where object[key] != nil { object[key] = maskCredentials(object[key]!) }
+        if let providers = object["proxy-providers"] as? [String: Any] {
+            object["proxy-providers"] = Dictionary(uniqueKeysWithValues: providers.map { name, provider -> (String, Any) in
+                guard var provider = provider as? [String: Any], let payload = provider["payload"] else { return (name, provider) }
+                if name.hasPrefix("ecy-panel-"), name != "ecy-panel-nodes" { provider["payload"] = nil }
+                else { provider["payload"] = maskCredentials(payload) }
+                return (name, provider)
+            })
+        }
+        return String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+    }
+
+    private nonisolated static func maskCredentials(_ value: Any) -> Any {
+        if let list = value as? [Any] { return list.map(maskCredentials) }
+        guard let map = value as? [String: Any] else { return value }
+        return Dictionary(uniqueKeysWithValues: map.map { key, item -> (String, Any) in
+            if ["uuid", "password", "auth", "auth-str", "obfs-password", "private-key", "pre-shared-key", "public-key", "short-id", "psk", "token"].contains(key), let text = item as? String, !text.isEmpty { return (key, "******") }
+            return (key, maskCredentials(item))
+        })
     }
 
     private func makeLease(takeover: Bool) throws -> TunnelLease {
         guard let connection, phase == .signedIn, let saved, let catalog, let owner = connectionOwner else { throw TunnelError.control }
-        guard !catalogExpired else { throw ClientError.input(L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
+        guard !catalogExpired, offlineUntil.map({ $0 > now() }) != false else { throw ClientError.input(L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
         var options = try connection.profileOptions(preferences)
         if !takeover { options.tunEnabled = false }
         let profile = try catalog.assemble(options: options, selections: nodeSelections)
-        return TunnelLease(owner: owner, expiresAt: sessionExpiry ?? saved.expiresAt, configuration: profile.data,
+        return TunnelLease(owner: owner, cacheKey: Self.accountKey(of: saved), expiresAt: sessionExpiry ?? saved.expiresAt, configuration: profile.data,
                            validationConfiguration: options.input == .proxy ? profile.validationData : nil, logLevel: preferences.logLevel)
     }
 
     private func connect(reclaimed: Bool) async {
-        guard let connection, connection.state == .disconnected, !busy else { return }
-        await refresh()
-        guard phase == .signedIn, let saved, catalog != nil, let owner = connectionOwner else { return }
+        guard let connection, connection.state == .disconnected, !connecting else { return }
+        connecting = true
+        defer { connecting = false }
+        // 对应 connection_controller.dart 的 _attemptConnect：离线授权窗口内先连接，面板核实放到连接之后
+        let offline = catalog != nil && saved.flatMap {
+            cache?.restore(account: $0.email, binding: api.cacheBinding(endpoints, token: $0.token), sealKey: api.cacheKey(token: $0.token),
+                           now: now())?.validUntil
+        } != nil
+        if !offline { await refresh() }
+        guard phase == .signedIn, let saved, let owner = connectionOwner else { return }
+        guard catalog != nil else { message = nodesError ?? L10n.t("尚未获取面板配置"); return }
         guard reclaimed || profile?.deviceKickNotice != true else { message = L10n.t("设备下线通知尚未处理，请先查看通知。"); return }
         guard reclaimed || !needsDeviceSlot else { message = L10n.t("在线客户端名额已满，请选择一台设备下线后连接。"); return }
         let operation = generation
@@ -676,10 +764,11 @@ public final class ClientSession {
             }
             guard operation == generation else { return }
             let lease = try makeLease(takeover: true)
-            await connection.reconcile(owner: owner, expiresAt: sessionExpiry ?? saved.expiresAt)
+            await connection.reconcile(owner: owner, expiresAt: sessionExpiry ?? saved.expiresAt, authorizationExpiry: authorizationLimitsSession)
             guard operation == generation, phase == .signedIn else { return }
             await connection.connect(lease)
         } catch { report(error) }
+        if offline { Task { [weak self] in if self?.generation == operation { await self?.refresh(silently: true) } } }
     }
 
     public func logout() async {
@@ -707,10 +796,12 @@ public final class ClientSession {
         guard value.email == session.email, session.userID == nil || value.id == session.userID else {
             throw ClientError.invalidResponse
         }
-        try applyOrigins(site: value.siteOrigin, config: value.apiOrigin)
+        applyOrigins(site: value.siteOrigin, config: value.apiOrigin)
         let updated = StoredSession(token: session.token, expiresAt: session.expiresAt,
                                     email: value.email, userID: value.id, endpoints: endpoints)
-        try vault.save(updated)
+        if updated.userID != session.userID || updated.endpoints != session.endpoints {
+            do { try vault.save(updated) } catch { message = errorText(error) }
+        }
         saved = updated
         profile = value
         panelOffline = false
@@ -722,17 +813,92 @@ public final class ClientSession {
         updatedAt = now()
     }
 
-    private func applyOrigins(site: String, config: String) throws {
-        let next = try endpoints.updating(site: site, config: config)
-        endpoints = next
-        vault.endpoints = next
+    // 对应 auth_controller.dart 的 _offerOrigin：面板下发的地址与当前不同就先不带令牌探一次，收到任何 HTTP 响应才切换并落盘，
+    // 网络层失败保持当前地址，同一新地址 10 分钟内只探一次。回退到出包地址后面板仍会下发那个连不上的旧地址，不探就会来回切换
+    private func applyOrigins(site: String, config: String) {
+        let site = (try? PanelEndpoints.origin(site)) ?? endpoints.site
+        let config = (try? PanelEndpoints.origin(config)) ?? endpoints.config
+        guard let delivered = try? endpoints.updating(site: site.absoluteString, config: config.absoluteString) else { return }
+        guard delivered != endpoints else {
+            offered = [:]
+            vault.endpoints = delivered
+            return
+        }
+        var probes: [(URL, Bool)] = []
+        for config in [false, true] {
+            let next = config ? delivered.config : delivered.site
+            guard next != (config ? endpoints.config : endpoints.site) else { offered[config] = nil; continue }
+            offered[config] = next
+            let key = (config ? "config " : "site ") + next.absoluteString
+            if let last = probedAt[key], now().timeIntervalSince(last) < 600 { continue }
+            probedAt[key] = now()
+            probes.append((next, config))
+        }
+        guard !probes.isEmpty else { return }
+        let previous = originProbe
+        originProbe = Task { [weak self, api] in
+            await previous?.value
+            for (origin, config) in probes {
+                let reachable = await api.probe(origin, config: config)
+                self?.adopt(origin, config: config, reachable: reachable)
+            }
+        }
     }
 
+    private func adopt(_ origin: URL, config: Bool, reachable: Bool) {
+        guard reachable, offered[config] == origin,
+              let next = try? endpoints.updating(site: (config ? endpoints.site : origin).absoluteString,
+                                                 config: (config ? origin : endpoints.config).absoluteString) else { return }
+        offered[config] = nil
+        unreachable[(config ? "config " : "site ") + origin.absoluteString] = nil
+        endpoints = next
+        persistOrigin(origin, config: config)
+    }
+
+    // 对应 auth_controller.dart 的 _reach：连续 3 次网络层失败且已持续 10 分钟，才在持久化地址与出包地址之间切换（只限这两个 https 地址）；
+    // 出包地址恢复可达后落盘
+    private func reached(_ url: URL, _ reachable: Bool) {
+        let persisted = saved?.endpoints ?? vault.endpoints ?? bundled
+        for config in [false, true] {
+            let current = config ? endpoints.config : endpoints.site
+            guard url.scheme == current.scheme, url.host == current.host, url.port == current.port else { continue }
+            let original = config ? bundled.config : bundled.site, stored = config ? persisted.config : persisted.site
+            let key = (config ? "config " : "site ") + current.absoluteString
+            if reachable {
+                unreachable[key] = nil
+                if current == original, stored != original { persistOrigin(original, config: config) }
+                continue
+            }
+            let streak = (failures: (unreachable[key]?.failures ?? 0) + 1, since: unreachable[key]?.since ?? now())
+            unreachable[key] = streak
+            let next = current == original ? stored : original
+            guard streak.failures >= 3, now().timeIntervalSince(streak.since) >= 600, next != current,
+                  let updated = try? endpoints.updating(site: (config ? endpoints.site : next).absoluteString,
+                                                        config: (config ? next : endpoints.config).absoluteString) else { continue }
+            unreachable[key] = nil
+            endpoints = updated
+        }
+    }
+
+    private func persistOrigin(_ origin: URL, config: Bool) {
+        let persisted = saved?.endpoints ?? vault.endpoints ?? bundled
+        guard let next = try? persisted.updating(site: (config ? persisted.site : origin).absoluteString,
+                                                 config: (config ? origin : persisted.config).absoluteString) else { return }
+        vault.endpoints = next
+        guard let session = saved else { return }
+        let updated = StoredSession(token: session.token, expiresAt: session.expiresAt, email: session.email, userID: session.userID, endpoints: next)
+        if (try? vault.save(updated)) != nil { saved = updated }
+    }
+
+    // 受限、启动时令牌过期或上次清理未完成时并未进入已登录态，归属仍按本机保存的会话计算
     private func clearLocal() -> Bool {
+        let previous = saved ?? (try? vault.load())
+        let owner = previous.map(Self.owner)
+        if let owner { icons.configure(owner: owner) }
         icons.clear()
         nodeProbes.configure(site: nil, userID: nil)
         trafficRank.configure(site: nil, userID: nil)
-        connection?.disconnect(clearLogsFor: connectionOwner)
+        connection?.disconnect(clearLogsFor: owner, account: previous.map(Self.accountKey))
         vault.logoutPending = true
         cache?.clear()
         saved = nil
@@ -802,6 +968,7 @@ public final class ClientSession {
     }
 
     private func errorText(_ error: any Error) -> String {
-        (error as? ClientError)?.localizedDescription ?? (error as? TunnelError)?.localizedDescription ?? L10n.t("操作未完成，请稍后重试。")
+        (error as? ClientError)?.localizedDescription ?? (error as? TunnelError)?.localizedDescription
+            ?? (error as? ProfileValidationError)?.localizedDescription ?? L10n.t("操作未完成，请稍后重试。")
     }
 }

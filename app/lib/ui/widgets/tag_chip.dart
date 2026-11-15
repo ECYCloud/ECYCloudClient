@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../node_labels.dart';
+import 'flag_icon.dart';
+
 class TagChip extends StatelessWidget {
   const TagChip({
     super.key,
@@ -105,6 +108,8 @@ class _TagText extends StatelessWidget {
   final TextStyle style;
   final bool capsule;
 
+  static const double _flagWidth = 12;
+
   static final Map<Object, Future<double>> _centers =
       <Object, Future<double>>{};
 
@@ -153,7 +158,11 @@ class _TagText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget text = Text(label, style: style);
+    final List<InlineSpan> spans = NodeLabels.flagSpans(
+      label,
+      width: _flagWidth,
+    );
+    final Widget text = Text.rich(TextSpan(children: spans), style: style);
     if (capsule) return text;
     final TextStyle measuredStyle = style
         .copyWith(
@@ -176,13 +185,29 @@ class _TagText extends StatelessWidget {
     final TextHeightBehavior? behavior =
         DefaultTextStyle.of(context).textHeightBehavior ??
         DefaultTextHeightBehavior.maybeOf(context);
-    final TextPainter painter = TextPainter(
-      text: TextSpan(text: label, style: measuredStyle),
-      textDirection: direction,
-      textScaler: scaler,
-      locale: locale,
-      textHeightBehavior: behavior,
-    )..layout();
+    // 旗帜占位不参与绘制，量出的仍只是文字墨迹；行内组件随字号缩放，与 WidgetSpan 同一算法
+    final double flagScale =
+        scaler.scale(measuredStyle.fontSize!) / measuredStyle.fontSize!;
+    final TextPainter painter =
+        TextPainter(
+            text: TextSpan(style: measuredStyle, children: spans),
+            textDirection: direction,
+            textScaler: scaler,
+            locale: locale,
+            textHeightBehavior: behavior,
+          )
+          ..setPlaceholderDimensions(<PlaceholderDimensions>[
+            for (final InlineSpan span in spans)
+              if (span case WidgetSpan(
+                :final PlaceholderAlignment alignment,
+                child: final FlagIcon flag,
+              ))
+                PlaceholderDimensions(
+                  size: flag.size * flagScale,
+                  alignment: alignment,
+                ),
+          ])
+          ..layout();
     final Size size = painter.size;
     final key = (
       label,

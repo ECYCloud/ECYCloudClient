@@ -369,8 +369,9 @@ class _InvitePageState extends State<InvitePage>
                             ),
                             InfoRow(
                               label: L10n.t('累计返利'),
-                              value:
-                                  '¥ ${summary.paybacksSum.toStringAsFixed(2)}',
+                              value: L10n.t('¥ {0}', <Object>[
+                                summary.paybacksSum.toStringAsFixed(2),
+                              ]),
                             ),
                             InfoRow(
                               label: L10n.t('返利比例'),
@@ -400,18 +401,22 @@ class _InvitePageState extends State<InvitePage>
                           children: <Widget>[
                             InfoRow(
                               label: L10n.t('可提现'),
-                              value:
-                                  '¥ ${summary.withdrawBalance.toStringAsFixed(2)}',
+                              value: L10n.t('¥ {0}', <Object>[
+                                summary.withdrawBalance.toStringAsFixed(2),
+                              ]),
                             ),
                             if (summary.enableWithdraw)
                               InfoRow(
                                 label: L10n.t('提现中'),
-                                value:
-                                    '¥ ${summary.pendingWithdraw.toStringAsFixed(2)}',
+                                value: L10n.t('¥ {0}', <Object>[
+                                  summary.pendingWithdraw.toStringAsFixed(2),
+                                ]),
                               ),
                             InfoRow(
                               label: L10n.t('账户余额'),
-                              value: '¥ ${summary.money.toStringAsFixed(2)}',
+                              value: L10n.t('¥ {0}', <Object>[
+                                summary.money.toStringAsFixed(2),
+                              ]),
                             ),
                           ],
                         ),
@@ -801,7 +806,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
 
   void _submit() {
     final double? parsed = double.tryParse(_amount.text.trim());
-    if (parsed == null || parsed <= 0) {
+    if (parsed == null || !parsed.isFinite || parsed <= 0) {
       setState(() => _amountError = L10n.t('请输入有效的提现金额'));
       return;
     }

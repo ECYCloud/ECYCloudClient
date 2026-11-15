@@ -10,7 +10,7 @@ import UIKit
 enum AppSessionFactory {
     static func make() throws -> ClientSession {
         #if os(macOS)
-        try ClientPreferences.migrateMacDefaults(applicationID: Bundle.main.bundleIdentifier!)
+        ClientPreferences.migrateMacDefaults(applicationID: Bundle.main.bundleIdentifier!)
         #endif
         let endpoints = try PanelEndpoints.bundled()
         let vault = KeychainVault(service: "\(Bundle.main.bundleIdentifier!).apple-native")

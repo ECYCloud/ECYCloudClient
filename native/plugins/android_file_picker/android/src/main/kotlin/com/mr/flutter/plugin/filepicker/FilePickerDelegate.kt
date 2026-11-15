@@ -11,7 +11,6 @@ import com.mr.flutter.plugin.filepicker.FileUtils.processFiles
 import io.flutter.plugin.common.EventChannel.EventSink
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
-import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,30 +47,33 @@ class FilePickerDelegate(
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         return when (requestCode) {
             SAVE_FILE_CODE -> handleSaveFileResult(resultCode, data)
-            REQUEST_CODE -> handleFilePickerResult(resultCode, data)
-            else -> false.also {
-                finishWithError(
-                    "unknown_activity",
-                    "Unknown activity error, please file an issue."
-                )
+            REQUEST_CODE -> {
+                if (pendingResult == null && !restoreLostRequest()) {
+                    false
+                } else {
+                    handleFilePickerResult(resultCode, data)
+                }
             }
-        }
-    }
-
-    private fun handleSaveFileResult(resultCode: Int, data: Intent?): Boolean {
-        return when (resultCode) {
-            Activity.RESULT_OK -> saveFile(data?.data)
-            Activity.RESULT_CANCELED -> {
-                finishWithSuccess(null)
-                false
-            }
-
+            // Results of activities this plugin did not start, such as
+            // those of other plugins, are not ours to answer.
             else -> false
         }
     }
 
-    private fun saveFile(uri: Uri?): Boolean {
-        uri ?: return false
+    private fun handleSaveFileResult(resultCode: Int, data: Intent?): Boolean {
+        val uri = data?.data
+        when (ResultOutcome.of(resultCode, hasData = uri != null)) {
+            ResultOutcome.DELIVER -> saveFile(uri!!)
+            ResultOutcome.CANCEL -> finishWithSuccess(null)
+            ResultOutcome.FAIL -> finishWithError(
+                "unknown_result",
+                "The save dialog ended without a location, with result code $resultCode."
+            )
+        }
+        return true
+    }
+
+    private fun saveFile(uri: Uri) {
         dispatchEventStatus(true)
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -85,31 +87,43 @@ class FilePickerDelegate(
                 Handler(Looper.getMainLooper()).post {
                     finishWithSuccess(renamedUri.path)
                 }
-            } catch (e: IOException) {
+            } catch (e: Exception) {
+                // Not only IOException: a SecurityException from the provider
+                // would otherwise escape the coroutine and crash the app.
                 Log.e(TAG, "Error while saving file", e)
                 Handler(Looper.getMainLooper()).post {
                     finishWithError("Error while saving file", e.message)
                 }
             }
         }
-        return true
     }
 
     private fun handleFilePickerResult(resultCode: Int, data: Intent?): Boolean {
-        return when (resultCode) {
-            Activity.RESULT_OK -> {
+        when (ResultOutcome.of(resultCode)) {
+            ResultOutcome.DELIVER -> {
                 dispatchEventStatus(true)
                 processFiles(activity, data, compressionQuality, type.orEmpty(), androidSafOptions)
-                true
             }
 
-            Activity.RESULT_CANCELED -> {
-                finishWithSuccess(null)
-                true
-            }
-
-            else -> false
+            ResultOutcome.CANCEL -> finishWithSuccess(null)
+            ResultOutcome.FAIL -> finishWithError(
+                "unknown_result",
+                "The picker ended with result code $resultCode."
+            )
         }
+        return true
+    }
+
+    /**
+     * Restores the options of a request whose activity was destroyed while the
+     * picker was open. Returns `false` when there is nothing to restore.
+     */
+    private fun restoreLostRequest(): Boolean {
+        val request = LostDataStore.beginRestore(activity.applicationContext) ?: return false
+        type = request.type
+        compressionQuality = request.compressionQuality
+        androidSafOptions = request.androidSafOptions
+        return true
     }
 
     fun setPendingMethodCallResult(result: MethodChannel.Result): Boolean {
@@ -123,6 +137,13 @@ class FilePickerDelegate(
 
     fun finishWithSuccess(data: Any?) {
         dispatchEventStatus(false)
+        val context = activity.applicationContext
+        if (isLostResult()) {
+            val files = (data as? ArrayList<*>)?.filterIsInstance<FileInfo>()
+            LostDataStore.finishRestore(context, files)
+            return
+        }
+        LostDataStore.clearRequest(context)
         pendingResult?.let {
             it.success(data?.takeIf { it is String }
                 ?: (data as? ArrayList<*>)?.mapNotNull { (it as? FileInfo)?.toMap() })
@@ -132,6 +153,12 @@ class FilePickerDelegate(
 
     fun finishWithError(errorCode: String, errorMessage: String?) {
         dispatchEventStatus(false)
+        val context = activity.applicationContext
+        if (isLostResult()) {
+            LostDataStore.finishRestoreWithError(context, errorCode, errorMessage)
+            return
+        }
+        LostDataStore.clearRequest(context)
         pendingResult?.error(errorCode, errorMessage, null)
         clearPendingResult()
     }
@@ -142,7 +169,17 @@ class FilePickerDelegate(
         }
     }
 
+    /**
+     * Whether the result being finished belongs to a restored request, whose
+     * outcome goes to LostDataStore instead of a pending method call.
+     */
+    private fun isLostResult(): Boolean = pendingResult == null && LostDataStore.isRestoring
+
     private fun clearPendingResult() {
         pendingResult = null
+        // The delegate outlives each export; release the complete byte payload.
+        bytes = null
+        saveFileName = null
+        saveMimeType = null
     }
 }

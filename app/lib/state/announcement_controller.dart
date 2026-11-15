@@ -74,43 +74,18 @@ class AnnouncementController extends ChangeNotifier {
     List<Announcement> items,
     Map<String, String> seen,
   ) {
-    int? bestIndex;
-    DateTime? bestAt;
     for (int i = 0; i < items.length; i++) {
       final Announcement item = items[i];
-      if (item.id == 1) {
-        continue;
-      }
-      if (seen['${item.id}'] == item.updatedAt) {
-        continue;
-      }
-      final DateTime? at = item.revisedAt;
-      if (bestIndex == null ||
-          (at != null && (bestAt == null || at.isAfter(bestAt)))) {
-        bestIndex = i;
-        bestAt = at;
+      if (item.id != 1 && seen['${item.id}'] != item.updatedAt) {
+        return i;
       }
     }
-    return bestIndex;
+    return null;
   }
 
   static int latestIndex(List<Announcement> items) {
-    if (items.isEmpty) {
-      return 0;
-    }
-    int best = 0;
-    DateTime? bestAt;
-    for (int i = 0; i < items.length; i++) {
-      if (items[i].id == 1 && items.length > 1) {
-        continue;
-      }
-      final DateTime? at = items[i].revisedAt;
-      if (at != null && (bestAt == null || at.isAfter(bestAt))) {
-        best = i;
-        bestAt = at;
-      }
-    }
-    return best;
+    final int index = items.indexWhere((Announcement item) => item.id != 1);
+    return index < 0 ? 0 : index;
   }
 
   Map<String, String> _seenRevisions() => decodeSeen(_store.read()[_seenKey]);

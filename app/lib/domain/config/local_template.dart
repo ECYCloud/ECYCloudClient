@@ -1,4 +1,5 @@
 import 'network_bypass.dart';
+import 'speed_probe_config.dart';
 
 class LocalTemplateOptions {
   const LocalTemplateOptions({
@@ -8,6 +9,7 @@ class LocalTemplateOptions {
     required this.allowLan,
     required this.ipv6Enabled,
     required this.logLevel,
+    this.authenticateMixedPort = false,
     this.routeMode = 'rule',
     this.tunInterfaceName = defaultTunInterfaceName,
     this.tunStack = 'mixed',
@@ -17,8 +19,6 @@ class LocalTemplateOptions {
     this.autoDetectInterface = true,
     this.remoteDnsServer = 'https://1.1.1.1/dns-query',
     this.localDnsServer = '223.5.5.5',
-    this.tunIncludePackages = const <String>[],
-    this.tunExcludePackages = const <String>[],
     this.tunExcludeAddresses = const <String>[],
   });
 
@@ -30,6 +30,7 @@ class LocalTemplateOptions {
   final bool allowLan;
   final bool ipv6Enabled;
   final String logLevel;
+  final bool authenticateMixedPort;
   final String routeMode;
   final String tunInterfaceName;
   final String tunStack;
@@ -43,9 +44,6 @@ class LocalTemplateOptions {
   final String remoteDnsServer;
   final String localDnsServer;
 
-  // 分应用代理走 tun 段而非 rules 的 process-name：rules 归面板所有，客户端不得往里塞
-  final List<String> tunIncludePackages;
-  final List<String> tunExcludePackages;
   final List<String> tunExcludeAddresses;
 }
 
@@ -58,6 +56,9 @@ class ClashApiOptions {
   String get externalController => '127.0.0.1:$port';
 
   Uri get baseUri => Uri.parse('http://127.0.0.1:$port');
+
+  String get mixedCredential =>
+      SpeedProbeConfig.credential(secret, 'ecy-mixed');
 }
 
 class LocalTemplate {
@@ -92,9 +93,12 @@ class LocalTemplate {
     'mode': options.routeMode,
     'allow-lan': options.allowLan,
     'bind-address': options.allowLan ? '*' : '127.0.0.1',
-    // 入站认证归客户端：界面上没有填代理口账号密码的地方，本机浏览器与系统代理
-    // 也不会带上面板那组密码，而内核对回环不豁免（实测 127.0.0.1 也回 407）
-    'authentication': const <String>[],
+    // 入站认证归客户端：桌面浏览器与系统代理不带凭据，而内核对回环不豁免（实测 127.0.0.1 也回 407）；
+    // Android 同机任一应用都能连回环口，未开局域网共享时只认 GUI 持有的凭据
+    'authentication': options.authenticateMixedPort
+        ? <String>[clashApi.mixedCredential]
+        : const <String>[],
+    if (options.authenticateMixedPort) 'skip-auth-prefixes': const <String>[],
     'ss-config': '',
     'vmess-config': '',
     'tuic-server': const <String, dynamic>{'enable': false},
@@ -150,10 +154,6 @@ class LocalTemplate {
       excludedRoutes,
       options.tunExcludeAddresses,
     ),
-    if (options.tunIncludePackages.isNotEmpty)
-      'include-package': options.tunIncludePackages,
-    if (options.tunExcludePackages.isNotEmpty)
-      'exclude-package': options.tunExcludePackages,
   };
 
   Map<String, dynamic> get dns => <String, dynamic>{

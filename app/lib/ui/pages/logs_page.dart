@@ -256,6 +256,10 @@ class _LogsPageState extends State<LogsPage> {
                           .copyWith(color: _color(entry.level, scheme));
                       final double lineSize = messageStyle.fontSize!;
                       final String? inbound = inboundTypes[_inboundKey(entry)];
+                      final String shown = _shown(entry);
+                      final List<InlineSpan> spans = NodeLabels.flagSpans(
+                        shown,
+                      );
                       return Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 14,
@@ -295,23 +299,25 @@ class _LogsPageState extends State<LogsPage> {
                                 ),
                               ),
                             ),
+                            // 节点名里的国旗与连接页一样画成旗帜图标；搜索、复制与日志文件仍是原文
                             Expanded(
-                              child: inbound == null
-                                  ? Text(_shown(entry), style: messageStyle)
+                              child: inbound == null && spans.length == 1
+                                  ? Text(shown, style: messageStyle)
                                   : Text.rich(
                                       TextSpan(
                                         children: <InlineSpan>[
-                                          WidgetSpan(
-                                            alignment:
-                                                PlaceholderAlignment.middle,
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 6,
+                                          if (inbound != null)
+                                            WidgetSpan(
+                                              alignment:
+                                                  PlaceholderAlignment.middle,
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  right: 6,
+                                                ),
+                                                child: TagChip(label: inbound),
                                               ),
-                                              child: TagChip(label: inbound),
                                             ),
-                                          ),
-                                          TextSpan(text: _shown(entry)),
+                                          ...spans,
                                         ],
                                       ),
                                       style: messageStyle,

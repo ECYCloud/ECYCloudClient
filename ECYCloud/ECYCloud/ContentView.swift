@@ -17,6 +17,16 @@ struct ContentView: View {
     var body: some View {
         Group {
             switch session.phase {
+            case .starting where session.message != nil:
+                ContentUnavailableView {
+                    Label(L10n.t("暂时无法恢复登录"), systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(verbatim: session.message ?? "")
+                } actions: {
+                    Button(L10n.t("重试")) { Task { await session.start() } }
+                        .disabled(session.busy)
+                    Button(L10n.t("退出登录")) { Task { await session.logout() } }
+                }
             case .starting, .restoring:
                 VStack(spacing: 20) {
                     ProgressView(L10n.t("正在恢复登录…"))

@@ -211,4 +211,74 @@ void main() {
     expect(loaded.topGroups(TrafficRankDay.today), isEmpty);
     expect(loaded.topHosts(TrafficRankDay.today), isEmpty);
   });
+
+  // 与 OpenWrt 同一口径：超长主机名不计入，内存键数有上限，落盘每类只留前 100
+  test('超长主机名不计入，内存键数受上限约束', () {
+    final TrafficRankStore rank = store();
+    rank.add(groups: <String>['组'], host: '${'a' * 249}.com', bytes: 5);
+    rank.add(groups: <String>['组'], host: '${'b' * 250}.com', bytes: 900);
+    expect(rank.topHosts(TrafficRankDay.today).single.name, '${'a' * 249}.com');
+    for (int i = 0; i < 10001; i++) {
+      rank.add(groups: <String>['组$i'], host: 'h$i.test', bytes: 1);
+    }
+    rank.add(groups: <String>['迟到组'], host: 'late.test', bytes: 1000);
+    expect(rank.topGroups(TrafficRankDay.today).first.name, isNot('迟到组'));
+    expect(rank.topHosts(TrafficRankDay.today).first.name, isNot('late.test'));
+    rank.add(groups: <String>['组0'], host: 'h0.test', bytes: 1000);
+    expect(rank.topGroups(TrafficRankDay.today).first.name, '组0');
+    expect(rank.topHosts(TrafficRankDay.today).first.name, 'h0.test');
+  });
+
+  test('落盘只留每类前 100，当天内存保留完整计数', () {
+    final TrafficRankStore rank = store();
+    for (int i = 0; i < 150; i++) {
+      rank.add(groups: <String>['组$i'], host: 'h$i.test', bytes: 1000 + i);
+    }
+    rank.flush();
+    final Map<String, dynamic> saved =
+        (jsonDecode(file.readAsStringSync())['accounts']
+            as Map<String, dynamic>)['account-a@test'][TrafficRankStore.dayKey(
+          now,
+        )];
+    expect((saved['groups'] as Map<String, dynamic>).length, 100);
+    expect((saved['hosts'] as Map<String, dynamic>).length, 100);
+    expect(saved['hosts'], contains('h149.test'));
+    expect(saved['hosts'], isNot(contains('h0.test')));
+    rank.add(groups: <String>['组0'], host: 'h0.test', bytes: 5000);
+    expect(rank.topHosts(TrafficRankDay.today).first.name, 'h0.test');
+    expect(rank.topHosts(TrafficRankDay.today).first.bytes, 6000);
+    expect(rank.topGroups(TrafficRankDay.today), hasLength(10));
+  });
+
+  test('落盘清掉其它账户的过期日期，同账户再登录仍能恢复', () {
+    final String today = TrafficRankStore.dayKey(now);
+    final String old = TrafficRankStore.dayKey(
+      now.subtract(const Duration(days: 3)),
+    );
+    Map<String, Object> day(String host) => <String, Object>{
+      'groups': <String, int>{'组': 10},
+      'hosts': <String, int>{host: 10},
+    };
+    file.writeAsStringSync(
+      jsonEncode(<String, Object>{
+        'accounts': <String, Object>{
+          'account-b@test': <String, Object>{
+            today: day('b-today.test'),
+            old: day('b-old.test'),
+          },
+          'account-c@test': <String, Object>{old: day('c-old.test')},
+        },
+      }),
+    );
+    final TrafficRankStore rank = store();
+    rank.add(groups: <String>['美国'], host: 'a.test', bytes: 100);
+    rank.flush();
+    final String saved = file.readAsStringSync();
+    expect(saved, isNot(contains('b-old.test')));
+    expect(saved, isNot(contains('account-c@test')));
+    rank.bindAccount('account-b@test');
+    expect(rank.topHosts(TrafficRankDay.today).single.name, 'b-today.test');
+    rank.bindAccount('account-a@test');
+    expect(rank.topHosts(TrafficRankDay.today).single.name, 'a.test');
+  });
 }

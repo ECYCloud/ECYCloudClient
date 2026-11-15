@@ -2,13 +2,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/app_paths.dart';
+import '../../core/logger.dart';
+import '../../data/store/settings_store.dart';
 import '../../domain/config/network_bypass.dart';
 import '../../domain/platform/platform_service.dart';
 import '../unix/unix_platform_service.dart';
 
 /// 系统代理走会话 D-Bus，helper（root）改不到。
 class LinuxPlatformService extends UnixPlatformService {
-  LinuxPlatformService();
+  LinuxPlatformService({this._run = Process.run});
+
+  final Future<ProcessResult> Function(String, List<String>) _run;
 
   static const String _proxySchema = 'org.gnome.system.proxy';
 
@@ -34,13 +38,16 @@ class LinuxPlatformService extends UnixPlatformService {
     required int port,
     required List<String> bypass,
   }) async {
+    await leftoverProxyRestore;
     // 已有快照说明上一次还没还原，保留最早的原值，不要用被自己改过的值覆盖
     if (!AppPaths.proxySnapshot.existsSync()) {
       final Map<String, String> snapshot = <String, String>{};
       for (final (String schema, String key) in _snapshotKeys) {
         snapshot['$schema $key'] = await _get(schema, key);
       }
-      AppPaths.proxySnapshot.writeAsStringSync(jsonEncode(snapshot));
+      final File temporary = File('${AppPaths.proxySnapshot.path}.tmp')
+        ..writeAsStringSync(jsonEncode(snapshot), flush: true);
+      temporary.renameSync(AppPaths.proxySnapshot.path);
     }
 
     for (final String scheme in <String>['http', 'https', 'socks']) {
@@ -65,16 +72,40 @@ class LinuxPlatformService extends UnixPlatformService {
       return;
     }
 
-    final Object? decoded = jsonDecode(file.readAsStringSync());
-    if (decoded is Map<String, dynamic>) {
-      for (final MapEntry<String, dynamic> entry in decoded.entries) {
-        final List<String> parts = entry.key.split(' ');
-        if (parts.length == 2 && entry.value is String) {
-          await _set(parts[0], parts[1], entry.value as String);
-        }
+    final Map<String, dynamic>? snapshot = _readSnapshot(file);
+    if (snapshot == null) {
+      file.deleteSync();
+      await _disableOwnProxy();
+      return;
+    }
+    for (final MapEntry<String, dynamic> entry in snapshot.entries) {
+      final List<String> parts = entry.key.split(' ');
+      if (parts.length == 2 && entry.value is String) {
+        await _set(parts[0], parts[1], entry.value as String);
       }
     }
     file.deleteSync();
+  }
+
+  static Map<String, dynamic>? _readSnapshot(File file) {
+    try {
+      final Object? decoded = jsonDecode(file.readAsStringSync());
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      Logger.instance.warn(UnixPlatformService.source, '系统代理快照格式无效，已丢弃');
+    } on Object catch (e) {
+      Logger.instance.warn(UnixPlatformService.source, '系统代理快照损坏，已丢弃：$e');
+    }
+    return null;
+  }
+
+  Future<void> _disableOwnProxy() async {
+    final String host = _unquote(await _get('$_proxySchema.http', 'host'));
+    final String port = await _get('$_proxySchema.http', 'port');
+    if (host == '127.0.0.1' && port == '${SettingsStore().load().mixedPort}') {
+      await _set(_proxySchema, 'mode', "'none'");
+    }
   }
 
   @override
@@ -143,7 +174,7 @@ X-GNOME-Autostart-enabled=true
   }
 
   Future<String> _get(String schema, String key) async {
-    final ProcessResult result = await Process.run('gsettings', <String>[
+    final ProcessResult result = await _run('gsettings', <String>[
       'get',
       schema,
       key,
@@ -157,7 +188,7 @@ X-GNOME-Autostart-enabled=true
   }
 
   Future<void> _set(String schema, String key, String value) async {
-    final ProcessResult result = await Process.run('gsettings', <String>[
+    final ProcessResult result = await _run('gsettings', <String>[
       'set',
       schema,
       key,

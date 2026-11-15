@@ -18,8 +18,13 @@ class _LanguageSettingsStore implements SettingsStore {
   AppSettings settings = const AppSettings.defaults();
   int saves = 0;
 
+  DateTime? saved;
+
   @override
   bool get hasPersistedSettings => true;
+
+  @override
+  DateTime? get savedAt => saved;
 
   @override
   AppSettings load() => settings;
@@ -43,7 +48,7 @@ void main() {
     final KernelException kernel = KernelException('内核启动失败：fixture');
     final NodeSpeedTestException speed = NodeSpeedTestException('测速超时');
     L10n.current = AppLanguage.en;
-    expect('$api', 'Upload failed');
+    expect('$api', 'Failed to upload');
     expect(api.message, '上传失败');
     expect(api.statusCode, 413);
     expect('$clash', 'Node 自定义中文节点 is unavailable.');
@@ -203,11 +208,43 @@ void main() {
     expect(store.saves, 1);
   });
 
+  test('安装器语言晚于上次保存的设置时覆盖已有语言，之后不再覆盖', () {
+    final store = _LanguageSettingsStore()..saved = DateTime(2026, 11, 1);
+    final original = const AppSettings.defaults().copyWith(locale: 'zh_CN');
+    DateTime? asked;
+    String? installer(DateTime? after) {
+      asked = after;
+      return 'en-US';
+    }
+
+    final applied = AppLanguage.seed(
+      store,
+      original,
+      installerLocale: installer,
+    );
+    expect(asked, DateTime(2026, 11, 1));
+    expect(applied.locale, 'en-US');
+    expect(store.saves, 1);
+    expect(
+      AppLanguage.seed(store, applied, installerLocale: installer),
+      same(applied),
+    );
+    final changed = applied.copyWith(locale: 'zh_TW');
+    expect(
+      AppLanguage.seed(store, changed, installerLocale: (_) => null),
+      same(changed),
+    );
+    expect(store.saves, 1);
+  });
+
   test('L10n 按当前语言替换占位符，缺词回落到简中原文', () {
     L10n.current = AppLanguage.en;
     expect(L10n.t('设置'), 'Settings');
     expect(L10n.t('账户信息'), 'Account');
-    expect(L10n.t('更新失败：{0}', <Object>['timeout']), 'Update failed: timeout');
+    expect(
+      L10n.t('更新失败：{0}', <Object>['timeout']),
+      'Failed to update: timeout',
+    );
     expect(L10n.t('不会出现的词'), '不会出现的词');
 
     L10n.current = AppLanguage.zhTW;

@@ -306,12 +306,15 @@ class ClashApiClient {
   }
 
   /// 内核常驻时 tun.enable 是唯一能读回本轮是否接管出口的字段
-  Future<({String mode, bool tunEnabled})> fetchRuntime() async {
+  Future<({String mode, bool tunEnabled, int mixedPort})> fetchRuntime() async {
     final Map<String, dynamic> config = await _getJson('/configs');
     final Object? tun = config['tun'];
+    final Object? mixedPort = config['mixed-port'];
     return (
       mode: config['mode'] as String? ?? 'rule',
       tunEnabled: tun is Map<String, dynamic> && tun['enable'] == true,
+      // 内核只在监听成功时回报端口（listener.GetPorts），绑定失败为 0
+      mixedPort: mixedPort is int ? mixedPort : 0,
     );
   }
 
@@ -405,29 +408,6 @@ class ClashApiClient {
       }
     } on Object catch (_) {}
     return body.length > 200 ? body.substring(0, 200) : body;
-  }
-
-  /// PUT /configs?force=true + payload 走 ApplyConfig，不重建 external-controller
-  Future<void> applyConfigPayload(
-    String configJson, {
-    bool force = true,
-  }) async {
-    final http.Response response = await _request(
-      'PUT',
-      '/configs',
-      query: <String, String>{'force': '$force'},
-      body: <String, String>{'payload': configJson},
-      timeout: const Duration(seconds: 120),
-    );
-
-    if (response.statusCode != 204 && response.statusCode != 200) {
-      final String body = response.body.trim();
-      throw ClashApiException(
-        body.isEmpty
-            ? '热载配置失败（HTTP ${response.statusCode}）'
-            : '热载配置失败：${body.length > 200 ? body.substring(0, 200) : body}',
-      );
-    }
   }
 
   /// PUT /proxies/{name} 只改选中项，存量连接仍走旧出站；按 chains 筛，勿用全量 DELETE /connections
@@ -528,7 +508,7 @@ class ClashApiClient {
     http.Client? streamClient;
 
     Future<void> start() async {
-      streamClient = http.Client();
+      streamClient = _directClient();
       try {
         final http.Request request = http.Request('GET', _uri(path, query))
           ..headers.addAll(_headers);

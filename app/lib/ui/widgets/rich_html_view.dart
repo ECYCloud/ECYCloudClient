@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
 
 import '../../core/safe_url.dart';
 import '../app_scope.dart';
@@ -44,6 +46,29 @@ String _decodeHtmlSrc(String value) {
       .replaceAll('&apos;', "'");
 }
 
+// flutter_html 不渲染 <style> 却仍把其中的 CSS 套用到全文，list-style-image 的 url()
+// 直接交给 Image.network：既不过 SafeUrl，也没有远程图片的大小与时限约束
+@visibleForTesting
+String withoutRemoteCss(String source) {
+  final dom.Document document = html_parser.parse(source);
+  for (final dom.Element style in document.getElementsByTagName('style')) {
+    style.remove();
+  }
+  void visit(dom.Element element) {
+    final String? css = element.attributes['style']?.toLowerCase();
+    if (css != null && (css.contains('url(') || css.contains(r'\'))) {
+      element.attributes.remove('style');
+    }
+    element.children.forEach(visit);
+  }
+
+  final dom.Element? root = document.documentElement;
+  if (root != null) {
+    visit(root);
+  }
+  return document.outerHtml;
+}
+
 class RichHtmlView extends StatelessWidget {
   const RichHtmlView(this.html, {super.key, this.imageAlbum, this.textStyle});
 
@@ -76,7 +101,7 @@ class RichHtmlView extends StatelessWidget {
     final String base = AppScope.of(context).auth.siteOrigin;
 
     return Html(
-      data: source,
+      data: withoutRemoteCss(source),
       doNotRenderTheseTags: _blockedTags,
       style: <String, Style>{
         ...Style.fromThemeData(theme),

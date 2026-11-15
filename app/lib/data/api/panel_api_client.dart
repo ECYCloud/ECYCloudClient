@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:crypto/crypto.dart';
@@ -48,6 +50,7 @@ class RemoteProfile {
     this.offlineIssuedAt,
     this.offlineUntil,
     this.cacheBinding = '',
+    this.updateInterval,
   });
 
   final Map<String, dynamic> config;
@@ -55,6 +58,16 @@ class RemoteProfile {
   final DateTime? offlineIssuedAt;
   final DateTime? offlineUntil;
   final String cacheBinding;
+
+  /// 响应头 profile-update-interval（小时，正整数），与第三方 Clash 客户端同一语义
+  final Duration? updateInterval;
+
+  static Duration? parseUpdateInterval(String? raw) {
+    final int? hours = int.tryParse(raw?.trim() ?? '');
+    return hours != null && hours > 0 && hours <= 8760
+        ? Duration(hours: hours)
+        : null;
+  }
 
   bool usableOffline(PanelApiClient api, {DateTime? now}) {
     final DateTime time = now ?? DateTime.now();
@@ -144,6 +157,8 @@ class TicketUploadResult {
       );
 }
 
+enum _PanelHost { site, config, other }
+
 class PanelApiClient {
   PanelApiClient({
     required this.baseUrl,
@@ -171,6 +186,10 @@ class PanelApiClient {
   final DeviceInfo device;
 
   int? fallbackProxyPort;
+  String? fallbackProxyCredential;
+
+  /// 每个请求重试结束后报告所用面板地址是否可达；只有网络层失败报告 false
+  void Function(String origin, bool reachable)? onReach;
 
   final Map<String, List<InternetAddress>> _directByHost =
       <String, List<InternetAddress>>{};
@@ -179,6 +198,7 @@ class PanelApiClient {
   late final http.Client _direct = _directHttpClient(_directByHost);
   http.Client? _proxy;
   int? _proxyPort;
+  String? _proxyCredential;
 
   String? token;
 
@@ -196,6 +216,15 @@ class PanelApiClient {
               ),
             )
             .toString();
+
+  // 只能留在内存：写进任何文件，面板配置缓存就不再随系统保护的登录令牌绑定在本机
+  Uint8List? get cacheKey => token == null || token!.isEmpty
+      ? null
+      : Uint8List.fromList(
+          Hmac(sha256, utf8.encode(token!))
+              .convert(utf8.encode('remote-config-cache|${device.deviceId}'))
+              .bytes,
+        );
 
   bool reportConnected = false;
 
@@ -284,8 +313,7 @@ class PanelApiClient {
     return <String, String>{
       'Accept': 'application/json',
       'Accept-Language': contentLanguage,
-      'User-Agent':
-          'ECYCloud/${_uaVersion(device.appVersion)} (${_uaPlatform(device.platform)})',
+      'User-Agent': _userAgent,
       // 设备信息须随请求刷新，否则升级后面板一直是旧值
       if (device.deviceName.isNotEmpty)
         'X-Device-Name': _headerText(device.deviceName),
@@ -303,6 +331,35 @@ class PanelApiClient {
   }
 
   String get contentLanguage => L10n.current.contentLanguage;
+
+  String get _userAgent =>
+      'ECYCloud/${_uaVersion(device.appVersion)} (${_uaPlatform(device.platform)})';
+
+  /// 面板下发的新地址先探一次再采用：只发不带令牌的 GET、不重试，不经 onReach，不计入回退计数。
+  /// 收到任何 HTTP 响应即可达，只有网络层失败返回 false。配置域只承载 /config/clash 与
+  /// /config/revision，不带令牌请求后者会在面板鉴权中间件第一步直接回 401，不查库也不生成配置
+  Future<bool> probe({required bool config}) async {
+    try {
+      await _viaDirectThenProxy(
+        retryUnreachable: false,
+        host: _PanelHost.other,
+        run: (http.Client client) => _send(
+          () => client.get(
+            config
+                ? _configEndpoint('/config/revision')
+                : _endpoint('/auth/options'),
+            headers: <String, String>{
+              'Accept': 'application/json',
+              'User-Agent': _userAgent,
+            },
+          ),
+        ),
+      );
+      return true;
+    } on ApiException catch (e) {
+      return !e.transportFailure;
+    }
+  }
 
   // HTTP 头只保证 ASCII；非 ASCII 须 encode，面板 rawurldecode 还原
   static String _headerText(String value) => Uri.encodeComponent(value);
@@ -469,10 +526,10 @@ class PanelApiClient {
   Future<String> sendKillEmailCode() =>
       _postMsg('/user/send-kill-email-code', const <String, dynamic>{});
 
-  Future<AccountStatus> killAccount({String? emailCode}) async {
+  Future<AccountStatus> killAccount({String? emailCode, String? passwd}) async {
     final Map<String, dynamic> envelope = await _postEnvelope(
       '/user/kill',
-      <String, dynamic>{'email_code': ?emailCode},
+      <String, dynamic>{'email_code': ?emailCode, 'passwd': ?passwd},
     );
     final Object? data = envelope['data'];
     if (data is Map<String, dynamic>) {
@@ -620,10 +677,12 @@ class PanelApiClient {
     required String newemail,
     String oldEmailcode = '',
     String newEmailcode = '',
+    String passwd = '',
   }) => _postMsg('/user/email', <String, dynamic>{
     'newemail': newemail,
     if (oldEmailcode.isNotEmpty) 'old_emailcode': oldEmailcode,
     if (newEmailcode.isNotEmpty) 'new_emailcode': newEmailcode,
+    if (passwd.isNotEmpty) 'passwd': passwd,
   });
 
   Future<InviteSummary> fetchInviteSummary({
@@ -662,9 +721,9 @@ class PanelApiClient {
   Future<String> gaCheck(String code) =>
       _postMsg('/user/ga-check', <String, dynamic>{'code': code});
 
-  Future<String> gaSet(int enable, {String? passwd}) => _postMsg(
+  Future<String> gaSet(int enable, {String? passwd, String? code}) => _postMsg(
     '/user/ga-set',
-    <String, dynamic>{'enable': enable, 'passwd': ?passwd},
+    <String, dynamic>{'enable': enable, 'passwd': ?passwd, 'code': ?code},
   );
 
   Future<({String message, String gaToken, String gaUrl})> gaReset({
@@ -685,10 +744,12 @@ class PanelApiClient {
     );
   }
 
-  Future<({String message, String bindToken})> telegramReset() async {
+  Future<({String message, String bindToken})> telegramReset({
+    required String passwd,
+  }) async {
     final Map<String, dynamic> envelope = await _postEnvelope(
       '/user/telegram-reset',
-      const <String, dynamic>{},
+      <String, dynamic>{'passwd': passwd},
     );
     final Object? data = envelope['data'];
     final Map<String, dynamic> body = data is Map<String, dynamic>
@@ -928,6 +989,7 @@ class PanelApiClient {
   Future<String> fetchConfigRevision({int? fallbackProxyPort}) async {
     return _viaDirectThenProxy(
       fallbackProxyPort: fallbackProxyPort,
+      host: _PanelHost.config,
       run: (http.Client client) async {
         final http.Response response = await _send(
           () => client.get(
@@ -944,6 +1006,7 @@ class PanelApiClient {
   Future<RemoteProfile> fetchClashProfile({int? fallbackProxyPort}) async {
     return _viaDirectThenProxy(
       fallbackProxyPort: fallbackProxyPort,
+      host: _PanelHost.config,
       run: _fetchClashProfileVia,
     );
   }
@@ -955,15 +1018,23 @@ class PanelApiClient {
     int? fallbackProxyPort,
     bool repeatable = true,
     bool retryUnreachable = true,
+    _PanelHost host = _PanelHost.site,
   }) async {
     for (int attempt = 1; ; attempt++) {
       try {
-        return await _sendOnce(
+        final T result = await _sendOnce(
           run: run,
           proxyPort: fallbackProxyPort ?? this.fallbackProxyPort,
           repeatable: repeatable,
         );
+        _reached(host, true);
+        return result;
       } on ApiException catch (e) {
+        if (!e.connectFailed ||
+            !retryUnreachable ||
+            attempt >= _maxConnectAttempts) {
+          _reached(host, !e.transportFailure);
+        }
         if (!e.connectFailed || !retryUnreachable) {
           rethrow;
         }
@@ -986,6 +1057,17 @@ class PanelApiClient {
     }
   }
 
+  void _reached(_PanelHost host, bool reachable) {
+    final String? origin = switch (host) {
+      _PanelHost.site => baseUrl,
+      _PanelHost.config => configBaseUrl,
+      _PanelHost.other => null,
+    };
+    if (origin != null) {
+      onReach?.call(origin, reachable);
+    }
+  }
+
   /// repeatable 为 false 时只在连接未建起时换代理重发，超时可能已处理完
   Future<T> _sendOnce<T>({
     required Future<T> Function(http.Client client) run,
@@ -1004,11 +1086,68 @@ class PanelApiClient {
     }
   }
 
+  // 声明 X-ECY-Node-Members 后，各组节点 provider 只带成员名单；按 ecy-panel-nodes 还原成完整格式，
+  // 下游的结构检查、缓存和「只更新节点」判断都与完整格式逐字段相同
+  @visibleForTesting
+  static Map<String, dynamic> withNodePayloads(Map<String, dynamic> config) {
+    final Object? providers = config['proxy-providers'];
+    if (providers is! Map) {
+      return config;
+    }
+    final Object? panel = providers['ecy-panel-nodes'];
+    final Object? source = panel is Map ? panel['payload'] : null;
+    final Map<String, Object?> nodes = <String, Object?>{
+      if (source is List)
+        for (final Object? node in source)
+          if (node is Map && node['name'] is String)
+            node['name'] as String: node,
+    };
+    Object? payloadOf(Map<dynamic, dynamic> provider) {
+      final Object? members = provider['members'];
+      if (members is! List ||
+          members.isEmpty ||
+          provider.containsKey('payload')) {
+        throw ApiException('面板下发的不是一份完整配置');
+      }
+      return <Object?>[
+        for (final Object? member in members)
+          member is String && nodes.containsKey(member)
+              ? jsonDecode(jsonEncode(nodes[member]))
+              : throw ApiException('面板下发的不是一份完整配置'),
+      ];
+    }
+
+    return <String, dynamic>{
+      ...config,
+      'proxy-providers': <String, dynamic>{
+        for (final MapEntry<dynamic, dynamic> entry in providers.entries)
+          '${entry.key}':
+              '${entry.key}'.startsWith('ecy-panel-') &&
+                  entry.value is Map &&
+                  (entry.value as Map).containsKey('members')
+              ? <String, dynamic>{
+                  for (final MapEntry<dynamic, dynamic> field
+                      in (entry.value as Map).entries)
+                    field.key == 'members'
+                        ? 'payload'
+                        : '${field.key}': field.key == 'members'
+                        ? payloadOf(entry.value as Map)
+                        : field.value,
+                }
+              : entry.value,
+      },
+    };
+  }
+
   Future<RemoteProfile> _fetchClashProfileVia(http.Client client) async {
     final http.Response response = await _send(
       () => client.get(
         _configEndpoint('/config/clash'),
-        headers: <String, String>{..._headers(), 'X-ECY-Node-Providers': '1'},
+        headers: <String, String>{
+          ..._headers(),
+          'X-ECY-Node-Providers': '1',
+          'X-ECY-Node-Members': '1',
+        },
       ),
     );
     final Map<String, dynamic> data = _unwrap(response);
@@ -1023,7 +1162,7 @@ class PanelApiClient {
     }
 
     return RemoteProfile(
-      config: Map<String, dynamic>.from(raw),
+      config: withNodePayloads(Map<String, dynamic>.from(raw)),
       revision: data['revision'] as String? ?? '',
       groupIcons: <String, String>{
         if (icons is Map<String, dynamic>)
@@ -1052,6 +1191,9 @@ class PanelApiClient {
             )
           : null,
       cacheBinding: cacheBinding,
+      updateInterval: RemoteProfile.parseUpdateInterval(
+        response.headers['profile-update-interval'],
+      ),
     );
   }
 
@@ -1072,12 +1214,16 @@ class PanelApiClient {
 
   http.Client _proxyClient(int port) {
     final http.Client? cached = _proxy;
-    if (cached != null && _proxyPort == port) {
+    final String? credential = fallbackProxyCredential;
+    if (cached != null &&
+        _proxyPort == port &&
+        _proxyCredential == credential) {
       return cached;
     }
     cached?.close();
     _proxyPort = port;
-    return _proxy = _proxyHttpClient(port);
+    _proxyCredential = credential;
+    return _proxy = _proxyHttpClient(port, credential);
   }
 
   static http.Client _directHttpClient(
@@ -1147,8 +1293,13 @@ class PanelApiClient {
     return bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19);
   }
 
-  static http.Client _proxyHttpClient(int port) => _PanelHttpClient(
-    HttpClient()..findProxy = (Uri _) => 'PROXY 127.0.0.1:$port',
+  static http.Client _proxyHttpClient(
+    int port,
+    String? credential,
+  ) => _PanelHttpClient(
+    HttpClient()
+      ..findProxy = (Uri _) =>
+          'PROXY ${credential == null ? '' : '$credential@'}127.0.0.1:$port',
   );
 
   Future<AnnouncementBundle> fetchAnnouncements() async =>
@@ -1201,16 +1352,24 @@ class PanelApiClient {
       if (uploadUrl.isEmpty || token.isEmpty || url.isEmpty) {
         throw ApiException(L10n.t('上传失败'));
       }
-      final http.Response uploaded = await _sendVia((http.Client client) async {
-        final File file = File(filePath);
-        final _PanelRequest request =
-            _PanelRequest.file(file, Uri.parse(uploadUrl), await file.length())
-              ..headers.addAll(<String, String>{
-                'Content-Type': 'application/octet-stream',
-                'X-Files-Token': token,
-              });
-        return http.Response.fromStream(await client.send(request));
-      }, repeatable: false);
+      final http.Response uploaded = await _sendVia(
+        (http.Client client) async {
+          final File file = File(filePath);
+          final _PanelRequest request =
+              _PanelRequest.file(
+                  file,
+                  Uri.parse(uploadUrl),
+                  await file.length(),
+                )
+                ..headers.addAll(<String, String>{
+                  'Content-Type': 'application/octet-stream',
+                  'X-Files-Token': token,
+                });
+          return http.Response.fromStream(await client.send(request));
+        },
+        repeatable: false,
+        host: _PanelHost.other,
+      );
       _envelope(uploaded);
       return TicketUploadResult(
         url: url,
@@ -1413,10 +1572,12 @@ class PanelApiClient {
     Future<http.Response> Function(http.Client client) request, {
     bool repeatable = true,
     bool retryUnreachable = true,
+    _PanelHost host = _PanelHost.site,
   }) {
     return _viaDirectThenProxy(
       repeatable: repeatable,
       retryUnreachable: retryUnreachable,
+      host: host,
       run: (http.Client client) => _send(() => request(client)),
     );
   }
@@ -1483,6 +1644,7 @@ class PanelApiClient {
         statusCode: response.statusCode,
         ret: ret,
         retryAfterSeconds: _retryAfterSeconds(response),
+        passwordChanged: ret == 0 && payload['password_changed'] == true,
       );
     }
 

@@ -207,7 +207,7 @@ return view.extend({
 			chips.push(E('span', { 'class': 'ecycloud-tag' }, [ network ]));
 
 		if (out)
-			chips.push(E('span', { 'class': 'ecycloud-tag' }, [ out ]));
+			chips.push(E('span', { 'class': 'ecycloud-tag' }, api.flagText(out)));
 
 		if (process)
 			chips.push(E('span', { 'class': 'ecycloud-tag' }, [ process ]));
@@ -340,9 +340,8 @@ return view.extend({
 		detail.closeBtn.style.display = detail.active ? '' : 'none';
 		dom.content(detail.fields, detailFields(detail.item, detail.speed).map(function(field) {
 			return E('div', {}, [
-				E('span', { 'class': 'ecycloud-modal-label' }, [ field[0] + ': ' ]),
-				field[1] || '—'
-			]);
+				E('span', { 'class': 'ecycloud-modal-label' }, [ field[0] + ': ' ])
+			].concat(api.flagText(field[1] || '—')));
 		}));
 	},
 

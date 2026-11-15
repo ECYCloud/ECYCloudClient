@@ -20,6 +20,7 @@ import ECYCloudKit
 @MainActor final class MacApplicationDelegate: NSObject, NSApplicationDelegate {
     var session: ClientSession?
     private var terminating = false
+    private var replied = false
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         !(session?.preferences.closeToTray ?? true)
     }
@@ -27,15 +28,19 @@ import ECYCloudKit
         guard !terminating else { return .terminateLater }
         terminating = true
         Task {
-            do {
-                try await session?.connection?.shutdown()
-                sender.reply(toApplicationShouldTerminate: true)
-            } catch {
-                terminating = false
-                sender.reply(toApplicationShouldTerminate: false)
-            }
+            try? await session?.connection?.shutdown()
+            allowTermination(sender)
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(10))
+            allowTermination(sender)
         }
         return .terminateLater
+    }
+    private func allowTermination(_ sender: NSApplication) {
+        guard !replied else { return }
+        replied = true
+        sender.reply(toApplicationShouldTerminate: true)
     }
 }
 

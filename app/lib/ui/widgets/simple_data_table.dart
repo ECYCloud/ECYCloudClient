@@ -350,6 +350,8 @@ class TableMoney extends StatelessWidget {
   final double amount;
 
   @override
-  Widget build(BuildContext context) =>
-      TableText('¥ ${amount.toStringAsFixed(2)}', bold: true);
+  Widget build(BuildContext context) => TableText(
+    L10n.t('¥ {0}', <Object>[amount.toStringAsFixed(2)]),
+    bold: true,
+  );
 }

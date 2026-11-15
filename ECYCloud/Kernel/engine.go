@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ const MaximumConfigBytes = 8 * 1024 * 1024
 const MaximumPacketBytes = 65535
 
 var ErrConfiguration = errors.New("内核配置无效或包含扩展不支持的监听器")
+var ErrNoNodes = errors.New("面板未下发任何可用节点")
 var ErrStopped = errors.New("连接已停止")
 var ErrPacket = errors.New("数据包格式无效")
 var ErrBusy = errors.New("内核正在运行")
@@ -153,15 +155,15 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 			shutdown()
 		}
 	}()
-	// ApplyConfig logs provider failures without returning them. Never mark an empty provider ready.
+	// ApplyConfig logs provider failures without returning them. An empty node provider cannot carry traffic; an empty rule set only loses its rules.
 	for _, provider := range cfg.Providers {
 		if provider.VehicleType() != P.Compatible && provider.Count() == 0 {
-			return 0, ErrConfiguration
+			return 0, ErrNoNodes
 		}
 	}
 	for _, provider := range cfg.RuleProviders {
 		if provider.VehicleType() != P.Compatible && provider.Count() == 0 {
-			return 0, ErrConfiguration
+			log.Warnln("规则集 %s 为空，已跳过其中的规则", provider.Name())
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -226,7 +228,21 @@ func Stop(id uint64) {
 	currentMu.Unlock()
 	old.logs.stop()
 	old.cancel()
-	old.probeWorkers.Wait()
+	// GeoData 更新不接受取消，单个文件最长下载 90 秒：先停止受理新连接，等待期间持续关闭已有连接，让它随下载失败退出
+	tunnel.OnSuspend()
+	workers := make(chan struct{})
+	go func() {
+		old.probeWorkers.Wait()
+		close(workers)
+	}()
+	for waiting := true; waiting; {
+		closeConnections()
+		select {
+		case <-workers:
+			waiting = false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	if old.device != nil {
 		_ = old.device.Close()
 	}
@@ -242,7 +258,7 @@ func shutdown() {
 	for _, proxy := range tunnel.Proxies() {
 		_ = proxy.Adapter().Close()
 	}
-	statistic.DefaultManager.Range(func(c statistic.Tracker) bool { _ = c.Close(); return true })
+	closeConnections()
 	for _, p := range tunnel.Providers() {
 		if c, ok := p.(io.Closer); ok {
 			_ = c.Close()
@@ -258,6 +274,10 @@ func shutdown() {
 	}
 	executor.Shutdown()
 	statistic.DefaultManager.ResetStatistic()
+}
+
+func closeConnections() {
+	statistic.DefaultManager.Range(func(c statistic.Tracker) bool { _ = c.Close(); return true })
 }
 
 func Submit(id uint64, packet []byte) error {
@@ -378,5 +398,44 @@ func checkProfile(data []byte) error {
 	if json.Unmarshal(raw["tun"], &tunOptions) != nil || tunOptions.Enable || tunOptions.AutoRoute || json.Unmarshal(raw["dns"], &dns) != nil || dns.Listen != "" || json.Unmarshal(raw["tuic-server"], &tuic) != nil || tuic.Enable || json.Unmarshal(raw["iptables"], &iptables) != nil || iptables.Enable {
 		return ErrConfiguration
 	}
+	if !httpsDownloads(raw) {
+		return ErrConfiguration
+	}
 	return nil
+}
+
+// 明文下载会被链路上替换规则集、节点订阅与地理数据库：只检查不改写，与 ProfileAssembler 同口径。
+// 内核取 provider 字段时名字不分大小写（mihomo common/structure），URL、Url 一样会被拿去下载
+func httpsDownloads(raw map[string]json.RawMessage) bool {
+	var geox map[string]any
+	if json.Unmarshal(raw["geox-url"], &geox) == nil {
+		for _, url := range geox {
+			if !httpsURL(url) {
+				return false
+			}
+		}
+	}
+	for _, section := range []string{"proxy-providers", "rule-providers"} {
+		var providers map[string]json.RawMessage
+		if json.Unmarshal(raw[section], &providers) != nil {
+			continue
+		}
+		for _, provider := range providers {
+			var fields map[string]any
+			_ = json.Unmarshal(provider, &fields)
+			for key, url := range fields {
+				if strings.EqualFold(key, "url") && !httpsURL(url) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// 没有地址的本地 provider 不受影响
+func httpsURL(value any) bool {
+	text, ok := value.(string)
+	text = strings.ToLower(strings.TrimSpace(text))
+	return value == nil || (ok && (text == "" || strings.HasPrefix(text, "https://")))
 }

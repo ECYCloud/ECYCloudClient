@@ -38,9 +38,6 @@ class AndroidPlatformService implements PlatformService {
   bool get supportsLaunchAtLogin => true;
 
   @override
-  bool get supportsPerAppProxy => true;
-
-  @override
   bool get isTelevision => _isTelevision;
 
   @override
@@ -116,23 +113,10 @@ class AndroidPlatformService implements PlatformService {
   }
 
   @override
-  Future<List<InstalledApp>> installedApps() async {
-    final List<Object?>? result = await _channel.invokeMethod<List<Object?>>(
-      'apps.list',
-    );
-    if (result == null) {
-      return const <InstalledApp>[];
-    }
-    return <InstalledApp>[
-      for (final Object? item in result)
-        if (item is Map<Object?, Object?>)
-          InstalledApp(
-            packageName: item['package'] as String? ?? '',
-            label: item['label'] as String? ?? '',
-            system: item['system'] == true,
-          ),
-    ];
-  }
+  Future<void> copySecret(String text) => _channel.invokeMethod<void>(
+    'clipboard.copySecret',
+    <String, dynamic>{'text': text},
+  );
 
   @override
   Future<bool> runInstaller(String path) async =>

@@ -57,6 +57,7 @@ function logBody(text) {
 	return out;
 }
 
+/* 内核把出站链写成「策略组[节点]」，与连接页及 Flutter 端 Logger.kernelChain 一样改为「策略组 → 节点」 */
 function parseLog(line) {
 	var match = line.match(/^(\w{3}\s+\w{3}\s+\d+\s+)(\d{2}:\d{2}:\d{2})(\s+\d{4}\s+)([\w.]+)\s+([^:]+):\s*(.*)$/);
 
@@ -74,7 +75,7 @@ function parseLog(line) {
 		level: lineLevel(line),
 		time: match[2],
 		source: program,
-		message: logBody(match[6])
+		message: logBody(match[6]).replace(/ using ([^\[\]]+)\[([^\[\]]+)\]$/, ' using $1 → $2')
 	};
 }
 
@@ -172,9 +173,8 @@ return view.extend({
 				E('span', { 'class': 'ecycloud-log-time' }, [ entry.time ]),
 				E('span', { 'class': 'ecycloud-log-src' }, [ entry.source ]),
 				E('span', { 'class': 'ecycloud-log-msg' }, [
-					inbound ? E('span', { 'class': 'ecycloud-tag' }, [ inbound ]) : '',
-					entry.message
-				])
+					inbound ? E('span', { 'class': 'ecycloud-tag' }, [ inbound ]) : ''
+				].concat(api.flagText(entry.message)))
 			]);
 		})));
 	},

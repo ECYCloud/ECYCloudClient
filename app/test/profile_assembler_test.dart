@@ -471,39 +471,6 @@ void main() {
     );
   });
 
-  test('分应用名单落在 tun 段，未选模式时整键不出现', () {
-    final Map<String, dynamic> off =
-        assembler
-                .assemble(remote: remoteProfile(), template: template())
-                .config['tun']
-            as Map<String, dynamic>;
-
-    expect(off.containsKey('include-package'), isFalse);
-    expect(off.containsKey('exclude-package'), isFalse);
-
-    final LocalTemplate perApp = LocalTemplate(
-      const LocalTemplateOptions(
-        tunEnabled: true,
-        tunStrictRoute: false,
-        mixedPort: 12334,
-        allowLan: false,
-        ipv6Enabled: true,
-        logLevel: 'warning',
-        tunIncludePackages: <String>['com.example.one'],
-      ),
-      const ClashApiOptions(port: 19090, secret: 'secret'),
-    );
-
-    final Map<String, dynamic> included =
-        assembler
-                .assemble(remote: remoteProfile(), template: perApp)
-                .config['tun']
-            as Map<String, dynamic>;
-
-    expect(included['include-package'], <String>['com.example.one']);
-    expect(included.containsKey('exclude-package'), isFalse);
-  });
-
   test('关闭 TUN 只改 enable，不删整段', () {
     final Map<String, dynamic> tun =
         assembler
@@ -663,6 +630,113 @@ void main() {
     expect(issues, anyElement(contains('missing-set')));
     expect(issues, anyElement(contains('不存在的组')));
     expect(issues, anyElement(contains('兜底')));
+  });
+
+  // 只检查不改写：明文 http 整份拒绝，https 与没有地址的本地 provider 照常通过；内核取 url 不分大小写
+  test('geox-url 与 provider 的下载地址只收 https', () {
+    final Map<String, dynamic> remote = remoteProfile()
+      ..['geox-url'] = <String, dynamic>{
+        'mmdb': 'https://example.com/geoip.metadb',
+        'geosite': 'HTTPS://example.com/GeoSite.dat',
+        'asn': '',
+      };
+    expect(ProfileInspector.inspect(remote), isEmpty);
+
+    remote['geox-url'] = <String, dynamic>{
+      'geoip': 'http://example.com/geoip.dat',
+    };
+    final Map<String, dynamic> rules =
+        remote['rule-providers'] as Map<String, dynamic>;
+    (rules['geosite-cn'] as Map<String, dynamic>)['url'] =
+        ' HTTP://example.com/cn.mrs';
+    rules['upper'] = <String, dynamic>{
+      'type': 'http',
+      'behavior': 'domain',
+      'url': 'https://example.com/upper.yaml',
+      'URL': 'http://example.com/upper.yaml',
+      'path': './rules/upper.yaml',
+    };
+    remote['proxy-providers'] = <String, dynamic>{
+      'sub': <String, dynamic>{
+        'type': 'http',
+        'url': 'http://example.com/sub.yaml',
+        'path': './sub.yaml',
+      },
+    };
+    expect(
+      ProfileInspector.inspect(remote),
+      containsAll(<String>[
+        'geox-url「geoip」必须使用 https',
+        '规则集「geosite-cn」的下载地址必须使用 https',
+        '规则集「upper」的下载地址必须使用 https',
+        '节点订阅「sub」的下载地址必须使用 https',
+      ]),
+    );
+    expect(
+      ProfileInspector.inspect(remote),
+      isNot(anyElement(contains('local-list'))),
+    );
+    expect(
+      (rules['geosite-cn'] as Map<String, dynamic>)['url'],
+      ' HTTP://example.com/cn.mrs',
+    );
+    expect(
+      () => ProfileInspector.ensureValid(remote),
+      throwsA(isA<ProfileFormatException>()),
+    );
+  });
+
+  // 修复前只认小写 path：PATH、Path 写法能绕过保留文件名检查，覆盖运行目录里的客户端文件；变体合法时照常放行
+  test('provider 的保存路径与下载地址按键名不分大小写逐个检查', () {
+    final Map<String, dynamic> remote = remoteProfile();
+    final Map<String, dynamic> rules =
+        remote['rule-providers'] as Map<String, dynamic>;
+    rules['upper'] = <String, dynamic>{
+      'type': 'http',
+      'behavior': 'domain',
+      'url': 'https://example.com/upper.yaml',
+      'PATH': './config.json',
+    };
+    rules['mixed'] = <String, dynamic>{
+      'type': 'http',
+      'behavior': 'domain',
+      'url': 'https://example.com/mixed.yaml',
+      'path': './rules/mixed.yaml',
+      'Path': 'CACHE.DB',
+    };
+    remote['proxy-providers'] = <String, dynamic>{
+      'sub': <String, dynamic>{
+        'type': 'http',
+        'URL': 'https://example.com/sub.yaml',
+        'pAtH': '../outside.yaml',
+      },
+    };
+    expect(
+      ProfileInspector.inspect(remote),
+      containsAll(<String>[
+        '「upper」的保存路径必须位于运行目录内，且不能覆盖客户端文件',
+        '「mixed」的保存路径必须位于运行目录内，且不能覆盖客户端文件',
+        '「sub」的保存路径必须位于运行目录内，且不能覆盖客户端文件',
+      ]),
+    );
+
+    rules
+      ..remove('upper')
+      ..remove('mixed')
+      ..['legit'] = <String, dynamic>{
+        'type': 'http',
+        'behavior': 'domain',
+        'URL': 'https://example.com/legit.yaml',
+        'PATH': './Rules/Legit.YAML',
+      };
+    remote['proxy-providers'] = <String, dynamic>{
+      'sub': <String, dynamic>{
+        'type': 'http',
+        'URL': 'https://example.com/sub.yaml',
+        'Path': './Sub.yaml',
+      },
+    };
+    expect(ProfileInspector.inspect(remote), isEmpty);
   });
 
   test('classical 的 rule-providers 不能用 mrs', () {

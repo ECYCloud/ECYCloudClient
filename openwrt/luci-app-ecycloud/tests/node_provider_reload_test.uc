@@ -2,7 +2,8 @@
 
 import { testState } from 'fs';
 import { API_FILE, CRED_FILE, PROFILE_FILE, readJson, sessionBinding, sessionValid, settings } from 'ecycloud.common';
-import { NODE_PROVIDER, SPEED_GROUP, assemble, canUpdateNodes, inspect, membersOf, nodesOf, write, writeNodeProviders } from 'ecycloud.profile';
+import { NODE_PROVIDER, SPEED_GROUP, assemble, canUpdateNodes, inspect, kernelConfig, membersOf, nodesOf, runtimeConfig, write, writeNodeProviders } from 'ecycloud.profile';
+import { withNodePayloads } from 'ecycloud.panel';
 import { delayBatch, proxies } from 'ecycloud.clash';
 import { update } from 'ecycloud.service';
 
@@ -14,7 +15,7 @@ function check(ok, message) {
 };
 
 function copy(value) { return json(sprintf('%J', value)); };
-const runDir = '/etc/ecycloud/run';
+const runDir = '/etc/ecycloud/run/fixture-session';
 const groupProvider = 'ecy-panel-' + join('', map([ 1, 2, 3, 4 ], () => '0123456789abcdef'));
 const initial = {
 	proxies: [],
@@ -30,7 +31,7 @@ const initial = {
 };
 initial['proxy-providers'][groupProvider] = { type: 'file', path: `${groupProvider}.json`, payload: copy(nodesOf(initial)) };
 testState.config = { run_dir: runDir, site_url: 'https://panel.test', sub_url: 'https://sub.test', enabled: '1', mode: 'tun' };
-testState.files[CRED_FILE] = sprintf('%J', { email: 'router@test', token: 'synthetic-token', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
+testState.files[CRED_FILE] = sprintf('%J', { email: 'router@test', token: 'synthetic-token', session_id: 'fixture-session', account_key: 'fixture-session', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
 testState.files[API_FILE] = sprintf('%J', { port: 19090, secret: 'synthetic-secret', speed: 'synthetic-speed' });
 testState.files['/proc/41/cmdline'] = `/usr/libexec/mihomo\0-d\0${runDir}\0`;
 testState.files[`${runDir}/geoip.metadb`] = 'fixture';
@@ -84,6 +85,7 @@ let requests = [];
 let failedProvider = '';
 let validationFailed = false;
 let expectedBeforeValidation = originalFile;
+let issuedAt = 1;
 testState.onCommand = command => {
 	if (index(command, ' -t -f ') < 0)
 		return;
@@ -110,7 +112,7 @@ testState.onRequest = () => {
 			testState.response = { ret: 1, data: { config_revision: revision } };
 		else if (index(text, '/config/clash') >= 0) {
 			check(index(text, 'X-ECY-Node-Providers: 1') >= 0, 'OpenWrt 必须请求面板节点订阅格式');
-			testState.response = { ret: 1, data: { revision, config: candidate, offline_authorization: { issued_at: 1, valid_until: 2000000000 } } };
+			testState.response = { ret: 1, data: { revision, config: candidate, offline_authorization: { issued_at: issuedAt, valid_until: 2000000000 } } };
 		} else if (index(text, '/providers/proxies/') >= 0) {
 			if (length(failedProvider) && index(text, failedProvider) >= 0) {
 				failedProvider = '';
@@ -189,6 +191,8 @@ for (let failure in [ 'validation', 'write', 'provider' ]) {
 		`节点更新失败必须恢复旧文件与缓存：${failure}`);
 	check(readJson(`${runDir}/config.json`)['proxy-providers'][NODE_PROVIDER].payload[0].port == 10002,
 		`节点更新失败必须恢复旧运行配置：${failure}`);
+	check(testState.files[`${runDir}/kernel.json`] == sprintf('%J', kernelConfig(readJson(`${runDir}/config.json`))),
+		`节点更新失败时内核配置必须随运行配置一起恢复：${failure}`);
 	uninterrupted();
 	validationFailed = false; testState.commandStatus = 0; testState.onWrite = null;
 }
@@ -201,13 +205,82 @@ result = update(false);
 check(result.ok && !result.reloaded && !length(membersOf(candidate, candidate['proxy-groups'][0])),
 	'节点增删和策略组节点暂时为空时，仍应独立更新并排除占位节点');
 uninterrupted();
+
+/* 面板 profile-update-interval：版本未变也按间隔重拉，内容相同不重启、不断连 */
+const realTime = time;
+let clock = 1791126000;
+global.time = () => clock;
+function intervalUpdate(header) {
+	testState.responseHeaders = header == null ? 'HTTP/2 200\r\n\r\n' : `HTTP/2 200\r\nprofile-update-interval: ${header}\r\n\r\n`;
+	requests = []; testState.commands = []; issuedAt = clock;
+	const res = update(false);
+	check(res.ok && !res.changed, '定时重拉到相同配置必须按无变化处理');
+	uninterrupted();
+	return length(filter(requests, text => index(text, '/config/clash') >= 0));
+};
+check(intervalUpdate('6') == 1, '缓存签发时间已超过默认间隔时，版本未变也必须重拉完整配置');
+check(readJson(PROFILE_FILE).update_interval_hours == 6 && readJson(PROFILE_FILE).offline_authorization.issued_at == clock,
+	'面板下发的更新间隔与签发时间必须随缓存落盘');
+clock += 5 * 3600 + 3599;
+check(intervalUpdate('6') == 0, '未到面板下发的更新间隔且版本未变时不能请求 /config/clash');
+clock += 1;
+check(intervalUpdate('6') == 1, '满面板下发的更新间隔必须重拉一次');
+for (let header in [ null, '0', '8761', '-3', '1.5', 'abc', '0x18', '', '99999999999999999999' ]) {
+	clock += 24 * 3600;
+	check(intervalUpdate(header) == 1 && readJson(PROFILE_FILE).update_interval_hours == null,
+		`非法或缺失的更新间隔必须视为未下发：${header}`);
+	clock += 23 * 3600 + 3599;
+	check(intervalUpdate('6') == 0, `未下发间隔时必须按 24 小时计时：${header}`);
+	clock += 1;
+	check(intervalUpdate(header) == 1, `未下发间隔时满 24 小时必须重拉：${header}`);
+}
+clock += 24 * 3600;
+check(intervalUpdate(' +8760 ') == 1 && readJson(PROFILE_FILE).update_interval_hours == 8760, '上限 8760 小时必须接受');
+clock += 8759 * 3600;
+check(intervalUpdate('1') == 0, '8760 小时间隔未到期时不能重拉');
+clock += 24 * 3600;
+check(intervalUpdate('6') == 1, '超过 8760 小时必须重拉');
+clock += 3600;
+testState.responseHeaders = 'HTTP/1.1 200 Connection established\r\nprofile-update-interval: 1\r\n\r\nHTTP/2 200\r\n\r\n';
+requests = []; testState.commands = []; issuedAt = clock;
+check(update(true).ok && readJson(PROFILE_FILE).update_interval_hours == null, '代理 CONNECT 响应头里的间隔不能算作面板下发');
+testState.files[PROFILE_FILE] = sprintf('%J', { ...readJson(PROFILE_FILE), update_interval_hours: 99999 });
+clock += 23 * 3600;
+check(intervalUpdate('6') == 0, '缓存里被篡改的非法间隔必须按 24 小时处理');
+clock += 3600;
+check(intervalUpdate('6') == 1, '缓存里被篡改的非法间隔满 24 小时必须重拉');
+global.time = realTime;
+testState.responseHeaders = null;
+issuedAt = 1;
 const rulesChanged = copy(candidate);
 rulesChanged.rules = [ 'MATCH,DIRECT' ];
 check(!canUpdateNodes(candidate, rulesChanged), '规则变更不能错误归类为仅节点更新');
 const dnsChanged = copy(candidate);
 dnsChanged.dns.nameserver = [ '1.1.1.1' ];
 check(!canUpdateNodes(candidate, dnsChanged), 'DNS 变更不能错误归类为仅节点更新');
+const shown = json(runtimeConfig().text);
+check(length(shown['proxy-providers'][NODE_PROVIDER].payload) == length(nodesOf(readJson(`${runDir}/config.json`))) &&
+	shown['proxy-providers'][NODE_PROVIDER].payload[0].password == '******' &&
+	length(filter(keys(shown['proxy-providers']), name => name != NODE_PROVIDER && index(name, 'ecy-panel-') == 0 &&
+		shown['proxy-providers'][name].payload != null)) == 0,
+	'运行配置页必须列出全部节点且只列一次，凭据打码');
 testState.onRequest = () => { testState.httpStatus = 401; testState.response = { ret: 0, msg: 'fixture denied' }; };
 result = update(false);
 check(!result.ok && testState.files[PROFILE_FILE] == null && !sessionValid(), '相同配置版本也必须先确认会话，401 必须清除旧授权缓存和会话');
+const kernelFile = readJson(`${runDir}/kernel.json`);
+const runFile = readJson(`${runDir}/config.json`);
+check(length(filter(keys(kernelFile['proxy-providers']), name => index(name, 'ecy-panel-') == 0 && kernelFile['proxy-providers'][name].payload == null)) ==
+	length(filter(keys(runFile['proxy-providers']), name => index(name, 'ecy-panel-') == 0)) &&
+	kernelFile['proxy-providers'][NODE_PROVIDER].path == `${NODE_PROVIDER}.json` && length(nodesOf(runFile)) > 0,
+	'内核配置不带内嵌节点，运行配置保留完整节点供校验、回滚与节点列表使用');
+const full = { ret: 1, data: { config: copy(initial) } };
+const compact = { ret: 1, data: { config: copy(initial) } };
+compact.data.config['proxy-providers'][groupProvider] = { type: 'file', path: `${groupProvider}.json`, members: [ '节点一' ] };
+check(sprintf('%J', withNodePayloads(compact)) == sprintf('%J', full), '成员名单按 ecy-panel-nodes 还原后必须与完整格式逐字段一致');
+check(sprintf('%J', withNodePayloads(copy(full))) == sprintf('%J', full), '完整格式不能被改写');
+for (let members in [ [ '不存在' ], [], 'x' ]) {
+	const bad = { ret: 1, data: { config: copy(initial) } };
+	bad.data.config['proxy-providers'][groupProvider] = { type: 'file', path: `${groupProvider}.json`, members };
+	check(!withNodePayloads(bad).ok, '成员名单引用未下发节点或格式错误时必须拒绝整份配置');
+}
 print(`OpenWrt 节点独立更新回归通过：${assertions} 项断言。\n`);

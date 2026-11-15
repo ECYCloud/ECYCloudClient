@@ -1,5 +1,13 @@
 import Foundation
 
+// 本机 Application Support/ECYCloud：图标、流量排行、面板缓存与 macOS 日志都在这里；测试经 TaskLocal 换成临时目录，不碰真实数据
+@usableFromInline enum UserDataDirectory {
+    @TaskLocal static var override: URL?
+    @usableFromInline static var root: URL? {
+        override ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ECYCloud", isDirectory: true)
+    }
+}
+
 final class ClientLogStore {
     static let levels = ["debug", "info", "warning", "error", "silent"]
     static let filePattern = #"^app-\d{4}-\d{2}-\d{2}\.log$"#
@@ -53,8 +61,7 @@ final class ClientLogStore {
     static func directory(owner: String) -> URL? {
         guard owner.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else { return nil }
         #if os(macOS)
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("ECYCloud/Logs/\(owner)", isDirectory: true)
+        return UserDataDirectory.root?.appendingPathComponent("Logs/\(owner)", isDirectory: true)
         #else
         guard let applicationID = Bundle.main.bundleIdentifier else { return nil }
         return try? TunnelFiles.directory(group: "group." + applicationID).appendingPathComponent("Logs/\(owner)", isDirectory: true)

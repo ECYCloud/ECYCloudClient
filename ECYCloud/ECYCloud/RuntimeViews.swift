@@ -226,6 +226,7 @@ struct RuntimeLogsView: View {
     @State private var level = ""
     @State private var search = ""
     @State private var entries: [TunnelLogs.Entry] = []
+    @State private var shown: [Int64: String] = [:]
     @Environment(\.colorScheme) private var scheme
     private var connected: Bool { session.connection?.controlPlaneReady == true }
     var body: some View {
@@ -250,7 +251,7 @@ struct RuntimeLogsView: View {
                                     Text(verbatim: "mihomo").lineLimit(1).foregroundStyle(colors.secondary).frame(width: 82, alignment: .leading)
                                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                                         if let inbound = entry.inbound, !inbound.isEmpty { ProductTag(text: inbound) }
-                                        Text(verbatim: entry.message).foregroundStyle(tone).productTextSelection()
+                                        Text(verbatim: shown[entry.id] ?? entry.message).foregroundStyle(tone).productTextSelection()
                                     }.frame(maxWidth: .infinity, alignment: .leading)
                                 }.font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 7).productScrollStop()
                             }
@@ -313,7 +314,11 @@ struct RuntimeLogsView: View {
             }
             try Task.checkCancellation()
             var seen: Set<Int64> = []
-            entries = rows.filter { seen.insert($0.id).inserted }
+            let unique = rows.filter { seen.insert($0.id).inserted }
+            // 对应 logs_page.dart：内核日志里的 node-编号 与策略组标识显示成节点名
+            let messages = session.catalog?.annotateLogs(unique.map(\.message)) ?? unique.map(\.message)
+            shown = Dictionary(zip(unique.map(\.id), messages), uniquingKeysWith: { first, _ in first })
+            entries = unique
             return first
         }
     }

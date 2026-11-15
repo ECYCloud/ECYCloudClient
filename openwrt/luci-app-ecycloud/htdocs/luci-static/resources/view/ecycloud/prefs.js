@@ -1,8 +1,44 @@
 'use strict';
 'require view';
 'require form';
+'require rpc';
 'require tools.widgets as widgets';
 'require ecycloud.api as api';
+
+var callChanges = rpc.declare({
+	object: 'uci',
+	method: 'changes',
+	params: [ 'config' ],
+	expect: { changes: [] }
+});
+
+var callApply = rpc.declare({
+	object: 'uci',
+	method: 'apply',
+	params: [ 'rollback', 'timeout' ]
+});
+
+var callConfirm = rpc.declare({
+	object: 'uci',
+	method: 'confirm'
+});
+
+function wait(ms) {
+	return new Promise(function(resolve) {
+		setTimeout(resolve, ms);
+	});
+}
+
+/* 带回滚应用：截止前确认不上（改坏 LAN 等导致浏览器连不回来），rpcd 自动回滚 */
+function confirmApply(deadline) {
+	return callConfirm().catch(function() {
+		if (Date.now() >= deadline)
+			throw new Error(_('The router could not be reached, so the changes were rolled back'));
+		return wait(1000).then(function() {
+			return confirmApply(deadline);
+		});
+	});
+}
 
 function actionButton(label, run) {
 	return api.btn(label, 'cta', run);
@@ -159,18 +195,63 @@ function kernelUpdateText(res) {
 
 return view.extend({
 	handleSave: null,
+	handleSaveApply: null,
+	handleReset: null,
 
-	handleSaveApply: function() {
-		var self = this;
+	saveSection: function(section) {
+		var m = this._form;
+		var timeout = L.env.apply_rollback;
 
-		return api.status().then(function(status) {
-			if (!api.signedIn(status))
+		m.checkDepends();
+		return section.parse().then(function() {
+			return m.data.save();
+		}).then(function() {
+			return m.load();
+		}).then(function() {
+			return callChanges('ecycloud');
+		}).then(function(changes) {
+			if (!changes.length) {
+				api.notify({ ok: true, msg: _('No changes to save') });
 				return;
-
-			return Promise.resolve(self._form ? self._form.save() : api.saveMaps()).then(function() {
-				return L.ui.changes.apply(true);
+			}
+			var deadline = Date.now() + timeout * 1000;
+			return callApply(true, timeout).then(function() {
+				return wait(L.env.apply_holdoff * 1000);
+			}).then(function() {
+				return confirmApply(deadline);
+			}).then(function() {
+				api.notify({ ok: true, msg: _('Applied') });
 			});
 		});
+	},
+
+	resetSection: function(section, node, icon) {
+		var self = this;
+
+		return Promise.resolve(section.render()).then(function(fresh) {
+			self.decorateSection(section, fresh, icon, true);
+			node.replaceWith(fresh);
+			self._form.checkDepends();
+		});
+	},
+
+	decorateSection: function(section, node, icon, editable) {
+		var self = this;
+		var h3 = node.querySelector('h3');
+
+		if (h3 && !h3.querySelector('.ecycloud-ico'))
+			h3.insertBefore(E('span', { 'class': 'ecycloud-ico', 'data-ico': icon }), h3.firstChild);
+		if (!editable)
+			return;
+
+		node.appendChild(E('div', { 'class': 'ecycloud-section-actions' }, [
+			api.btn(_('Save & Apply'), 'cta', function() {
+				return self.saveSection(section);
+			}),
+			api.btn(_('Reset'), 'danger', function() {
+				return self.resetSection(section, node, icon);
+			})
+		]));
 	},
 
 	load: function() {
@@ -189,6 +270,7 @@ return view.extend({
 	},
 
 	renderForm: function(status) {
+		var self = this;
 		var m, s, o;
 
 		m = new form.Map('ecycloud', null,
@@ -354,7 +436,7 @@ return view.extend({
 		api.skinValue(o);
 
 		o = s.option(form.Value, 'geox_base', _('GeoData mirror'),
-			_('Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable.'));
+			_('Base URL for geoip.metadb and GeoSite.dat. Must be https. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable.'));
 		o.placeholder = 'https://rules.ecydy.com/Clash';
 		api.skinValue(o);
 
@@ -437,8 +519,12 @@ return view.extend({
 		s = m.section(form.NamedSection, 'config', 'ecycloud', _('About'));
 		s.addremove = false;
 
-		dummyOption(s, '_privacy', _('Privacy Policy'), null, function() {
-			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy Policy') ]);
+		dummyOption(s, '_terms', _('Terms of service'), null, function() {
+			return E('a', { href: status.site + '/tos', target: '_blank', rel: 'noreferrer' }, [ _('Terms of service') ]);
+		});
+
+		dummyOption(s, '_privacy', _('Privacy policy'), null, function() {
+			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy policy') ]);
 		});
 
 		o = s.option(form.DummyValue, '_version', _('Current version'));
@@ -488,10 +574,8 @@ return view.extend({
 
 		return Promise.resolve(m.render()).then(function(node) {
 			var icons = [ 'vpn', 'tune', 'description', 'info' ];
-			node.querySelectorAll('.cbi-section > h3').forEach(function(h3, i) {
-				if (!icons[i] || h3.querySelector('.ecycloud-ico'))
-					return;
-				h3.insertBefore(E('span', { 'class': 'ecycloud-ico', 'data-ico': icons[i] }), h3.firstChild);
+			node.querySelectorAll('.cbi-section').forEach(function(section, i) {
+				self.decorateSection(m.children[i], section, icons[i], i < icons.length - 1);
 			});
 			return api.shell([ node ]);
 		});

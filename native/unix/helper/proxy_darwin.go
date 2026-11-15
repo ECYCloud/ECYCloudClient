@@ -124,8 +124,21 @@ func (p *proxyManager) restore() error {
 		return err
 	}
 
+	listed, err := listedServices()
+	if err != nil {
+		return err
+	}
+	present := make(map[string]bool, len(listed))
+	for _, name := range listed {
+		present[strings.TrimPrefix(name, "*")] = true
+	}
+
 	var failures []error
 	for _, service := range snapshot.Services {
+		if !present[service.Name] {
+			logf("快照中的网络服务 %s 已不存在，跳过还原", service.Name)
+			continue
+		}
 		for index, proxy := range managedProxies {
 			failures = append(failures, restoreEntry(service.Name, proxy.set, proxy.state, service.Proxies[index]))
 		}
@@ -221,38 +234,63 @@ func captureSnapshot(services []string, pid int) (proxySnapshot, error) {
 }
 
 func loadSnapshot() (proxySnapshot, error) {
+	return loadSnapshotFile(snapshotPath())
+}
+
+func loadSnapshotFile(path string) (proxySnapshot, error) {
 	var snapshot proxySnapshot
-	data, err := os.ReadFile(snapshotPath())
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return snapshot, err
 	}
 	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return snapshot, fmt.Errorf("代理快照已损坏: %w", err)
+		return snapshot, discardSnapshot(path, fmt.Errorf("代理快照已损坏: %w", err))
 	}
 	if len(snapshot.Services) == 0 {
-		return snapshot, fmt.Errorf("代理快照没有记录任何网络服务")
+		return snapshot, discardSnapshot(path, fmt.Errorf("代理快照没有记录任何网络服务"))
 	}
 	for _, service := range snapshot.Services {
 		if len(service.Proxies) != len(managedProxies) {
-			return snapshot, fmt.Errorf("代理快照与当前版本不匹配")
+			return snapshot, discardSnapshot(path, fmt.Errorf("代理快照与当前版本不匹配"))
 		}
 	}
 	return snapshot, nil
 }
 
+func discardSnapshot(path string, reason error) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(reason, err)
+	}
+	logf("%v，已删除", reason)
+	return fmt.Errorf("%w: %w", reason, os.ErrNotExist)
+}
+
 func saveSnapshot(snapshot proxySnapshot) error {
-	if err := prepareRunDir(); err != nil {
+	if err := prepareRunRoot(); err != nil {
 		return err
 	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(snapshotPath(), data, 0o600)
+	return writeSnapshotFile(snapshotPath(), data)
 }
 
-// 首行是说明文字，带 * 前缀的是已停用的服务，都不该动
-func activeServices() ([]string, error) {
+func writeSnapshotFile(path string, data []byte) error {
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+		os.Remove(temporary)
+		return err
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		os.Remove(temporary)
+		return err
+	}
+	return nil
+}
+
+// 首行是说明文字，带 * 前缀的是已停用的服务
+func listedServices() ([]string, error) {
 	out, err := output("-listallnetworkservices")
 	if err != nil {
 		return nil, err
@@ -261,10 +299,25 @@ func activeServices() ([]string, error) {
 	var services []string
 	for index, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if index == 0 || line == "" || strings.HasPrefix(line, "*") {
+		if index == 0 || line == "" {
 			continue
 		}
 		services = append(services, line)
+	}
+	return services, nil
+}
+
+func activeServices() ([]string, error) {
+	listed, err := listedServices()
+	if err != nil {
+		return nil, err
+	}
+
+	var services []string
+	for _, line := range listed {
+		if !strings.HasPrefix(line, "*") {
+			services = append(services, line)
+		}
 	}
 	if len(services) == 0 {
 		return nil, fmt.Errorf("系统里没有已启用的网络服务")

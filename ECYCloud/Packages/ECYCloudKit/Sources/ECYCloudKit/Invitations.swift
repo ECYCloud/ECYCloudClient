@@ -1,8 +1,8 @@
 import Foundation
 
 public struct InviteSummary: Decodable, Sendable {
-    public struct InvitedUser: Decodable, Identifiable, Sendable { public let id: Int; public let userName: String, email: String, regDate: String }
-    public struct Payback: Decodable, Identifiable, Sendable { public let id: Int, userid: Int; public let total: Double, refGet: Double; public let datetime: String }
+    public struct InvitedUser: Decodable, Identifiable, Sendable { public let id: Int; public let regDate: String }
+    public struct Payback: Decodable, Identifiable, Sendable { public let id: Int, userid: Int; public let refGet: Double; public let datetime: String }
     public struct Withdrawal: Decodable, Identifiable, Sendable {
         public let id: Int, status: Int
         public let amount: Double

@@ -11,8 +11,8 @@ class SpeedProbeConfig {
 
   // 派生方式必须与 NodeSpeedTester 发出的 Proxy-Authorization 保持一致，
   // 两侧只许经此函数取值
-  static String credential(String secret) =>
-      '$listenerName:${sha256.convert(utf8.encode('$listenerName\u0000$secret')).toString()}';
+  static String credential(String secret, [String label = listenerName]) =>
+      '$label:${sha256.convert(utf8.encode('$label\u0000$secret')).toString()}';
 
   static void applyTo(
     Map<String, dynamic> config,

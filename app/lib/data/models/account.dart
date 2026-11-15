@@ -84,21 +84,15 @@ class AccountStatus {
 class InvitedUserItem {
   const InvitedUserItem({
     required this.id,
-    required this.userName,
-    required this.email,
     required this.regDate,
   });
 
   final int id;
-  final String userName;
-  final String email;
   final String regDate;
 
   factory InvitedUserItem.fromJson(Map<String, dynamic> json) =>
       InvitedUserItem(
         id: (json['id'] as num?)?.toInt() ?? 0,
-        userName: json['user_name'] as String? ?? '',
-        email: json['email'] as String? ?? '',
         regDate: json['reg_date'] as String? ?? '',
       );
 }
@@ -107,7 +101,6 @@ class PaybackItem {
   const PaybackItem({
     required this.id,
     required this.userId,
-    required this.total,
     required this.refBy,
     required this.refGet,
     required this.datetime,
@@ -115,7 +108,6 @@ class PaybackItem {
 
   final int id;
   final int userId;
-  final double total;
   final int refBy;
   final double refGet;
   final String datetime;
@@ -123,7 +115,6 @@ class PaybackItem {
   factory PaybackItem.fromJson(Map<String, dynamic> json) => PaybackItem(
     id: (json['id'] as num?)?.toInt() ?? 0,
     userId: (json['userid'] as num?)?.toInt() ?? 0,
-    total: (json['total'] as num?)?.toDouble() ?? 0,
     refBy: (json['ref_by'] as num?)?.toInt() ?? 0,
     refGet: (json['ref_get'] as num?)?.toDouble() ?? 0,
     datetime: json['datetime'] as String? ?? '',
@@ -418,7 +409,8 @@ class EditAccountOptions {
       telegramBot: json['telegram_bot'] as String? ?? '',
       telegramId: (json['telegram_id'] as num?)?.toInt() ?? 0,
       imValue: json['im_value'] as String? ?? '',
-      bindToken: json['bind_token'] as String? ?? '',
+      // 面板的 bind_token 只给旧版客户端：绑定码要复核密码后从 telegramReset 取得
+      bindToken: '',
       telegramUnbindKick: json['telegram_unbind_kick'] == true,
       mailNotifySettings: settingsRaw is Map<String, dynamic>
           ? Map<String, dynamic>.from(settingsRaw)
@@ -582,6 +574,7 @@ class PurchaseRecord {
     required this.renew,
     required this.autoRenew,
     required this.canToggle,
+    required this.autoRenewUnavailableReason,
     required this.type,
   });
 
@@ -596,6 +589,7 @@ class PurchaseRecord {
   final String? renew;
   final bool autoRenew;
   final bool canToggle;
+  final String autoRenewUnavailableReason;
   final String type;
 
   factory PurchaseRecord.fromJson(Map<String, dynamic> json) => PurchaseRecord(
@@ -610,6 +604,8 @@ class PurchaseRecord {
     renew: json['renew']?.toString(),
     autoRenew: json['auto_renew'] == true,
     canToggle: json['can_toggle'] == true,
+    autoRenewUnavailableReason:
+        json['auto_renew_unavailable_reason']?.toString() ?? '',
     type: json['type']?.toString() ?? '',
   );
 }

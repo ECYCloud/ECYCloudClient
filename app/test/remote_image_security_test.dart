@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -108,6 +109,40 @@ void main() {
       onDecode: (int n) => decoded = n,
     );
     expect(decoded, 50 << 20);
+  });
+
+  // 富文本图片每会话合计 200 MiB：前 4 张 45 MiB 用掉 180 MiB，第 5 张中途超额即判失败
+  test('富文本图片累计超出每会话预算后按加载失败处理，新会话重新计数', () async {
+    int requests = 0;
+    respond = (HttpRequest request) async {
+      requests++;
+      request.response.contentLength = 45 << 20;
+      final Uint8List chunk = Uint8List(1 << 20);
+      for (int i = 0; i < 45; i++) {
+        request.response.add(chunk);
+      }
+      await request.response.close();
+    };
+    final List<int> decoded = <int>[];
+    for (int i = 0; i < 6; i++) {
+      int size = 0;
+      await loadFailure(
+        RemoteImage('$origin/image-$i'),
+        onDecode: (int n) => size = n,
+      );
+      decoded.add(size);
+    }
+    expect(decoded, <int>[45 << 20, 45 << 20, 45 << 20, 45 << 20, 0, 0]);
+    expect(requests, 5, reason: '预算用完后不再发起请求');
+
+    await RemoteIcon.clearSession();
+    RemoteIcon.resumeSession();
+    int size = 0;
+    await loadFailure(
+      RemoteImage('$origin/image-0'),
+      onDecode: (int n) => size = n,
+    );
+    expect(size, 45 << 20);
   });
 
   test('退出会取消未结束的图片响应，旧会话不能再次发起下载', () async {
@@ -254,6 +289,50 @@ void main() {
     );
     expect(decoded, 0);
     expect(requests, 6);
+  });
+
+  // 一篇富文本的图片同时开始加载，每张最多 50 MiB 整份进内存：同时下载的数量必须封顶
+  test('同时下载的远程图片最多 4 张，其余排队，退出时排队的请求不再发出', () async {
+    final Completer<void> gate = Completer<void>();
+    int requests = 0, active = 0, peak = 0;
+    respond = (HttpRequest request) async {
+      requests++;
+      peak = max(peak, ++active);
+      await gate.future;
+      active--;
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    };
+    Future<void> settle(int expected) async {
+      final DateTime deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (requests < expected && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+
+    final List<Future<Object>> loads = <Future<Object>>[
+      for (int i = 0; i < 6; i++) loadFailure(RemoteImage('$origin/held-$i')),
+    ];
+    await settle(4);
+    expect((requests, peak), (4, 4));
+    gate.complete();
+    await Future.wait(loads);
+    expect((requests, peak), (6, 4));
+
+    final Completer<void> held = Completer<void>();
+    respond = (HttpRequest request) async {
+      requests++;
+      await held.future;
+    };
+    for (int i = 0; i < 6; i++) {
+      unawaited(loadFailure(RemoteImage('$origin/queued-$i')));
+    }
+    await settle(10);
+    expect(requests, 10);
+    await RemoteIcon.clearSession();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(requests, 10);
   });
 
   test('正常 PNG 能生成图片帧并报告下载进度', () async {

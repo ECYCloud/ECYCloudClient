@@ -134,7 +134,7 @@ class _RechargePageState extends State<RechargePage>
   Future<void> _pay(String type) async {
     final PanelApiClient? api = _api;
     final double? price = double.tryParse(_amount.text.trim());
-    if (api == null || price == null || price <= 0 || _busy) {
+    if (api == null || price == null || !price.isFinite || price <= 0 || _busy) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(L10n.t('请输入有效金额')),
@@ -258,11 +258,15 @@ class _RechargePageState extends State<RechargePage>
                             children: <Widget>[
                               InfoRow(
                                 label: L10n.t('当前余额'),
-                                value: '¥ ${info.money.toStringAsFixed(2)}',
+                                value: L10n.t('¥ {0}', <Object>[
+                                  info.money.toStringAsFixed(2),
+                                ]),
                               ),
                               InfoRow(
                                 label: L10n.t('累计消费'),
-                                value: '¥ ${info.totalTopUp}',
+                                value: L10n.t('¥ {0}', <Object>[
+                                  info.totalTopUp,
+                                ]),
                               ),
                             ],
                           ),

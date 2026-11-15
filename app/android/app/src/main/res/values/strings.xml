@@ -6,6 +6,5 @@
     <string name="notification_running">Connected</string>
     <string name="notification_disconnect">Disconnect</string>
     <string name="documents_root_logs">Logs</string>
-    <string name="documents_session_ending">Account session cleanup is in progress</string>
     <string name="documents_session_expired">The log session has expired</string>
 </resources>

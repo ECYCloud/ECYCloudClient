@@ -381,7 +381,7 @@ class _UserCard extends StatelessWidget {
           ),
           InfoRow(
             label: L10n.t('余额'),
-            value: '¥ ${user.money.toStringAsFixed(2)}',
+            value: L10n.t('¥ {0}', <Object>[user.money.toStringAsFixed(2)]),
           ),
           InfoRow(
             label: L10n.t('注册时间'),
@@ -416,21 +416,33 @@ class _UserCard extends StatelessWidget {
                 ? L10n.t('{0} / 无限制', <Object>[user.onlineDeviceCount])
                 : '${user.onlineDeviceCount} / ${user.connectorLimit}',
           ),
-          if (plan != null && plan.canToggleAutoRenew) ...<Widget>[
+          if (plan != null &&
+              (plan.canToggleAutoRenew ||
+                  plan.autoRenewUnavailableReason.isNotEmpty)) ...<Widget>[
             const SizedBox(height: 4),
+            // 不能开启时显示禁用开关与原因，与网页购买记录一致
             SwitchTile(
               contentPadding: EdgeInsets.zero,
               title: L10n.t('自动续费'),
-              subtitle: plan.autoRenew ? plan.renewAt : L10n.t('已关闭'),
+              subtitle: plan.autoRenew
+                  ? plan.renewAt
+                  : plan.canToggleAutoRenew
+                  ? L10n.t('已关闭')
+                  : L10n.t(plan.autoRenewUnavailableReason),
               value: plan.autoRenew,
-              onChanged: (bool value) => unawaited(
-                togglePurchaseAutoRenewDialog(
-                  context,
-                  auth: auth,
-                  purchaseId: plan.id,
-                  enable: value,
-                ),
-              ),
+              mouseCursor: plan.canToggleAutoRenew
+                  ? null
+                  : SystemMouseCursors.forbidden,
+              onChanged: plan.canToggleAutoRenew
+                  ? (bool value) => unawaited(
+                      togglePurchaseAutoRenewDialog(
+                        context,
+                        auth: auth,
+                        purchaseId: plan.id,
+                        enable: value,
+                      ),
+                    )
+                  : null,
             ),
           ],
         ],

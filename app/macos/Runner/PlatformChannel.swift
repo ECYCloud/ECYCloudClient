@@ -179,6 +179,13 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
           FlutterError(
             code: "secret", message: error.localizedDescription, details: nil))
       }
+    case "clipboard.copySecret":
+      guard let text = (call.arguments as? [String: Any])?["text"] as? String else {
+        result(FlutterError(code: "argument", message: "缺少 text", details: nil))
+        return
+      }
+      copySecret(text)
+      result(nil)
     case "cursor.create":
       createCursor(call.arguments, result: result)
     case "cursor.set":
@@ -186,6 +193,14 @@ final class PlatformChannel: NSObject, NSMenuDelegate, NSWindowDelegate {
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  // 只留在本机，不经通用剪贴板同步到其它设备；ConcealedType 按 nspasteboard.org 约定让剪贴板工具不记录
+  private func copySecret(_ text: String) {
+    let pasteboard = NSPasteboard.general
+    _ = pasteboard.prepareForNewContents(with: .currentHostOnly)
+    pasteboard.setString(text, forType: .string)
+    pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
   }
 
   private func createCursor(_ arguments: Any?, result: @escaping FlutterResult) {

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'android_platform_file.dart';
 import 'file_picker_android_options.dart';
+import 'lost_file_picker_result.dart';
 
 /// An implementation of [FilePickerPlatform] for Android.
 class FilePickerAndroid extends FilePickerPlatform {
@@ -24,12 +25,16 @@ class FilePickerAndroid extends FilePickerPlatform {
   );
 
   /// The event channel used to receive real-time updates from the native platform.
-  @visibleForTesting
-  final eventChannel = const EventChannel(
+  static const EventChannel _sharedEventChannel = EventChannel(
     'miguelruivo.flutter.plugins.filepickerevent',
   );
 
-  static StreamSubscription? _eventSubscription;
+  // Share the messenger handler so overlapping calls cannot remove it.
+  static final Stream<dynamic> _statusEvents = _sharedEventChannel
+      .receiveBroadcastStream();
+
+  @visibleForTesting
+  final eventChannel = _sharedEventChannel;
 
   @override
   Future<PlatformFile?> pickFile({
@@ -95,21 +100,25 @@ class FilePickerAndroid extends FilePickerPlatform {
     AndroidOptions androidOptions = const FilePickerAndroidOptions(),
   }) async {
     final String typeName = type.name;
+    StreamSubscription<Object?>? eventSubscription;
 
     try {
       if (onFileLoading != null) {
-        _eventSubscription = eventChannel.receiveBroadcastStream().listen((
-          data,
-        ) {
-          if (data is! bool) return;
-          onFileLoading(
-            data ? FilePickerStatus.picking : FilePickerStatus.done,
-          );
-        }, onError: (error) => throw Exception(error));
+        eventSubscription = _statusEvents.listen(
+          (data) {
+            if (data is! bool) return;
+            onFileLoading(
+              data ? FilePickerStatus.picking : FilePickerStatus.done,
+            );
+          },
+          // A status update that fails is not worth failing the call over,
+          // and throwing here only surfaced as an uncaught error.
+          onError: (_) {},
+        );
       }
 
       final Map<String, Object?>? safOptionsMap = switch (androidOptions) {
-        FilePickerAndroidOptions opts => opts.toMap(),
+        FilePickerAndroidOptions opts => opts.safOptions.toMap(),
         _ => null,
       };
 
@@ -130,11 +139,9 @@ class FilePickerAndroid extends FilePickerPlatform {
       }
 
       return platformFiles;
-    } catch (e) {
-      rethrow;
     } finally {
-      await _eventSubscription?.cancel();
-      _eventSubscription = null;
+      await eventSubscription?.cancel();
+      onFileLoading?.call(FilePickerStatus.done);
     }
   }
 
@@ -151,7 +158,7 @@ class FilePickerAndroid extends FilePickerPlatform {
       type: type,
       allowedExtensions: allowedExtensions,
     );
-    return files.map((e) => e.uri.path).toList();
+    return files.map((e) => e.path).nonNulls.toList();
   }
 
   @override
@@ -165,7 +172,7 @@ class FilePickerAndroid extends FilePickerPlatform {
   }) async {
     try {
       final Map<String, Object?>? safOptionsMap = switch (androidOptions) {
-        FilePickerAndroidOptions opts => opts.toMap(),
+        FilePickerAndroidOptions opts => opts.safOptions.toMap(),
         _ => null,
       };
 
@@ -180,6 +187,43 @@ class FilePickerAndroid extends FilePickerPlatform {
       }
     }
     return null;
+  }
+
+  /// Recovers the files picked before Android destroyed the activity, or the
+  /// whole app process, while the file picker was open, or `null` if there is
+  /// nothing to recover.
+  ///
+  /// Only `pickFile()` and `pickFiles()` can be recovered. The outcome is
+  /// delivered once, and only the most recent lost pick is kept. Call it
+  /// early, for example in the `initState` of the screen that started the
+  /// pick, which a `RestorationScope` can bring back:
+  ///
+  /// ```dart
+  /// if (FilePickerPlatform.instance case final FilePickerAndroid android) {
+  ///   final lost = await android.retrieveLostData();
+  /// }
+  /// ```
+  Future<LostFilePickerResult?> retrieveLostData() async {
+    final Map<Object?, Object?>? data = await methodChannel
+        .invokeMapMethod<Object?, Object?>('retrieveLostData');
+    if (data == null) return null;
+
+    if (data['errorCode'] case final String code) {
+      return LostFilePickerResult(
+        exception: PlatformException(
+          code: code,
+          message: data['errorMessage'] as String?,
+        ),
+      );
+    }
+
+    final files = (data['files'] as List<Object?>?) ?? const [];
+    return LostFilePickerResult(
+      files: [
+        for (final file in files.whereType<Map<Object?, Object?>>())
+          AndroidPlatformFile.fromMap(file),
+      ],
+    );
   }
 
   @override
@@ -199,15 +243,21 @@ class FilePickerAndroid extends FilePickerPlatform {
     LinuxOptions linuxOptions = const LinuxOptions(),
     WebOptions webOptions = const WebOptions(),
   }) async {
+    StreamSubscription<Object?>? eventSubscription;
     try {
       if (onFileSaving != null) {
         onFileSaving(FilePickerStatus.picking);
-        _eventSubscription = eventChannel.receiveBroadcastStream().listen((
-          data,
-        ) {
-          if (data is! bool) return;
-          onFileSaving(data ? FilePickerStatus.picking : FilePickerStatus.done);
-        }, onError: (error) => throw Exception(error));
+        eventSubscription = _statusEvents.listen(
+          (data) {
+            if (data is! bool) return;
+            onFileSaving(
+              data ? FilePickerStatus.picking : FilePickerStatus.done,
+            );
+          },
+          // A status update that fails is not worth failing the call over,
+          // and throwing here only surfaced as an uncaught error.
+          onError: (_) {},
+        );
       }
 
       final String? savedPath = await methodChannel
@@ -218,17 +268,12 @@ class FilePickerAndroid extends FilePickerPlatform {
             "bytes": bytes,
           });
 
-      if (onFileSaving != null) {
-        onFileSaving(FilePickerStatus.done);
-      }
-
       if (savedPath == null) return null;
       return Uri.tryParse(savedPath) ?? Uri.file(savedPath);
-    } catch (e) {
-      rethrow;
     } finally {
-      await _eventSubscription?.cancel();
-      _eventSubscription = null;
+      // Also when saving fails, so the app does not stay in the picking state.
+      await eventSubscription?.cancel();
+      onFileSaving?.call(FilePickerStatus.done);
     }
   }
 

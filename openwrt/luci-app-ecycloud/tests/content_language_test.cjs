@@ -15,8 +15,9 @@ async function main() {
     });
     messageApi.resolveLang = () => locale;
     messageApi._messageSource = catalogs['zh-cn'];
-    const node = (tag, attrs, children) => ({ tag, attrs, children: children || [], style: {}, listeners: {},
+    const node = (tag, attrs = {}, children) => ({ tag, attrs, children: children || [], style: {}, listeners: {},
         get firstElementChild() { return this.children[0]; },
+        setAttribute(name, value) { this.attrs[name] = value; },
         addEventListener(event, handler) { this.listeners[event] = handler; }, classList: { add() {}, remove() {}, toggle() {} } });
     const textOf = value => typeof value == 'string' ? value : Array.isArray(value)
         ? value.map(textOf).join(' ') : value && value.children ? textOf(value.children) : '';
@@ -24,7 +25,7 @@ async function main() {
         locale = language;
         const apiView = {
             messageText: messageApi.messageText.bind(messageApi), bytesCompact: String,
-            pressable: () => node('button'), section: (icon, title, content, actions) => node('section', {}, [title, content, actions]),
+            pressable: (cls, attrs) => node('button', attrs), section: (icon, title, content, actions) => node('section', {}, [title, content, actions]),
             isSelector: type => type == 'Selector', sortGroupMembers: members => members, nodeLabel: String,
             groupMark: () => '', delayBadge: () => '', speedBadge: () => '', flagCode: () => '', flagImg: () => ''
         };
@@ -32,13 +33,17 @@ async function main() {
         const loadView = file => vm.runInNewContext('String.prototype.format = function() { var args = arguments, i = 0; return this.replace(/%[sd]/g, () => String(args[i++])); }; (function(){' + fs.readFileSync(path.join(__dirname,
             '../htdocs/luci-static/resources/view/ecycloud/' + file + '.js'), 'utf8') + '})()', {
             view: { extend: value => value }, api: apiView, E: node, _: key => language == 'zh_TW' ? catalogs['zh-tw'][key] || key : key,
-            dom: { content: (target, content) => target.children = [content] }, poll: {},
+            dom: { content: (target, content) => target.children = [content] }, poll: {}, document: { addEventListener() {} },
             ui: { createHandlerFn: (context, method, ...args) => () => selected = args },
             L: { bind: (fn, context, ...args) => fn.bind(context, ...args) }
         });
         const overview = loadView('overview');
         const account = { traffic_reset: '不重置', last_ss_time: '从未使用喵' };
-        const output = textOf(overview.renderUsage({ account }));
+        const usage = overview.renderUsage({ account });
+        const output = textOf(usage);
+        const [usageHelp, usageTip] = usage.firstElementChild.children[1].children;
+        assert.equal(textOf(usageTip), language == 'en-US' ? 'Shows traffic usage across all devices.' : '統計所有裝置的流量使用情況');
+        assert.equal(usageHelp.attrs['aria-describedby'], usageTip.attrs.id);
         assert.ok(output.includes(language == 'en-US' ? 'No reset' : '不重設'), '首页实际渲染翻译流量重置说明');
         assert.ok(output.includes(language == 'en-US' ? 'Never used' : '從未使用'), '首页实际渲染翻译上次使用说明');
         assert.equal(account.last_ss_time, '从未使用喵', '原始账户字段不改写');
@@ -169,6 +174,7 @@ async function main() {
         languageRefresh: null, languageRetryAfter: 0, Date: { now: () => 1000 } };
     const statusApi = vm.runInNewContext('({' + source.slice(statusStart, statusEnd) + '})', statusContext);
     statusApi.resolveLang = () => 'en-US';
+    statusApi.ensureStyle = () => {};
     statusApi.update = (...args) => new Promise(resolve => updates.push({ args, resolve }));
     await statusApi.status();
     await statusApi.status();
@@ -191,15 +197,17 @@ async function main() {
     for (const label of ['Main nodes', '主節點']) {
         const raw = 'Match using 主节点[node-9]';
         const labels = { 'node-9': 'Fixture node', '主节点': label };
+        const annotate = (text, received) => {
+            assert.deepEqual(JSON.parse(JSON.stringify(received)), labels, 'RPC 实际输出入口须合并节点及策略组译名');
+            return text.replace(/主节点|node-9/g, key => received[key]);
+        };
         const context = {
             what: 'runtime', min: Math.min, max: Math.max, int: Number,
             popen: () => ({ read: () => raw, close() {} }),
             profile: { cached: () => ({ node_labels: { 'node-9': 'Fixture node' }, group_labels: { '主节点': label } }),
                 runtimeConfig: () => ({ ok: true, text: raw }) },
-            annotateLabels: (text, received) => {
-                assert.deepEqual(JSON.parse(JSON.stringify(received)), labels, 'RPC 实际输出入口须合并节点及策略组译名');
-                return text.replace(/主节点|node-9/g, key => received[key]);
-            }
+            annotateLabels: annotate,
+            annotateRuntime: annotate
         };
         const logs = vm.runInNewContext('({' + rpcSource.slice(logStart, logEnd) + '})', context);
         assert.equal(logs.logs.call({ args: { lines: 10 } }).log, `Match using ${label}[Fixture node]`, '日志 RPC 使用策略组译名');
@@ -207,6 +215,66 @@ async function main() {
         assert.equal(runtime.text, `Match using ${label}[Fixture node]`, '运行配置 RPC 使用策略组译名');
         assert.equal(raw, 'Match using 主节点[node-9]', 'RPC 展示翻译不能改写运行配置');
     }
+    const updateStart = source.indexOf('\tupdate: function(what, path, locale) {');
+    const updateEnd = source.indexOf('\n\tselectRpc:', updateStart);
+    assert.ok(updateStart >= 0 && updateEnd > updateStart);
+    const polls = [];
+    const updateContext = {
+        _: text => text,
+        setTimeout: (run, delay) => { polls.push(delay); setImmediate(run); },
+        updateRpc: async () => ({ ok: true, msg: '', pending: true, id: 'task-1' }),
+        statusRpc: async () => statuses.shift()
+    };
+    const statuses = [
+        { update_tasks: [{ id: 'task-1', state: 'queued' }] },
+        { update_tasks: [{ id: 'task-0', state: 'done', ok: false }, { id: 'task-1', state: 'running' }] },
+        { update_tasks: [{ id: 'task-1', state: 'done', ok: true, msg: '', changed: true, reloaded: true }] }
+    ];
+    const updateApi = vm.runInNewContext('({' + source.slice(updateStart, updateEnd) + '})', updateContext);
+    updateApi.resolveLang = () => 'en-US';
+    const finished = await updateApi.update();
+    assert.ok(finished.ok && finished.changed && finished.reloaded && statuses.length == 0 && polls.length == 3 && polls.every(ms => ms == 2000),
+        '后台刷新必须轮询到本任务完成后才返回 changed / reloaded 结果');
+    statuses.push({ update_tasks: [] });
+    assert.deepEqual(JSON.parse(JSON.stringify(await updateApi.update())), { ok: false, msg: 'The background update was interrupted. Try again.' },
+        'status 里找不到任务时必须提示后台更新已中断');
+    updateContext.updateRpc = async () => ({ ok: true, items: [] });
+    assert.deepEqual(JSON.parse(JSON.stringify(await updateApi.update('rules'))), { ok: true, items: [] }, '不排后台任务的 update 调用必须照常立即返回');
+    const connectStart = source.indexOf('\tconnect: function(opts) {');
+    const connectEnd = source.indexOf('\n\twatchKick: function()', connectStart);
+    assert.ok(connectStart >= 0 && connectEnd > connectStart);
+    const connectContext = { _: text => text, connectGeneration: 0, connectPending: null };
+    const connectApi = vm.runInNewContext('({' + source.slice(connectStart, connectEnd) + '})', connectContext);
+    const starts = [];
+    let startResult = { ok: true, msg: '', pending: true, id: 'task-start' };
+    let waited = null;
+    connectApi.refreshAccount = async () => ({ ok: true, account: {} });
+    connectApi.start = async refreshed => { starts.push(refreshed); return refreshed ? { ok: true, msg: '' } : startResult; };
+    connectApi.waitUpdate = id => new Promise(resolve => waited = { id, resolve });
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+    let connecting = connectApi.connect();
+    await settle();
+    assert.equal(waited.id, 'task-start');
+    waited.resolve({ id: 'task-start', state: 'done', ok: true, msg: '' });
+    assert.deepEqual(JSON.parse(JSON.stringify(await connecting)), { ok: true, msg: '' });
+    assert.deepEqual(starts, [undefined, true], '后台刷新完成后才带 refreshed 再次启动');
+    starts.length = 0;
+    connecting = connectApi.connect();
+    await settle();
+    waited.resolve({ id: 'task-start', state: 'done', ok: false, msg: '拉取配置失败：fixture' });
+    assert.deepEqual(JSON.parse(JSON.stringify(await connecting)), { ok: false, msg: '拉取配置失败：fixture' }, '后台刷新失败时给出原来的错误提示');
+    assert.deepEqual(starts, [undefined], '后台刷新失败时不能再次启动');
+    starts.length = 0;
+    connecting = connectApi.connect();
+    await settle();
+    connectContext.connectGeneration++;
+    waited.resolve({ id: 'task-start', state: 'done', ok: true, msg: '' });
+    assert.deepEqual(JSON.parse(JSON.stringify(await connecting)), { ok: false, cancelled: true }, '等待期间已断开时不能再开启服务');
+    assert.deepEqual(starts, [undefined]);
+    starts.length = 0;
+    startResult = { ok: false, msg: '面板配置不规范：fixture' };
+    assert.deepEqual(JSON.parse(JSON.stringify(await connectApi.connect())), startResult, '不排后台任务的启动结果照常返回');
+    assert.ok(starts.length == 1 && connectContext.connectPending == null);
     console.log('OpenWrt 内容语言界面离线回归通过：首页、连接页、节点和策略组实际渲染、原始选择标识、请求语言与旧响应隔离。');
 }
 

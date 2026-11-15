@@ -433,7 +433,12 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
       ),
     );
     if (status != null) {
-      await _showMessage(L10n.t('支付成功，订单已到账。'), cardKey: status.cardKey);
+      await _showMessage(
+        status.rechargedToBalance
+            ? L10n.t('商品未能交付，款项已转入余额。')
+            : L10n.t('支付成功，订单已到账。'),
+        cardKey: status.cardKey,
+      );
     }
     await _refreshAfterPurchase();
   }
@@ -551,7 +556,9 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
                 ),
                 child: InfoRow(
                   label: L10n.t('当前余额'),
-                  value: '¥ ${catalog.money.toStringAsFixed(2)}',
+                  value: L10n.t('¥ {0}', <Object>[
+                    catalog.money.toStringAsFixed(2),
+                  ]),
                 ),
               ),
               if (catalog.notice.trim().isNotEmpty) ...<Widget>[
@@ -782,7 +789,7 @@ class _PlanCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      '¥ ${product.price}',
+                      L10n.t('¥ {0}', <Object>[product.price]),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.displaySmall?.copyWith(
                         fontWeight: FontWeight.w700,
@@ -993,7 +1000,7 @@ class _CompactCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      '¥ ${product.price}',
+                      L10n.t('¥ {0}', <Object>[product.price]),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.displaySmall?.copyWith(
                         fontWeight: FontWeight.w700,
@@ -1340,25 +1347,35 @@ class _PlanOrderDialogState extends State<_PlanOrderDialog> {
               const SizedBox(height: 10),
               _DetailBlock(
                 title: L10n.t('流量重置费用'),
-                lines: <String>[
-                  L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[
-                    quote.trafficCurrentShopName,
-                    Format.bytes(quote.trafficUsed),
-                    Format.bytes(quote.trafficTotal),
-                    quote.trafficUsagePercent.toStringAsFixed(2),
-                  ]),
-                  L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[
-                    quote.name,
-                    quote.trafficBillingBasePrice,
-                  ]),
-                  L10n.t('流量重置费：{0} x {1}%{2} = {3} 元', <Object>[
-                    quote.trafficBillingBasePrice,
-                    quote.trafficFeePercent.toStringAsFixed(2),
-                    quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
-                    quote.trafficResetFee,
-                  ]),
-                  L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
-                ],
+                lines: quote.trafficBillingBaseType == 'fee_shortfall'
+                    ? <String>[
+                        L10n.t('此前更换套餐时未收齐的流量重置费：{0} 元', <Object>[
+                          quote.trafficResetFee,
+                        ]),
+                      ]
+                    : <String>[
+                        L10n.t('现有套餐：{0} 已使用：{1} / {2}（{3}%）', <Object>[
+                          quote.trafficCurrentShopName,
+                          Format.bytes(quote.trafficUsed),
+                          Format.bytes(quote.trafficTotal),
+                          quote.trafficUsagePercent.toStringAsFixed(2),
+                        ]),
+                        quote.trafficBillingBaseType == 'previous_plan'
+                            ? L10n.t('计费基准价：{0} 元', <Object>[
+                                quote.trafficBillingBasePrice,
+                              ])
+                            : L10n.t('新套餐：{0} 计费基准价：{1} 元', <Object>[
+                                quote.name,
+                                quote.trafficBillingBasePrice,
+                              ]),
+                        L10n.t('流量重置费：{0} x {1}%{2} = {3} 元', <Object>[
+                          quote.trafficBillingBasePrice,
+                          quote.trafficFeePercent.toStringAsFixed(2),
+                          quote.trafficFeeIsCapped ? L10n.t('（费用上限）') : '',
+                          quote.trafficResetFee,
+                        ]),
+                        L10n.t('费用规则：按已用流量比例计算，50% 封顶'),
+                      ],
               ),
             ],
             if (quote.hasValidOrder &&

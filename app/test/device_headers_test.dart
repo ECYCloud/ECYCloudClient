@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ecycloud_client/data/api/api_exception.dart';
 import 'package:ecycloud_client/data/api/panel_api_client.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -54,6 +55,70 @@ void main() {
     expect(result.token, 'fixture-new-token');
     expect(result.profile?.email, 'fixture@example.test');
   });
+
+  for (final (int status, Map<String, dynamic> body, bool changed)
+      in <(int, Map<String, dynamic>, bool)>[
+        (
+          200,
+          <String, dynamic>{'ret': 0, 'msg': 'x', 'password_changed': true},
+          true,
+        ),
+        (200, <String, dynamic>{'ret': 0, 'msg': 'x'}, false),
+        (
+          200,
+          <String, dynamic>{'ret': 0, 'msg': 'x', 'password_changed': 'true'},
+          false,
+        ),
+        (
+          403,
+          <String, dynamic>{'ret': 0, 'msg': 'x', 'password_changed': true},
+          false,
+        ),
+      ]) {
+    test('重置密码响应 $status $body 的成功标记为 $changed', () async {
+      final HttpServer server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => server.close(force: true));
+      final PanelApiClient api = PanelApiClient(
+        baseUrl: 'http://127.0.0.1:${server.port}',
+        configBaseUrl: 'http://127.0.0.1:${server.port}',
+        device: const DeviceInfo(
+          platform: 'windows',
+          deviceId: 'fixture',
+          deviceName: 'fixture',
+          deviceModel: 'Windows 11',
+          osVersion: '26H2',
+          appVersion: '0.1.1',
+        ),
+      );
+      addTearDown(api.close);
+      final Future<LoginResult> pending = api.confirmPasswordReset(
+        token: 'fixture-reset',
+        password: 'test-password',
+        repasswd: 'test-password',
+      );
+      final Future<void> outcome = expectLater(
+        pending,
+        throwsA(
+          isA<ApiException>()
+              .having((ApiException e) => e.message, 'message', 'x')
+              .having(
+                (ApiException e) => e.passwordChanged,
+                'passwordChanged',
+                changed,
+              ),
+        ),
+      );
+      final HttpRequest received = await server.first;
+      received.response.statusCode = status;
+      received.response.headers.contentType = ContentType.json;
+      received.response.write(jsonEncode(body));
+      await received.response.close();
+      await outcome;
+    });
+  }
 
   test('已登录请求以 ASCII 头同步中文设备名称和型号', () async {
     final HttpServer server = await HttpServer.bind(

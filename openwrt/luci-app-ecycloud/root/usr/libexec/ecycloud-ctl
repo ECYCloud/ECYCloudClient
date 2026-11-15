@@ -3,17 +3,15 @@
 
 import * as service from 'ecycloud.service';
 
-import { mihomoBin, sessionLease, state } from 'ecycloud.common';
-
-const session = ARGV[0] in [ 'kernel', 'cleanup', 'revert' ] ? true : sessionLease();
-if (!session) {
-	warn('账户正在切换，后台任务已拒绝\n');
-	exit(1);
-}
+import { mihomoBin, settings, state } from 'ecycloud.common';
 
 switch (ARGV[0]) {
 case 'kernel':
 	printf('%s\n', mihomoBin());
+	exit(0);
+
+case 'rundir':
+	printf('%s\n', settings().runDir);
 	exit(0);
 
 case 'prepare':
@@ -28,6 +26,13 @@ case 'revert':
 
 case 'cleanup':
 	exit(service.cleanup() ? 0 : 1);
+
+case 'gc':
+	service.collectGarbage();
+	exit(0);
+
+case 'retire':
+	exit(service.retireSignedOut(ARGV[1] ?? '') ? 0 : 1);
 
 case 'watchdog':
 	service.watchdog();
@@ -53,6 +58,10 @@ case 'rules':
 	service.runRuleProviders();
 	exit(0);
 
+case 'update-tasks':
+	service.runUpdates();
+	exit(0);
+
 case 'close-via':
 	service.runCloseVia(ARGV[1] ?? '');
 	exit(0);
@@ -74,6 +83,6 @@ case 'update': {
 }
 
 default:
-	warn('usage: ecycloud-ctl kernel|prepare|retry|cleanup|revert|update [force]|watchdog|refresh|statistics|delay|speed|rules|close-via|icons\n');
+	warn('usage: ecycloud-ctl kernel|rundir|prepare|retry|cleanup|revert|gc|retire <dir>|update [force]|update-tasks|watchdog|refresh|statistics|delay|speed|rules|close-via|icons\n');
 	exit(1);
 }

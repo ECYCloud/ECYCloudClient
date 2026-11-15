@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 )
 
 // utun 由系统内建，只需 helper 是 root
@@ -17,3 +18,8 @@ func ensureTunReady() (bool, string) {
 	}
 	return true, ""
 }
+
+// utun 只认 root，macOS 也没有 capability 可降权
+func resolveKernelUser() (int, int) { return 0, 0 }
+
+func applyKernelCredential(_ *exec.Cmd) error { return nil }

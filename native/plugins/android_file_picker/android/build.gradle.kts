@@ -1,4 +1,4 @@
-import com.android.build.gradle.LibraryExtension
+import com.android.build.api.dsl.LibraryExtension
 import groovy.lang.GroovyObject
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.withGroovyBuilder
@@ -13,8 +13,8 @@ buildscript {
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:9.4.1")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20")
+        classpath("com.android.tools.build:gradle:9.5.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
     }
 }
 
@@ -84,5 +84,10 @@ dependencies {
     add("implementation", "androidx.core:core-ktx:1.19.1")
     add("implementation", "androidx.annotation:annotation:1.11.0")
     add("implementation", "androidx.lifecycle:lifecycle-runtime:2.11.0")
+
+    add("testImplementation", "junit:junit:4.13.2")
+    // The org.json in android.jar is a stub on the JVM, so unit tests need
+    // the real implementation.
+    add("testImplementation", "org.json:json:20260814")
 }
 

@@ -52,7 +52,7 @@ void _traceFirstFrame() {
   });
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   _boot.start();
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.bootstrap();
@@ -87,18 +87,23 @@ Future<void> main() async {
     kernel: kernel,
     settingsStore: settingsStore,
   );
-  final AuthController auth = AuthController(
+  late final AuthController auth;
+  auth = AuthController(
     platform,
     CredentialStore(),
-    clearLocalSession: () async {
-      await connection.shutdown(clearSession: true);
-      await Future.wait(<Future<void>>[
-        RemoteIcon.clearSession(),
-        HtmlVideoView.clearSession(),
-      ]);
-      PaintingBinding.instance.imageCache.clear();
-      PaintingBinding.instance.imageCache.clearLiveImages();
-      svg.cache.clear();
+    clearLocalSession: (String endedSession) async {
+      final int generation = auth.sessionGeneration;
+      await connection.shutdown(clearSession: true, endedSession: endedSession);
+      if (generation == auth.sessionGeneration) {
+        await Future.wait(<Future<void>>[
+          RemoteIcon.clearSession(),
+          HtmlVideoView.clearSession(),
+        ]);
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+        svg.cache.clear();
+      }
+      await AppPaths.collectGarbage();
     },
   );
   final AnnouncementController announcements = AnnouncementController();
@@ -116,7 +121,8 @@ Future<void> main() async {
       update: update,
       platform: platform,
       settingsStore: settingsStore,
-      child: const EcyCloudApp(),
+      // Windows 显卡丢失后在同一进程重建引擎时传入，说明旧实例当时已连接
+      child: EcyCloudApp(resumeTakeover: args.contains('--resume-takeover')),
     ),
   );
   _mark('runApp');
@@ -126,7 +132,9 @@ Future<void> main() async {
 }
 
 class EcyCloudApp extends StatefulWidget {
-  const EcyCloudApp({super.key});
+  const EcyCloudApp({super.key, this.resumeTakeover = false});
+
+  final bool resumeTakeover;
 
   @override
   State<EcyCloudApp> createState() => _EcyCloudAppState();
@@ -191,24 +199,33 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     try {
       await platform.initialize();
       _mark('platform');
-      await connection.syncPlatformSettings();
     } on Object catch (e) {
       Logger.instance.error('app', '平台初始化失败', e);
+    }
+    try {
+      await connection.syncPlatformSettings();
+    } on Object catch (e) {
+      Logger.instance.error('app', '同步平台设置失败', e);
     }
     if (mounted) {
       setState(() => _platformReady = true);
     }
 
     unawaited(connection.runPreflight());
-    // 界面可能是被系统重建的，隧道还在后台跑着，要在拉起常驻内核之前认回来
-    await connection.adoptRunningKernel();
-    _mark('adopt');
+    // 界面可能是被系统重建的，隧道还在后台跑着：接管与恢复登录并行，恢复不等后台服务应答
+    final Future<void> adopting = connection
+        .adoptRunningKernel(takeover: widget.resumeTakeover)
+        .then(
+          (_) => _mark('adopt'),
+          onError: (Object e) => Logger.instance.error('app', '接管运行中的内核失败', e),
+        );
     try {
       await auth.restore();
     } on ApiException catch (e) {
       Logger.instance.warn('auth', e.message);
     }
     _mark('auth');
+    await adopting;
 
     update.start();
   }
@@ -298,7 +315,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
     }
 
     if (auth.stage == AuthStage.accountRestricted && previous != auth.stage) {
-      unawaited(connection.shutdown(clearSession: true));
+      unawaited(connection.shutdown().catchError((Object _) {}));
     }
     connection.attachApi(
       auth.stage == AuthStage.accountRestricted ? null : auth.api,

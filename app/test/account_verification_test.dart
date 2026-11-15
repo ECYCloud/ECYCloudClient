@@ -5,7 +5,7 @@ import 'package:ecycloud_client/data/api/panel_api_client.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('修改邮箱和注销不携带密码，邮箱验证码按原流程提交', () async {
+  test('修改邮箱与注销只提交邮箱验证码或登录密码之一', () async {
     final HttpServer server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
       0,
@@ -47,12 +47,18 @@ void main() {
       expect(requests[1].containsKey('passwd'), isFalse);
       expect(requests[1]['old_emailcode'], '123456');
       expect(requests[1]['new_emailcode'], '654321');
-      await api.updateEmail(newemail: 'new@example.test');
-      expect(requests[2], <String, dynamic>{'newemail': 'new@example.test'});
+      await api.updateEmail(
+        newemail: 'new@example.test',
+        passwd: 'Current-Test-Password',
+      );
+      expect(requests[2], <String, dynamic>{
+        'newemail': 'new@example.test',
+        'passwd': 'Current-Test-Password',
+      });
       await api.killAccount(emailCode: '123456');
       expect(requests[3], <String, dynamic>{'email_code': '123456'});
-      await api.killAccount();
-      expect(requests[4], isEmpty);
+      await api.killAccount(passwd: 'Current-Test-Password');
+      expect(requests[4], <String, dynamic>{'passwd': 'Current-Test-Password'});
     } finally {
       api.close();
       await server.close(force: true);

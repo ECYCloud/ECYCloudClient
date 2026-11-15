@@ -33,6 +33,21 @@ class _Platform implements PlatformService {
 }
 
 void main() {
+  test('更新包地址解析后仍须落在本仓库的发布路径下', () {
+    for (final String url in <String>[
+      '${AppUpdate.downloadPrefix}../../../../evil/repo/releases/download/v1/x.exe',
+      '${AppUpdate.downloadPrefix}%2e%2e/%2e%2e/%2e%2e/%2e%2e/evil/repo/releases/download/v1/x.exe',
+      'https://user@github.com/${AppUpdate.repo}/releases/download/v1/x.exe',
+      'https://github.com:8443/${AppUpdate.repo}/releases/download/v1/x.exe',
+    ]) {
+      expect(AppUpdate.isOfficialDownload(url), isFalse, reason: url);
+    }
+    expect(
+      AppUpdate.isOfficialDownload('${AppUpdate.downloadPrefix}v1.0.0/ECYCloud-1.0.0-windows-x64.exe'),
+      isTrue,
+    );
+  });
+
   for (final String scenario in <String>[
     'normal',
     'metadata-too-large',

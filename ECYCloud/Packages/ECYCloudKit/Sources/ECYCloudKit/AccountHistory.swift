@@ -39,6 +39,7 @@ public struct AccountHistory: Sendable {
         public let currentDevice: Bool
         public var content: String? = nil
         public var renewal: Renewal? = nil
+        public var renewalUnavailableReason = ""
         public var thirdPartyDevice = false
         public struct Renewal: Sendable { public let id: Int; public let enabled: Bool }
     }
@@ -124,7 +125,7 @@ struct BalanceRecord: Decodable, Sendable {
     let amount: Double
     var row: AccountHistory.Row {
         .init(fields: [.init(label: "订单号", value: orderNo), .init(label: "类型", value: typeText),
-                       .init(label: "金额", value: String(format: "¥ %.2f", amount)), .init(label: "时间", value: createdAt)],
+                       .init(label: "金额", value: L10n.t("¥ {0}", [String(format: "%.2f", amount)])), .init(label: "时间", value: createdAt)],
               deviceID: nil, online: nil, currentDevice: false)
     }
 }
@@ -134,14 +135,15 @@ struct PurchaseRecord: Decodable, Sendable {
     let name: String?
     let price: Double
     let autoRenew: Bool, canToggle: Bool
-    let renew: String?
+    let renew: String?, autoRenewUnavailableReason: String?
     var row: AccountHistory.Row {
         .init(fields: [.init(label: "订单号", value: orderNo), .init(label: "商品名称", value: shopName.isEmpty ? name ?? "" : shopName),
-                       .init(label: "购买价格", value: String(format: "¥ %.2f", price)), .init(label: "购买时间", value: datetime),
+                       .init(label: "购买价格", value: L10n.t("¥ {0}", [String(format: "%.2f", price)])), .init(label: "购买时间", value: datetime),
                        .init(label: "套餐过期时间", value: expTime.isEmpty ? "-" : expTime),
                        .init(label: "自动续费时间", value: autoRenew && renew?.isEmpty == false ? renew ?? "-" : "-")],
               deviceID: nil, online: nil, currentDevice: false, content: content,
-              renewal: canToggle ? .init(id: id, enabled: autoRenew) : nil)
+              renewal: canToggle ? .init(id: id, enabled: autoRenew) : nil,
+              renewalUnavailableReason: autoRenewUnavailableReason ?? "")
     }
 }
 struct UnlockRecord: Decodable, Sendable {

@@ -16,7 +16,7 @@ public struct AccountEditOptions: Decodable, Sendable {
     public let gaEnable: Int
     public let gaToken: String, gaUrl: String
     public let enableTelegram: Bool, telegramUnbindKick: Bool
-    public let telegramBot: String, imValue: String, bindToken: String
+    public let telegramBot: String, imValue: String
     public let telegramId: Int64
     public let mailNotifySettings: [String: PanelSetting]
     public let mailNotifyPreferences: [String: Bool]
@@ -67,21 +67,17 @@ extension ClientSession {
         accountMailDates[purpose.rawValue] = Date().addingTimeInterval(60)
         return result
     }
-    public func verifyOldEmail(_ code: String) async throws -> String {
-        guard !code.isEmpty else { throw ClientError.input(L10n.t("请输入原邮箱验证码。")) }
-        return try await authenticated { try await api.perform("/user/verify-old-email", origin: endpoints.site, token: $0.token, body: ["old_emailcode": code]).message }
-    }
-    public func updateEmail(_ email: String, oldCode: String, newCode: String) async throws {
+    public func updateEmail(_ email: String, oldCode: String, newCode: String, password: String? = nil) async throws {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !email.isEmpty, email.utf8.count <= 254 else { throw ClientError.input(L10n.t("请输入有效的新邮箱。")) }
-        let result = try await authenticated { try await api.perform("/user/email", origin: endpoints.site, token: $0.token,
-            body: ["newemail": email, "old_emailcode": oldCode, "new_emailcode": newCode]).message }
+        let body = ["newemail": email, "old_emailcode": oldCode, "new_emailcode": newCode, "passwd": password].compactMapValues { $0 }
+        let result = try await authenticated { try await api.perform("/user/email", origin: endpoints.site, token: $0.token, body: body).message }
         finishCredentialChange(result)
     }
-    public func enableTwoFactor(code: String) async throws -> String {
+    public func enableTwoFactor(code: String, password: String) async throws -> String {
         guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { throw ClientError.input(L10n.t("请输入验证器中的 6 位验证码。")) }
-        _ = try await authenticated { try await api.perform("/user/ga-check", origin: endpoints.site, token: $0.token, body: ["code": code]).message }
-        return try await authenticated { try await api.perform("/user/ga-set", origin: endpoints.site, token: $0.token, body: ["enable": "1"]).message }
+        try requirePassword(password)
+        return try await authenticated { try await api.perform("/user/ga-set", origin: endpoints.site, token: $0.token, body: ["enable": "1", "code": code, "passwd": password]).message }
     }
     public func testTwoFactor(code: String) async throws -> String {
         guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { throw ClientError.input(L10n.t("请输入验证器中的 6 位验证码。")) }
@@ -90,15 +86,20 @@ extension ClientSession {
     public func keepTwoFactorSetting(enabled: Bool) async throws -> String {
         try await authenticated { try await api.perform("/user/ga-set", origin: endpoints.site, token: $0.token, body: ["enable": enabled ? "1" : "0"]).message }
     }
-    public func disableTwoFactor(password: String) async throws -> String {
+    private func requirePassword(_ password: String) throws {
         guard !password.isEmpty else { throw ClientError.input(L10n.t("请输入当前登录密码。")) }
+    }
+    public func disableTwoFactor(password: String) async throws -> String {
+        try requirePassword(password)
         return try await authenticated { try await api.perform("/user/ga-set", origin: endpoints.site, token: $0.token, body: ["enable": "0", "passwd": password]).message }
     }
     public func resetTwoFactor(password: String) async throws -> TwoFactorSecret {
-        try await authenticated { try await api.request("/user/ga-reset", origin: endpoints.site, token: $0.token, body: ["passwd": password]) }
+        try requirePassword(password)
+        return try await authenticated { try await api.request("/user/ga-reset", origin: endpoints.site, token: $0.token, body: ["passwd": password]) }
     }
-    public func resetTelegram() async throws -> (message: String, binding: TelegramBinding) {
-        let result = try await authenticated { try await api.perform("/user/telegram-reset", origin: endpoints.site, token: $0.token, body: [:]) }
+    public func resetTelegram(password: String) async throws -> (message: String, binding: TelegramBinding) {
+        try requirePassword(password)
+        let result = try await authenticated { try await api.perform("/user/telegram-reset", origin: endpoints.site, token: $0.token, body: ["passwd": password]) }
         let body = try? Self.snakeDecoder.decode(TelegramEnvelope.self, from: result.data)
         return (result.message, TelegramBinding(bound: false, imValue: "", telegramId: 0, bindToken: body?.data?.bindToken ?? body?.bindToken ?? ""))
     }
@@ -120,8 +121,9 @@ extension ClientSession {
         let encoded = String(decoding: try JSONEncoder().encode(preferences), as: UTF8.self)
         return try await authenticated { try await api.perform("/user/mail-notify", origin: endpoints.site, token: $0.token, body: ["preferences": encoded]).message }
     }
-    public func deleteAccount(emailCode: String) async throws -> String {
-        let result = try await authenticated { try await api.perform("/user/kill", origin: endpoints.site, token: $0.token, body: ["email_code": emailCode]).message }
+    public func deleteAccount(emailCode: String? = nil, password: String? = nil) async throws -> String {
+        let body = ["email_code": emailCode, "passwd": password].compactMapValues { $0 }
+        let result = try await authenticated { try await api.perform("/user/kill", origin: endpoints.site, token: $0.token, body: body).message }
         connection?.disconnect()
         await refresh()
         return result

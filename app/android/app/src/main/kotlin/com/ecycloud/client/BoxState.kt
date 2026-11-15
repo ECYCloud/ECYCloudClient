@@ -64,15 +64,64 @@ object BoxState {
     @Volatile
     var stoppedByUser = false
 
-    fun runDir(context: Context): File = File(context.filesDir, "run")
+    // 本进程内核已绑定的登录会话；mihomo 的 cache.db 按进程只打开一次，换会话只能换进程
+    @Volatile
+    var session: String? = null
 
-    fun configFile(context: Context): File = File(runDir(context), "config.json")
+    private val sessionKeyPattern = Regex("[a-f0-9]{64}")
 
+    // 与 Dart CredentialStore 的 session_key 字段同名，退出登录时随令牌一起删掉。
+    // 旧版凭据没有这个字段：按 Dart AuthController._accountDirKey 同一算法补算，界面下次启动时会写回
+    fun sessionKey(context: Context): String? {
+        val saved = runCatching {
+            JSONObject(File(context.filesDir, "credentials.json").readText())
+        }.getOrNull() ?: return null
+        saved.optString("session_key").takeIf(sessionKeyPattern::matches)?.let { return it }
+        val email = saved.optString("email").trim().lowercase()
+        if (saved.optString("token").isEmpty() || email.isEmpty()) {
+            return null
+        }
+        val key = AccountKey.of(saved.optString("site_origin"), BuildConfig.SITE_URL, email) ?: return null
+        adoptLegacyRunDir(context, key)
+        return key
+    }
+
+    // 旧版的共享运行目录归这个账号：搬进账号目录，开机自启与磁贴才能找到原配置
+    fun adoptLegacyRunDir(context: Context, key: String) {
+        val legacy = File(context.filesDir, "run")
+        val target = runDir(context, key)
+        if (stat(legacy)?.let { OsConstants.S_ISDIR(it.st_mode) } != true || stat(target) != null) {
+            return
+        }
+        target.parentFile?.mkdirs()
+        runCatching { Os.rename(legacy.path, target.path) }
+    }
+
+    // 与 Dart AppPaths.sessions 逐字一致
+    fun sessionDir(context: Context, key: String): File = File(File(context.filesDir, "sessions"), key)
+
+    fun runDir(context: Context, key: String): File = File(sessionDir(context, key), "run")
+
+    fun configFile(context: Context, key: String): File = File(runDir(context, key), "config.json")
+
+    // 退出时删掉带节点凭据的配置，规则集与 cache.db 留给同账号下次登录
+    fun dropRuntimeSecrets(context: Context, key: String) {
+        runDir(context, key).listFiles()?.filter {
+            it.name == "config.json" || (it.name.startsWith("ecy-panel-") && it.name.endsWith(".json"))
+        }?.forEach { check(it.delete()) { "不能删除旧账户配置" } }
+    }
+
+    // 节点已写成各自的文件，内核按 path 读取；payload 留在配置里只会被内核当作后备节点再解析一遍，
+    // 所以落盘与交给内核的都是去掉 payload 的配置。重建服务时读回的落盘配置没有 payload，沿用已写好的节点文件
     @Synchronized
-    fun writeConfig(context: Context, raw: String) {
+    fun writeConfig(context: Context, key: String, raw: String): String {
         val config = JSONObject(raw)
         val providers = config.optJSONObject("proxy-providers")
+        val root = runDir(context, key)
+        root.mkdirs()
+        require(stat(root)?.let { OsConstants.S_ISDIR(it.st_mode) } == true) { "运行目录类型不可信" }
         val files = mutableMapOf<String, String>()
+        var stripped = false
         providers?.keys()?.forEach { name ->
             if (name.startsWith("ecy-panel-")) {
                 require(name == "ecy-panel-nodes" || Regex("ecy-panel-[a-f0-9]{64}").matches(name)) {
@@ -82,16 +131,22 @@ object BoxState {
                 require(provider.getString("type") == "file" && provider.getString("path") == "$name.json") {
                     "节点文件配置不合法"
                 }
+                val payloadKeys = provider.keys().asSequence().filter { it.equals("payload", ignoreCase = true) }.toList()
+                if (payloadKeys.isEmpty()) {
+                    require(stat(File(root, "$name.json"))?.let { OsConstants.S_ISREG(it.st_mode) && it.st_nlink == 1L } == true) {
+                        "节点文件缺失"
+                    }
+                    return@forEach
+                }
                 val payload = provider.getJSONArray("payload")
                 require(payload.length() > 0) { "节点文件不能为空" }
                 val content = JSONObject().put("proxies", payload).toString()
                 require(content.toByteArray(Charsets.UTF_8).size <= maxRunFileBytes) { "节点文件过大" }
                 files["$name.json"] = content
+                payloadKeys.forEach { provider.remove(it) }
+                stripped = true
             }
         }
-        val root = runDir(context)
-        root.mkdirs()
-        require(stat(root)?.let { OsConstants.S_ISDIR(it.st_mode) } == true) { "运行目录类型不可信" }
         files.forEach { (name, content) ->
             val target = File(root, name)
             stat(target)?.let {
@@ -106,24 +161,10 @@ object BoxState {
                 temp.delete()
             }
         }
-        configFile(context).writeText(raw)
-    }
-
-    // 与 Dart CredentialStore 的凭据文件清理标记保持同名，跨进程、重启后仍须阻止旧配置自启。
-    fun sessionCleanupPending(context: Context): Boolean =
-        stat(File(context.filesDir, "credentials.json.session-ending")) != null
-
-    fun clearRunFiles(context: Context) {
-        deleteTree(runDir(context))
-    }
-
-    private fun deleteTree(file: File) {
-        val info = stat(file) ?: return
-        if (OsConstants.S_ISDIR(info.st_mode)) {
-            val children = file.listFiles() ?: error("不能读取旧运行目录")
-            children.forEach(::deleteTree)
-        }
-        check(file.delete()) { "不能删除旧运行数据" }
+        // AOSP JSONObject 会把 / 编成 \/，mihomo 的 yaml.v3 不认该转义
+        val written = if (stripped) config.toString(2).replace("\\/", "/") else raw
+        configFile(context, key).writeText(written)
+        return written
     }
 
     private fun stat(file: File) = try {
@@ -133,8 +174,9 @@ object BoxState {
         null
     }
 
-    fun cacheReady(context: Context): Boolean =
-        File(runDir(context), "cache.db").let { it.isFile && it.length() > 0 }
+    fun cacheReady(context: Context): Boolean = session?.let { key ->
+        File(runDir(context, key), "cache.db").let { it.isFile && it.length() > 0 }
+    } ?: false
 
     fun takesOverExit(config: String): Boolean = runCatching {
         JSONObject(config).getJSONObject("tun").getBoolean("enable")
@@ -160,7 +202,8 @@ object BoxState {
 
     // 与桌面 kernel.read 同语义
     fun readRunFile(context: Context, relative: String): String {
-        val file = resolveWithin(runDir(context), relative)
+        val key = sessionKey(context) ?: error("尚未登录")
+        val file = resolveWithin(runDir(context, key), relative)
         require(file.isFile) { if (file.exists()) "不能读取目录" else "文件不存在" }
         require(file.length() <= maxRunFileBytes) { "文件过大（超过 ${maxRunFileBytes shr 20} MiB）" }
         return file.readText()

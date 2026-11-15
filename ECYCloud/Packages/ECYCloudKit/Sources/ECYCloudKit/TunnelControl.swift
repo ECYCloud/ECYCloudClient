@@ -295,8 +295,6 @@ extension ClientSession {
     }
     public func selectActiveNode(group: String, node: String) async throws {
         guard let connection else { throw TunnelError.control }
-        let snapshot = try await tunnelSnapshot()
-        guard snapshot.groups.contains(where: { $0.id == group && $0.selectable && $0.members.contains(node) }) else { throw TunnelError.control }
         _ = try await connection.request(.init(.select, group: group, node: node))
         selectNode(group: group, node: node)
     }

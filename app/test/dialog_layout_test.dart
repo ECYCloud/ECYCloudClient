@@ -273,7 +273,7 @@ void main() {
                 greaterThan(0),
               );
             }
-            if (kind == '公告浏览') {
+            if (kind == '公告浏览' || kind == '自动公告') {
               final Finder previous = find.widgetWithText(TextButton, '上一条');
               final Finder next = find.widgetWithText(TextButton, '下一条');
               final Finder count = find.text('1 / 2');
@@ -296,7 +296,7 @@ void main() {
             }
             await tester.tap(
               find.text(switch (kind) {
-                '公告浏览' => '关闭',
+                '公告浏览' || '自动公告' => '关闭',
                 '续费确认' => '取消',
                 _ => '我知道了',
               }),

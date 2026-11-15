@@ -7,14 +7,26 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
+
+// 读写当前登录会话运行目录的指令，必须先 kernel.bind
+var sessionCommands = map[string]bool{
+	"kernel.start":  true,
+	"kernel.check":  true,
+	"kernel.write":  true,
+	"kernel.reload": true,
+	"kernel.read":   true,
+}
 
 const (
 	pipePath       = `\\.\pipe\ECYCloudService`
@@ -89,11 +101,12 @@ func (s *server) serve(listener net.Listener) {
 		if err != nil {
 			return
 		}
+		accepted := time.Now()
 		select {
 		case s.slots <- struct{}{}:
 			go func() {
 				defer func() { <-s.slots }()
-				s.handle(conn)
+				s.handle(conn, accepted)
 			}()
 		default:
 			conn.Close()
@@ -101,9 +114,24 @@ func (s *server) serve(listener net.Listener) {
 	}
 }
 
-func (s *server) handle(conn net.Conn) {
+func (s *server) handle(conn net.Conn, accepted time.Time) {
 	defer conn.Close()
 	defer guard("处理客户端请求")
+
+	// 先认定调用方再读请求：读请求要等对端发完，拖得越久 PID 被复用的窗口越大
+	pid, err := pipeClientPID(conn)
+	if err != nil {
+		logf("识别管道客户端失败: %v", err)
+		writeResponse(conn, response{Error: err.Error()})
+		return
+	}
+	process, user, err := guiCallerSID(pid, accepted)
+	if err != nil {
+		logf("拒绝进程 %d 的指令: %v", pid, err)
+		writeResponse(conn, response{Error: err.Error()})
+		return
+	}
+	defer windows.CloseHandle(process)
 
 	conn.SetReadDeadline(time.Now().Add(requestReadTimeout))
 	reader := bufio.NewReaderSize(conn, 64*1024)
@@ -115,19 +143,6 @@ func (s *server) handle(conn net.Conn) {
 	var req request
 	if err := json.Unmarshal([]byte(line), &req); err != nil {
 		writeResponse(conn, response{Error: fmt.Sprintf("请求格式错误: %v", err)})
-		return
-	}
-
-	pid, err := pipeClientPID(conn)
-	if err != nil {
-		logf("识别管道客户端失败: %v", err)
-		writeResponse(conn, response{Error: err.Error()})
-		return
-	}
-	user, err := guiCallerSID(pid)
-	if err != nil {
-		logf("拒绝指令 %s: %v", req.Command, err)
-		writeResponse(conn, response{Error: err.Error()})
 		return
 	}
 
@@ -150,6 +165,9 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 	}
 	s.operation.Lock()
 	defer s.operation.Unlock()
+	if sessionCommands[req.Command] && activeSession == "" {
+		return nil, fmt.Errorf("尚未绑定登录会话")
+	}
 	switch req.Command {
 	case "kernel.upgrade.commit":
 		if err := commitKernelUpgrade(); err != nil {
@@ -178,7 +196,7 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 		return map[string]any{"ready": ready, "reason": reason}, nil
 
 	case "kernel.bind":
-		if err := s.bindCache(req.CacheKey, user); err != nil {
+		if err := s.bindCache(req.CacheKey); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil
@@ -199,7 +217,7 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 		return map[string]any{}, nil
 
 	case "kernel.clear":
-		if err := s.clearRuntime(); err != nil {
+		if err := s.endSession(req.CacheKey); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil
@@ -218,6 +236,15 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 			return nil, fmt.Errorf("缺少配置内容")
 		}
 		if err := s.kernel.write(req.Config); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
+
+	case "kernel.reload":
+		if strings.TrimSpace(req.Config) == "" {
+			return nil, fmt.Errorf("缺少配置内容")
+		}
+		if err := s.kernel.reload(req.Config); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil
@@ -249,7 +276,7 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 		return map[string]any{}, nil
 
 	case "proxy.restore":
-		if err := s.proxy.restore(); err != nil {
+		if err := s.proxy.restore(user); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil
@@ -284,23 +311,6 @@ func (s *server) lockSession(pid int, user string) error {
 
 		s.mu.Lock()
 		if !s.closing && (s.owner == "" || s.owner == user) {
-			root, err := os.OpenRoot(dataDir())
-			if err == nil {
-				marker, readErr := root.ReadFile(".cache-owner")
-				root.Close()
-				if readErr == nil && !strings.HasPrefix(string(marker), user+"\n") {
-					if err := s.clearRuntime(); err != nil {
-						s.mu.Unlock()
-						return err
-					}
-				} else if readErr != nil && !os.IsNotExist(readErr) {
-					s.mu.Unlock()
-					return readErr
-				}
-			} else if !os.IsNotExist(err) {
-				s.mu.Unlock()
-				return err
-			}
 			if err := watchProcess(pid, func() { s.onClientGone(pid) }); err != nil {
 				s.mu.Unlock()
 				return fmt.Errorf("监听 GUI 进程失败: %w", err)
@@ -312,97 +322,156 @@ func (s *server) lockSession(pid int, user string) error {
 }
 
 func (s *server) initialize() error {
-	if err := prepareRunDir(); err != nil {
+	if err := prepareRunRoot(); err != nil {
 		return err
 	}
-	return s.resetSession()
+	if err := s.resetSession(); err != nil {
+		return err
+	}
+	collectGarbage(runRoot())
+	return nil
 }
 
+// 登录会话目录保留，同一会话再次绑定时复用其中的缓存与规则集
 func (s *server) resetSession() error {
-	if err := s.clearRuntime(true); err != nil {
+	if err := s.releaseKernel(); err != nil {
 		return err
 	}
+	if activeSession != "" {
+		dropRuntimeSecrets(runDir())
+	}
+	activeSession = ""
 	s.owner, s.watched = "", 0
 	return nil
 }
 
-func (s *server) clearRuntime(preserveCache ...bool) error {
+// 面板账户退出：删掉带节点凭据的配置，规则集与 cache.db 留给同账号下次登录。
+// 晚到的旧账号退出不能停掉已绑定的新账号
+func (s *server) endSession(key string) error {
+	if key != "" && !validSessionKey(key) {
+		return fmt.Errorf("缓存身份格式错误")
+	}
+	if key != "" && key != activeSession {
+		dropRuntimeSecrets(filepath.Join(runRoot(), key))
+		return nil
+	}
+	if err := s.releaseKernel(); err != nil {
+		return err
+	}
+	if activeSession != "" {
+		dropRuntimeSecrets(runDir())
+	}
+	activeSession = ""
+	collectGarbage(runRoot())
+	return nil
+}
+
+func validSessionKey(key string) bool {
+	_, err := hex.DecodeString(key)
+	return len(key) == 64 && err == nil
+}
+
+func (s *server) releaseKernel() error {
 	if err := s.kernel.stop(); err != nil {
-		return fmt.Errorf("停止旧内核失败，不能释放会话: %w", err)
+		return fmt.Errorf("停止旧内核失败: %w", err)
 	}
 	if s.kernel.status(0).Running {
-		return fmt.Errorf("旧内核尚未退出，不能释放会话")
+		return fmt.Errorf("旧内核尚未退出")
 	}
-	if err := s.proxy.restore(); err != nil {
-		return fmt.Errorf("还原系统代理失败，不能释放会话: %w", err)
-	}
-	if err := clearSessionFiles(dataDir(), preserveCache...); err != nil {
-		return fmt.Errorf("清理旧运行数据失败，不能释放会话: %w", err)
+	if err := s.proxy.restoreAll(); err != nil {
+		logf("还原系统代理失败，快照保留待下次还原: %v", err)
 	}
 	s.kernel = newKernelManager()
 	return nil
 }
 
-func (s *server) bindCache(key, user string) error {
-	if len(key) != 64 {
+func (s *server) bindCache(key string) error {
+	if !validSessionKey(key) {
 		return fmt.Errorf("缓存身份格式错误")
 	}
-	if _, err := hex.DecodeString(key); err != nil {
-		return fmt.Errorf("缓存身份格式错误")
+	if key != activeSession {
+		if err := s.releaseKernel(); err != nil {
+			return err
+		}
+		activeSession = key
 	}
 	if err := prepareRunDir(); err != nil {
 		return err
 	}
-	identity := user + "\n" + key
-	root, err := os.OpenRoot(dataDir())
-	if err != nil {
-		return err
-	}
-	old, readErr := root.ReadFile(".cache-owner")
-	root.Close()
-	if readErr == nil && string(old) == identity {
-		return nil
-	}
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return readErr
-	}
-	if err := s.clearRuntime(); err != nil {
-		return err
-	}
-	if err := prepareRunDir(); err != nil {
-		return err
-	}
-	root, err = os.OpenRoot(dataDir())
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	return root.WriteFile(".cache-owner", []byte(identity), 0600)
+	touchLastUsed(runDir())
+	collectGarbage(runRoot())
+	return nil
 }
 
-func clearSessionFiles(base string, preserveCache ...bool) error {
-	root, err := os.OpenRoot(base)
+func dropRuntimeSecrets(dir string) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		if !os.IsNotExist(err) {
+			logf("读取账号运行目录失败: %v", err)
+		}
+		return
 	}
-	defer root.Close()
-	if len(preserveCache) > 0 && preserveCache[0] {
-		if marker, err := root.ReadFile(".cache-owner"); err == nil && len(marker) > 0 {
-			for _, name := range []string{"config.json", "config.check.json", "proxy-snapshot.json"} {
-				if err := root.Remove("run/" + name); err != nil && !os.IsNotExist(err) {
-					return err
-				}
-			}
-			return nil
+	for _, entry := range entries {
+		name := entry.Name()
+		if name != "config.json" && name != "config.check.json" &&
+			!(strings.HasPrefix(name, "ecy-panel-") && strings.HasSuffix(name, ".json")) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			logf("删除运行密钥失败: %v", err)
 		}
 	}
-	if err := root.RemoveAll("run"); err != nil {
-		return err
+}
+
+// 账号目录超过这么久未用才回收；当前绑定的目录永不回收
+const sessionRetention = 30 * 24 * time.Hour
+
+const lastUsedName = ".last-used"
+
+func touchLastUsed(dir string) {
+	path := filepath.Join(dir, lastUsedName)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|noFollow, 0o600)
+	if err == nil {
+		file.Close()
+		now := time.Now()
+		err = os.Chtimes(path, now, now)
 	}
-	if err := root.Remove(".cache-owner"); err != nil && !os.IsNotExist(err) {
-		return err
+	if err != nil {
+		logf("记录账号目录使用时间失败: %v", err)
 	}
-	return nil
+}
+
+func recentlyUsed(dir string) bool {
+	info, err := os.Lstat(filepath.Join(dir, lastUsedName))
+	return err == nil && info.Mode().IsRegular() && time.Since(info.ModTime()) < sessionRetention
+}
+
+func collectGarbage(base string) {
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logf("打开运行目录失败: %v", err)
+		}
+		return
+	}
+	defer root.Close()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		logf("读取运行目录失败: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == activeSession || strings.HasPrefix(name, "proxy-snapshot") ||
+			(entry.IsDir() && recentlyUsed(filepath.Join(base, name))) {
+			continue
+		}
+		if err := root.RemoveAll(name); err != nil {
+			logf("删除过期账号运行数据失败: %v", err)
+		}
+	}
+	if err := os.Remove(filepath.Join(filepath.Dir(base), ".cache-owner")); err != nil && !os.IsNotExist(err) {
+		logf("删除旧版缓存归属文件失败: %v", err)
+	}
 }
 
 func (s *server) onClientGone(pid int) {

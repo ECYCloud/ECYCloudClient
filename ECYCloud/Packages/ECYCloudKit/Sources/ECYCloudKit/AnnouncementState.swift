@@ -32,33 +32,8 @@ public final class AnnouncementState {
         defaults.set(seen, forKey: scope + ".seen")
     }
     public func openIndex(_ items: [Announcement]) -> Int {
-        var best: Int?, bestAt: Date?
-        for (index, item) in items.enumerated() where item.id != 1 && seen[String(item.id)] != item.updatedAt {
-            let at = Self.revisedAt(item)
-            if best == nil || at != nil && (bestAt == nil || at! > bestAt!) { best = index; bestAt = at }
-        }
-        if let best { return best }
-        var latest = 0
-        bestAt = nil
-        for (index, item) in items.enumerated() where !(item.id == 1 && items.count > 1) {
-            if let at = Self.revisedAt(item), bestAt == nil || at > bestAt! { latest = index; bestAt = at }
-        }
-        return latest
-    }
-    static func revisedAt(_ item: Announcement) -> Date? {
-        let text = item.updatedAt.isEmpty ? item.date : item.updatedAt
-        let iso = ISO8601DateFormatter()
-        for options: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]] {
-            iso.formatOptions = options
-            if let date = iso.date(from: text) { return date }
-        }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.calendar = Calendar(identifier: .gregorian)
-        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: text) { return date }
-        }
-        return nil
+        items.firstIndex { $0.id != 1 && seen[String($0.id)] != $0.updatedAt }
+            ?? items.firstIndex { $0.id != 1 } ?? 0
     }
     public func takePopup() -> Announcement? {
         guard scope != nil, let popup = bundle?.popup, dismissed[String(popup.id)] != popup.updatedAt else { return nil }

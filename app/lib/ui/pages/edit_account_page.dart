@@ -35,6 +35,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
   final TextEditingController _oldEmailCode = TextEditingController();
   final TextEditingController _newEmail = TextEditingController();
   final TextEditingController _newEmailCode = TextEditingController();
+  final TextEditingController _emailPwd = TextEditingController();
   final TextEditingController _gaCode = TextEditingController();
 
   AuthOptions? _options;
@@ -70,6 +71,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     _oldEmailCode.dispose();
     _newEmail.dispose();
     _newEmailCode.dispose();
+    _emailPwd.dispose();
     _gaCode.dispose();
     super.dispose();
   }
@@ -156,6 +158,27 @@ class _EditAccountPageState extends State<EditAccountPage> {
     }
   }
 
+  Future<void> _updateEmail(bool emailVerify) async {
+    if (!emailVerify && _emailPwd.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(L10n.t('请填写密码')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    await _run(
+      (PanelApiClient api) => api.updateEmail(
+        newemail: _newEmail.text.trim(),
+        oldEmailcode: _oldEmailCode.text.trim(),
+        newEmailcode: _newEmailCode.text.trim(),
+        passwd: emailVerify ? '' : _emailPwd.text,
+      ),
+      logoutAfter: true,
+    );
+  }
+
   Future<void> _run(
     Future<String> Function(PanelApiClient api) action, {
     VoidCallback? onSuccess,
@@ -222,7 +245,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
   }
 
   Future<void> _copy(String label, String value) async {
-    await Clipboard.setData(ClipboardData(text: value));
+    await AppScope.of(context).platform.copySecret(value);
     if (!mounted) {
       return;
     }
@@ -241,7 +264,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     }
     final int enable = _gaEnableDraft;
     String? passwd;
-    if (enable == 1) {
+    if (enable == 1 && edit.gaEnable != 0) {
       final bool? confirmed = await showDialog<bool>(
         context: context,
         builder: (BuildContext context) => AppAlertDialog(
@@ -262,14 +285,24 @@ class _EditAccountPageState extends State<EditAccountPage> {
       if (confirmed != true || !mounted) {
         return;
       }
-    } else if (edit.gaEnable != 0) {
-      passwd = await _askGaPassword();
+    } else if (enable == 1 || edit.gaEnable != 0) {
+      passwd = await _askGaPassword(
+        title: enable == 1 ? L10n.t('您确定要开启两步验证吗？') : null,
+        intro: enable == 1
+            ? Text(L10n.t('开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。'))
+            : null,
+      );
       if (passwd == null || !mounted) {
         return;
       }
     }
     await _run(
-      (PanelApiClient api) => api.gaSet(enable, passwd: passwd),
+      // 开启时带上测试栏的验证码，面板据此确认验证器已绑定当前密钥
+      (PanelApiClient api) => api.gaSet(
+        enable,
+        passwd: passwd,
+        code: enable == 1 ? _gaCode.text.trim() : null,
+      ),
       onSuccess: () {
         setState(() {
           _editOptions = edit.copyWith(
@@ -286,7 +319,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     );
   }
 
-  Future<void> _reloadEditOptions() async {
+  Future<void> _reloadEditOptions({String? gaToken, String? gaUrl}) async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
     if (api == null) {
       return;
@@ -297,7 +330,12 @@ class _EditAccountPageState extends State<EditAccountPage> {
         return;
       }
       setState(() {
-        _editOptions = edit;
+        // 面板不再下发已启用账户的密钥，绑定码也只在复核密码后取得：刚拿到的要留着显示
+        _editOptions = edit.copyWith(
+          gaToken: gaToken,
+          gaUrl: gaUrl,
+          bindToken: _editOptions?.bindToken,
+        );
         _gaEnableDraft = edit.gaEnable;
       });
     } on Object {
@@ -305,10 +343,11 @@ class _EditAccountPageState extends State<EditAccountPage> {
     }
   }
 
-  Future<String?> _askGaPassword() {
+  Future<String?> _askGaPassword({String? title, Widget? intro}) {
     return showDialog<String>(
       context: context,
-      builder: (BuildContext context) => const _GaPasswordDialog(),
+      builder: (BuildContext context) =>
+          _GaPasswordDialog(title: title, intro: intro),
     );
   }
 
@@ -318,12 +357,9 @@ class _EditAccountPageState extends State<EditAccountPage> {
     if (edit == null || api == null || _busy) {
       return;
     }
-    String? passwd;
-    if (edit.gaEnable != 0) {
-      passwd = await _askGaPassword();
-      if (passwd == null || !mounted) {
-        return;
-      }
+    final String? passwd = await _askGaPassword();
+    if (passwd == null || !mounted) {
+      return;
     }
     setState(() => _busy = true);
     try {
@@ -342,6 +378,9 @@ class _EditAccountPageState extends State<EditAccountPage> {
         );
         _busy = false;
       });
+      unawaited(
+        _reloadEditOptions(gaToken: result.gaToken, gaUrl: result.gaUrl),
+      );
       if (!context.mounted) {
         return;
       }
@@ -368,67 +407,59 @@ class _EditAccountPageState extends State<EditAccountPage> {
   }
 
   Future<void> _confirmTelegramUnbind(EditAccountOptions edit) async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AppAlertDialog(
-          title: Text(L10n.t('您确定要解除Telegram绑定吗？')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text.rich(
+    final String? passwd = await _askGaPassword(
+      title: L10n.t('您确定要解除Telegram绑定吗？'),
+      intro: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text.rich(
+            TextSpan(
+              style: Theme.of(context).textTheme.bodyMedium,
+              children: <InlineSpan>[
+                TextSpan(text: L10n.t('注意：您点击 ')),
                 TextSpan(
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  children: <InlineSpan>[
-                    TextSpan(text: L10n.t('注意：您点击 ')),
-                    TextSpan(
-                      text: L10n.t('确定'),
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppTheme.danger,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    TextSpan(
-                      text: L10n.t(' 按钮之后系统会解除你本站账号与Telegram Bot的绑定。'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                L10n.t('解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。'),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              if (edit.telegramUnbindKick) ...<Widget>[
-                const SizedBox(height: 10),
-                Text(
-                  L10n.t(
-                    '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。',
+                  text: L10n.t('确定'),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.danger,
+                    fontWeight: FontWeight.w700,
                   ),
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: AppTheme.danger),
                 ),
+                TextSpan(text: L10n.t(' 按钮之后系统会解除你本站账号与Telegram Bot的绑定。')),
               ],
-            ],
-          ),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text(L10n.t('确定')),
             ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(L10n.t('取消')),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            L10n.t('解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。'),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (edit.telegramUnbindKick) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              L10n.t(
+                '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。',
+              ),
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppTheme.danger),
             ),
           ],
-        );
-      },
+        ],
+      ),
     );
-    if (ok != true || !mounted) {
-      return;
+    if (passwd != null && mounted) {
+      await _resetTelegram(edit, passwd);
     }
+  }
 
+  Future<void> _requestBindToken(EditAccountOptions edit) async {
+    final String? passwd = await _askGaPassword();
+    if (passwd != null && mounted) {
+      await _resetTelegram(edit, passwd);
+    }
+  }
+
+  Future<void> _resetTelegram(EditAccountOptions edit, String passwd) async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
     if (api == null || _busy) {
       return;
@@ -436,7 +467,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
     setState(() => _busy = true);
     try {
       final ({String message, String bindToken}) result = await api
-          .telegramReset();
+          .telegramReset(passwd: passwd);
       if (!mounted || _otherAccount(api)) {
         if (mounted) {
           setState(() => _busy = false);
@@ -452,7 +483,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
         _busy = false;
       });
       _startTelegramPoll();
-      if (!context.mounted) {
+      if (!context.mounted || !edit.telegramBound) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -741,8 +772,8 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                     prefixIcon: Icon(Icons.mail_outline),
                                   ),
                                 ),
-                                if (emailVerify) ...<Widget>[
-                                  const SizedBox(height: 12),
+                                const SizedBox(height: 12),
+                                if (emailVerify)
                                   Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.center,
@@ -810,8 +841,38 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                         ),
                                       ),
                                     ],
+                                  )
+                                else
+                                  EmailOtpIme(
+                                    builder:
+                                        (
+                                          BuildContext context,
+                                          FocusNode focusNode,
+                                        ) {
+                                          return AppTextField(
+                                            controller: _emailPwd,
+                                            focusNode: focusNode,
+                                            obscureText: true,
+                                            keyboardType:
+                                                TextInputType.visiblePassword,
+                                            autocorrect: false,
+                                            enableSuggestions: false,
+                                            autofillHints: const <String>[
+                                              AutofillHints.password,
+                                            ],
+                                            inputFormatters:
+                                                <TextInputFormatter>[
+                                                  asciiOnlyFormatter,
+                                                ],
+                                            decoration: InputDecoration(
+                                              labelText: L10n.t('登录密码'),
+                                              prefixIcon: const Icon(
+                                                Icons.lock_outline,
+                                              ),
+                                            ),
+                                          );
+                                        },
                                   ),
-                                ],
                                 const SizedBox(height: 12),
                                 Align(
                                   alignment: Alignment.centerRight,
@@ -819,20 +880,7 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                     onPressed: _busy
                                         ? null
                                         : () => unawaited(
-                                            _run(
-                                              (PanelApiClient api) =>
-                                                  api.updateEmail(
-                                                    newemail: _newEmail.text
-                                                        .trim(),
-                                                    oldEmailcode: _oldEmailCode
-                                                        .text
-                                                        .trim(),
-                                                    newEmailcode: _newEmailCode
-                                                        .text
-                                                        .trim(),
-                                                  ),
-                                              logoutAfter: true,
-                                            ),
+                                            _updateEmail(emailVerify),
                                           ),
                                     child: Text(L10n.t('换绑邮箱')),
                                   ),
@@ -1145,61 +1193,75 @@ class _EditAccountPageState extends State<EditAccountPage> {
                                               ),
                                         ),
                                         const SizedBox(height: 8),
-                                        Text(
-                                          L10n.t('绑定码：{0}', <Object>[
-                                            edit.bindToken,
-                                          ]),
+                                        if (edit.bindToken.isEmpty)
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: FilledButton(
+                                              onPressed: _busy
+                                                  ? null
+                                                  : () => unawaited(
+                                                      _requestBindToken(edit),
+                                                    ),
+                                              child: Text(L10n.t('获取绑定码')),
+                                            ),
+                                          )
+                                        else ...<Widget>[
+                                          Text(
+                                            L10n.t('绑定码：{0}', <Object>[
+                                              edit.bindToken,
+                                            ]),
 
-                                          style: theme.textTheme.bodySmall,
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: <Widget>[
-                                            OutlinedButton.icon(
-                                              onPressed: () => unawaited(
-                                                _copy(
-                                                  L10n.t('绑定码'),
-                                                  edit.bindToken,
+                                            style: theme.textTheme.bodySmall,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: <Widget>[
+                                              OutlinedButton.icon(
+                                                onPressed: () => unawaited(
+                                                  _copy(
+                                                    L10n.t('绑定码'),
+                                                    edit.bindToken,
+                                                  ),
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.copy,
+                                                  size: 16,
+                                                ),
+                                                label: Text(L10n.t('复制绑定码')),
+                                              ),
+                                              FilledButton.icon(
+                                                onPressed:
+                                                    edit.telegramBot.isEmpty
+                                                    ? null
+                                                    : () {
+                                                        final String url =
+                                                            'https://t.me/${edit.telegramBot}?start=${edit.bindToken}';
+                                                        unawaited(
+                                                          AppScope.of(context)
+                                                              .platform
+                                                              .openUrl(url),
+                                                        );
+                                                      },
+                                                icon: const Icon(
+                                                  Icons.open_in_new,
+                                                  size: 16,
+                                                ),
+                                                label: Text(
+                                                  edit.telegramBot.isEmpty
+                                                      ? L10n.t('一键绑定')
+                                                      : L10n.t(
+                                                          '一键绑定 @{0}',
+                                                          <Object>[
+                                                            edit.telegramBot,
+                                                          ],
+                                                        ),
                                                 ),
                                               ),
-                                              icon: const Icon(
-                                                Icons.copy,
-                                                size: 16,
-                                              ),
-                                              label: Text(L10n.t('复制绑定码')),
-                                            ),
-                                            FilledButton.icon(
-                                              onPressed:
-                                                  edit.telegramBot.isEmpty
-                                                  ? null
-                                                  : () {
-                                                      final String url =
-                                                          'https://t.me/${edit.telegramBot}?start=${edit.bindToken}';
-                                                      unawaited(
-                                                        AppScope.of(context)
-                                                            .platform
-                                                            .openUrl(url),
-                                                      );
-                                                    },
-                                              icon: const Icon(
-                                                Icons.open_in_new,
-                                                size: 16,
-                                              ),
-                                              label: Text(
-                                                edit.telegramBot.isEmpty
-                                                    ? L10n.t('一键绑定')
-                                                    : L10n.t(
-                                                        '一键绑定 @{0}',
-                                                        <Object>[
-                                                          edit.telegramBot,
-                                                        ],
-                                                      ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                            ],
+                                          ),
+                                        ],
                                       ],
                                     ),
                             ),
@@ -1314,7 +1376,10 @@ class _TelegramLink extends StatelessWidget {
 }
 
 class _GaPasswordDialog extends StatefulWidget {
-  const _GaPasswordDialog();
+  const _GaPasswordDialog({this.title, this.intro});
+
+  final String? title;
+  final Widget? intro;
 
   @override
   State<_GaPasswordDialog> createState() => _GaPasswordDialogState();
@@ -1340,14 +1405,18 @@ class _GaPasswordDialogState extends State<_GaPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AppAlertDialog(
-      title: Text(L10n.t('请验证登录密码')),
+      title: Text(widget.title ?? L10n.t('请验证登录密码')),
       content: SizedBox(
         width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(L10n.t('关闭或重置已启用的两步验证属敏感操作，为确认是您本人，请输入当前登录密码。')),
+            if (widget.intro case final Widget intro) ...<Widget>[
+              intro,
+              const SizedBox(height: 12),
+            ],
+            Text(L10n.t('此操作属敏感操作，为确认是您本人，请输入当前登录密码。')),
             const SizedBox(height: 12),
             AppTextField(
               controller: _password,

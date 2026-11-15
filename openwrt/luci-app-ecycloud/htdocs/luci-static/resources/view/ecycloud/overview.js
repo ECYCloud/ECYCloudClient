@@ -279,11 +279,16 @@ return view.extend({
 			self.applyAnnounce(res);
 			self.paint();
 		});
-		this.announceModal = api.announcePopup(item, {
+		// 后台设置的客户端弹窗公告以翻页公告弹窗展示并定位到该条，点「关闭」后同一版本不再自动弹出
+		var items = this.announcements.items;
+		this.announceModal = api.announceBrowser({
+			items: items,
+			index: items.findIndex(function(entry) { return entry.id == item.id; }),
+			loaded: true,
 			site: this.announceSite(),
-			onClose: function(gotIt) {
+			onClose: function(closed) {
 				self.announceModal = null;
-				if (!gotIt)
+				if (!closed)
 					return;
 				api.dismissAnnouncementPopup().then(function(res) {
 					self.applyAnnounce(res);
@@ -773,14 +778,11 @@ return view.extend({
 		}) : [ E('div', { 'class': 'ecycloud-hint' }, [ _('No ranking data yet') ]) ]));
 	},
 
-	renderTrafficRank: function() {
+	renderTrafficTitle: function(title, notice, id) {
 		var self = this;
-		var day = this.rankDay || 'today';
-		var data = api.trafficRank(day, api.rankSkip(this.cache && this.cache.status));
-		var notice = _('Statistics are stored locally for the last two days, cover only this device, and are not synchronized between devices.');
-		var tip = E('span', { 'class': 'ecycloud-rank-tooltip', 'role': 'tooltip', 'id': 'ecycloud-rank-notice' }, [ notice ]);
+		var tip = E('span', { 'class': 'ecycloud-rank-tooltip', 'role': 'tooltip', 'id': id }, [ notice ]);
 		var info = api.pressable('ecycloud-icon-btn', { 'aria-label': notice, 'data-ico': 'notice' });
-		info.setAttribute('aria-describedby', 'ecycloud-rank-notice');
+		info.setAttribute('aria-describedby', id);
 		info.setAttribute('aria-expanded', 'false');
 		var help = E('span', { 'class': 'ecycloud-rank-info' }, [ info, tip ]);
 		var closeTimer;
@@ -797,20 +799,25 @@ return view.extend({
 			clearTimeout(closeTimer);
 			help.classList.remove('is-open');
 			info.setAttribute('aria-expanded', 'false');
+			if (self.closeTrafficHint === close)
+				self.closeTrafficHint = null;
 		}
 		function show() {
+			if (self.closeTrafficHint && self.closeTrafficHint !== close)
+				self.closeTrafficHint();
+			self.closeTrafficHint = close;
 			clearTimeout(closeTimer);
 			position();
 			help.classList.add('is-open');
 			info.setAttribute('aria-expanded', 'true');
 		}
-		self.closeRankHint = close;
-		if (!self._onRankScroll) {
-			self._onRankScroll = function() { self.closeRankHint(); };
-			document.addEventListener('scroll', self._onRankScroll, true);
-			document.addEventListener('pointerdown', function(event) {
-				self.closeRankHint(event);
-			}, true);
+		if (!self._onTrafficHintDismiss) {
+			self._onTrafficHintDismiss = function(event) {
+				if (self.closeTrafficHint)
+					self.closeTrafficHint(event.type == 'pointerdown' ? event : null);
+			};
+			document.addEventListener('scroll', self._onTrafficHintDismiss, true);
+			document.addEventListener('pointerdown', self._onTrafficHintDismiss, true);
 		}
 		info.addEventListener('click', function() {
 			if (!help.classList.contains('is-open'))
@@ -838,7 +845,18 @@ return view.extend({
 				close();
 		});
 
-		return api.section('leaderboard', E('span', {}, [ _('Traffic ranking'), help ]), E('div', {}, [
+		return E('span', {}, [ title, help ]);
+	},
+
+	renderTrafficRank: function() {
+		var self = this;
+		var day = this.rankDay || 'today';
+		var data = api.trafficRank(day, api.rankSkip(this.cache && this.cache.status));
+		var title = this.renderTrafficTitle(_('Traffic ranking'),
+			_('Statistics are stored locally for the last two days, cover only this device, and are not synchronized between devices.'),
+			'ecycloud-rank-notice');
+
+		return api.section('leaderboard', title, E('div', {}, [
 			E('div', { 'class': 'ecycloud-rank-switch' }, [
 				api.segments([
 					{ value: 'today', label: _('Today') },
@@ -910,7 +928,9 @@ return view.extend({
 			});
 		});
 
-		return api.section('chart', _('Traffic usage'), E('div', { 'class': 'ecycloud-usage' }, [
+		var title = this.renderTrafficTitle(_('Traffic usage'),
+			_('Shows traffic usage across all devices.'), 'ecycloud-usage-notice');
+		return api.section('chart', title, E('div', { 'class': 'ecycloud-usage' }, [
 			bar(_('Today used'), api.bytesCompact(today), ratio(today), 'danger'),
 			bar(_('Previously used'), api.bytesCompact(previous), ratio(previous), 'warning'),
 			bar(_('Remaining traffic'), api.bytesCompact(remain > 0 ? remain : 0),
@@ -1037,13 +1057,13 @@ return view.extend({
 			'href': siteHref(site, '/tos'),
 			'target': '_blank',
 			'rel': 'noreferrer'
-		}, [ _('Terms of Service') ]);
+		}, [ _('Terms of service') ]);
 		var privacyLink = E('a', {
 			'class': 'ecycloud-login-textbtn is-muted',
 			'href': siteHref(site, '/privacy'),
 			'target': '_blank',
 			'rel': 'noreferrer'
-		}, [ _('Privacy Policy') ]);
+		}, [ _('Privacy policy') ]);
 
 		var emailRow = loginField(_('Email'), [ email ]);
 		var passwordRow = loginField(_('Password'), [ password ]);

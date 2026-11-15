@@ -24,7 +24,6 @@ import 'package:ecycloud_client/state/connection_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  late Directory dir;
   late _Client client;
   late _Kernel kernel;
   late PanelResponseCache cache;
@@ -36,7 +35,7 @@ void main() {
   setUp(() async {
     overrides = HttpOverrides.current;
     HttpOverrides.global = null;
-    dir = Directory.systemTemp.createTempSync('ecycloud-offline-');
+    AppPaths.useSession(_sessionA);
     JsonFileStore(AppPaths.selectorCache, 'test').clear();
     JsonFileStore(AppPaths.speedTestQuota, 'test').clear();
     JsonFileStore(AppPaths.trafficRank, 'test').clear();
@@ -50,10 +49,7 @@ void main() {
     speedTester = _SpeedTester();
     client = _Client()..token = 'test-token';
     kernel = _Kernel();
-    cache = PanelResponseCache(
-      profileStore: JsonFileStore(File('${dir.path}/profile.json'), 'test'),
-      remoteStore: JsonFileStore(File('${dir.path}/remote.json'), 'test'),
-    );
+    cache = PanelResponseCache();
     connection = ConnectionController(
       platform: _Platform(),
       kernel: kernel,
@@ -71,8 +67,16 @@ void main() {
     JsonFileStore(AppPaths.speedTestQuota, 'test').clear();
     JsonFileStore(AppPaths.trafficRank, 'test').clear();
     HttpOverrides.global = overrides;
-    dir.deleteSync(recursive: true);
+    AppPaths.useSession('');
+    if (AppPaths.sessions.existsSync()) {
+      AppPaths.sessions.deleteSync(recursive: true);
+    }
   });
+
+  Future<void> endSession() async {
+    AppPaths.useSession('');
+    await connection.shutdown(clearSession: true);
+  }
 
   void seed({Duration lifetime = const Duration(hours: 2)}) {
     cache.saveProfile(
@@ -82,7 +86,11 @@ void main() {
         'email': 'a@example.test',
       }),
     );
-    cache.saveRemote('a@example.test', client.profile(lifetime));
+    cache.saveRemote(
+      'a@example.test',
+      client.profile(lifetime),
+      client.cacheKey,
+    );
     connection.attachApi(client, accountKey: 'a@example.test');
   }
 
@@ -215,7 +223,7 @@ void main() {
       bool rejected = false;
       connection.onSessionRejected = () async {
         rejected = true;
-        await connection.shutdown(clearSession: true);
+        await endSession();
         client.token = null;
         connection.attachApi(null);
       };
@@ -224,7 +232,7 @@ void main() {
       expect(rejected, isTrue);
       expect(client.token, isNull);
       expect(kernel.status.state, KernelState.stopped);
-      expect(cache.loadRemote('a@example.test'), isNull);
+      expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
     });
   }
 
@@ -236,12 +244,17 @@ void main() {
     connection.notePanelRevision('candidate');
     for (
       int i = 0;
-      i < 80 && cache.loadRemote('a@example.test')?.revision != 'candidate';
+      i < 80 &&
+          cache.loadRemote('a@example.test', client.cacheKey)?.revision !=
+              'candidate';
       i++
     ) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
-    expect(cache.loadRemote('a@example.test')?.revision, 'candidate');
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'candidate',
+    );
   });
 
   for (final AppLanguage language in AppLanguage.values) {
@@ -270,7 +283,7 @@ void main() {
     connection.attachApi(client, accountKey: 'a@example.test');
     await connection.connect();
     expect(kernel.starts, 0);
-    expect(cache.loadRemote('a@example.test'), isNull);
+    expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
   });
 
   test('仅客户端无法访问面板时从有效缓存启动内核，不等待资料接口', () async {
@@ -281,7 +294,10 @@ void main() {
     expect(client.profileCalls, 0);
     expect(kernel.starts, 1);
     expect(connection.panelOffline, isTrue);
-    expect(cache.loadRemote('a@example.test')?.revision, 'verified');
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'verified',
+    );
   });
 
   test('面板签发的配置未到期时，超过 24 小时仍能从缓存连接', () async {
@@ -299,8 +315,8 @@ void main() {
     client.configError = ApiException('revoked', statusCode: 401);
     bool rejected = false;
     connection.onSessionRejected = () async {
+      await endSession();
       rejected = true;
-      await connection.shutdown(clearSession: true);
     };
     await connection.connect();
     for (int i = 0; i < 50 && !rejected; i++) {
@@ -308,7 +324,7 @@ void main() {
     }
     expect(rejected, isTrue);
     expect(kernel.status.running, isFalse);
-    expect(cache.loadRemote('a@example.test'), isNull);
+    expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
   });
 
   for (final String scenario in <String>[
@@ -402,7 +418,7 @@ void main() {
     expect(kernel.starts, starts);
     expect(kernel.stops, stops);
     expect(client.token, 'test-token');
-    expect(cache.loadRemote('a@example.test'), isNotNull);
+    expect(cache.loadRemote('a@example.test', client.cacheKey), isNotNull);
     await connection.connect();
     expect(connection.state, ConnectionPhase.connected);
     expect(kernel.starts, starts);
@@ -434,7 +450,10 @@ void main() {
       expect(client.token, 'test-token');
       expect(kernel.status.running, isTrue);
       expect(connection.state, ConnectionPhase.connected);
-      expect(cache.loadRemote('a@example.test')?.revision, 'verified');
+      expect(
+        cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+        'verified',
+      );
     });
   }
 
@@ -451,12 +470,13 @@ void main() {
   test('配置戳接口明确拒绝时，不用全量接口的网络故障掩盖撤销', () async {
     seed();
     client.revisionError = ApiException('revoked', statusCode: 401);
+    connection.onSessionRejected = endSession;
     await connection.connect();
     for (int i = 0; i < 50 && kernel.status.running; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     expect(kernel.status.running, isFalse);
-    expect(cache.loadRemote('a@example.test'), isNull);
+    expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
   });
 
   test('不同登录令牌不能使用旧会话缓存', () async {
@@ -476,8 +496,93 @@ void main() {
     await connection.refreshProfileFromPanel();
     expect(kernel.status.running, isTrue);
     expect(kernel.starts, 1);
-    expect(cache.loadRemote('a@example.test')?.revision, 'verified');
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'verified',
+    );
     expect(connection.groups.single.name, 'group');
+  });
+
+  // 只检查不改写：弹窗列出问题，正在用的配置与持久化缓存都不动
+  test('候选配置含明文 http 下载地址时拒绝并保留上一份可用缓存', () async {
+    seed();
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    client
+      ..fresh = true
+      ..extra = <String, Object>{
+        'geox-url': <String, String>{
+          'mmdb': 'http://example.test/geoip.metadb',
+        },
+      };
+    expect(await connection.refreshProfileFromPanel(), isNull);
+    expect(connection.formatError, contains('geox-url「mmdb」必须使用 https'));
+    expect(kernel.status.running, isTrue);
+    expect(kernel.starts, 1);
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'verified',
+    );
+    expect(
+      cache
+          .loadRemote('a@example.test', client.cacheKey)
+          ?.config
+          .containsKey('geox-url'),
+      isFalse,
+    );
+  });
+
+  // 修复前桌面直接向内核 PUT /configs 提交整份原文，特权侧落盘前的净化管不到；改为交特权侧净化落盘后按文件重载
+  test('全量热载交特权侧 kernel.reload，不向内核提交配置原文，连接与选中节点保持', () async {
+    client.extra = <String, Object>{
+      'dns': <String, Object>{'enable': true, 'enhanced-mode': 'redir-host'},
+    };
+    seed();
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    final DateTime connectedAt = connection.connectedAt!;
+    client
+      ..fresh = true
+      ..extra = <String, Object>{
+        ...client.extra,
+        'rules': <String>['DOMAIN,reload.example.test,DIRECT', 'MATCH,group'],
+      };
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(kernel.fullReloads, 0);
+    expect(kernel.privilegedReloads, hasLength(1));
+    expect(
+      kernel.privilegedReloads.single['rules'],
+      contains('DOMAIN,reload.example.test,DIRECT'),
+    );
+    expect((kernel.starts, kernel.stops, kernel.closedConnections), (1, 0, 0));
+    expect(connection.connectedAt, connectedAt);
+    expect(connection.groups.single.now, 'node-1');
+  });
+
+  // 旧版后台组件不认 kernel.reload：改为经特权侧净化的重启，不能退回原文热载，也不能静默失败
+  test('后台组件不支持热载时改为重启内核，不退回原文热载', () async {
+    client.extra = <String, Object>{
+      'dns': <String, Object>{'enable': true, 'enhanced-mode': 'redir-host'},
+    };
+    seed();
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    kernel.reloadUnsupported = true;
+    client
+      ..fresh = true
+      ..extra = <String, Object>{
+        ...client.extra,
+        'rules': <String>['DOMAIN,reload.example.test,DIRECT', 'MATCH,group'],
+      };
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(kernel.fullReloads, 0);
+    expect(kernel.privilegedReloads, isEmpty);
+    expect(kernel.starts, 2);
+    expect(
+      kernel.config['rules'],
+      contains('DOMAIN,reload.example.test,DIRECT'),
+    );
+    expect(connection.state, ConnectionPhase.connected);
   });
 
   test('面板节点变化重启保留已连接时间，主动断开后重新计时', () async {
@@ -542,6 +647,40 @@ void main() {
     expect(client.clashCalls, calls + 1);
   });
 
+  for (final (Duration? interval, Duration age, bool due)
+      in <(Duration?, Duration, bool)>[
+        (null, const Duration(hours: 23), false),
+        (null, const Duration(hours: 25), true),
+        (const Duration(hours: 1), const Duration(minutes: 30), false),
+        (const Duration(hours: 1), const Duration(hours: 2), true),
+      ]) {
+    test('配置戳未变时按更新间隔 ${interval?.inHours ?? '默认'} 小时、距上次 ${age.inMinutes} 分钟'
+        '${due ? '' : '不'}重拉全量，内容相同不重启不断开', () async {
+      client.nodeProviders = true;
+      seed();
+      await connection.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      client
+        ..fresh = true
+        ..updateInterval = interval
+        ..fetchedAgo = age;
+      await connection.refreshProfileFromPanel();
+      final int calls = client.clashCalls;
+      expect(await connection.refreshProfileFromPanel(), '已是最新，分流规则已刷新');
+      expect(client.clashCalls, calls + (due ? 1 : 0));
+      expect(kernel.starts, 1);
+      expect(kernel.stops, 0);
+      expect(kernel.fullReloads, 0);
+      expect(kernel.privilegedReloads, isEmpty);
+      expect(kernel.closedConnections, 0);
+      expect(connection.state, ConnectionPhase.connected);
+      expect(
+        cache.loadRemote('a@example.test', client.cacheKey)?.updateInterval,
+        interval,
+      );
+    });
+  }
+
   for (final String stage in <String>['write', 'update']) {
     test('节点独立更新 $stage 失败保留当前连接和原有缓存', () async {
       client.nodeProviders = true;
@@ -561,7 +700,10 @@ void main() {
       expect(connection.state, ConnectionPhase.connected);
       expect(connection.connectedAt, connectedAt);
       expect(connection.groups.single.members, <String>['node-1']);
-      expect(cache.loadRemote('a@example.test')?.revision, 'verified');
+      expect(
+        cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+        'verified',
+      );
     });
   }
 
@@ -573,6 +715,7 @@ void main() {
       ..token = 'new-token'
       ..fresh = true;
     addTearDown(next.close);
+    AppPaths.useSession(_sessionB);
     connection.attachApi(next, accountKey: 'a@example.test');
     for (
       int i = 0;
@@ -584,7 +727,11 @@ void main() {
     }
     expect(kernel.starts, 2);
     expect(connection.state, ConnectionPhase.connected);
-    expect(cache.loadRemote('a@example.test')?.cacheBinding, next.cacheBinding);
+    expect(
+      cache.loadRemote('a@example.test', next.cacheKey)?.cacheBinding,
+      next.cacheBinding,
+    );
+    expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
   });
 
   for (final (String label, String account, List<String> nodes, String expected)
@@ -606,11 +753,11 @@ void main() {
         expect(connection.groupByName(group)?.now, 'node-2');
       }
 
-      await connection.shutdown(clearSession: true);
+      await endSession();
       expect(kernel.status.running, isFalse);
       expect(connection.groups, isEmpty);
       expect(cache.loadProfile('a@example.test'), isNull);
-      expect(cache.loadRemote('a@example.test'), isNull);
+      expect(cache.loadRemote('a@example.test', client.cacheKey), isNull);
       expect(
         JsonFileStore(AppPaths.selectorCache, 'test').read(),
         <String, Object>{
@@ -623,6 +770,7 @@ void main() {
       );
       connection.dispose();
 
+      AppPaths.useSession(_sessionB);
       final _Client next = _Client()
         ..token = 'new-token'
         ..fresh = true
@@ -646,10 +794,16 @@ void main() {
       for (final String group in next.groups) {
         expect(connection.groupByName(group)?.now, expected);
       }
-      expect(cache.loadRemote(account)?.cacheBinding, next.cacheBinding);
+      expect(
+        cache.loadRemote(account, next.cacheKey)?.cacheBinding,
+        next.cacheBinding,
+      );
     });
   }
 }
+
+final String _sessionA = 'a' * 64;
+final String _sessionB = 'b' * 64;
 
 class _Client extends PanelApiClient {
   _Client()
@@ -670,6 +824,7 @@ class _Client extends PanelApiClient {
   Map<String, dynamic> profileExtras = <String, dynamic>{};
   final List<String> reclaimTargets = <String>[];
   bool fresh = false;
+  Map<String, Object> extra = <String, Object>{};
   String account = 'a@example.test';
   List<String> nodes = <String>['node-1'];
   List<String> groups = <String>['group'];
@@ -683,6 +838,8 @@ class _Client extends PanelApiClient {
   bool denyReport = false;
   ApiException configError = ApiException('offline', connectFailed: true);
   ApiException? revisionError;
+  Duration fetchedAgo = const Duration(seconds: 1);
+  Duration? updateInterval;
   RemoteProfile profile(Duration lifetime) => RemoteProfile(
     config: <String, dynamic>{
       'proxies': nodeProviders ? <Object>[] : nodeConfigs,
@@ -706,6 +863,7 @@ class _Client extends PanelApiClient {
           },
       ],
       'rules': <String>['MATCH,group'],
+      ...extra,
     },
     revision: fresh
         ? (nodeProviders ? 'candidate-$revision' : 'candidate')
@@ -713,9 +871,10 @@ class _Client extends PanelApiClient {
     groupIcons: const <String, String>{},
     nodeLabels: const <String, String>{},
     flagRegex: '',
-    offlineIssuedAt: DateTime.now().subtract(const Duration(seconds: 1)),
+    offlineIssuedAt: DateTime.now().subtract(fetchedAgo),
     offlineUntil: DateTime.now().add(lifetime),
     cacheBinding: cacheBinding,
+    updateInterval: updateInterval,
   );
   List<Object> get nodeConfigs => <Object>[
     for (final String node in nodes)
@@ -814,7 +973,10 @@ class _Kernel implements KernelController {
   int trafficSamples = 0;
   int starts = 0;
   int stops = 0;
+  // 控制面直接收到的 PUT /configs（原文热载）与交给特权侧的 kernel.reload 分开计
   int fullReloads = 0;
+  final List<Map<String, dynamic>> privilegedReloads = <Map<String, dynamic>>[];
+  bool reloadUnsupported = false;
   int closedConnections = 0;
   int providerUpdates = 0;
   bool failWrite = false;
@@ -968,11 +1130,20 @@ class _Kernel implements KernelController {
   }
 
   @override
-  Future<void> clearSession() => stop();
+  Future<void> clearSession(String cacheKey) => stop();
   @override
   Future<void> persistConfig(String configJson) async {
     if (failWrite) throw KernelException('模拟写入失败');
     config = jsonDecode(configJson) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<void> reloadConfig(String configJson) async {
+    if (reloadUnsupported) {
+      throw KernelException('热载配置失败：未知指令 "kernel.reload"', unsupported: true);
+    }
+    config = jsonDecode(configJson) as Map<String, dynamic>;
+    privilegedReloads.add(config);
   }
 
   @override

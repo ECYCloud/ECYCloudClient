@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -13,7 +14,17 @@ val signing = Properties().apply {
     }
 }
 
+// 与 Dart AppConfig.siteBaseUrl 同源：原生侧补算旧版凭据缺失的账号键时要用到站点地址
+val dartSiteUrl: String = (findProperty("dart-defines") as String?).orEmpty()
+    .split(',')
+    .filter { it.isNotBlank() }
+    .map { String(Base64.getDecoder().decode(it)) }
+    .firstOrNull { it.startsWith("ECYCLOUD_SITE_URL=") }
+    ?.substringAfter('=')
+    .orEmpty()
+
 val requireReleaseSigning = tasks.register("requireReleaseSigning") {
+    onlyIf { !signing.isEmpty() }
     doLast {
         check(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all {
             !signing.getProperty(it).isNullOrBlank()
@@ -51,6 +62,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        buildConfigField("String", "SITE_URL", "\"${dartSiteUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     signingConfigs {
@@ -80,6 +92,7 @@ android {
 dependencies {
     implementation(files("libs/libmihomo.aar"))
     implementation("androidx.core:core-ktx:1.19.1")
+    testImplementation("junit:junit:4.13.2")
 }
 
 flutter {

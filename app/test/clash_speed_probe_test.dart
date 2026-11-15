@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:ecycloud_client/domain/config/local_template.dart';
 import 'package:ecycloud_client/domain/config/speed_probe_config.dart';
 import 'package:ecycloud_client/domain/kernel/clash_api_client.dart';
+import 'package:ecycloud_client/state/connection_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -239,5 +240,116 @@ void main() {
       'GET /connections',
       'DELETE /connections/probe',
     ]);
+  });
+
+  test('运行配置展示不含控制密钥与测速入站口令', () {
+    final Map<String, dynamic> config = <String, dynamic>{
+      'secret': 'control-secret-value',
+      'proxies': <Object?>[
+        <String, dynamic>{
+          'name': 'node-1',
+          'type': 'vless',
+          'server': 'node.example.test',
+          'uuid': 'device-uuid-in-proxies',
+        },
+      ],
+      'proxy-groups': <Object?>[],
+      'proxy-providers': <String, dynamic>{
+        'ecy-panel-nodes': <String, dynamic>{
+          'type': 'file',
+          'path': 'ecy-panel-nodes.json',
+          'payload': <Object?>[
+            <String, dynamic>{
+              'name': 'node-2',
+              'type': 'ss',
+              'password': 'device-password-in-payload',
+              'plugin-opts': <String, dynamic>{'password': 'nested-secret'},
+            },
+            <String, dynamic>{
+              'name': 'node-3',
+              'type': 'hysteria2',
+              'auth': 'device-auth-in-payload',
+            },
+          ],
+        },
+      },
+    };
+    SpeedProbeConfig.applyTo(config, 10203, 'control-secret-value');
+    final String password = SpeedProbeConfig.credential('control-secret-value')
+        .split(':')
+        .last;
+    final String shown = ConnectionController.maskRuntimeSecrets(
+      jsonEncode(config),
+    );
+    expect(shown, isNot(contains('control-secret-value')));
+    expect(shown, isNot(contains(password)));
+    for (final String credential in <String>[
+      'device-uuid-in-proxies',
+      'device-password-in-payload',
+      'nested-secret',
+      'device-auth-in-payload',
+    ]) {
+      expect(shown, isNot(contains(credential)));
+    }
+    expect(shown, contains('node.example.test'));
+    expect(shown, contains('ecy-panel-nodes.json'));
+    final Map<String, dynamic> parsed =
+        jsonDecode(shown) as Map<String, dynamic>;
+    expect(parsed['secret'], '******');
+    expect(parsed['listeners'][0]['port'], SpeedProbeConfig.portOf(10203));
+    expect(
+      () => ConnectionController.maskRuntimeSecrets('not-json'),
+      throwsFormatException,
+    );
+  });
+
+  test('运行配置查看时从节点文件补回全部节点，各组不重复列出，凭据仍打码', () {
+    final String group = 'ecy-panel-${'a' * 64}';
+    final String raw = jsonEncode(<String, Object>{
+      'proxy-providers': <String, Object>{
+        'ecy-panel-nodes': <String, String>{
+          'type': 'file',
+          'path': 'ecy-panel-nodes.json',
+        },
+        group: <String, Object>{
+          'type': 'file',
+          'path': '$group.json',
+          'payload': <Object>[
+            <String, String>{'name': 'node-1', 'uuid': 'stale-group-copy'},
+          ],
+        },
+      },
+    });
+    final Map<String, dynamic> shown = jsonDecode(
+      ConnectionController.maskRuntimeSecrets(
+        raw,
+        nodes: <Object?>[
+          <String, Object>{
+            'name': 'node-1',
+            'server': 'node.example.test',
+            'uuid': 'node-credential',
+            'reality-opts': <String, String>{
+              'public-key': 'reality-public-key',
+              'short-id': '0123abcd',
+            },
+          },
+        ],
+      ),
+    ) as Map<String, dynamic>;
+    final Map<String, dynamic> providers =
+        shown['proxy-providers'] as Map<String, dynamic>;
+    expect(
+      providers['ecy-panel-nodes']['payload'][0]['server'],
+      'node.example.test',
+    );
+    expect(providers['ecy-panel-nodes']['payload'][0]['uuid'], '******');
+    expect((providers[group] as Map).containsKey('payload'), isFalse);
+    expect(jsonEncode(shown), isNot(contains('node-credential')));
+    expect(jsonEncode(shown), isNot(contains('reality-public-key')));
+    expect(jsonEncode(shown), isNot(contains('0123abcd')));
+    expect(
+      providers['ecy-panel-nodes']['payload'][0]['reality-opts']['public-key'],
+      '******',
+    );
   });
 }

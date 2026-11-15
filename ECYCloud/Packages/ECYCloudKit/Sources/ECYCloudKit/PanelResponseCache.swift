@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // 对应 panel_response_cache.dart 与 RemoteProfile.usableOffline：已登录时先凭缓存进入界面与本地内核，
@@ -8,6 +9,7 @@ import Foundation
         var binding = ""
         var issuedAt: Date?
         var validUntil: Date?
+        var updateIntervalHours: Int?
         let response: Data
     }
 
@@ -30,8 +32,7 @@ import Foundation
     private static let maximumFileBytes = 12 * 1024 * 1024
     private let directory: URL?
 
-    public init(directory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-        .appendingPathComponent("ECYCloud/PanelCache", isDirectory: true)) {
+    public init(directory: URL? = UserDataDirectory.root?.appendingPathComponent("PanelCache", isDirectory: true)) {
         self.directory = directory
     }
 
@@ -39,22 +40,34 @@ import Foundation
         write(Entry(account: Self.key(account), response: response), to: "profile.json")
     }
 
-    func saveConfig(_ response: Data, account: String, binding: String) {
+    // 配置含本设备的节点凭据，只以令牌派生的密钥加密落盘
+    func saveConfig(_ response: Data, account: String, binding: String, sealKey: SymmetricKey, updateIntervalHours: Int?) {
+        let key = Self.key(account)
         let window = (try? PanelAPI.decode(response) as OfflineWindow)?.offlineAuthorization
-        write(Entry(account: Self.key(account), binding: binding,
+        guard let sealed = try? AES.GCM.seal(response, using: sealKey, authenticating: Data(key.utf8)).combined else { return }
+        write(Entry(account: key, binding: binding,
                     issuedAt: window.map { Date(timeIntervalSince1970: TimeInterval($0.issuedAt)) },
                     validUntil: window.map { Date(timeIntervalSince1970: TimeInterval($0.validUntil)) },
-                    response: response), to: "config.json")
+                    updateIntervalHours: updateIntervalHours, response: sealed), to: "config.json")
     }
 
-    func restore(account: String, binding: String, now: Date) -> Restored? {
+    func restore(account: String, binding: String, sealKey: SymmetricKey, now: Date) -> Restored? {
         let key = Self.key(account)
         guard !key.isEmpty, let profile = read("profile.json"), profile.account == key,
               let value: UserProfile = try? PanelAPI.decode(profile.response), (try? value.validate()) != nil else { return nil }
-        guard let config = read("config.json"), config.account == key,
-              let catalog: NodeCatalog = try? PanelAPI.decode(config.response) else {
+        guard let config = read("config.json"), config.account == key else {
             return Restored(profile: value, catalog: nil, validUntil: nil)
         }
+        // 解不开的是旧版本明文缓存或已失效登录的缓存，前者含节点凭据，一律删除
+        guard let box = try? AES.GCM.SealedBox(combined: config.response),
+              let response = try? AES.GCM.open(box, using: sealKey, authenticating: Data(key.utf8)) else {
+            remove("config.json")
+            return Restored(profile: value, catalog: nil, validUntil: nil)
+        }
+        guard var catalog: NodeCatalog = try? PanelAPI.decode(response) else {
+            return Restored(profile: value, catalog: nil, validUntil: nil)
+        }
+        catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(config.updateIntervalHours.map(String.init))
         guard !binding.isEmpty, value.deviceKickReason != "remove", config.binding == binding,
               let issued = config.issuedAt, let until = config.validUntil, issued <= now, now < until else {
             return Restored(profile: value, catalog: catalog, validUntil: nil)
@@ -76,6 +89,11 @@ import Foundation
               let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= Self.maximumFileBytes,
               let data = try? Data(contentsOf: file) else { return nil }
         return try? JSONDecoder().decode(Entry.self, from: data)
+    }
+
+    private func remove(_ name: String) {
+        guard let file = directory?.appendingPathComponent(name) else { return }
+        try? FileManager.default.removeItem(at: file)
     }
 
     private func write(_ entry: Entry, to name: String) {

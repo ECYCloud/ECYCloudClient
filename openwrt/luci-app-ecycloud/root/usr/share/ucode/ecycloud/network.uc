@@ -1,6 +1,6 @@
 'use strict';
 
-import { access, open, popen, unlink, writefile } from 'fs';
+import { access, lsdir, open, popen, readfile, unlink, writefile } from 'fs';
 import { cursor } from 'uci';
 
 import { NETWORK_FILE, NFT_DIR, NFT_TABLE, ROUTE_TABLE, ROUTING_MARK, STATE_DIR, TPROXY_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX,
@@ -11,6 +11,11 @@ const RULESET_FILE = `${NFT_DIR}/ruleset-post/${NFT_TABLE}.nft`;
 const DSTNAT_FILE = `${NFT_DIR}/chain-pre/dstnat/${NFT_TABLE}.nft`;
 const FORWARD_FILE = `${NFT_DIR}/chain-pre/forward/${NFT_TABLE}.nft`;
 const INPUT_FILE = `${NFT_DIR}/chain-pre/input/${NFT_TABLE}.nft`;
+/* 须排在 sing-tun 规则之前，并与 TUN 规则同时清除：内核卡死而 TUN 仍在时，本机仍要能直连面板 */
+const PANEL_RULE_INDEX = TUN_RULE_INDEX - 1;
+const ROUTER_DNS_CONF = `${STATE_DIR}/router-dns.conf`;
+const ROUTER_DNS_RULESET = `${STATE_DIR}/router-dns.nft`;
+const ROUTER_DNS_TABLE = `${NFT_TABLE}_dns`;
 
 /* fake-ip 段不能进保留地址表，那正是要送进内核的目标 */
 const RESERVED4 = [
@@ -21,10 +26,10 @@ const RESERVED4 = [
 
 const RESERVED6 = [ '::1/128', '100::/64', 'fc00::/7', 'fe80::/10', 'ff00::/8' ];
 
-function bypassNets(cfg, v6) {
+function bypassNets(nets, v6) {
 	const extra = [];
 
-	for (let net in [ ...(cfg.bypass ?? []), ...panelDirectNets() ]) {
+	for (let net in nets) {
 		if (!isIpNet(net))
 			continue;
 		if ((index(net, ':') >= 0) == v6)
@@ -35,11 +40,16 @@ function bypassNets(cfg, v6) {
 };
 
 function reserved4(cfg) {
-	return appendNets(RESERVED4, bypassNets(cfg, false));
+	return appendNets(RESERVED4, bypassNets(cfg.bypass ?? [], false));
 };
 
 function reserved6(cfg) {
-	return appendNets(RESERVED6, bypassNets(cfg, true));
+	return appendNets(RESERVED6, bypassNets(cfg.bypass ?? [], true));
+};
+
+/* 面板直连只给路由器自身：并进保留网段或 route-exclude-address 会让整个 LAN 访问这些地址时绕过内核 */
+function panelNets(cfg, v6) {
+	return !cfg.routerProxy || (v6 && !cfg.ipv6) ? [] : bypassNets(panelDirectNets(), v6);
 };
 
 function deviceSet(devices) {
@@ -93,7 +103,7 @@ function ruleset(cfg, devices) {
 
 	push(lines, '\t}');
 
-	if (cfg.routerProxy)
+	if (cfg.routerProxy) {
 		push(lines,
 			'',
 			'\tchain output {',
@@ -101,9 +111,16 @@ function ruleset(cfg, devices) {
 			`\t\tmeta mark ${ROUTING_MARK} accept`,
 			'\t\tmeta l4proto { tcp, udp } th dport 53 accept',
 			'\t\tip daddr @reserved4 accept',
-			cfg.ipv6 ? '\t\tip6 daddr @reserved6 accept' : '\t\tmeta nfproto ipv6 accept',
+			cfg.ipv6 ? '\t\tip6 daddr @reserved6 accept' : '\t\tmeta nfproto ipv6 accept');
+		for (let v6 in [ false, true ]) {
+			const panel = panelNets(cfg, v6);
+			if (length(panel))
+				push(lines, `\t\t${v6 ? 'ip6' : 'ip'} daddr { ${join(', ', panel)} } accept`);
+		}
+		push(lines,
 			`\t\tmeta l4proto { tcp, udp } meta mark set ${TPROXY_MARK}`,
 			'\t}');
+	}
 
 	push(lines, '}', '');
 
@@ -122,6 +139,18 @@ function routing(cfg, add) {
 			    system(`${ip} route add local default dev lo table ${ROUTE_TABLE}`) != 0)
 				return false;
 		}
+	}
+	return true;
+};
+
+function panelRouting(cfg) {
+	for (let v6 in [ false, true ]) {
+		const ip = v6 ? 'ip -6' : 'ip';
+		if (system(`${ip} rule flush pref ${PANEL_RULE_INDEX} 2>/dev/null`) != 0)
+			return false;
+		for (let net in panelNets(cfg, v6))
+			if (system(`${ip} rule add pref ${PANEL_RULE_INDEX} iif lo to ${net} lookup main`) != 0)
+				return false;
 	}
 	return true;
 };
@@ -182,8 +211,85 @@ function query(command) {
 	return { ok: proc.close() == 0, text };
 };
 
+function routerDnsPort(cfg) {
+	return cfg.dnsPort > 1 ? cfg.dnsPort - 1 : cfg.dnsPort + 1;
+};
+
+function plainOption(value) {
+	return type(value) == 'string' && length(value) > 0 && !match(value, /[[:cntrl:][:space:]]/);
+};
+
+/* 主 dnsmasq 已转给内核且缓存各客户端共用，无法只给路由器自身返回真实地址，只能另起实例 */
+function routerDnsConf(cfg, section) {
+	const uci = cursor();
+	const resolv = uci.get('dhcp', section, 'resolvfile') ?? '/tmp/resolv.conf.d/resolv.conf.auto';
+	const local = uci.get('dhcp', section, 'local');
+	const port = +(uci.get('dhcp', section, 'port') ?? 53);
+	const lines = [
+		`port=${routerDnsPort(cfg)}`, 'interface=lo', 'bind-interfaces', 'user=dnsmasq', 'group=dnsmasq', 'pid-file=',
+		'domain-needed', 'bogus-priv',
+		uci.get('dhcp', section, 'noresolv') != '1' && plainOption(resolv) ? `resolv-file=${resolv}` : 'no-resolv',
+		...map(filter(uciList(uci.get('dhcp', section, 'server')), plainOption), server => `server=${server}`)
+	];
+	if (plainOption(local) && match(local, /^\/.+\/$/) && port > 0)
+		push(lines, `server=${local}127.0.0.1#${port}`);
+	return `${join('\n', lines)}\n`;
+};
+
+/* 不走 fw4 include（断电重启后实例已不在，规则须一起消失），也不放进 inet ecycloud（TPROXY 的 include 每次 fw4 reload 都会清空它）。
+   转回主实例的本地域查询以 dnsmasq 身份发出，不能再被引回本实例 */
+function routerDnsRuleset(cfg) {
+	const redirect = `meta l4proto { tcp, udp } th dport 53 redirect to :${routerDnsPort(cfg)}`;
+	return join('\n', [
+		`table inet ${ROUTER_DNS_TABLE}`,
+		`flush table inet ${ROUTER_DNS_TABLE}`,
+		`table inet ${ROUTER_DNS_TABLE} {`,
+		'\tchain output {',
+		'\t\ttype nat hook output priority -100; policy accept;',
+		'\t\tmeta skuid dnsmasq accept',
+		`\t\tip daddr 127.0.0.1 ${redirect}`,
+		`\t\tip6 daddr ::1 ${redirect}`,
+		'\t}',
+		'}',
+		''
+	]);
+};
+
+function startRouterDns(cfg, section) {
+	const ok = writefile(ROUTER_DNS_CONF, routerDnsConf(cfg, section)) != null &&
+		system(`/usr/sbin/dnsmasq -C ${ROUTER_DNS_CONF} >/dev/null 2>&1`) == 0 &&
+		writefile(ROUTER_DNS_RULESET, routerDnsRuleset(cfg)) != null &&
+		system(`nft -f ${ROUTER_DNS_RULESET} >/dev/null 2>&1`) == 0;
+	unlink(ROUTER_DNS_RULESET);
+	return ok;
+};
+
+function routerDnsPids() {
+	return filter(lsdir('/proc') ?? [], pid => match(pid, /^[0-9]+$/) &&
+		index(readfile(`/proc/${pid}/cmdline`) ?? '', `-C\0${ROUTER_DNS_CONF}\0`) >= 0);
+};
+
+function stopRouterDns() {
+	const tables = query('nft list tables 2>/dev/null');
+	if (!tables.ok || (match(tables.text, /table inet ecycloud_dns([[:space:]]|$)/) &&
+	    system(`nft delete table inet ${ROUTER_DNS_TABLE} 2>/dev/null`) != 0))
+		return false;
+	let pids = routerDnsPids();
+	for (let attempt = 0; length(pids) && attempt < 20; attempt++) {
+		system(`kill ${attempt < 10 ? '' : '-9 '}${join(' ', pids)} 2>/dev/null`);
+		pids = routerDnsPids();
+		if (length(pids))
+			sleep(100);
+	}
+	return !length(pids) && (!access(ROUTER_DNS_CONF) || unlink(ROUTER_DNS_CONF));
+};
+
 export function applied() {
 	return readJson(NETWORK_FILE);
+};
+
+export function intact(record) {
+	return record?.router_dns != true || length(routerDnsPids()) > 0;
 };
 
 function withNetworkLock(action) {
@@ -231,7 +337,7 @@ function revertNetwork() {
 	for (let ip in [ 'ip', 'ip -6' ]) {
 		if (tunStopped) {
 			/* sing-tun 的 auto-route 规则占用起始优先级到起始值 + 10，强杀不会撤销这些规则。 */
-			for (let priority = TUN_RULE_INDEX; priority <= TUN_RULE_INDEX + 10; priority++)
+			for (let priority = PANEL_RULE_INDEX; priority <= TUN_RULE_INDEX + 10; priority++)
 				if (system(`${ip} rule flush pref ${priority} 2>/dev/null`) != 0)
 					ok = false;
 			system(`${ip} route flush table ${TUN_ROUTE_TABLE} 2>/dev/null`);
@@ -244,7 +350,7 @@ function revertNetwork() {
 		if (tunStopped) {
 			for (let line in split(rules.text, '\n')) {
 				const priority = +split(line, ':')[0];
-				if (priority >= TUN_RULE_INDEX && priority <= TUN_RULE_INDEX + 10)
+				if (priority >= PANEL_RULE_INDEX && priority <= TUN_RULE_INDEX + 10)
 					ok = false;
 			}
 			if (match(routes.text, /table 1937([[:space:]]|$)/))
@@ -252,6 +358,8 @@ function revertNetwork() {
 		}
 	}
 	if (!revertDnsmasq(record?.dnsmasq))
+		ok = false;
+	if (!stopRouterDns())
 		ok = false;
 	if (ok && access(NETWORK_FILE) && !unlink(NETWORK_FILE))
 		ok = false;
@@ -268,6 +376,8 @@ function applyNetwork(cfg) {
 	const devices = lanDevices();
 	if (!length(devices))
 		return { ok: false, error: '取不到 LAN 接口设备名，请在设置里确认「LAN 接口」' };
+	if (cfg.mode == 'tun' && !length(cfg.tunDevice))
+		return { ok: false, error: 'TUN 网卡名只能包含 1 到 15 个字母、数字、下划线、点或连字符' };
 
 	if (!revertNetwork())
 		return { ok: false, error: '旧网络设置恢复失败，未应用新的代理规则' };
@@ -276,7 +386,8 @@ function applyNetwork(cfg) {
 	const dir = cfg.dnsHijack ? dnsmasqConfDir(section) : null;
 	if (cfg.dnsHijack && !length(dir))
 		return { ok: false, error: 'dnsmasq 配置目录不可用，DNS 未接入内核' };
-	const record = { active: false, dnsmasq: cfg.dnsHijack ? `${dir}/ecycloud.conf` : null };
+	const record = { active: false, dnsmasq: cfg.dnsHijack ? `${dir}/ecycloud.conf` : null,
+		router_dns: cfg.dnsHijack && !cfg.routerProxy };
 	if (!writeJson(NETWORK_FILE, record))
 		return { ok: false, error: '无法保存网络恢复记录' };
 
@@ -288,8 +399,8 @@ function applyNetwork(cfg) {
 		} else {
 			ensureDir(`${NFT_DIR}/chain-pre/forward`);
 			const accept = [
-				`\t\tiifname "${cfg.tunDevice}" accept comment "!ecycloud: tun ingress"`,
-				`\t\toifname "${cfg.tunDevice}" accept comment "!ecycloud: tun egress"`,
+				`\t\tiifname "${cfg.tunDevice}" oifname ${deviceSet(devices)} accept comment "!ecycloud: tun ingress"`,
+				`\t\tiifname ${deviceSet(devices)} oifname "${cfg.tunDevice}" accept comment "!ecycloud: tun egress"`,
 				''
 			];
 			if (writefile(FORWARD_FILE, join('\n', accept)) == null)
@@ -317,8 +428,11 @@ function applyNetwork(cfg) {
 		    system('fw4 reload >/dev/null 2>&1') != 0)
 			die('防火墙规则校验或加载失败，规则未生效');
 
-		if (cfg.mode == 'tproxy' && !routing(cfg, true))
+		if (!(cfg.mode == 'tproxy' ? routing(cfg, true) : panelRouting(cfg)))
 			die('策略路由设置失败');
+
+		if (record.router_dns && !startRouterDns(cfg, section))
+			die(`路由器自身的 DNS 转发启动失败，请确认 127.0.0.1:${routerDnsPort(cfg)} 未被占用`);
 
 		if (cfg.dnsHijack && !length(applyDnsmasq(cfg, section, dir)))
 			die('dnsmasq 配置或重启失败，DNS 未接入内核');

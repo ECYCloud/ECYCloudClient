@@ -11,7 +11,7 @@ import CryptoKit
     private let configuration: @Sendable () -> URLSessionConfiguration
     public init() {
         configuration = { .ephemeral }
-        baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ECYCloud/icons", isDirectory: true)
+        baseDirectory = UserDataDirectory.root?.appendingPathComponent("icons", isDirectory: true)
     }
     init(directory: URL? = nil, configuration: @escaping @Sendable () -> URLSessionConfiguration) {
         baseDirectory = directory; self.configuration = configuration

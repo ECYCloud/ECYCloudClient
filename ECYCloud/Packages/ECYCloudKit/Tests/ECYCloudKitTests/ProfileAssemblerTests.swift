@@ -80,12 +80,65 @@ struct ProfileAssemblerTests {
         #expect((result["profile"] as? [String: Bool])?["store-selected"] == true)
     }
 
+    // 组网类出站会让内核加入外部 P2P 网络、开监听口或充当出口节点
+    @Test(arguments: ["easytier", "ZeroTier", " tailscale "])
+    func rejectsMeshNetworkOutbounds(type: String) throws {
+        var source = try json(remote)
+        source["proxies"] = (source["proxies"] as! [[String: Any]]) + [["name": "mesh", "type": type]]
+        #expect(throws: ProfileValidationError.self) { try ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: source), options: options) }
+        var provided = try json(remote)
+        provided["proxy-providers"] = ["ecy-panel-nodes": ["type": "file", "path": "ecy-panel-nodes.json",
+                                                           "payload": [["name": "synthetic-node", "type": "ss"], ["name": "hidden", "type": type]]]]
+        #expect(throws: ProfileValidationError.self) { try ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: provided), options: options) }
+    }
+
     @Test(arguments: ["../config.json", "/tmp/rules", "rules/../config.json", "config.json.backup", "cache.db", "./GeoSite.dat", ".validate-a/rules", "a\\b", "a/", "a//b", "a/con.txt", "a/b.", "a/b ", "a:b"])
     func rejectsProviderTraversalAndReservedFiles(path: String) throws {
         #expect(!ProfileAssembler.safeProviderPath(path))
         var source = try json(remote)
         source["rule-providers"] = ["test": ["type": "http", "path": path, "url": "https://example.test/rules", "behavior": "domain", "format": "mrs"]]
         #expect(throws: ProfileValidationError.self) { try ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: source), options: options) }
+    }
+
+    // 只检查不改写：明文 http 整份拒绝，https 与没有地址的本地 provider 照常通过；内核取 url 不分大小写
+    @Test func rejectsPlaintextDownloadSourcesAndKeepsPanelValues() throws {
+        func issues(_ source: [String: Any]) throws -> [String] {
+            do { _ = try ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: source), options: options); return [] }
+            catch let error as ProfileValidationError { return error.issues }
+        }
+        var source = try json(remote)
+        source["geox-url"] = ["mmdb": "https://example.test/geoip.metadb", "geosite": "HTTPS://example.test/GeoSite.dat", "asn": ""]
+        source["rule-providers"] = ["remote": ["type": "http", "path": "rules/remote.mrs", "url": "https://example.test/remote.mrs", "behavior": "domain", "format": "mrs"],
+                                    "local": ["type": "file", "path": "rules/local.yaml", "behavior": "classical"]]
+        let accepted = try json(ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: source), options: options).data)
+        #expect((accepted["geox-url"] as? [String: String])?["geosite"] == "HTTPS://example.test/GeoSite.dat")
+        #expect((accepted["rule-providers"] as? [String: [String: Any]])?["remote"]?["url"] as? String == "https://example.test/remote.mrs")
+        for (key, value) in [("geox-url", ["geoip": "http://example.test/geoip.dat"] as [String: Any]),
+                             ("rule-providers", ["remote": ["type": "http", "path": "rules/remote.mrs", "url": " HTTP://example.test/remote.mrs", "behavior": "domain"]]),
+                             ("rule-providers", ["remote": ["type": "http", "path": "rules/remote.mrs", "url": "https://example.test/remote.mrs", "URL": "http://example.test/remote.mrs", "behavior": "domain"]]),
+                             ("proxy-providers", ["sub": ["type": "http", "path": "sub.yaml", "url": "http://example.test/sub.yaml"]])] {
+            var unsafe = try json(remote)
+            unsafe[key] = value
+            let found = try issues(unsafe)
+            #expect(found == [key == "geox-url" ? L10n.t("geox-url「{0}」必须使用 https", ["geoip"]) : L10n.t("规则或节点提供器的下载地址必须使用 https")], "\(key): \(found)")
+        }
+    }
+
+    // 修复前只认小写 path：PATH、Path 写法能绕过保留文件名检查，覆盖运行目录里的客户端文件；变体合法时照常放行
+    @Test func providerPathAndURLKeysAreCheckedCaseInsensitively() throws {
+        func issues(_ provider: [String: Any]) throws -> [String] {
+            var source = try json(remote)
+            source["rule-providers"] = ["test": provider]
+            do { _ = try ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: source), options: options); return [] }
+            catch let error as ProfileValidationError { return error.issues }
+        }
+        let unsafe = L10n.t("规则或节点保存路径必须位于运行目录内，且不能覆盖客户端文件")
+        for provider: [String: Any] in [["type": "http", "behavior": "domain", "url": "https://example.test/a.yaml", "PATH": "./config.json"],
+                                        ["type": "http", "behavior": "domain", "url": "https://example.test/a.yaml", "path": "rules/a.yaml", "Path": "CACHE.DB"],
+                                        ["type": "http", "behavior": "domain", "URL": "https://example.test/a.yaml", "pAtH": "../outside.yaml"]] {
+            #expect(try issues(provider).contains(unsafe), "\(provider)")
+        }
+        #expect(try issues(["type": "http", "behavior": "domain", "URL": "https://example.test/a.yaml", "PATH": "Rules/Legit.YAML"]).isEmpty)
     }
 
     @Test func rejectsMissingCrossReferencesAndUnsafeControllerOptions() throws {

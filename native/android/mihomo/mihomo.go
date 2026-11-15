@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/metacubex/mihomo/component/dialer"
 	C "github.com/metacubex/mihomo/constant"
@@ -18,6 +20,7 @@ import (
 	"github.com/metacubex/mihomo/hub/route"
 	"github.com/metacubex/mihomo/listener"
 	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
 	"go4.org/netipx"
 )
@@ -31,6 +34,10 @@ var (
 	mu      sync.Mutex
 	running bool
 )
+
+const controllerTimeout = 10 * time.Second
+
+var errControllerNotReady = fmt.Errorf("内核控制面在 %d 秒内未就绪", int(controllerTimeout/time.Second))
 
 func Setup(homeDir string) {
 	C.SetHomeDir(homeDir)
@@ -62,9 +69,20 @@ func SetProtector(p Protector) {
 	}
 }
 
-func Check(configJSON string) error {
+// gomobile 导出函数里的 panic 会直接带崩 :kernel 进程；配置已先落盘，系统重建服务后会反复崩溃
+func recoverAsError(err *error, cleanup func()) {
+	if r := recover(); r != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		*err = fmt.Errorf("内核处理配置时异常: %v", r)
+	}
+}
+
+func Check(configJSON string) (err error) {
 	mu.Lock()
 	defer mu.Unlock()
+	defer recoverAsError(&err, nil)
 	if _, err := executor.ParseWithBytes([]byte(configJSON)); err != nil {
 		return trimmed(err)
 	}
@@ -72,9 +90,10 @@ func Check(configJSON string) error {
 }
 
 // tunFd≤0 表示不接 TUN。Fake-IP 更新须先保存地址池再解析，不能走 Reload。
-func Start(configJSON string, tunFd int32) error {
+func Start(configJSON string, tunFd int32) (err error) {
 	mu.Lock()
 	defer mu.Unlock()
+	defer recoverAsError(&err, stopLocked)
 	stopLocked()
 
 	cfg, err := executor.ParseWithBytes([]byte(configJSON))
@@ -86,15 +105,67 @@ func Start(configJSON string, tunFd int32) error {
 	}
 	bindTun(&cfg.General.Tun, configJSON, int(tunFd))
 
+	controller := watchController(cfg.Controller.ExternalController)
 	hub.ApplyConfig(cfg)
 	running = true
+	if err := <-controller; err != nil {
+		stopLocked()
+		return err
+	}
 	return ensureTunBound(cfg.General.Tun.Enable)
 }
 
+// 端口在 Dart 选定之后、内核监听之前可能被同机其它应用抢先占住：内核只记一行日志照常运行，
+// 带 secret 的控制面请求就会交给对方。订阅者积压会阻塞全部日志，退订完成前必须一直读空
+func watchController(address string) <-chan error {
+	result := make(chan error, 1)
+	if address == "" {
+		result <- nil
+		return result
+	}
+	events := log.Subscribe()
+	go func() {
+		result <- controllerEvent(events, address)
+		go log.UnSubscribe(events)
+		for range events {
+		}
+	}()
+	return result
+}
+
+func controllerEvent(events <-chan log.Event, address string) error {
+	timeout := time.NewTimer(controllerTimeout)
+	defer timeout.Stop()
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return errControllerNotReady
+			}
+			if event.Payload == "RESTful API listening at: "+address {
+				return nil
+			}
+			if strings.HasPrefix(event.Payload, "External controller listen error") {
+				return fmt.Errorf("控制面端口 %s 已被其它程序占用，请重新连接", portOf(address))
+			}
+		case <-timeout.C:
+			return errControllerNotReady
+		}
+	}
+}
+
+func portOf(address string) string {
+	if _, port, err := net.SplitHostPort(address); err == nil {
+		return port
+	}
+	return address
+}
+
 // Dart 侧 PUT /configs 带不上 fd，非 Fake-IP 配置热载在此保留 fd。
-func Reload(configJSON string) error {
+func Reload(configJSON string) (err error) {
 	mu.Lock()
 	defer mu.Unlock()
+	defer recoverAsError(&err, stopLocked)
 	if !running {
 		return errors.New("内核未运行")
 	}

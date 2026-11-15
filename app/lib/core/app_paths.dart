@@ -55,10 +55,10 @@ class AppPaths {
 
   // 上次成功的账号资料 / 面板配置：限流 429 时复用，避免冷启动无内存缓存就失败
   static File get profileCache =>
-      File(_join(userData.path, 'profile-cache.json'));
+      File(_join(_sessionData.path, 'profile-cache.json'));
 
   static File get remoteConfigCache =>
-      File(_join(userData.path, 'remote-config-cache.json'));
+      File(_join(_sessionData.path, 'remote-config-cache.json'));
 
   static File get selectorCache =>
       File(_join(userData.path, 'selector-cache.json'));
@@ -69,13 +69,14 @@ class AppPaths {
   static File get speedTestQuota =>
       File(_join(userData.path, 'speed-test-quota.json'));
 
-  static Directory get logs => _ensure(Directory(_join(userData.path, 'logs')));
+  static Directory get logs =>
+      _ensure(Directory(_join(_sessionData.path, 'logs')));
 
   static Directory get iconCache =>
-      _ensure(Directory(_join(userData.path, 'icons')));
+      _ensure(Directory(_join(_sessionData.path, 'icons')));
 
   static Directory get videoCache =>
-      _ensure(Directory(_join(userData.path, 'videos')));
+      _ensure(Directory(_join(_sessionData.path, 'videos')));
 
   static Directory get updates =>
       _ensure(Directory(_join(userData.path, 'updates')));
@@ -86,10 +87,129 @@ class AppPaths {
       File(_join(userData.path, 'proxy-snapshot.json'));
 
   // 必须与特权侧 runDir() / Android BoxState.runDir() 逐字一致
-  static String get kernelRunDir => _join(machineData.path, 'run');
+  static String get kernelRunDir => Platform.isAndroid
+      ? _join(_sessionPath, 'run')
+      : _join(_join(machineData.path, 'run'), _session);
 
   // 内核启动时用的那份配置。内核活得比界面久时，靠它读回控制面端口与 secret
   static String get kernelConfigFile => _join(kernelRunDir, 'config.json');
+
+  static String _session = '';
+
+  static String get session => _session;
+
+  // 与 Android BoxState.sessionDir() 逐字一致
+  static Directory get sessions => Directory(_join(userData.path, 'sessions'));
+
+  static String get _sessionName => _session.isEmpty ? 'guest' : _session;
+
+  static String get _sessionPath => _join(sessions.path, _sessionName);
+
+  static Directory get _sessionData => _ensure(Directory(_sessionPath));
+
+  static void useSession(String key) {
+    if (key != _session) {
+      _session = key;
+      Logger.instance.reopen();
+    }
+    if (Platform.isAndroid && key.isNotEmpty) {
+      _adoptLegacyRunDir();
+    }
+    touchSession();
+  }
+
+  // 旧版 Android 的运行目录在 filesDir/run，归当前登录账号；与 BoxState.adoptLegacyRunDir 相同
+  static void _adoptLegacyRunDir() {
+    final Directory legacy = Directory(_join(userData.path, 'run'));
+    final String target = kernelRunDir;
+    if (FileSystemEntity.typeSync(legacy.path, followLinks: false) !=
+            FileSystemEntityType.directory ||
+        FileSystemEntity.typeSync(target, followLinks: false) !=
+            FileSystemEntityType.notFound) {
+      return;
+    }
+    try {
+      _ensure(Directory(_sessionPath));
+      legacy.renameSync(target);
+    } on FileSystemException catch (e) {
+      Logger.instance.warn('paths', '旧版运行目录未能迁入账号目录: $e');
+    }
+  }
+
+  // 账号目录超过这么久未用才回收；当前账号的目录永不回收
+  static const Duration _retention = Duration(days: 30);
+
+  static const String _lastUsed = '.last-used';
+
+  static void touchSession() {
+    try {
+      File(_join(_sessionData.path, _lastUsed)).writeAsStringSync('');
+    } on FileSystemException catch (e) {
+      Logger.instance.warn('paths', '记录账号目录使用时间失败: $e');
+    }
+  }
+
+  static bool _recentlyUsed(String path) {
+    final File marker = File(_join(path, _lastUsed));
+    try {
+      return marker.existsSync() &&
+          DateTime.now().difference(marker.lastModifiedSync()) < _retention;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  static const List<String> _legacyEntries = <String>[
+    'logs',
+    'icons',
+    'videos',
+    'run',
+    'profile-cache.json',
+    'remote-config-cache.json',
+    'credentials.json.session-ending',
+  ];
+
+  static Future<void> collectGarbage() async {
+    final List<String> stale = <String>[
+      for (final String name in _legacyEntries) _join(userData.path, name),
+    ];
+    try {
+      if (sessions.existsSync()) {
+        await for (final FileSystemEntity entity in sessions.list(
+          followLinks: false,
+        )) {
+          // guest 存未登录时的日志，按日志保留期自行裁剪，不整体回收
+          if (entity.path == _join(sessions.path, 'guest')) {
+            continue;
+          }
+          if (entity is! Directory || !_recentlyUsed(entity.path)) {
+            stale.add(entity.path);
+          }
+        }
+      }
+    } on FileSystemException catch (e) {
+      Logger.instance.warn('paths', '读取会话目录失败: $e');
+    }
+    for (final String path in stale) {
+      if (path == _sessionPath) {
+        continue;
+      }
+      try {
+        switch (FileSystemEntity.typeSync(path, followLinks: false)) {
+          case FileSystemEntityType.notFound:
+            break;
+          case FileSystemEntityType.directory:
+            await Directory(path).delete(recursive: true);
+          case FileSystemEntityType.link:
+            await Link(path).delete();
+          default:
+            await File(path).delete();
+        }
+      } on FileSystemException catch (e) {
+        Logger.instance.warn('paths', '过期账号数据未能删除，下次再删: $e');
+      }
+    }
+  }
 
   static String _resolveUserData() {
     if (Platform.isAndroid) {

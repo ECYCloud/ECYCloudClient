@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 const vendorDirName = "ECYCloud"
@@ -46,9 +47,17 @@ func guiExePath() string {
 	return "/opt/ecycloud/ECYCloud"
 }
 
+// 只在持有 server.operation 或 server.mu 写锁时读写；空串表示尚未绑定登录会话
+var activeSession string
+
 // 内容含 Clash API 密钥，必须经 ensureRestrictedDir 收紧权限后再使用
-func runDir() string {
+func runRoot() string {
 	return filepath.Join(dataDir(), "run")
+}
+
+// 与 Dart 侧 AppPaths.kernelRunDir 必须一致
+func runDir() string {
+	return filepath.Join(runRoot(), activeSession)
 }
 
 func configPath() string {
@@ -84,13 +93,16 @@ func kernelCachePath() string {
 }
 
 func kernelCacheReady() bool {
+	if activeSession == "" {
+		return false
+	}
 	info, err := os.Stat(kernelCachePath())
 	return err == nil && info.Size() > 0
 }
 
-// 快照被 helper 完全信任，必须落在已收紧的运行目录
+// 快照被 helper 完全信任，必须落在已收紧的运行目录；不随登录会话切换
 func snapshotPath() string {
-	return filepath.Join(runDir(), "proxy-snapshot.json")
+	return filepath.Join(runRoot(), "proxy-snapshot.json")
 }
 
 func helperLogPath() string {
@@ -104,3 +116,5 @@ func kernelPath() string {
 func updateDir() string {
 	return filepath.Join(dataDir(), "update")
 }
+
+const noFollow = syscall.O_NOFOLLOW

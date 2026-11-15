@@ -347,7 +347,7 @@ return view.extend({
 		api.skinValue(o);
 
 		o = s.option(form.Value, 'geox_base', _('GeoData mirror'),
-			_('Base URL for geoip.metadb and GeoSite.dat. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable.'));
+			_('Base URL for geoip.metadb and GeoSite.dat. Must be https. Leave empty to keep the URLs sent by the panel. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable.'));
 		o.placeholder = 'https://rules.ecydy.com/Clash';
 		api.skinValue(o);
 
@@ -430,12 +430,12 @@ return view.extend({
 		s = m.section(form.NamedSection, 'config', 'ecycloud', _('About'));
 		s.addremove = false;
 
-		dummyOption(s, '_terms', _('Terms of Service'), null, function() {
-			return E('a', { href: status.site + '/tos', target: '_blank', rel: 'noreferrer' }, [ _('Terms of Service') ]);
+		dummyOption(s, '_terms', _('Terms of service'), null, function() {
+			return E('a', { href: status.site + '/tos', target: '_blank', rel: 'noreferrer' }, [ _('Terms of service') ]);
 		});
 
-		dummyOption(s, '_privacy', _('Privacy Policy'), null, function() {
-			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy Policy') ]);
+		dummyOption(s, '_privacy', _('Privacy policy'), null, function() {
+			return E('a', { href: status.site + '/privacy', target: '_blank', rel: 'noreferrer' }, [ _('Privacy policy') ]);
 		});
 
 		o = s.option(form.DummyValue, '_version', _('Current version'));

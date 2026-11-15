@@ -12,8 +12,8 @@ class KernelService : Service() {
 
     private val binder = object : IKernelService.Stub() {
         override fun ping(): Bundle = guarded {
-            BoxService.ensureSetup(this@KernelService)
             Bundle().apply {
+                putString("session", BoxState.session.orEmpty())
                 putString("version", BuildConfig.VERSION_NAME)
                 // 与桌面端 `mihomo -v` 的首行同一口径，设置页的内核版本从中取数字
                 putString("kernel", "Mihomo Meta ${Mihomo.version()}")
@@ -22,6 +22,7 @@ class KernelService : Service() {
         }
 
         override fun status(logCursor: Int): Bundle {
+            dropRetiredSession()
             BoxService.refreshLanguage()
             val (lines, cursor) = BoxState.logs.since(logCursor)
             return Bundle().apply {
@@ -62,9 +63,7 @@ class KernelService : Service() {
             if (raw.isBlank()) {
                 error("缺少配置内容")
             }
-            BoxService.ensureSetup(this@KernelService)
-            BoxState.writeConfig(this@KernelService, raw)
-            Mihomo.reload(raw)
+            Mihomo.reload(BoxState.writeConfig(this@KernelService, BoxService.ensureSetup(this@KernelService), raw))
         }
 
         override fun start(config: String?) = guarded {
@@ -75,9 +74,9 @@ class KernelService : Service() {
             BoxService.stop()
         }
 
+        // 本进程随后会被界面进程强制结束，内核与 TUN 随进程一起释放，停止失败不影响退出
         override fun clearSession(): Int = guarded {
-            check(BoxState.sessionCleanupPending(this@KernelService)) { "缺少会话清理标记" }
-            BoxService.stop()
+            runCatching { BoxService.stop() }
             Process.myPid()
         }
 
@@ -87,6 +86,16 @@ class KernelService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    // 绑定的会话已不是当前登录：结束本进程，界面重新绑定时换成新进程
+    private fun dropRetiredSession() {
+        val owner = BoxState.session ?: return
+        if (owner == BoxState.sessionKey(this)) {
+            return
+        }
+        runCatching { BoxService.stop() }
+        Process.killProcess(Process.myPid())
+    }
 
     // Binder 只透传少数框架异常，其余类型跨进程时连消息一并丢掉，界面侧就只能报「调用失败」
     private fun <T> guarded(block: () -> T): T = try {

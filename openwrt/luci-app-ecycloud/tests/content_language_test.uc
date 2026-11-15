@@ -12,7 +12,7 @@ function check(ok, message) {
 
 testState.config.site_url = 'https://fixture.test';
 testState.files[CRED_FILE] = sprintf('%J', {
-	token: 'fixture-token', email: 'fixture@test', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z'
+	token: 'fixture-token', session_id: 'fixture-session', account_key: 'fixture-session', email: 'fixture@test', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z'
 });
 testState.response = { ret: 1, data: { announcements: [ { id: 2, title: 'fixture-en', date: '2026-01-01', content: '<p>fixture</p>' } ] } };
 let res = announcements('refresh', 'en-US');
@@ -29,6 +29,12 @@ testState.response.data.announcements[0].title = 'fixture-tw';
 res = announcements('', 'zh-TW');
 saved = json(testState.files[ANNOUNCE_CACHE]);
 check(res.ok && saved.locale == 'zh-TW' && saved.items[0].title == 'fixture-tw', '切换语言不能使用旧语言缓存');
+testState.response.data.announcements = [
+	{ id: 5, title: 'newest', date: '2026-08-20 00:00:00', updated_at: '2026-08-21 00:00:00', content: '' },
+	{ id: 2, title: 'oldest', date: '2026-01-01 00:00:00', updated_at: '2026-11-01 00:00:00', content: '' }
+];
+res = announcements('refresh', 'en-US');
+check(res.open_index == 0, '译文较新的旧公告不能抢走最新发布公告的位置');
 check(!announcements('refresh', 'en-US\r\nX-Injected: 1').ok, '必须拒绝语言头注入');
 check(!announcements('refresh', [ 'en-US' ]).ok, '必须拒绝数组语言');
 global.system = command => { push(testState.commands, command); return 0; };

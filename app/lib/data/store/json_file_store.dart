@@ -4,12 +4,17 @@ import 'dart:io';
 import '../../core/logger.dart';
 
 class JsonFileStore {
-  JsonFileStore(this.file, this.source);
+  JsonFileStore(File file, this.source) : _locate = (() => file);
 
-  final File file;
+  JsonFileStore.at(this._locate, this.source);
+
+  final File Function() _locate;
   final String source;
 
+  File get file => _locate();
+
   Map<String, dynamic> read() {
+    final File file = this.file;
     if (!file.existsSync()) {
       return <String, dynamic>{};
     }
@@ -25,12 +30,14 @@ class JsonFileStore {
   }
 
   void write(Map<String, dynamic> data) {
+    final File file = this.file;
     final File temp = File('${file.path}.tmp');
     temp.writeAsStringSync(jsonEncode(data), flush: true);
     temp.renameSync(file.path);
   }
 
   void clear() {
+    final File file = this.file;
     if (file.existsSync()) {
       file.deleteSync();
     }
