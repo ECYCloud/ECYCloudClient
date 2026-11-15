@@ -542,12 +542,17 @@ func TestProxySnapshotsArePerSystemAccount(t *testing.T) {
 	if err := os.WriteFile(other, []byte(`{"user_sid":"S-1-5-21-1-1-1-1002"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := user.User.Sid.String()
 	p := newProxyManager()
-	state, err := p.state("S-1-5-21-1-1-1-1001")
+	state, err := p.state(current)
 	if err != nil || state.SnapshotPresent {
 		t.Fatalf("其它系统账号的快照不能挡住或冒充当前账号: %+v %v", state, err)
 	}
-	if err := p.restore("S-1-5-21-1-1-1-1001"); err != nil {
+	if err := p.restore(current); err != nil {
 		t.Fatalf("没有自己的快照时还原应直接成功: %v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
@@ -563,6 +568,8 @@ func TestProxySnapshotsArePerSystemAccount(t *testing.T) {
 
 func TestBindingReusesAccountDirectoryAndReplacesOtherAccount(t *testing.T) {
 	t.Setenv("ProgramData", t.TempDir())
+	dataDirReady.Store(false)
+	t.Cleanup(func() { dataDirReady.Store(false) })
 	defer func() { activeSession = "" }()
 	s := newServer()
 	bind := func(key string) {

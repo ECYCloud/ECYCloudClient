@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:ecycloud_client/core/app_paths.dart';
+import 'package:ecycloud_client/core/logger.dart';
 import 'package:ecycloud_client/data/models/user_profile.dart';
 import 'package:ecycloud_client/data/store/json_file_store.dart';
 import 'package:ecycloud_client/data/store/panel_response_cache.dart';
@@ -12,6 +13,7 @@ void main() {
 
   tearDown(() async {
     AppPaths.useSession('');
+    Logger.instance.reopen();
     if (AppPaths.sessions.existsSync()) {
       AppPaths.sessions.deleteSync(recursive: true);
     }

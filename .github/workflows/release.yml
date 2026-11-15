@@ -472,7 +472,10 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container: ubuntu:22.04
+    # helper 回归以 root 核对另一 UID 进程的 /proc/<pid>/exe，容器默认不给 root 这项能力
+    container:
+      image: ubuntu:22.04
+      options: --cap-add SYS_PTRACE
     steps:
       - name: 安装构建依赖
         run: |
