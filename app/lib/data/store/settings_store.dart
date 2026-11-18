@@ -17,6 +17,7 @@ class AppSettings {
     required this.mixedPort,
     required this.allowLan,
     required this.ipv6Enabled,
+    required this.region,
     required this.logLevel,
     required this.routeMode,
     required this.autoConnect,
@@ -36,6 +37,7 @@ class AppSettings {
       mixedPort = 10203,
       allowLan = false,
       ipv6Enabled = false,
+      region = regionChina,
       logLevel = LogLevel.warn,
       routeMode = 'rule',
       autoConnect = false,
@@ -52,6 +54,7 @@ class AppSettings {
   final int mixedPort;
   final bool allowLan;
   final bool ipv6Enabled;
+  final String region;
   final LogLevel logLevel;
   final String routeMode;
   final bool autoConnect;
@@ -69,6 +72,7 @@ class AppSettings {
     int? mixedPort,
     bool? allowLan,
     bool? ipv6Enabled,
+    String? region,
     LogLevel? logLevel,
     String? routeMode,
     bool? autoConnect,
@@ -85,6 +89,7 @@ class AppSettings {
     mixedPort: mixedPort ?? this.mixedPort,
     allowLan: allowLan ?? this.allowLan,
     ipv6Enabled: ipv6Enabled ?? this.ipv6Enabled,
+    region: region ?? this.region,
     logLevel: logLevel ?? this.logLevel,
     routeMode: routeMode ?? this.routeMode,
     autoConnect: autoConnect ?? this.autoConnect,
@@ -102,6 +107,7 @@ class AppSettings {
       mixedPort != other.mixedPort ||
       allowLan != other.allowLan ||
       ipv6Enabled != other.ipv6Enabled ||
+      region != other.region ||
       kernelLogLevel != other.kernelLogLevel ||
       !listEquals(tunExcludeAddresses, other.tunExcludeAddresses);
 
@@ -122,6 +128,7 @@ class AppSettings {
     mixedPort: mixedPort,
     allowLan: allowLan,
     ipv6Enabled: ipv6Enabled,
+    proxyChina: region == regionOverseas,
     logLevel: kernelLogLevel,
     authenticateMixedPort: !supportsSystemProxy && !allowLan,
     routeMode: routeMode,
@@ -140,6 +147,7 @@ class AppSettings {
     'mixed_port': mixedPort,
     'allow_lan': allowLan,
     'ipv6_enabled': ipv6Enabled,
+    'region': region,
     'log_level': logLevel.label,
     'route_mode': routeMode,
     'auto_connect': autoConnect,
@@ -162,6 +170,7 @@ class AppSettings {
       mixedPort: (json['mixed_port'] as num?)?.toInt() ?? fallback.mixedPort,
       allowLan: json['allow_lan'] as bool? ?? fallback.allowLan,
       ipv6Enabled: json['ipv6_enabled'] as bool? ?? fallback.ipv6Enabled,
+      region: json['region'] == regionOverseas ? regionOverseas : regionChina,
       logLevel: LogLevel.values.firstWhere(
         (LogLevel level) => level.label == json['log_level'],
         orElse: () => fallback.logLevel,
@@ -183,6 +192,9 @@ class AppSettings {
           fallback.tunExcludeAddresses,
     );
   }
+
+  static const String regionChina = 'cn';
+  static const String regionOverseas = 'overseas';
 
   static const Set<String> _routeModes = <String>{'rule', 'global', 'direct'};
 

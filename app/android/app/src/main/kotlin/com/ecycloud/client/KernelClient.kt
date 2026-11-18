@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
 import android.os.Process
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
@@ -27,6 +28,8 @@ object KernelClient {
 
     @Volatile
     private var bound = false
+
+    private lateinit var app: Context
 
     private val callback = object : IUiCallback.Stub() {
         override fun requestToggle(): Boolean = MainActivity.requestToggle()
@@ -52,7 +55,7 @@ object KernelClient {
         if (bound) {
             return
         }
-        val app = context.applicationContext
+        app = context.applicationContext
         bound = app.bindService(
             Intent(app, KernelService::class.java),
             connection,
@@ -65,8 +68,21 @@ object KernelClient {
         return try {
             block(remote)
         } catch (e: RemoteException) {
-            error("内核进程已退出")
+            error(crashReason() ?: "内核进程已退出")
         }
+    }
+
+    // Go 运行时崩溃前写下的 panic / fatal error 原因（Mihomo.setup 登记，每个内核进程起来时清空）
+    fun crashReason(): String? {
+        val key = BoxState.sessionKey(app) ?: return null
+        return runCatching { File(BoxState.runDir(app, key), "kernel-crash.log").readLines() }
+            .getOrNull()
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.takeWhile { !it.startsWith("goroutine ") }
+            ?.take(2)
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.joinToString(" | ", prefix = "内核进程已退出：")
     }
 
     fun <T> poll(block: (IKernelService) -> T): T? = try {

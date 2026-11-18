@@ -62,12 +62,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     control.async { [self] in
                         guard currentID == id, pendingStart != nil else { return }
                         guard error == nil, lease.expiresAt > Date() else { failStart(TunnelError.start); return }
-                        let expiry = DispatchWorkItem { [weak self] in
-                            self?.cleanup()
-                            self?.cancelTunnelWithError(TunnelError.expired)
-                        }
-                        expiration = expiry
-                        control.asyncAfter(deadline: .now() + lease.expiresAt.timeIntervalSinceNow, execute: expiry)
+                        scheduleExpiry(lease.expiresAt)
                         readPackets(id: id)
                         output.async { [self] in writePackets(id: id) }
                         let completion = pendingStart; pendingStart = nil
@@ -91,6 +86,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             guard currentID != 0, let envelope = try? JSONDecoder().decode(TunnelCommandEnvelope.self, from: messageData),
                   envelope.leaseID == leaseID,
                   let request = try? JSONEncoder().encode(envelope.command), request.count <= 4096 else { completionHandler?(nil); return }
+            // 是否只有节点变化由应用在写租约前比对；扩展内存上限很低，不再解析两份完整配置
+            if envelope.command.action == .nodes {
+                guard let running = runLease, let lease = try? TunnelFiles.load(group: group, owner: running.owner, id: running.id),
+                      lease.expiresAt > Date(),
+                      lease.configuration.withUnsafeBytes({ ECYUpdateNodes(currentID, UnsafeMutableRawPointer(mutating: $0.baseAddress), Int32($0.count)) }) == 0
+                else { completionHandler?(nil); return }
+                runLease = lease
+                scheduleExpiry(lease.expiresAt)
+                completionHandler?(request)
+                return
+            }
             var response = [UInt8](repeating: 0, count: Int(ECY_CONTROL_CAPACITY))
             let count = request.withUnsafeBytes { input in
                 response.withUnsafeMutableBytes { output in
@@ -102,6 +108,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
     private var currentID: UInt64 { lock.lock(); defer { lock.unlock() }; return activeID }
     private func setID(_ id: UInt64) { lock.lock(); activeID = id; lock.unlock() }
+    private func scheduleExpiry(_ date: Date) {
+        expiration?.cancel()
+        let expiry = DispatchWorkItem { [weak self] in
+            self?.cleanup()
+            self?.cancelTunnelWithError(TunnelError.expired)
+        }
+        expiration = expiry
+        control.asyncAfter(deadline: .now() + date.timeIntervalSinceNow, execute: expiry)
+    }
     private func failStart(_ error: Error) {
         cleanup()
         let completion = pendingStart; pendingStart = nil

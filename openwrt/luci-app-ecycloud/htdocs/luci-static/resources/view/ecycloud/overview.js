@@ -64,7 +64,7 @@ return view.extend({
 
 			return Promise.all([
 				api.groups().catch(function() { return { groups: [] }; }),
-				api.connections().catch(function() { return { connections: [] }; })
+				api.connections('', '', 1, 1).catch(function() { return { connections: [] }; })
 			]).then(function(extra) {
 				return {
 					status: status,
@@ -708,20 +708,18 @@ return view.extend({
 		var hijack = !!status.dns_hijack;
 
 		return api.card([
-			E('div', { 'class': 'ecycloud-toggles' }, [
-				this.renderToggle('dns', _('Hijack DNS'), running
-					? (status.dns_applied
-						? _('dnsmasq forwards to the kernel')
-						: _('Waiting for the kernel'))
-					: _('Used only while running'), hijack, L.bind(function(on) {
-					return this.saveOption('dns_hijack', on ? '1' : '0');
-				}, this)),
-				this.renderToggle('lan', _('TUN mode'), running
-					? _('Take over all forwarded traffic')
-					: _('Used only while running'), tun, L.bind(function(on) {
-					return this.saveOption('mode', on ? 'tun' : 'tproxy');
-				}, this))
-			])
+			this.renderToggle('dns', _('Hijack DNS'), running
+				? (status.dns_applied
+					? _('dnsmasq forwards to the kernel')
+					: _('Waiting for the kernel'))
+				: _('Used only while running'), hijack, L.bind(function(on) {
+				return this.saveOption('dns_hijack', on ? '1' : '0');
+			}, this)),
+			this.renderToggle('lan', _('TUN mode'), running
+				? _('Take over all forwarded traffic')
+				: _('Used only while running'), tun, L.bind(function(on) {
+				return this.saveOption('mode', on ? 'tun' : 'tproxy');
+			}, this))
 		], 'ecycloud-toggles');
 	},
 
@@ -787,11 +785,15 @@ return view.extend({
 		var help = E('span', { 'class': 'ecycloud-rank-info' }, [ info, tip ]);
 		var closeTimer;
 		var hovering = false;
+		// 与客户端 Tooltip 默认定位一致：水平以图标中心居中、距视口两侧至少 10px，顶边在图标中心下方 24px
 		function position() {
-			var available = window.innerWidth - info.getBoundingClientRect().right - 24;
-			var below = window.innerWidth <= 600 || available < 180;
-			help.classList.toggle('is-below', below);
-			help.style.setProperty('--ecy-rank-tip-width', below ? 'none' : available + 'px');
+			var box = help.getBoundingClientRect();
+			var icon = info.getBoundingClientRect();
+			var width = tip.offsetWidth;
+			var x = Math.min(Math.max(icon.left + icon.width / 2 - width / 2, 10),
+				document.documentElement.clientWidth - width - 10);
+			help.style.setProperty('--ecy-tip-x', (x - box.left) + 'px');
+			help.style.setProperty('--ecy-tip-y', (icon.top + icon.height / 2 + 24 - box.top) + 'px');
 		}
 		function close(event) {
 			if (event && event.composedPath().indexOf(help) >= 0)
@@ -807,8 +809,8 @@ return view.extend({
 				self.closeTrafficHint();
 			self.closeTrafficHint = close;
 			clearTimeout(closeTimer);
-			position();
 			help.classList.add('is-open');
+			position();
 			info.setAttribute('aria-expanded', 'true');
 		}
 		if (!self._onTrafficHintDismiss) {
@@ -835,7 +837,6 @@ return view.extend({
 			if (window.matchMedia('(hover: hover)').matches)
 				closeTimer = setTimeout(close, 100);
 		});
-		info.addEventListener('focus', position);
 		help.addEventListener('focusout', function(event) {
 			if (!hovering && event.relatedTarget && !help.contains(event.relatedTarget))
 				close();
@@ -875,7 +876,7 @@ return view.extend({
 
 	renderKernel: function(status) {
 		var live = api.phase(status) == 'connected';
-		var closed = api.ingestConnections(this.cache.connections).closed.length;
+		var closed = api.closedConnections();
 		var active = status.traffic.connections || 0;
 
 		function metric(icon, label, value, liveValue) {

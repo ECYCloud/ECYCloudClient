@@ -65,7 +65,14 @@ void main() {
     expect(
       restored.usableOffline(
         client,
-        now: issued.subtract(const Duration(seconds: 1)),
+        now: issued.subtract(const Duration(seconds: 10)),
+      ),
+      isTrue,
+    );
+    expect(
+      restored.usableOffline(
+        client,
+        now: issued.subtract(const Duration(seconds: 11)),
       ),
       isFalse,
     );

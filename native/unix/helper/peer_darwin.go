@@ -53,12 +53,14 @@ static OSStatus ecy_guest_path(audit_token_t token, const char *team, char *path
 	}
 	if (status == errSecSuccess) status = SecCodeCheckValidity(code, kSecCSDefaultFlags, requirement);
 	if (requirement != NULL) CFRelease(requirement);
-	CFURLRef url = NULL;
-	if (status == errSecSuccess) status = SecCodeCopyPath((SecStaticCodeRef)code, kSecCSDefaultFlags, &url);
+	// SecCodeCopyPath 对应用包返回的是 .app 目录，与 guiExePath() 永远对不上
+	CFDictionaryRef info = NULL;
+	if (status == errSecSuccess) status = SecCodeCopySigningInformation((SecStaticCodeRef)code, kSecCSDefaultFlags, &info);
 	CFRelease(code);
 	if (status != errSecSuccess) return status;
-	if (!CFURLGetFileSystemRepresentation(url, true, (UInt8 *)path, (CFIndex)size)) status = errSecParam;
-	CFRelease(url);
+	CFURLRef url = CFDictionaryGetValue(info, kSecCodeInfoMainExecutable);
+	if (url == NULL || !CFURLGetFileSystemRepresentation(url, true, (UInt8 *)path, (CFIndex)size)) status = errSecParam;
+	CFRelease(info);
 	return status;
 }
 */

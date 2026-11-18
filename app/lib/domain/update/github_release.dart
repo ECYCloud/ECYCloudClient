@@ -32,25 +32,40 @@ class GithubRelease {
     try {
       final http.Response response = await _get(
         client,
-        Uri.parse('https://api.github.com'),
+        Uri.parse('https://api.github.com/rate_limit'),
         const Duration(seconds: 5),
       );
-      // 挡劫持/错误页：必须是 GitHub API 根文档
-      return response.body.contains('"current_user_url"');
+      // 挡劫持/错误页：必须是 GitHub 的配额文档；该端点不占未登录的每小时配额
+      return response.body.contains('"resources"');
     } on Object {
       return false;
     }
   }
 
   // 软件通道必须读取 /releases；仅内核可使用只返回正式版的 /releases/latest。
+  // mirror 是面板缓存的同一份发布信息：节点出口由同节点用户共用，直连 GitHub 很快耗尽未登录配额；
+  // 面板不可用时才回落直连
   static Future<List<GithubRelease>> list(
     String repo, {
     http.Client? client,
     bool latestStableOnly = false,
+    Uri? mirror,
   }) async {
     final http.Client httpClient = client ?? http.Client();
     final bool owned = client == null;
     try {
+      if (mirror != null) {
+        try {
+          final Object? payload = jsonDecode(
+            utf8.decode((await _get(httpClient, mirror, _timeout)).bodyBytes),
+          );
+          if (payload is Map<String, dynamic> &&
+              payload['data'] is List<Object?>) {
+            return _parse(payload['data'] as List<Object?>, latestStableOnly);
+          }
+        } on Object catch (_) {}
+      }
+
       final http.Response response = await _get(
         httpClient,
         Uri.parse(
@@ -61,40 +76,44 @@ class GithubRelease {
       );
 
       final Object? payload = jsonDecode(utf8.decode(response.bodyBytes));
-      final List<Object?> entries;
       if (latestStableOnly && payload is Map<String, dynamic>) {
-        entries = <Object?>[payload];
-      } else if (!latestStableOnly && payload is List<Object?>) {
-        entries = payload;
-      } else {
-        throw GithubReleaseException('GitHub 返回内容无法解析');
+        return _parse(<Object?>[payload], latestStableOnly);
       }
-
-      final List<GithubRelease> releases = <GithubRelease>[];
-      for (final Object? entry in entries) {
-        if (entry is! Map<String, dynamic> ||
-            entry['draft'] == true ||
-            (latestStableOnly && entry['prerelease'] == true)) {
-          continue;
-        }
-        final GithubRelease? release = _fromJson(entry);
-        if (release != null) {
-          releases.add(release);
-        }
+      if (!latestStableOnly && payload is List<Object?>) {
+        return _parse(payload, latestStableOnly);
       }
-      if (releases.isEmpty) {
-        throw GithubReleaseException('GitHub 未给出版本号');
-      }
-      releases.sort(
-        (GithubRelease a, GithubRelease b) =>
-            b.publishedAt.compareTo(a.publishedAt),
-      );
-      return releases;
+      throw GithubReleaseException('GitHub 返回内容无法解析');
     } finally {
       if (owned) {
         httpClient.close();
       }
     }
+  }
+
+  static List<GithubRelease> _parse(
+    List<Object?> entries,
+    bool latestStableOnly,
+  ) {
+    final List<GithubRelease> releases = <GithubRelease>[];
+    for (final Object? entry in entries) {
+      if (entry is! Map<String, dynamic> ||
+          entry['draft'] == true ||
+          (latestStableOnly && entry['prerelease'] == true)) {
+        continue;
+      }
+      final GithubRelease? release = _fromJson(entry);
+      if (release != null) {
+        releases.add(release);
+      }
+    }
+    if (releases.isEmpty) {
+      throw GithubReleaseException('GitHub 未给出版本号');
+    }
+    releases.sort(
+      (GithubRelease a, GithubRelease b) =>
+          b.publishedAt.compareTo(a.publishedAt),
+    );
+    return releases;
   }
 
   static Future<http.Response> _get(

@@ -119,6 +119,36 @@ void main() {
     expect(credentials.api, 'https://moved-config.example.test');
   });
 
+  // 修复前：绑定跟着请求地址换，断网期间回退到出包地址后本地配置读不出来，直到换回去或重启
+  test('回退到出包地址不改离线缓存绑定，出包地址可达落盘后才换', () async {
+    DateTime now = DateTime(2026, 10, 30, 12);
+    final (AuthController auth, _, List<PanelApiClient> clients) = _auth(
+      () => now,
+      _Script(_moved, 'https://moved-config.example.test'),
+    );
+    addTearDown(auth.dispose);
+    Future<PanelApiClient> client() async {
+      await auth.fetchAuthOptions();
+      return clients.lastWhere(
+        (PanelApiClient client) => client.onReach != null,
+      )..token = 'fixture-token';
+    }
+
+    final String binding = (await client()).cacheBinding;
+    void report(String origin, bool reachable) => clients
+        .lastWhere((PanelApiClient client) => client.onReach != null)
+        .onReach!(origin, reachable);
+    report(_moved, false);
+    now = now.add(const Duration(minutes: 10));
+    report(_moved, false);
+    report(_moved, false);
+    final PanelApiClient fallback = await client();
+    expect(fallback.baseUrl, _bundled.site);
+    expect(fallback.cacheBinding, binding);
+    report(_bundled.site, true);
+    expect((await client()).cacheBinding, isNot(binding));
+  });
+
   // 修复前：回退并落盘出包地址后，面板仍下发原来那个连不上的地址，客户端立即切回去，10 分钟后又回退，循环不止
   test('面板仍下发连不上的旧地址时先探测，失败就留在出包地址且 10 分钟内不再探', () async {
     DateTime now = DateTime(2026, 10, 30, 12);

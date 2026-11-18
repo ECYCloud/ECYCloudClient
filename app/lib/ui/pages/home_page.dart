@@ -33,6 +33,7 @@ import '../widgets/section_card.dart';
 import '../widgets/sparkline.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/tag_chip.dart';
+import '../widgets/touch_bleed.dart';
 import 'network_segments_page.dart';
 import 'traffic_log_page.dart';
 import '../widgets/app_alert_dialog.dart';
@@ -117,32 +118,31 @@ class _HomePageState extends State<HomePage> {
                 title: L10n.t('首页'),
                 showUserAvatar: false,
                 actions: <Widget>[
-                  IconButton(
-                    tooltip: L10n.t('公告'),
-                    onPressed: () => unawaited(
-                      showAnnouncementBrowser(
-                        context,
-                        controller: scope.announcements,
-                      ),
-                    ),
-                    icon: Badge(
-                      isLabelVisible: scope.announcements.hasUnread,
-                      backgroundColor: const Color(0xFFE53935),
-                      smallSize: 8,
-                      child: const SizedBox(
-                        width: AppTheme.pointerTapTarget,
-                        height: AppTheme.pointerTapTarget,
-                        child: Center(
-                          child: Icon(Icons.notifications_outlined, size: 20),
+                  TouchBleed(
+                    child: IconButton(
+                      tooltip: L10n.t('公告'),
+                      onPressed: () => unawaited(
+                        showAnnouncementBrowser(
+                          context,
+                          controller: scope.announcements,
                         ),
                       ),
+                      icon: Badge(
+                        isLabelVisible: scope.announcements.hasUnread,
+                        backgroundColor: const Color(0xFFE53935),
+                        smallSize: 8,
+                        child: const SizedBox(
+                          width: AppTheme.pointerTapTarget,
+                          height: AppTheme.pointerTapTarget,
+                          child: Center(
+                            child: Icon(Icons.notifications_outlined, size: 20),
+                          ),
+                        ),
+                      ),
+                      visualDensity: VisualDensity.standard,
+                      constraints: AppTheme.iconButtonBox,
+                      padding: EdgeInsets.zero,
                     ),
-                    visualDensity: VisualDensity.standard,
-                    constraints: BoxConstraints.tightFor(
-                      width: AppTheme.minTapTarget,
-                      height: AppTheme.minTapTarget,
-                    ),
-                    padding: EdgeInsets.zero,
                   ),
                 ],
               ),
@@ -969,9 +969,7 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
       icon: Icons.leaderboard_outlined,
       title: L10n.t('流量排行'),
       titleTrailing: _TrafficHelp(
-        notice: L10n.t(
-          '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。',
-        ),
+        notice: L10n.t('统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。'),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1051,51 +1049,25 @@ class _TrafficHelpState extends State<_TrafficHelp> {
         triggerMode: TooltipTriggerMode.manual,
         showDuration: const Duration(seconds: 8),
         constraints: const BoxConstraints(maxWidth: 320),
-        positionDelegate: (TooltipPositionContext position) {
-          final double x =
-              position.target.dx + position.targetSize.width / 2 + 8;
-          if (x + position.tooltipSize.width >
-              position.overlaySize.width - 10) {
-            return positionDependentBox(
-              size: position.overlaySize,
-              childSize: position.tooltipSize,
-              target: position.target,
-              verticalOffset: position.verticalOffset,
-              preferBelow: position.preferBelow,
-            );
-          }
-          return Offset(
-            x,
-            (position.target.dy - position.tooltipSize.height / 2)
-                .clamp(
-                  10.0,
-                  position.overlaySize.height -
-                      position.tooltipSize.height -
-                      10,
-                )
-                .toDouble(),
-          );
-        },
         child: TextFieldTapRegion(
           onTapOutside: (_) => Tooltip.dismissAllToolTips(),
-          child: IconButton(
-            icon: Icon(
-              Icons.error_outline,
-              size: 14,
-              color: theme.colorScheme.onSurfaceVariant,
-              semanticLabel: notice,
+          child: TouchBleed(
+            child: IconButton(
+              icon: Icon(
+                Icons.error_outline,
+                size: 14,
+                color: theme.colorScheme.onSurfaceVariant,
+                semanticLabel: notice,
+              ),
+              visualDensity: VisualDensity.standard,
+              constraints: AppTheme.iconButtonBox,
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                if (!_hintKey.currentState!.ensureTooltipVisible()) {
+                  Tooltip.dismissAllToolTips();
+                }
+              },
             ),
-            visualDensity: VisualDensity.standard,
-            constraints: BoxConstraints.tightFor(
-              width: AppTheme.minTapTarget,
-              height: AppTheme.minTapTarget,
-            ),
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              if (!_hintKey.currentState!.ensureTooltipVisible()) {
-                Tooltip.dismissAllToolTips();
-              }
-            },
           ),
         ),
       ),
@@ -1304,7 +1276,11 @@ class _CurrentNodeCardState extends State<_CurrentNodeCard> {
     final String now = group.now;
     final String leaf = now.isEmpty ? '' : connection.resolveNode(now);
     final String display = leaf.isEmpty
-        ? (live ? L10n.t('未选择节点') : L10n.t('正在准备内核'))
+        ? (live
+              ? L10n.t('未选择节点')
+              : connection.standbyError == null
+              ? L10n.t('正在准备内核')
+              : L10n.t('内核启动失败：{0}', <Object>[connection.standbyError!]))
         : NodeLabels.displayName(leaf);
     final String? region = leaf.isEmpty ? null : NodeLabels.region(leaf);
     final int delay = leaf.isEmpty ? 0 : connection.delayOf(leaf);

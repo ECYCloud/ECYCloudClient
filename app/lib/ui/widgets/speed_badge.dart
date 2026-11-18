@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../format.dart';
 import '../theme.dart';
+import 'touch_bleed.dart';
 import '../../l10n/l10n.dart';
 
 class SpeedBadge extends StatelessWidget {
@@ -54,22 +55,25 @@ class SpeedBadge extends StatelessWidget {
     return Tooltip(
       message: L10n.t('测试该节点网速'),
       waitDuration: const Duration(milliseconds: 400),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: onTest,
-          borderRadius: BorderRadius.circular(AppTheme.minTapTarget / 2),
-          mouseCursor: SystemMouseCursors.click,
-          hoverColor: scheme.primary.withValues(alpha: 0.12),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minWidth: AppTheme.minTapTarget,
-              minHeight: AppTheme.minTapTarget,
-              maxHeight: AppTheme.minTapTarget,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Align(widthFactor: 1, heightFactor: 1, child: content),
+      child: TapPadding(
+        onTap: onTest,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTest,
+            borderRadius: BorderRadius.circular(AppTheme.pointerTapTarget / 2),
+            mouseCursor: SystemMouseCursors.click,
+            hoverColor: scheme.primary.withValues(alpha: 0.12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: AppTheme.pointerTapTarget,
+                minHeight: AppTheme.pointerTapTarget,
+                maxHeight: AppTheme.pointerTapTarget,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Align(widthFactor: 1, heightFactor: 1, child: content),
+              ),
             ),
           ),
         ),

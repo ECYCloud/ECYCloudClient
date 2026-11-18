@@ -205,6 +205,13 @@ class ProfileAssembler {
       };
     }
 
+    if (template.options.proxyChina) {
+      final Object? rules = config['rules'];
+      if (rules is List) {
+        config['rules'] = proxyChinaRules(rules);
+      }
+    }
+
     // NewSelector 的初始 now 是 default-selected。ApplyConfig 先开 TUN 再
     // patchSelectGroup，有落盘选择时必须关掉 store-selected，否则会被盖成首个成员。
     if (selectorDefaults.isNotEmpty) {
@@ -237,6 +244,40 @@ class ProfileAssembler {
       config,
       const JsonEncoder.withIndent('  ').convert(config),
     );
+  }
+
+  // 海外：面板的 GEOSITE,CN / GEOIP,CN 直连规则改走 MATCH 的出站。Apple 与 OpenWrt 同一判定
+  static List<Object?> proxyChinaRules(List<Object?> rules) {
+    String? fallback;
+    for (final Object? rule in rules) {
+      final List<String> fields = '$rule'.split(',');
+      if (fields.length >= 2 && fields[0].trim().toUpperCase() == 'MATCH') {
+        fallback = fields[1].trim();
+        break;
+      }
+    }
+    if (fallback == null || fallback.toUpperCase() == 'DIRECT') {
+      return rules;
+    }
+    return <Object?>[
+      for (final Object? rule in rules)
+        if (rule is String) _proxyChinaRule(rule, fallback) else rule,
+    ];
+  }
+
+  static String _proxyChinaRule(String rule, String target) {
+    final List<String> fields = rule
+        .split(',')
+        .map((String field) => field.trim())
+        .toList();
+    if (fields.length < 3 ||
+        !const <String>{'GEOIP', 'GEOSITE'}.contains(fields[0].toUpperCase()) ||
+        fields[1].toLowerCase() != 'cn' ||
+        fields[2].toUpperCase() != 'DIRECT') {
+      return rule;
+    }
+    fields[2] = target;
+    return fields.join(',');
   }
 
   static Object? _withSelectorDefault(

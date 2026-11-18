@@ -3,6 +3,7 @@ import AppKit
 #endif
 import CryptoKit
 import ImageIO
+import os
 import SwiftUI
 import ECYCloudKit
 
@@ -20,11 +21,18 @@ import ECYCloudKit
 }
 struct ReviewTransport: HTTPTransport {
     let fixtures: [String: Data]
-    init() throws {
+    let release: String?
+    let releaseRequests = OSAllocatedUnfairLock(initialState: 0)
+    init(release: String? = nil) throws {
+        self.release = release
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: Bundle.main.url(forResource: "fixtures", withExtension: "json")!)) as! [String: Any]
         fixtures = try object.mapValues { try JSONSerialization.data(withJSONObject: ["ret": 1, "data": $0]) }
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {
+        if request.url!.host == "api.github.com", let release {
+            releaseRequests.withLock { $0 += 1 }
+            return HTTPResult(data: try JSONSerialization.data(withJSONObject: [["tag_name": "v" + release, "published_at": "2026-01-01T00:00:00Z", "draft": false, "prerelease": false]]), status: 200)
+        }
         let path = request.url!.path.replacingOccurrences(of: "/api/client/v1", with: "")
         guard let data = fixtures[path] else { print("UNEXPECTED: \(path)"); throw ClientError.invalidResponse }
         return HTTPResult(data: data, status: 200)
@@ -179,8 +187,6 @@ struct ReviewFailure: Error { let message: String }
             ("login-narrow-dark", AnyView(LoginView(session: signedOut)), 390, 844, .dark),
             ("home-dark", AnyView(ClientHomeView(session: session).environment(AccountMenu(session: session))), 1000, 720, .dark),
             ("home-narrow-light", AnyView(ClientHomeView(session: session).environment(AccountMenu(session: session))), 480, 760, .light),
-            ("shop-light", AnyView(ShopView(session: session, category: .constant(.plan))), 1000, 720, .light),
-            ("shop-narrow-dark", AnyView(ShopView(session: session, category: .constant(.plan))), 390, 844, .dark),
             ("tickets-dark", AnyView(TicketsView(session: session)), 1000, 720, .dark),
             ("ticket-reply-light", AnyView(TicketConversationView(session: session, id: 12)), 700, 800, .light),
             ("security-dark", AnyView(AccountSecurityView(session: session, message: .constant(nil), working: .constant(false))), 700, 1500, .dark),
@@ -194,7 +200,7 @@ struct ReviewFailure: Error { let message: String }
             ("offline-start-wide-light", AnyView(ContentView(session: offline)), 1000, 720, .light),
             ("offline-start-narrow-dark", AnyView(ContentView(session: offline)), 390, 844, .dark)
         ]
-        for (name, content, width, height, scheme) in cases {
+        func shot(_ name: String, _ content: AnyView, _ width: CGFloat, _ height: CGFloat, _ scheme: ColorScheme, before capture: (NSWindow) async throws -> Void = { _ in }) async throws {
             session.preferences.language = name.hasPrefix("en-") ? .enUS : name.hasPrefix("tw-") ? .zhTW : .zhCN
             defaults.set(scheme == .dark ? "dark" : "light", forKey: "apple.appearance")
             let root = content.font(.system(size: 13)).foregroundStyle(ProductPalette(scheme: scheme).text).background(ProductPalette(scheme: scheme).background).environment(\.colorScheme, scheme).environment(\.scenePhase, .active).frame(width: width, height: height)
@@ -210,6 +216,7 @@ struct ReviewFailure: Error { let message: String }
                 view.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(50))
             }
+            try await capture(window)
             if name == "strategy-light" {
                 var editorTexts: [String] = []
                 func inspect(_ node: NSView) {
@@ -226,6 +233,66 @@ struct ReviewFailure: Error { let message: String }
             try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent("\(name).png"))
             window.close()
             print("RENDERED: \(name)")
+        }
+        for (name, content, width, height, scheme) in cases { try await shot(name, content, width, height, scheme) }
+
+        // 更新提示：首次检查弹窗并记下时间；一小时内重开不再请求；连接成功立即再查并弹窗
+        let releases = try ReviewTransport(release: "999.0.0")
+        func requests() -> Int { releases.releaseRequests.withLock { $0 } }
+        let outdated = try ReviewData.session(defaults: defaults, transport: releases)
+        try await ReviewData.signIn(outdated)
+        defer { outdated.connection?.disconnect() }
+        try await shot("update-wide-light", AnyView(ContentView(session: outdated)), 1000, 720, .light)
+        guard requests() == 1, defaults.double(forKey: "apple.lastUpdateCheck") > 0 else { throw ReviewFailure(message: "首次检查必须请求一次并记下检查时间：\(requests())") }
+        let reopened = try ReviewData.session(defaults: defaults, transport: releases)
+        try await ReviewData.signIn(reopened)
+        defer { reopened.connection?.disconnect() }
+        try await shot("update-gated-narrow-dark", AnyView(ContentView(session: reopened)), 390, 844, .dark)
+        guard requests() == 1 else { throw ReviewFailure(message: "距上次检查不满一小时不得重复请求：\(requests())") }
+        try await shot("update-connected-narrow-dark", AnyView(ContentView(session: reopened)), 390, 844, .dark) { _ in
+            await reopened.connect()
+            try await Task.sleep(for: .seconds(1))
+            guard reopened.connection?.state == .connected, requests() == 2 else { throw ReviewFailure(message: "连接成功必须立即检查：\(String(describing: reopened.connection?.state)) \(requests())") }
+        }
+        // 关闭后同一版本本次运行内不再弹：断开重连仍会检查，但不再出现弹窗
+        try await shot("update-dismissed-narrow-dark", AnyView(ContentView(session: outdated)), 390, 844, .dark) { window in
+            await outdated.connect()
+            try await Task.sleep(for: .seconds(1))
+            guard requests() == 3 else { throw ReviewFailure(message: "新窗口连接成功必须检查：\(requests())") }
+            click(window, x: 292, y: 487, height: 844)
+            try await Task.sleep(for: .milliseconds(500))
+            outdated.connection?.disconnect()
+            try await Task.sleep(for: .milliseconds(500))
+            await outdated.connect()
+            try await Task.sleep(for: .seconds(1))
+            guard outdated.connection?.state == .connected, requests() == 4 else { throw ReviewFailure(message: "关闭弹窗后重新连接仍须检查：\(requests())") }
+        }
+        for (name, width, height, scheme) in [("en-update-narrow-light", 390.0, 844.0, ColorScheme.light), ("tw-update-wide-dark", 1000.0, 720.0, ColorScheme.dark)] {
+            defaults.removeObject(forKey: "apple.lastUpdateCheck")
+            let localized = try ReviewData.session(defaults: defaults, transport: releases)
+            try await ReviewData.signIn(localized)
+            try await shot(name, AnyView(ContentView(session: localized)), width, height, scheme)
+            localized.connection?.disconnect()
+        }
+        // 「打开发布页」须交给系统打开发布页地址；验收时截获该请求，不真的打开浏览器
+        defaults.removeObject(forKey: "apple.lastUpdateCheck")
+        var opened: URL?
+        let linked = try ReviewData.session(defaults: defaults, transport: releases)
+        try await ReviewData.signIn(linked)
+        try await shot("update-open-narrow-dark", AnyView(ContentView(session: linked).environment(\.openURL, OpenURLAction { opened = $0; return .handled })), 390, 844, .dark) { window in
+            click(window, x: 200, y: 487, height: 844)
+            try await Task.sleep(for: .milliseconds(500))
+            guard opened == ClientRelease.releasesURL else { throw ReviewFailure(message: "「打开发布页」必须打开发布页地址：\(String(describing: opened))") }
+        }
+        linked.connection?.disconnect()
+        print("UPDATE PROMPT VERIFIED")
+    }
+
+    static func click(_ window: NSWindow, x: Double, y: Double, height: CGFloat) {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: Double(height) - y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            window.sendEvent(event)
         }
     }
 
@@ -249,12 +316,7 @@ struct ReviewFailure: Error { let message: String }
             switch (step.first, step.count) {
             case ("click", 3):
                 guard let x = Double(step[1]), let y = Double(step[2]) else { throw ReviewFailure(message: "无效坐标 \(step)") }
-                let point = NSPoint(x: x, y: Double(height) - y)
-                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                    let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
-                    window.sendEvent(event)
-                }
+                click(window, x: x, y: y, height: height)
             case ("wait", 2):
                 try await Task.sleep(for: .milliseconds(Int((Double(step[1]) ?? 0) * 1000)))
             case ("shot", 2):
@@ -282,9 +344,13 @@ struct ReviewFailure: Error { let message: String }
                 else if let failure { Text(verbatim: failure) }
                 else { ProgressView().task {
                     do {
-                        let value = try ReviewData.session(defaults: .standard)
+                        let value = try ReviewData.session(defaults: .standard, transport: ReviewTransport(release: UserDefaults.standard.string(forKey: "review.release")))
                         try await ReviewData.signIn(value)
                         session = value
+                        // 本任务随占位视图消失而取消，自动连接须另起任务
+                        if UserDefaults.standard.bool(forKey: "review.connect") {
+                            Task { try? await Task.sleep(for: .seconds(4)); await value.connect() }
+                        }
                     } catch { failure = String(describing: error) }
                 } }
             }

@@ -112,12 +112,15 @@ const EXCLUDED_ROUTES = [
 	'ff00::/8'
 ];
 
+/* 面板签发时间取整到秒，本机校时也有误差：只对签发一侧留 10 秒，到期一侧不放宽（三端同值） */
+const ISSUED_SKEW = 10;
+
 export function authorized(saved, margin) {
 	const issued = timestamp(saved?.offline_authorization?.issued_at);
 	const until = timestamp(saved?.offline_authorization?.valid_until);
 	const binding = sessionBinding();
 	return length(binding) > 0 && saved?.binding == binding && issued > 0 &&
-		issued <= time() && until > issued && until > time() + +(margin ?? 0);
+		issued <= time() + ISSUED_SKEW && until > issued && until > time() + +(margin ?? 0);
 };
 
 /* 响应头 profile-update-interval：1～8760 的正整数小时，其余视为未下发 */
@@ -590,6 +593,26 @@ export function inspect(remote) {
 	return { ok: false, error: `面板配置不规范：\n${join('\n', shown)}` };
 };
 
+function proxyChinaRules(rules) {
+	let target = null;
+	for (let rule in rules) {
+		const fields = split(rule, ',');
+		if (length(fields) >= 2 && uc(trim(fields[0])) == 'MATCH') {
+			target = trim(fields[1]);
+			break;
+		}
+	}
+	if (target == null || uc(target) == 'DIRECT')
+		return rules;
+	return map(rules, rule => {
+		const fields = map(split(rule, ','), field => trim(field));
+		if (length(fields) < 3 || !(uc(fields[0]) in [ 'GEOIP', 'GEOSITE' ]) || lc(fields[1]) != 'cn' || uc(fields[2]) != 'DIRECT')
+			return rule;
+		fields[2] = target;
+		return join(',', fields);
+	});
+}
+
 export function assemble(remote, cfg, api, selectorDefaults) {
 	const checked = inspect(remote);
 	if (!checked.ok)
@@ -635,6 +658,10 @@ export function assemble(remote, cfg, api, selectorDefaults) {
 		users: [ { username: SPEED_GROUP, password: api.speed } ],
 		proxy: SPEED_GROUP
 	}];
+	/* allow-lan 关闭时内核的 tproxy-port 只绑 127.0.0.1，没有 IPv6 监听：
+	   不补这一口，LAN 的 IPv6 流量会整段绕过代理直连出去 */
+	if (cfg.mode != 'tun' && cfg.ipv6 && !cfg.allowLan)
+		push(merged.listeners, { name: 'ecy-tproxy6', type: 'tproxy', listen: '::1', port: cfg.tproxyPort, udp: true });
 
 	/* dns 整段归面板，但 listen 会让内核对外开 DNS 口；路由器上改成只监听回环供 dnsmasq 转发。
 	   ipv6 跟 LuCI 开关走，不盖掉就落不到配置上 */
@@ -642,6 +669,8 @@ export function assemble(remote, cfg, api, selectorDefaults) {
 	merged.dns.enable = true;
 	merged.dns.listen = `127.0.0.1:${cfg.dnsPort}`;
 	merged.dns.ipv6 = cfg.ipv6;
+	if (cfg.region == 'overseas')
+		merged.rules = proxyChinaRules(merged.rules);
 
 	/* 面板下发的 geox-url 指向 github，而路由器没有随包 geodata，首次启动全靠它下载。
 	   只改镜像实际托管的这两个键：geoip / asn 镜像上没有，改过去就是 404 */
@@ -844,7 +873,7 @@ export function readRunFile(rel) {
 	if (index(raw, '\0') >= 0)
 		return { ok: false, error: '该文件为二进制规则集，无法以文本查看' };
 
-	return { ok: true, text: raw };
+	return { ok: true, text: raw, info };
 };
 
 export function geoFingerprint(runDir) {

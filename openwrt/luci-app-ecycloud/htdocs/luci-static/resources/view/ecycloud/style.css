@@ -41,6 +41,7 @@ html[data-page^="admin-services-ecycloud"],
 .ecycloud-ui,
 .ecycloud-modal {
 	--ecy-primary: #0071e3;
+	--ecy-tip-bg: rgba(97, 97, 97, 0.9);
 	--ecy-cta: #1d1d1f;
 	--ecy-cta-text: #fff;
 	--ecy-success: #2fbf71;
@@ -69,6 +70,7 @@ html[data-page^="admin-services-ecycloud"],
 .ecycloud-ui[data-theme="light"],
 .ecycloud-modal[data-theme="light"] {
 	--ecy-primary: #0071e3;
+	--ecy-tip-bg: rgba(97, 97, 97, 0.9);
 	--ecy-cta: #1d1d1f;
 	--ecy-cta-text: #fff;
 	--ecy-danger: #d70015;
@@ -100,6 +102,7 @@ html[data-theme="dark"] .ecycloud-modal,
 body[data-theme="dark"] .ecycloud-modal,
 .ecycloud-modal[data-theme="dark"] {
 	--ecy-primary: #2997ff;
+	--ecy-tip-bg: rgba(255, 255, 255, 0.9);
 	--ecy-cta: #f5f5f7;
 	--ecy-cta-text: #1d1d1f;
 	--ecy-danger: #ff453a;
@@ -1346,41 +1349,34 @@ body.dark .ecycloud-ui .ecycloud-node-check {
 	margin: 9px;
 }
 
+/* 与客户端 Material Tooltip 默认样式一致；位置由 overview.js 按图标中心计算 */
 .ecycloud-ui .ecycloud-rank-tooltip {
 	display: none;
 	position: absolute;
-	left: calc(100% + 8px);
-	top: calc(50% - 2px);
-	transform: translateY(-50%);
+	left: var(--ecy-tip-x, 0);
+	top: var(--ecy-tip-y, 0);
 	z-index: 5;
 	box-sizing: border-box;
-	width: 380px;
-	max-width: var(--ecy-rank-tip-width, 380px);
-	padding: 10px 12px;
-	border: 1px solid var(--ecy-line);
-	border-radius: 9px;
-	background: var(--ecy-card);
-	color: var(--ecy-fg);
-	box-shadow: 0 4px 16px #0002;
-	font-size: 14px;
+	width: max-content;
+	max-width: min(320px, calc(100vw - 20px));
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: var(--ecy-tip-bg);
+	color: var(--ecy-card);
+	font-size: 12px;
 	font-weight: 400;
-	line-height: 1.5;
+	line-height: normal;
+	text-align: start;
+}
+
+@media (pointer: coarse) {
+	.ecycloud-ui .ecycloud-rank-tooltip {
+		padding: 4px 16px;
+	}
 }
 
 .ecycloud-ui .ecycloud-rank-info.is-open .ecycloud-rank-tooltip {
 	display: block;
-}
-
-.ecycloud-ui .ecycloud-rank-info.is-below {
-	position: static;
-}
-
-.ecycloud-ui .ecycloud-rank-info.is-below .ecycloud-rank-tooltip {
-	left: 0;
-	right: 0;
-	top: calc(100% + 8px);
-	transform: none;
-	width: auto;
 }
 
 .ecycloud-ui .ecycloud-card-actions {
@@ -2459,15 +2455,18 @@ html body #main-content .ecycloud-ui .cbi-checkbox input[type="checkbox"]::after
 }
 
 @media (hover: hover) {
-	html body .ecycloud-ui .ecycloud-icon-btn:hover:not(:disabled):not(.is-disabled):not(.is-testing),
+	html body .ecycloud-ui .ecycloud-icon-btn:hover:not(:disabled):not(.is-disabled):not(.is-testing) {
+		background: color-mix(in srgb, var(--ecy-muted) 8%, transparent);
+		background-color: color-mix(in srgb, var(--ecy-muted) 8%, transparent);
+		background-image: none;
+	}
+
 	html body .ecycloud-ui [role="button"].ecycloud-delay:hover:not(.is-testing) {
 		background: var(--ecy-hover);
 		background-color: var(--ecy-hover);
 		background-image: none;
-		box-shadow: inset 0 0 0 1px var(--ecy-line);
 	}
 
-	.ecycloud-ui .ecycloud-icon-btn:hover:not(:disabled):not(.is-disabled),
 	.ecycloud-ui .ecycloud-seg-btn:hover:not(.is-on):not(:disabled):not(.is-disabled),
 	.ecycloud-ui button.btn:not([class*="cbi-button-"]):hover:not(:disabled),
 	body .ecycloud-ui a.ecycloud-jump:hover,
@@ -3566,6 +3565,7 @@ html body .cbi-page-actions .cbi-dropdown > div:not([class]) {
 	html[data-page^="admin-services-ecycloud"] .ecycloud-ui:not([data-theme="light"]),
 	html[data-page^="admin-services-ecycloud"] .ecycloud-modal:not([data-theme="light"]) {
 		--ecy-primary: #2997ff;
+		--ecy-tip-bg: rgba(255, 255, 255, 0.9);
 		--ecy-cta: #f5f5f7;
 		--ecy-cta-text: #1d1d1f;
 		--ecy-danger: #ff453a;

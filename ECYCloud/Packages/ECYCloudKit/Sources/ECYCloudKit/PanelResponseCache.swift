@@ -30,6 +30,8 @@ import Foundation
 
     // 配置响应上限 8 MiB，Data 按 base64 编码后约增大三分之一
     private static let maximumFileBytes = 12 * 1024 * 1024
+    // 面板签发时间取整到秒，本机校时也有误差：只对签发一侧留 10 秒，到期一侧不放宽（三端同值）
+    private static let issuedSkew: TimeInterval = 10
     private let directory: URL?
 
     public init(directory: URL? = UserDataDirectory.root?.appendingPathComponent("PanelCache", isDirectory: true)) {
@@ -69,7 +71,7 @@ import Foundation
         }
         catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(config.updateIntervalHours.map(String.init))
         guard !binding.isEmpty, value.deviceKickReason != "remove", config.binding == binding,
-              let issued = config.issuedAt, let until = config.validUntil, issued <= now, now < until else {
+              let issued = config.issuedAt, let until = config.validUntil, issued <= now.addingTimeInterval(Self.issuedSkew), now < until else {
             return Restored(profile: value, catalog: catalog, validUntil: nil)
         }
         return Restored(profile: value, catalog: catalog, validUntil: until)

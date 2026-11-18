@@ -131,14 +131,11 @@ public struct AccountStatus: Decodable, Sendable {
 
 public struct UserProfile: Decodable, Sendable {
     public struct Plan: Decodable, Sendable {
-        public let id: Int?
         public let name: String
         public let remainingDays: Int
         public let expTime: String
         public let autoRenew: Bool?
         public let renewAt: String?
-        public let canToggleAutoRenew: Bool?
-        public let autoRenewUnavailableReason: String?
     }
 
     public let id: Int
@@ -156,6 +153,8 @@ public struct UserProfile: Decodable, Sendable {
     public let lastDayT: Int64
     public let nodeSpeedlimit: Double
     public let nodeConnector: Int
+    // 面板按超级管理员下发：测速不限次数，本地额度预判跳过；旧面板不下发时为 nil
+    public let speedTestUnlimited: Bool?
     public let onlineClientCount: Int
     public let onlineClientSelf: Bool?
     public let deviceKickNotice: Bool?
@@ -174,7 +173,7 @@ public struct UserProfile: Decodable, Sendable {
     public let siteOrigin: String
     let revisions: [String: String]?
 
-    public enum Page: String, Sendable { case shop, tickets, invite, unlock }
+    public enum Page: String, Sendable { case tickets, invite, unlock }
     // 面板未下发该页版本号时为 nil，页面退回定时刷新
     public func revision(_ page: Page) -> String? { revisions?[page.rawValue] }
 
@@ -346,7 +345,11 @@ public struct NodeCatalog: Decodable, Sendable {
             // 与 app/lib/state/connection_controller.dart 的 _displayType / _tlsTypeOf / udpOf 一致
             let tls = (details?["reality-opts"] as? [String: Any])?.isEmpty == false ? "REALITY"
                 : details?["tls"] as? Bool == true || ["hysteria", "hysteria2", "tuic", "anytls"].contains(type) ? "TLS" : ""
-            let xudp = details?["xudp"] as? Bool == true || details?["packet-encoding"] as? String == "xudp"
+            // 内核对 VLESS 默认启用 XUDP（adapter/outbound/vless.go），只有 packet-addr / packet-encoding: packetaddr 才关掉
+            let encoding = details?["packet-encoding"] as? String
+            let xudp = type == "vless"
+                ? !["packetaddr", "packet"].contains(encoding ?? "") && (details?["xudp"] as? Bool == true || details?["packet-addr"] as? Bool != true)
+                : details?["xudp"] as? Bool == true || encoding == "xudp"
             return CloudNode(id: proxy.name, name: labels[proxy.name] ?? proxy.name, protocolName: Self.displayTypes[type] ?? proxy.type,
                              network: (details?["network"] as? String ?? "").trimmingCharacters(in: .whitespaces).uppercased(),
                              tls: tls, udp: xudp ? "XUDP" : details?["udp"] as? Bool == true ? "UDP" : "")

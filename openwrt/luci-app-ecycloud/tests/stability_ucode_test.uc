@@ -34,7 +34,7 @@ global.system = command => {
 	return 0;
 };
 
-testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', device: 'br-lan', enabled: '1', ipv6: '1' };
+testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', device: 'br-lan', enabled: '1', ipv6: '1', router_proxy: '0' };
 testState.files[CRED_FILE] = sprintf('%J', { email: 'router@test', token: 'synthetic-token', session_id: 'fixture-session', account_key: 'fixture-session', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
 
 const paths = [
@@ -42,7 +42,7 @@ const paths = [
 	'/usr/share/nftables.d/chain-pre/input/ecycloud.nft',
 	'/usr/share/nftables.d/chain-pre/forward/ecycloud.nft',
 	'/usr/share/nftables.d/chain-pre/dstnat/ecycloud.nft',
-	'/tmp/dnsmasq.test.d/ecycloud.conf',
+	'/tmp/dnsmasq.d/ecycloud.conf',
 	routerDnsConf,
 	routerDnsRuleset
 ];
@@ -216,7 +216,7 @@ for (let mode in [ 'tproxy', 'tun' ]) {
 			!length(filter(testState.commands, command => index(command, 'router-dns') >= 0)),
 			`${mode}：代理路由器自身或未劫持 DNS 时不另起路由器自身的解析实例`);
 		check(revert(), `${mode}：未另起解析实例时必须可以恢复`);
-		delete testState.config.router_proxy;
+		testState.config.router_proxy = '0';
 		delete testState.config.dns_hijack;
 	}
 }
@@ -226,7 +226,7 @@ failures = 1;
 const routerDnsFailed = apply(settings());
 check(!routerDnsFailed.ok && index(routerDnsFailed.error, '127.0.0.1:10200') >= 0 && readJson(NETWORK_FILE) == null &&
 	testState.files[paths[2]] == null && testState.files[routerDnsConf] == null &&
-	testState.writes['/tmp/dnsmasq.test.d/ecycloud.conf'] == null,
+	testState.writes['/tmp/dnsmasq.d/ecycloud.conf'] == null,
 	'路由器自身的解析实例启动失败必须回滚全部接管，主 dnsmasq 不能被指向内核');
 failedCommand = '';
 delete testState.config.local;
@@ -380,6 +380,7 @@ global.sleep = duration => {
 refresh();
 check(identityRequests == 2 && connectedRequests == 2 && profileRequests == 3,
 	'独立面板任务必须保留每 60 秒心跳、连接上报和配置刷新');
+check(readJson('/var/run/ecycloud/updates.json').checked_at == 1000, '接管成功时必须立即检查更新，不等到下次检查时间');
 delete testState.files['/var/run/ecycloud/stopping'];
 testState.onRequest = null;
 

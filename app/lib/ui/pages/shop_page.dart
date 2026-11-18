@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/api/api_exception.dart';
@@ -82,6 +83,7 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
   ShopCatalog? _catalog;
   String? _error;
   bool _busy = false;
+  bool _ordering = false;
   bool _started = false;
   String? _contentLanguage;
   int _loadGeneration = 0;
@@ -268,6 +270,19 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
             (_) => mounted ? setState(() {}) : null,
           )
         : null;
+  }
+
+  // 取报价与下单期间按钮仍可点：慢网下连点会叠出多个确认框，各确认一次就是多笔订单
+  Future<void> _order(Future<void> Function() buy) async {
+    if (_ordering) {
+      return;
+    }
+    _ordering = true;
+    try {
+      await buy();
+    } finally {
+      _ordering = false;
+    }
   }
 
   Future<void> _buyPlan(ShopProduct product) async {
@@ -704,17 +719,18 @@ class _ShopPageState extends State<ShopPage> with AutoRefreshMixin<ShopPage> {
             child: switch (_tab) {
               'plan' => _PlanCard(
                 product: row[i],
-                onBuy: _buyPlan,
+                onBuy: (ShopProduct p) => _order(() => _buyPlan(p)),
                 reserveChipSlot: reserveChipSlot,
               ),
               'traffic_package' => _CompactCard(
                 product: row[i],
-                onBuy: _buyTrafficPackage,
+                onBuy: (ShopProduct p) =>
+                    _order(() => _buyTrafficPackage(p)),
                 reserveChipSlot: reserveChipSlot,
               ),
               _ => _CompactCard(
                 product: row[i],
-                onBuy: _buyCardKey,
+                onBuy: (ShopProduct p) => _order(() => _buyCardKey(p)),
                 reserveChipSlot: reserveChipSlot,
               ),
             },
@@ -771,8 +787,7 @@ class _PlanCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       product.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: theme.textTheme.titleLarge,
                     ),
                     if (_ProductChips.visible(product) || reserveChipSlot)
@@ -982,8 +997,7 @@ class _CompactCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       product.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: theme.textTheme.titleLarge,
                     ),
                     if (_ProductChips.visible(product) || reserveChipSlot)
@@ -1592,31 +1606,33 @@ class _PaymentPicker extends StatelessWidget {
       children: <Widget>[
         Text(L10n.t('选择支付方式'), style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
-        LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final bool stack =
-                constraints.maxWidth.isFinite &&
-                constraints.maxWidth <
-                    _minHorizontalChip(context) * segments.length;
-            if (!stack) {
-              return SegmentedButton<_PayMethod>(
-                segments: segments,
-                selected: <_PayMethod>{value},
-                onSelectionChanged: (Set<_PayMethod> selection) =>
-                    onChanged(selection.first),
-                showSelectedIcon: false,
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                for (int i = 0; i < segments.length; i++) ...<Widget>[
-                  if (i > 0) const SizedBox(height: 8),
-                  _payMethodChip(segments[i]),
+        _NoIntrinsicHeight(
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final bool stack =
+                  constraints.maxWidth.isFinite &&
+                  constraints.maxWidth <
+                      _minHorizontalChip(context) * segments.length;
+              if (!stack) {
+                return SegmentedButton<_PayMethod>(
+                  segments: segments,
+                  selected: <_PayMethod>{value},
+                  onSelectionChanged: (Set<_PayMethod> selection) =>
+                      onChanged(selection.first),
+                  showSelectedIcon: false,
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (int i = 0; i < segments.length; i++) ...<Widget>[
+                    if (i > 0) const SizedBox(height: 8),
+                    _payMethodChip(segments[i]),
+                  ],
                 ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
         const SizedBox(height: 6),
         Text(
@@ -1656,6 +1672,23 @@ class _PaymentPicker extends StatelessWidget {
     }
     return OutlinedButton.icon(onPressed: onPressed, icon: icon, label: label);
   }
+}
+
+// AlertDialog 定宽时会向内容问固有高度，LayoutBuilder 答不了，调试版整个对话框不显示
+class _NoIntrinsicHeight extends SingleChildRenderObjectWidget {
+  const _NoIntrinsicHeight({required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderNoIntrinsicHeight();
+}
+
+class _RenderNoIntrinsicHeight extends RenderProxyBox {
+  @override
+  double computeMinIntrinsicHeight(double width) => 0;
+
+  @override
+  double computeMaxIntrinsicHeight(double width) => 0;
 }
 
 class _DetailBlock extends StatelessWidget {

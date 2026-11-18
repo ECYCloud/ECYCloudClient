@@ -132,7 +132,9 @@ class ClashApiClient {
           '/version',
           timeout: const Duration(seconds: 2),
         );
-        if (response.statusCode == 200 && !(isCancelled?.call() ?? false)) {
+        if (response.statusCode == 200 &&
+            !(isCancelled?.call() ?? false) &&
+            await _panelNodesLoaded()) {
           if (proxyPort == null) {
             return;
           }
@@ -168,7 +170,28 @@ class ClashApiClient {
     );
   }
 
+  // 当前运行配置里的面板节点文件名，由持有配置的一方填入；留空则不做加载检查
+  Iterable<String> panelProviders = const <String>[];
+
+  // 控制口先于节点文件就绪，热载期间节点文件也会重新加载：这时读分组，内核会把空组回落的
+  // REJECT 当作 url-test 的结果缓存 10 秒，期间走该组的连接全部被拒。
+  // 只能逐个读节点文件：/providers/proxies 总表会连分组一起输出，同样触发这份缓存
+  Future<bool> _panelNodesLoaded() async {
+    final List<bool> loaded = await Future.wait(
+      panelProviders.map((String name) async {
+        final Object? proxies = (await _getJson(
+          '/providers/proxies/${Uri.encodeComponent(name)}',
+        ))['proxies'];
+        return proxies is List && proxies.isNotEmpty;
+      }),
+    );
+    return !loaded.contains(false);
+  }
+
   Future<(List<ProxyGroup>, List<ProxyNode>)> fetchProxies() async {
+    if (!await _panelNodesLoaded()) {
+      throw ClashApiException('节点文件尚未加载完成');
+    }
     final Map<String, dynamic> payload = await _getJson('/proxies');
     final Object? proxies = payload['proxies'];
     if (proxies is! Map<String, dynamic>) {
@@ -352,9 +375,6 @@ class ClashApiClient {
       );
     }
   }
-
-  Future<void> disableTun() =>
-      setTunEnabled(false, timeout: const Duration(seconds: 1));
 
   // ApplyConfig / 热载不绕过 interval；规则内容变而 url 未变必须 PUT /providers/rules/{name}
   Future<void> updateRuleProviders(Iterable<String> names) =>

@@ -13,6 +13,10 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var scheme
     @State private var entered: String?
     @State private var resetMessage: String?
+    @Environment(\.openURL) private var openURL
+    @State private var update: String?
+    @State private var dismissedUpdate: String?
+    private var signedIn: Bool { session.phase == .signedIn || session.phase == .restricted }
 
     var body: some View {
         Group {
@@ -69,6 +73,32 @@ struct ContentView: View {
         .alert(L10n.t("重置成功"), isPresented: Binding(get: { resetMessage != nil }, set: { if !$0 { resetMessage = nil } })) {
             Button(L10n.t("我知道了")) { resetMessage = nil }
         } message: { Text(L10n.message(resetMessage ?? "")) }
+        .productDialog(isPresented: Binding(get: { update != nil }, set: { if !$0 { dismissedUpdate = update; update = nil } })) {
+            ProductDialog(title: L10n.t("检测到更新")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.t("强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。"))
+                    Text(L10n.t("客户端 {0} → {1}", [ClientRelease.currentVersion, update ?? ""]))
+                    #if os(tvOS)
+                    ReleasePageCode()
+                    #endif
+                }
+            } actions: {
+                #if !os(tvOS)
+                Button(L10n.t("打开发布页")) { openURL(ClientRelease.releasesURL) }.buttonStyle(ProductButtonStyle(filled: true))
+                #endif
+                Button(L10n.t("关闭")) { dismissedUpdate = update; update = nil }.buttonStyle(ProductButtonStyle())
+            }
+        }
+        .onChange(of: session.connection?.state == .connected) { _, connected in if connected { Task { await checkUpdate() } } }
+        .task(id: "\(scenePhase == .background)|\(signedIn)") {
+            guard scenePhase != .background, signedIn else { return }
+            var wait = session.untilUpdateCheck
+            while true {
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+                await checkUpdate()
+                wait = ClientSession.updateCheckInterval
+            }
+        }
         .task { await session.start() }
         .task(id: scenePhase) { await session.setRuntimeActive(scenePhase != .background) }
         .task(id: "\(scenePhase)|\(session.connection?.state.rawValue ?? "none")") {
@@ -78,6 +108,13 @@ struct ContentView: View {
                 do { try await Task.sleep(for: .seconds(session.refreshInterval)) } catch { break }
             }
         }
+    }
+}
+
+extension ContentView {
+    private func checkUpdate() async {
+        guard let result = try? await session.checkClientUpdate(), result.outdated, result.latest != dismissedUpdate else { return }
+        update = result.latest
     }
 }
 
@@ -193,12 +230,17 @@ struct LoginView: View {
                 focus = emailCode ? .code : .password
             } label: { Text(emailCode ? L10n.t("密码登录") : L10n.t("邮箱验证码登录")).frame(maxWidth: .infinity) }
                 .buttonStyle(AuthButtonStyle(kind: .secondary)).padding(.top, -4)
-            Divider().padding(.top, 12)
-            ViewThatFits(in: .horizontal) {
-                HStack { registerButton; Spacer(minLength: 8); legalButtons }
-                VStack(alignment: .leading, spacing: 0) { registerButton; legalButtons }
+            HStack(spacing: 12) {
+                Rectangle().fill(colors.segment).frame(height: 1)
+                HStack(spacing: 4) {
+                    Text(L10n.t("没有账号？")).font(.system(size: 14)).foregroundStyle(colors.secondary)
+                    registerButton
+                }
+                .fixedSize()
+                Rectangle().fill(colors.segment).frame(height: 1)
             }
-            .padding(.top, -4)
+            .padding(.top, 8)
+            legalButtons.padding(.top, -16)
         }
     }
 
@@ -217,7 +259,7 @@ struct LoginView: View {
     }
 
     private var registerButton: some View {
-        Button(L10n.t("注册账号 ›")) { open(.register) }.buttonStyle(AuthButtonStyle(kind: .link))
+        Button(L10n.t("注册")) { open(.register) }.buttonStyle(AuthButtonStyle(kind: .link))
     }
 
     private var legalButtons: some View {

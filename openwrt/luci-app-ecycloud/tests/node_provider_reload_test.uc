@@ -1,7 +1,7 @@
 'use strict';
 
 import { testState } from 'fs';
-import { API_FILE, CRED_FILE, PROFILE_FILE, readJson, sessionBinding, sessionValid, settings } from 'ecycloud.common';
+import { API_FILE, CRED_FILE, PROFILE_FILE, readJson, saveOrigins, sessionBinding, sessionValid, settings } from 'ecycloud.common';
 import { NODE_PROVIDER, SPEED_GROUP, assemble, canUpdateNodes, inspect, kernelConfig, membersOf, nodesOf, runtimeConfig, write, writeNodeProviders } from 'ecycloud.profile';
 import { withNodePayloads } from 'ecycloud.panel';
 import { delayBatch, proxies } from 'ecycloud.clash';
@@ -100,6 +100,10 @@ testState.onCommand = command => {
 	testState.commandStatus = validationFailed ? 1 : 0;
 	testState.commandText = validationFailed ? 'fixture validation failed' : '';
 };
+let loading = false;
+let announced = null;
+let fallbackSub = null;
+let switchedSession = null;
 testState.onRequest = () => {
 	for (let path, text in testState.files) {
 		if (!match(path, /\/req-[a-f0-9]+\.conf$/))
@@ -109,9 +113,17 @@ testState.onRequest = () => {
 		if (index(text, '/user/account-status') >= 0)
 			testState.response = { ret: 1, data: { enable: 1 } };
 		else if (index(text, '/user/profile') >= 0)
-			testState.response = { ret: 1, data: { config_revision: revision } };
+			testState.response = { ret: 1, data: { config_revision: revision, site_origin: announced } };
 		else if (index(text, '/config/clash') >= 0) {
 			check(index(text, 'X-ECY-Node-Providers: 1') >= 0, 'OpenWrt 必须请求面板节点订阅格式');
+			if (switchedSession != null) {
+				testState.files[CRED_FILE] = switchedSession;
+				switchedSession = null;
+			}
+			if (fallbackSub != null) {
+				saveOrigins('', fallbackSub, [ PROFILE_FILE ]);
+				fallbackSub = null;
+			}
 			testState.response = { ret: 1, data: { revision, config: candidate, offline_authorization: { issued_at: issuedAt, valid_until: 2000000000 } } };
 		} else if (index(text, '/providers/proxies/') >= 0) {
 			if (length(failedProvider) && index(text, failedProvider) >= 0) {
@@ -119,7 +131,7 @@ testState.onRequest = () => {
 				testState.httpStatus = 500;
 				testState.response = { message: 'fixture provider failed' };
 			} else
-				testState.response = { proxies: [ { name: '节点一', type: 'Shadowsocks', history: [ { delay: 23 } ] } ] };
+				testState.response = { proxies: loading && index(text, groupProvider) >= 0 ? [] : [ { name: '节点一', type: 'Shadowsocks', history: [ { delay: 23 } ] } ] };
 		} else
 			testState.response = { proxies: { '代理': { type: 'Selector', all: [ '节点一' ], now: '节点一' } } };
 	}
@@ -146,6 +158,17 @@ function uninterrupted() {
 uninterrupted();
 const persisted = copy(candidate);
 const persistedFile = testState.files[file];
+loading = true;
+const before = length(requests);
+const loadedConfig = testState.files[`${runDir}/config.json`];
+const tested = json(loadedConfig);
+tested['proxy-groups'][0].type = 'url-test';
+testState.files[`${runDir}/config.json`] = sprintf('%J', tested);
+check(!proxies().ok && length(requests) > before &&
+	!length(filter(slice(requests, before), text => index(text, '/providers/proxies/ecy-panel-') < 0)),
+	'url-test 组的节点文件加载完成前不能读取分组，也不能读连分组一并输出的 /providers/proxies 总表，否则内核会把空组回落的 REJECT 缓存 10 秒');
+testState.files[`${runDir}/config.json`] = loadedConfig;
+loading = false;
 const enriched = proxies();
 check(enriched.ok && enriched.data.proxies['节点一'].history[0].delay == 23, '运行中的节点列表必须读取 provider 的实际节点与测速记录');
 delayBatch([ '节点一', '代理' ], 500);
@@ -153,8 +176,9 @@ check(length(filter(values(testState.writes), text => index(text, `/providers/pr
 	'文件订阅节点必须通过 provider 的逐节点测速接口测延迟');
 if (length(ARGV[0])) {
 	const rpc = loadfile(ARGV[0], { raw_mode: true })()['luci.ecycloud'];
-	const groups = rpc.groups.call({ args: {} }).groups;
-	check(groups[0].members[0].protocol == 'Shadowsocks' && groups[0].members[0].delay == 23,
+	const listed = rpc.groups.call({ args: {} });
+	check(listed.groups[0].members[0] == '节点一' && listed.nodes['节点一'].protocol == 'Shadowsocks' && listed.nodes['节点一'].delay == 23 &&
+		!exists(listed.nodes['节点一'], 'tls') && !exists(listed.nodes['节点一'], 'testing'),
 		'LuCI RPC 必须保留 provider 节点的协议与实际延迟');
 	const status = rpc.status.call({ args: {} });
 	check(status.profile.nodes == 1 && status.profile.servers[0] == '127.0.0.1', 'LuCI 节点数量和流量排除地址必须取自 provider');
@@ -164,9 +188,17 @@ if (length(ARGV[0])) {
 	push(offline['proxy-groups'], { name: '隐藏辅助组', type: 'select', use: [ NODE_PROVIDER ], hidden: true });
 	cache(offline, 'r2');
 	testState.onRequest = () => { testState.httpStatus = 500; testState.response = { message: 'fixture offline' }; };
-	const offlineGroups = rpc.groups.call({ args: {} }).groups;
-	check(length(offlineGroups) == 1 && offlineGroups[0].members[0].name == '节点一' &&
-		offlineGroups[0].members[0].protocol == 'Shadowsocks', '离线节点卡片必须支持 use 成员并隐藏辅助组');
+	const offlineListed = rpc.groups.call({ args: {} });
+	check(length(offlineListed.groups) == 1 && offlineListed.groups[0].members[0] == '节点一' &&
+		offlineListed.nodes['节点一'].protocol == 'Shadowsocks', '离线节点卡片必须支持 use 成员并隐藏辅助组');
+	const crowded = copy(persisted);
+	for (let i = 0; i < 20000; i++)
+		push(crowded['proxy-providers'][NODE_PROVIDER].payload, { ...nodesOf(persisted)[0], name: `节点${i}` });
+	crowded['proxy-providers'][groupProvider].payload = copy(nodesOf(crowded));
+	cache(crowded, 'r2');
+	const rejected = rpc.groups.call({ args: {} });
+	check(index(rejected.error, '单次应答上限') >= 0 && rejected.ok == false && rejected.session?.logged_in == true && rejected.nodes == null,
+		'任何接口的应答将超过 ubus 单条消息上限时必须返回明确错误，不能交给 rpcd 丢弃');
 	testState.files['/proc/41/cmdline'] = `/usr/libexec/mihomo\0-d\0${runDir}\0`;
 	testState.onRequest = oldRequest;
 	cache(persisted, 'r2');
@@ -205,6 +237,22 @@ result = update(false);
 check(result.ok && !result.reloaded && !length(membersOf(candidate, candidate['proxy-groups'][0])),
 	'节点增删和策略组节点暂时为空时，仍应独立更新并排除占位节点');
 uninterrupted();
+announced = 'https://moved.test';
+testState.files['/var/run/ecycloud/panel-probe.json'] = sprintf('%J', { 'https://moved.test': { at: time(), ok: true } });
+result = update(true);
+check(result.ok && testState.config.site_url == announced && readJson(PROFILE_FILE).binding == sessionBinding(),
+	'更新途中面板地址落盘后，本轮更新仍须成功，缓存绑定跟随新地址');
+announced = null;
+fallbackSub = 'https://sub-fallback.test';
+result = update(true);
+check(result.ok && testState.config.sub_url == 'https://sub-fallback.test' && readJson(PROFILE_FILE).binding == sessionBinding(),
+	'拉取配置途中订阅地址回退落盘后，本轮更新仍须成功');
+const sameSession = testState.files[CRED_FILE];
+switchedSession = sprintf('%J', { ...json(sameSession), session_id: 'other-session' });
+result = update(true);
+check(!result.ok, '拉取配置途中会话已换成另一次登录时，本轮结果不能写入');
+testState.files[CRED_FILE] = sameSession;
+cache(readJson(PROFILE_FILE).config, readJson(PROFILE_FILE).revision);
 
 /* 面板 profile-update-interval：版本未变也按间隔重拉，内容相同不重启、不断连 */
 const realTime = time;

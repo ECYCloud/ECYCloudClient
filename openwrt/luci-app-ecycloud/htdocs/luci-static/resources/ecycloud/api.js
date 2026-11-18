@@ -2,7 +2,7 @@
 'require baseclass';
 'require rpc';
 
-function declare(method, params, expect) {
+function declare(method, params) {
 	var call = rpc.declare({
 		object: 'luci.ecycloud',
 		method: method,
@@ -30,7 +30,7 @@ function declare(method, params, expect) {
 				runtimeStatus = data;
 			if (method == 'connections')
 				runtimeConnections = data;
-			return expect ? (typeof data.log == 'string' ? data.log : '') : data;
+			return data;
 		});
 	};
 }
@@ -65,6 +65,10 @@ var kickWatch = false;
 var kickBusy = false;
 var groupTests = { testing: new Map(), speed_testing: new Map() };
 var groupsRpc = declare('groups');
+var memberDefaults = {
+	label: '', type: '', protocol: '', network: '', tls: '', udp: '', is_group: false, group_selectable: false,
+	via: '', via_label: '', delay: 0, testing: false, failed: false, speed: 0, speed_testing: false, speed_failed: false
+};
 var groupsRequest = 0;
 var groupsResponse = 0;
 var groupsData;
@@ -73,7 +77,7 @@ var connectGeneration = 0;
 var connectPending = null;
 var statusRpc = declare('status');
 var devicesRpc = declare('devices', [ 'page', 'length', 'search' ]);
-var updateRpc = declare('update', [ 'what', 'path', 'locale' ]);
+var updateRpc = declare('update', [ 'what', 'path', 'locale', 'offset', 'version' ]);
 var languageRefresh = null;
 var languageRetryAfter = 0;
 
@@ -322,6 +326,12 @@ return baseclass.extend({
 			});
 		});
 		return groupsRpc().then(function(data) {
+			var nodes = data.nodes || {};
+			(data.groups || []).forEach(function(group) {
+				group.members = (group.members || []).map(function(name) {
+					return Object.assign({ name: name }, memberDefaults, nodes[name]);
+				});
+			});
 			var fresh = request >= groupsResponse && !data.error;
 			if (!fresh)
 				data = groupsData || data;
@@ -343,7 +353,7 @@ return baseclass.extend({
 			return data;
 		});
 	},
-	logs: declare('logs', [ 'lines' ], { log: '' }),
+	logs: declare('logs', [ 'lines' ]),
 	login: declare('login', [ 'email', 'password', 'code' ]),
 	sendLoginVerify: declare('send_login_verify', [ 'email' ]),
 	loginCode: declare('login_code', [ 'email', 'code' ]),
@@ -385,7 +395,7 @@ return baseclass.extend({
 	reselect: declare('reselect', [ 'group' ]),
 	mode: declare('mode', [ 'mode' ]),
 	set: declare('set', [ 'name', 'value' ]),
-	connections: declare('connections'),
+	connections: declare('connections', [ 'scope', 'keyword', 'page', 'limit', 'id' ]),
 	closeConnection: declare('close_connection', [ 'id' ]),
 	refreshAccount: declare('refresh_account', [ 'use_cache' ]),
 	checkin: declare('checkin'),
@@ -504,8 +514,21 @@ return baseclass.extend({
 		return this.update('geo');
 	},
 
+	textFile: function(what, path) {
+		var read = function(text, offset, version, retries) {
+			return updateRpc(what, path || '', '', offset, version).then(function(res) {
+				if (res.stale && retries > 0)
+					return read('', 0, '', retries - 1);
+				if (!res.ok || !res.done)
+					return res.ok ? read(text + res.text, res.next, res.version, retries) : res;
+				return { ok: true, msg: '', text: text + res.text, session: res.session };
+			});
+		};
+		return read('', 0, '', 3);
+	},
+
 	runtimeConfig: function() {
-		return this.update('runtime');
+		return this.textFile('runtime');
 	},
 
 	ruleProviders: function() {
@@ -513,7 +536,7 @@ return baseclass.extend({
 	},
 
 	ruleProvider: function(path) {
-		return this.update('rule', path);
+		return this.textFile('rule', path);
 	},
 
 	checkUpdate: function(target) {
@@ -2656,9 +2679,8 @@ return baseclass.extend({
 		return ip.indexOf(':') != -1 ? '[' + ip + ']:' + port : ip + ':' + port;
 	},
 
-	ingestConnections: function(list) {
-		return sessionKey ? { active: list || [], closed: runtimeConnections.closed || [] }
-			: { active: [], closed: [] };
+	closedConnections: function() {
+		return sessionKey && runtimeConnections.total ? +runtimeConnections.total.closed || 0 : 0;
 	},
 
 	trafficRank: function(day, skip) {

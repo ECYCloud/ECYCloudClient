@@ -5,6 +5,7 @@ import 'search_field.dart';
 import '../../l10n/l10n.dart';
 import '../theme.dart';
 import 'app_text_field.dart';
+import 'touch_bleed.dart';
 
 class ListToolbar extends StatefulWidget {
   const ListToolbar({
@@ -69,7 +70,8 @@ class _ListToolbarState extends State<ListToolbar> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final double rowHeight = AppTheme.minTapTarget;
+    // 外观与桌面端同为 32；触控端 48 的点击范围由按钮的触控补边提供
+    const double rowHeight = AppTheme.pointerTapTarget;
     final TextStyle? fieldStyle = theme.textTheme.bodyMedium?.copyWith(
       fontSize: 12,
       height: 1.0,
@@ -98,7 +100,6 @@ class _ListToolbarState extends State<ListToolbar> {
           minimumSize: Size(48, rowHeight),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           visualDensity: AppTheme.controlDensity,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           textStyle: fieldStyle?.copyWith(fontWeight: FontWeight.w600),
         ).copyWith(
           side: WidgetStateProperty.resolveWith<BorderSide>(
@@ -118,19 +119,25 @@ class _ListToolbarState extends State<ListToolbar> {
       ]),
       style: theme.textTheme.bodySmall,
     );
-    final Widget prevButton = OutlinedButton(
-      style: buttonStyle,
-      onPressed: canPrev
-          ? () => widget.onPageChanged(widget.currentPage - 1)
-          : null,
-      child: Text(L10n.t('上页')),
+    final Widget prevButton = TouchBleed(
+      clipWidth: false,
+      child: OutlinedButton(
+        style: buttonStyle,
+        onPressed: canPrev
+            ? () => widget.onPageChanged(widget.currentPage - 1)
+            : null,
+        child: Text(L10n.t('上页')),
+      ),
     );
-    final Widget nextButton = OutlinedButton(
-      style: buttonStyle,
-      onPressed: canNext
-          ? () => widget.onPageChanged(widget.currentPage + 1)
-          : null,
-      child: Text(L10n.t('下页')),
+    final Widget nextButton = TouchBleed(
+      clipWidth: false,
+      child: OutlinedButton(
+        style: buttonStyle,
+        onPressed: canNext
+            ? () => widget.onPageChanged(widget.currentPage + 1)
+            : null,
+        child: Text(L10n.t('下页')),
+      ),
     );
     final Widget jumpField = SizedBox(
       width: 80,
@@ -165,10 +172,13 @@ class _ListToolbarState extends State<ListToolbar> {
         ),
       ),
     );
-    final Widget jumpButton = OutlinedButton(
-      style: buttonStyle,
-      onPressed: _jumpTo,
-      child: Text(L10n.t('确定')),
+    final Widget jumpButton = TouchBleed(
+      clipWidth: false,
+      child: OutlinedButton(
+        style: buttonStyle,
+        onPressed: _jumpTo,
+        child: Text(L10n.t('确定')),
+      ),
     );
     final List<Widget> pageControls = <Widget>[
       prevButton,
@@ -179,30 +189,32 @@ class _ListToolbarState extends State<ListToolbar> {
             height: rowHeight,
             child: const Center(child: Text('…')),
           ),
-        OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            shape: AppTheme.pillShape,
-            fixedSize: Size.fromHeight(rowHeight),
-            minimumSize: Size.square(rowHeight),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            backgroundColor: pages[index] == widget.currentPage
-                ? scheme.onSurface
-                : scheme.surfaceContainerLowest,
-            foregroundColor: pages[index] == widget.currentPage
-                ? scheme.surface
-                : scheme.onSurface,
-            side: BorderSide(
-              color: pages[index] == widget.currentPage
+        TouchBleed(
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              shape: AppTheme.pillShape,
+              fixedSize: Size.fromHeight(rowHeight),
+              minimumSize: Size.square(rowHeight),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              backgroundColor: pages[index] == widget.currentPage
                   ? scheme.onSurface
-                  : scheme.outline,
-            ),
-          ).merge(buttonStyle),
-          onPressed: () {
-            if (pages[index] != widget.currentPage) {
-              widget.onPageChanged(pages[index]);
-            }
-          },
-          child: Text('${pages[index]}', softWrap: false),
+                  : scheme.surfaceContainerLowest,
+              foregroundColor: pages[index] == widget.currentPage
+                  ? scheme.surface
+                  : scheme.onSurface,
+              side: BorderSide(
+                color: pages[index] == widget.currentPage
+                    ? scheme.onSurface
+                    : scheme.outline,
+              ),
+            ).merge(buttonStyle),
+            onPressed: () {
+              if (pages[index] != widget.currentPage) {
+                widget.onPageChanged(pages[index]);
+              }
+            },
+            child: Text('${pages[index]}', softWrap: false),
+          ),
         ),
       ],
       nextButton,

@@ -6,7 +6,6 @@ struct DashboardView: View {
     let wide: Bool
     let openNodes: () -> Void
     let openTraffic: () -> Void
-    let openShop: () -> Void
     let requestDeviceSlot: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var scheme
@@ -48,9 +47,10 @@ struct DashboardView: View {
                             let group = currentGroup(groups, catalog: catalog)
                             let now = snapshot?.selections[group.id] ?? ""
                             let leaf = resolvedNode(now)
+                            let standbyFailure = state == .disconnected && session.connection?.preparingStandby == false ? session.connection?.message : nil
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(verbatim: leaf.isEmpty ? (ready ? L10n.t("未选择节点") : L10n.t("正在准备内核")) : catalog.displayName(leaf))
+                                    Text(verbatim: leaf.isEmpty ? (ready ? L10n.t("未选择节点") : standbyFailure.map { L10n.t("内核启动失败：{0}", [$0]) } ?? L10n.t("正在准备内核")) : catalog.displayName(leaf))
                                         .font(.system(size: 13, weight: .semibold)).lineLimit(wide ? 1 : 3)
                                     if let node = catalog.nodes.first(where: { $0.id == leaf }) {
                                         HStack(spacing: 4) {
@@ -115,7 +115,7 @@ struct DashboardView: View {
                             Divider().frame(height: 34)
                             switchTile(L10n.t("TUN 模式"), connected ? L10n.t("接管系统全部流量") : L10n.t("仅连接后占用，当前未生效"),
                                        isOn: Binding(get: { preferences.tunEnabled }, set: { value in
-                                           Task { await perform { preferences.tunEnabled = value; try await session.applyProxySettings() } }
+                                           Task { await perform { preferences.tunEnabled = value; try await session.applyTunSettings() } }
                                        }), routes: true) { ProductGlyph(name: "lan_outlined", size: 18) }
                         }
                         #else
@@ -149,11 +149,6 @@ struct DashboardView: View {
                                      color: remaining < 0 ? colors.danger : colors.success)
                         Divider().padding(.vertical, 2)
                         HStack { Text(L10n.t("账户总流量")); Spacer(); Text(compactBytes(profile.transferEnable)).fontWeight(.semibold).monospacedDigit().foregroundStyle(colors.accent) }
-                        HStack(spacing: 0) {
-                            Text(L10n.t("流量不够用？前往 ")).foregroundStyle(colors.secondary)
-                            Button(L10n.t("商店") + " ›", action: openShop).buttonStyle(ProductButtonStyle())
-                            Text(L10n.t(" 选购流量包")).foregroundStyle(colors.secondary)
-                        }
                         VStack(spacing: 0) {
                             trafficMeta("today_outlined", L10n.t("下次重置已使用流量日期"), profile.trafficReset.isEmpty ? "—" : L10n.t(profile.trafficReset))
                             trafficMeta("schedule_outlined", L10n.t("上次使用时间"), L10n.t(profile.lastSsTime ?? "从未使用喵"))

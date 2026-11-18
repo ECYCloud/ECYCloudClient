@@ -21,10 +21,7 @@ class GroupDelayTestButton extends StatelessWidget {
       tooltip: L10n.t('测试本组全部节点延迟'),
       iconSize: 16,
       visualDensity: VisualDensity.standard,
-      constraints: BoxConstraints.tightFor(
-        width: AppTheme.minTapTarget,
-        height: AppTheme.minTapTarget,
-      ),
+      constraints: AppTheme.iconButtonBox,
       padding: EdgeInsets.zero,
       icon: testing
           ? const SizedBox(

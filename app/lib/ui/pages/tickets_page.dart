@@ -123,38 +123,30 @@ class _TicketsPageState extends State<TicketsPage>
     if (api == null) {
       return;
     }
+    int? id;
     final _TicketEditorResult? draft = await showDialog<_TicketEditorResult>(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) => _TicketEditorDialog(
         titleLabel: L10n.t('创建工单'),
         requireTitle: true,
         api: api,
+        onSubmit: (_TicketEditorResult draft) async {
+          id = await api.createTicket(
+            title: draft.title,
+            content: draft.content,
+          );
+        },
       ),
     );
-    if (draft == null) {
+    if (draft == null || id == null || !mounted) {
       return;
     }
-    try {
-      final int id = await api.createTicket(
-        title: draft.title,
-        content: draft.content,
-      );
-      if (!mounted) {
-        return;
-      }
-      await _load();
-      if (!mounted) {
-        return;
-      }
-      await _openDetail(id);
-    } on ApiException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
-      );
+    await _load();
+    if (!mounted) {
+      return;
     }
+    await _openDetail(id!);
   }
 
   Future<void> _openDetail(int id) async {
@@ -366,29 +358,19 @@ class _TicketDetailPageState extends State<_TicketDetailPage>
     }
     final _TicketEditorResult? draft = await showDialog<_TicketEditorResult>(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) => _TicketEditorDialog(
         titleLabel: L10n.t('回复工单'),
         requireTitle: false,
         api: api,
+        onSubmit: (_TicketEditorResult draft) =>
+            api.replyTicket(id: detail.id, content: draft.content),
       ),
     );
-    if (draft == null) {
+    if (draft == null || !mounted) {
       return;
     }
-    try {
-      await api.replyTicket(id: detail.id, content: draft.content);
-      if (!mounted) {
-        return;
-      }
-      await _load();
-    } on ApiException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
-      );
-    }
+    await _load();
   }
 
   Future<void> _closeTicket() async {
@@ -661,11 +643,15 @@ class _TicketEditorDialog extends StatefulWidget {
     required this.titleLabel,
     required this.requireTitle,
     required this.api,
+    required this.onSubmit,
   });
 
   final String titleLabel;
   final bool requireTitle;
   final PanelApiClient api;
+
+  // 提交在对话框里完成：失败时留在原处，正文与已上传的附件不能随对话框一起丢掉
+  final Future<void> Function(_TicketEditorResult draft) onSubmit;
 
   @override
   State<_TicketEditorDialog> createState() => _TicketEditorDialogState();
@@ -802,7 +788,7 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
     );
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final String title = _title.text.trim();
     final String html = _buildHtml();
     if (widget.requireTitle && title.isEmpty) {
@@ -811,7 +797,23 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
     if (html.trim().isEmpty) {
       return;
     }
-    Navigator.of(context).pop(_TicketEditorResult(title: title, content: html));
+    final _TicketEditorResult draft = _TicketEditorResult(
+      title: title,
+      content: html,
+    );
+    setState(() => _uploading = true);
+    try {
+      await widget.onSubmit(draft);
+      if (mounted) {
+        Navigator.of(context).pop(draft);
+      }
+    } on ApiException catch (e) {
+      _toast(e.message);
+    } finally {
+      if (mounted) {
+        setState(() => _uploading = false);
+      }
+    }
   }
 
   Widget _attachmentTile(int i) {

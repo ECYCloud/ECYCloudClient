@@ -63,26 +63,32 @@ func writeKernelFile(path string, content io.Reader) error {
 		return err
 	}
 	defer root.Close()
-	file, err := root.OpenFile(filepath.Base(path), os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
+	name := filepath.Base(path)
+	if info, err := root.Lstat(name); err == nil {
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !info.Mode().IsRegular() || !ok || stat.Nlink != 1 {
+			return fmt.Errorf("文件 %s 的类型或链接数不可信", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// 写完整再改名顶替：直接写目标，中途被杀留下的半截文件会被当成已有文件沿用
+	temp := name + ".tmp"
+	if err := root.Remove(temp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	file, err := root.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ok || stat.Nlink != 1 {
-		return fmt.Errorf("文件 %s 的类型或链接数不可信", path)
-	}
-	if err := file.Truncate(0); err != nil {
-		return err
-	}
 	if _, err := io.Copy(file, content); err != nil {
 		return err
 	}
-	return file.Chown(kernelUID, kernelGID)
+	if err := file.Chown(kernelUID, kernelGID); err != nil {
+		return err
+	}
+	return root.Rename(temp, name)
 }
 
 // 属主不归到内核身份，内核就打不开这些库

@@ -111,9 +111,16 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
 
     // 内核进程不在时如实报「没在跑」：抛异常会让 Dart 侧把轮询本身当成与后台失联，
     // 转而停掉轮询，之后即使内核被系统重建也无人接管
-    private fun status(cursor: Int): Map<String, Any?> =
-        KernelClient.poll { it.status(cursor) }?.toMap()
+    // 内核进程崩溃后会被绑定立刻拉起，新进程里没有旧进程的错误，原因只在崩溃文件里
+    private fun status(cursor: Int): Map<String, Any?> {
+        val status = KernelClient.poll { it.status(cursor) }?.toMap()
             ?: mapOf("running" to false, "log_cursor" to cursor)
+        return if (status["running"] == true || status["error"] != null) {
+            status
+        } else {
+            status + ("error" to KernelClient.crashReason())
+        }
+    }
 }
 
 // Bundle 的键集就是应答字段本身，逐键抄一遍等于把协议同时写在两个进程里

@@ -2,7 +2,7 @@
 
 import { popen, readfile, unlink, writefile } from 'fs';
 
-import { API_FILE, CONTROLLER_PORT, STATE_DIR, ensurePrivateDir, freePort, httpRequest,
+import { API_FILE, CONTROLLER_PORT, STATE_DIR, coreRunning, ensurePrivateDir, freePort, httpRequest,
          instances, randomHex, readJson, settings, shellquote, urlencode,
          writePrivateJson } from 'ecycloud.common';
 import { NODE_PROVIDER, SPEED_GROUP, nodeProviderNames, nodesOf, speedPort } from 'ecycloud.profile';
@@ -22,7 +22,8 @@ export function endpoint() {
 
 export function reserve() {
 	const prev = endpoint();
-	if (prev?.port && length(prev.secret) && freePort(prev.port) == prev.port) {
+	/* 内核在跑时端口正被它自己占着：换掉端口和密钥而 procd 不重启内核，控制面就此失联 */
+	if (prev?.port && length(prev.secret) && (coreRunning() || freePort(prev.port) == prev.port)) {
 		return prev;
 	}
 
@@ -70,18 +71,32 @@ export function ready() {
 };
 
 export function proxies() {
+	/* 控制口先于节点文件就绪：这时读分组，内核会把空组回落的 REJECT 当作 url-test 的结果缓存 10 秒。
+	   节点文件只能逐个查：/providers/proxies 总表连分组一并输出，读它同样会留下这份缓存 */
+	const config = readJson(`${settings().runDir}/config.json`);
+	const tested = {};
+	for (let group in (config?.['proxy-groups'] ?? []))
+		if (group?.type == 'url-test')
+			for (let name in (group.use ?? []))
+				tested[name] = true;
+	let nodes = [];
+	for (let name in nodeProviderNames(config)) {
+		if (name != NODE_PROVIDER && !tested[name])
+			continue;
+		const provider = request(`/providers/proxies/${urlencode(name)}`);
+		if (!provider.ok)
+			return provider;
+		if (!length(provider.data?.proxies))
+			return { ok: false, status: 503, data: null, error: '节点文件尚未加载完成' };
+		if (name == NODE_PROVIDER)
+			nodes = provider.data.proxies;
+	}
 	const snapshot = request('/proxies');
 	if (!snapshot.ok)
 		return snapshot;
-	const config = readJson(`${settings().runDir}/config.json`);
-	if (config?.['proxy-providers']?.[NODE_PROVIDER] != null) {
-		const provider = request(`/providers/proxies/${NODE_PROVIDER}`);
-		if (!provider.ok)
-			return provider;
-		for (let node in (provider.data?.proxies ?? []))
-			if (length(node?.name))
-				snapshot.data.proxies[node.name] = node;
-	}
+	for (let node in nodes)
+		if (length(node?.name))
+			snapshot.data.proxies[node.name] = node;
 	return snapshot;
 };
 

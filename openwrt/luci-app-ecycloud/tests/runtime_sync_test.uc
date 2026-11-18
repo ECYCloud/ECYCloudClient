@@ -48,6 +48,13 @@ now += 86400;
 check(cached() == null, '离线授权到期必须拒绝');
 now -= 86400 + 120;
 check(cached() == null, '时间回拨到授权签发之前必须拒绝');
+now += 50;
+check(cached() != null, '本机时间比签发时间慢 10 秒以内属于校时误差，不能判成授权无效');
+now -= 1;
+check(cached() == null, '本机时间比签发时间慢超过 10 秒必须拒绝');
+now += 86400 + 71;
+check(cached() == null, '签发一侧的容差不能让到期的授权继续可用');
+now -= 86400 + 120;
 now += 120;
 testState.files[CRED_FILE] = sprintf('%J', { ...credentials, expires_at: '2020-01-01T00:00:00Z' });
 check(!sessionValid() && cached() == null && call('/user/profile').status == 401, '过期令牌不能复用配置或请求接口');
@@ -154,6 +161,41 @@ check(statistics.read().rank[stats.today].groups['fixture-group'] == 160, '重�
 now += 5;
 statistics.collect({ connections: [] });
 check(length(statistics.read().closed) == 2, '网页关闭期间也必须记录已关闭连接');
+if (rpc) {
+	const snapshotFile = '/var/run/ecycloud/connections.json';
+	const keptSnapshot = testState.files[snapshotFile];
+	const crowd = json(keptSnapshot);
+	const sample = crowd.closed[0];
+	crowd.alive = {};
+	crowd.closed = [];
+	for (let i = 0; i < 4000; i++)
+		crowd.alive[`alive-${i}`] = { ...sample, id: `alive-${i}`, host: i % 40 == 7 ? `Wanted-${i}.test` : `other-${i}.test`, start: sprintf('2026-01-01T00:%02d:%02dZ', i / 60 % 60, i % 60) };
+	for (let i = 0; i < 1000; i++)
+		push(crowd.closed, { ...sample, id: `closed-${i}`, host: i % 40 == 7 ? `wanted-closed-${i}.test` : `gone-${i}.test`, start: '2025-12-31T00:00:00Z' });
+	testState.files[snapshotFile] = sprintf('%J', crowd);
+	const first = rpc.connections.call({ args: {} });
+	check(first.ok != false && length(first.connections) == 100 && first.page == 1 && first.pages == 50 && first.total.active == 4000 &&
+		first.total.closed == 1000 && first.matched.active == 4000 && first.matched.closed == 1000 && first.connections[0].active == true,
+		'连接再多也只回一页明细，活跃与已关闭的总数照实给出');
+	const seen = {};
+	for (let page = 1; page <= 50; page++)
+		for (let conn in rpc.connections.call({ args: { page } }).connections)
+			seen[conn.id] = true;
+	const tail = rpc.connections.call({ args: { page: 50 } });
+	check(length(keys(seen)) == 5000 && length(tail.connections) == 100 && tail.connections[99].active == false, '逐页取回必须不重不漏，按开始时间从新到旧');
+	const wanted = rpc.connections.call({ args: { keyword: 'WANTED', page: 2 } });
+	check(wanted.matched.active == 100 && wanted.matched.closed == 25 && wanted.pages == 2 && wanted.page == 2 && length(wanted.connections) == 25 &&
+		!length(filter(wanted.connections, conn => index(lc(conn.host), 'wanted') < 0)) && wanted.total.active == 4000,
+		'搜索必须先过滤再分页，匹配数与总数分别给出');
+	const closedOnly = rpc.connections.call({ args: { scope: 'closed', keyword: 'wanted', page: 9, limit: 99999 } });
+	check(closedOnly.page == 1 && closedOnly.pages == 1 && length(closedOnly.connections) == 25 && closedOnly.connections[0].active == false,
+		'页码越界回到最后一页，每页条数不能超过上限');
+	check(rpc.connections.call({ args: { page: -3, limit: -1, keyword: [ 'x' ], scope: 'bogus' } }).page == 1, '非法分页参数按默认值处理');
+	const found = rpc.connections.call({ args: { scope: 'closed', id: 'alive-3999' } });
+	check(found.detail?.id == 'alive-3999' && found.detail.active == true && rpc.connections.call({ args: { id: 'closed-5' } }).detail.active == false &&
+		rpc.connections.call({ args: { id: 'missing' } }).detail == null, '详情按连接标识单独取，不依赖它是否在当前页');
+	testState.files[snapshotFile] = keptSnapshot;
+}
 const many = [];
 for (let n = 1; n <= 1002; n++)
 	push(many, { ...connection, id: `c${n}` });
@@ -224,6 +266,15 @@ check(calls == 3 && sleeps == 8, '重试必须按 1/2/4 秒退避，手动断开
 testState.config.enabled = '1';
 testState.httpStatus = 403;
 check(!prepare() && readJson(STATE_FILE).retryable == false, '永久权限拒绝不能无限重试');
+testState.httpStatus = 200;
+const earlyClock = { ret: 1, data: { ...remote, offline_authorization: { issued_at: time() + 3600, valid_until: time() + 90000 } } };
+testState.response = earlyClock;
+check(!prepare() && readJson(STATE_FILE).retryable == true && index(readJson(STATE_FILE).error, '系统时间') == 0,
+	'系统时间落后于面板签发时间时必须等校时后重试，不能判成授权无效');
+earlyClock.data.offline_authorization = { issued_at: time() - 7200, valid_until: time() - 3600 };
+check(!prepare() && readJson(STATE_FILE).retryable == false && cached() == null && cached(true) == null,
+	'已到期的离线授权不能因时钟问题被重试或放行');
+testState.response = null;
 
 function securityFixture(enabled) {
 	now = 1791126000;
@@ -561,6 +612,13 @@ check(length(speedQuota(['node-1']).allowed) == 1, '超过一小时必须释放�
 now -= 3601;
 
 securityFixture('0');
+for (let i = 0; i < 5; i++) noteSpeedSuccess('node-1');
+testState.files[ACCOUNT_FILE] = sprintf('%J', { id: 1 });
+check(length(speedQuota(['node-1']).allowed) == 0, '用户 ID 1 没有面板标记时仍按次数限制');
+testState.files[ACCOUNT_FILE] = sprintf('%J', { id: 42, speed_test_unlimited: true });
+check(length(speedQuota(['node-1']).allowed) == 1, '面板标记不限次的账号跳过本地次数限制');
+
+securityFixture('0');
 testState.httpStatus = 503;
 testState.response = { ret: 0 };
 panel.reportNodeUsed();
@@ -761,6 +819,28 @@ check(assembledSelection.config['proxy-groups'][0]['default-selected'] == 'node-
 check(profile.assemble(selectedRemote, settings(), endpoint(), { Fixture: 'removed' }).config['proxy-groups'][0]['default-selected'] == null,
 	'已移除的节点不能注入启动选择');
 
+testState.config.region = 'overseas';
+check(settings().region == 'overseas', '海外地区必须读出 overseas');
+testState.config.region = 'other';
+check(settings().region == 'cn', '非 overseas 的地区一律按中国处理');
+delete testState.config.region;
+check(settings().region == 'cn', '未设置地区时默认中国');
+const regionRules = [ 'GEOSITE,CN,DIRECT', 'GEOIP,cn,DIRECT,no-resolve', 'GEOIP, CN, DIRECT', 'GEOIP,private,DIRECT',
+	'RULE-SET,direct,DIRECT', 'MATCH,Fixture' ];
+function assembledRules(region, rules) {
+	return profile.assemble({ ...remote.config, rules, 'rule-providers': { direct: { type: 'http', behavior: 'domain',
+		url: 'https://rules.test/direct.yaml', path: './direct.yaml', interval: 86400 } } },
+		{ ...settings(), region }, endpoint()).config?.rules;
+}
+check(sprintf('%J', assembledRules('overseas', regionRules)) == sprintf('%J', [ 'GEOSITE,CN,Fixture', 'GEOIP,cn,Fixture,no-resolve',
+	'GEOIP,CN,Fixture', 'GEOIP,private,DIRECT', 'RULE-SET,direct,DIRECT', 'MATCH,Fixture' ]),
+	'海外必须把中国直连规则改走 MATCH 的出站，其余规则原样保留');
+check(sprintf('%J', assembledRules('cn', regionRules)) == sprintf('%J', regionRules), '中国地区不改规则');
+const finalRules = [ 'GEOSITE,CN,DIRECT', 'FINAL,Fixture' ];
+check(sprintf('%J', assembledRules('overseas', finalRules)) == sprintf('%J', finalRules), '没有 MATCH 规则时不改规则');
+const directRules = [ 'GEOSITE,CN,DIRECT', 'MATCH, direct ' ];
+check(sprintf('%J', assembledRules('overseas', directRules)) == sprintf('%J', directRules), 'MATCH 指向 DIRECT 时不改规则');
+
 securityFixture('0');
 let milliseconds = 0;
 global.clock = () => [ int(milliseconds / 1000), int(milliseconds % 1000 * 1000000) ];
@@ -795,6 +875,58 @@ release.checkPeriodic();
 check(readJson('/var/run/ecycloud/updates.json').next_check == now + 11, 'GitHub 限流必须按恢复时间重试，不能固定等一小时');
 release.checkApp();
 check(githubRequests == 1, '限流恢复前手动检查也不能重复请求 GitHub');
+testState.onRequest = () => {
+	if (index(latestRequest(), 'api.github.com') >= 0)
+		githubRequests++;
+	testState.httpStatus = 200;
+	testState.response = { ret: 1, data: [ { tag_name: 'v0.0.4', published_at: '2026-04-01T00:00:00Z', prerelease: false } ] };
+};
+check(release.checkApp().latest == '0.0.4' && githubRequests == 1, 'GitHub 限流期间仍须读取网站发布缓存');
+
+now += 20;
+githubRequests = 0;
+testState.responseHeaders = 'HTTP/2 200\r\n\r\n';
+testState.onRequest = () => {
+	const github = index(latestRequest(), 'api.github.com') >= 0;
+	if (github)
+		githubRequests++;
+	testState.httpStatus = 200;
+	testState.response = github
+		? [ { tag_name: 'v0.0.1', published_at: '2026-01-01T00:00:00Z', prerelease: false } ]
+		: { packages: { 'mihomo-meta': '1.19.32' } };
+};
+release.checkPeriodic();
+check(githubRequests == 1 && readJson('/var/run/ecycloud/updates.json').app.ok &&
+	readJson('/var/run/ecycloud/updates.json').next_check == now + 3600, '检查成功后必须一小时后再查');
+now += 3599;
+release.checkPeriodic();
+check(githubRequests == 1, '距上次检查不满一小时不能重复检查');
+release.checkPeriodic(true);
+check(githubRequests == 2 && readJson('/var/run/ecycloud/updates.json').next_check == now + 3600,
+	'接管成功时必须立即检查，不等满一小时');
+
+for (let siteUp in [ true, false ]) {
+	githubRequests = 0;
+	let siteRequests = 0;
+	testState.onRequest = () => {
+		const text = latestRequest();
+		const github = index(text, 'api.github.com') >= 0;
+		const site = index(text, 'https://panel.test/api/client/v1/releases/client') >= 0;
+		if (github)
+			githubRequests++;
+		if (site)
+			siteRequests++;
+		testState.httpStatus = site && !siteUp ? 503 : 200;
+		testState.response = site
+			? (siteUp ? { ret: 1, data: [ { tag_name: 'v0.0.3', published_at: '2026-03-01T00:00:00Z', prerelease: false } ] }
+				: { ret: 0, msg: 'fixture-unavailable' })
+			: [ { tag_name: 'v0.0.2', published_at: '2026-02-01T00:00:00Z', prerelease: false } ];
+	};
+	const app = release.checkApp();
+	check(siteRequests == 1 && app.ok && app.latest == (siteUp ? '0.0.3' : '0.0.2') && githubRequests == (siteUp ? 0 : 1),
+		'网站发布缓存可用时不能请求 GitHub，网站 503 时必须回落 GitHub');
+}
+now -= 3619;
 
 if (rpc != null) {
 	securityFixture('0');

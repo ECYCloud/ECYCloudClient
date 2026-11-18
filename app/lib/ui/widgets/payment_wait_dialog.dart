@@ -186,6 +186,9 @@ class _PaymentWaitDialogState extends State<PaymentWaitDialog> {
         FilledButton(
           onPressed: () {
             _deadline = DateTime.now().add(_limit);
+            if (_timer?.isActive != true) {
+              _timer = Timer.periodic(_interval, (_) => unawaited(_poll()));
+            }
             unawaited(_poll());
           },
           child: Text(L10n.t('我已完成支付')),

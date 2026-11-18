@@ -48,6 +48,32 @@ void main() {
     );
   });
 
+  test('使用地区缺省为中国，非法值回落到中国，切换要重启内核', () {
+    expect(defaults.region, AppSettings.regionChina);
+    final AppSettings overseas = defaults.copyWith(
+      region: AppSettings.regionOverseas,
+    );
+    expect(defaults.affectsKernel(overseas), isTrue);
+    expect(
+      AppSettings.fromJson(overseas.toJson()).region,
+      AppSettings.regionOverseas,
+    );
+    expect(
+      AppSettings.fromJson(defaults.toJson()..['region'] = 'mars').region,
+      AppSettings.regionChina,
+    );
+    expect(
+      overseas
+          .toTemplateOptions(
+            tunInterfaceName: 'ECYCloud',
+            takeover: true,
+            supportsSystemProxy: true,
+          )
+          .proxyChina,
+      isTrue,
+    );
+  });
+
   test('语言变更不重启内核，缺省为空表示尚未选定', () {
     expect(defaults.locale, isEmpty);
     expect(defaults.affectsKernel(defaults.copyWith(locale: 'en-US')), isFalse);

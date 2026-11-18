@@ -356,6 +356,7 @@ class _LoginPageState extends State<LoginPage> {
           final ButtonStyle subtle = TextButton.styleFrom(
             foregroundColor: theme.colorScheme.onSurfaceVariant,
           );
+          final Color rule = theme.colorScheme.outlineVariant;
           return Form(
             key: _formKey,
             child: Column(
@@ -528,40 +529,47 @@ class _LoginPageState extends State<LoginPage> {
                     _emailCodeMode ? L10n.t('密码登录') : L10n.t('邮箱验证码登录'),
                   ),
                 ),
-                const SizedBox(height: 28),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
+                const SizedBox(height: 24),
+                Row(
                   children: <Widget>[
+                    Expanded(child: Divider(color: rule)),
+                    const SizedBox(width: 12),
+                    Text(
+                      L10n.t('没有账号？'),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                     TextButton(
                       onPressed: _openRegister,
-                      child: Text('${L10n.t('注册账号')} ›'),
+                      child: Text(L10n.t('注册')),
                     ),
-                    Wrap(
-                      spacing: 16,
-                      children: <Widget>[
-                        TextButton(
-                          style: subtle,
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (BuildContext context) =>
-                                  const TosPage(),
-                            ),
-                          ),
-                          child: Text(L10n.t('服务条款')),
+                    const SizedBox(width: 12),
+                    Expanded(child: Divider(color: rule)),
+                  ],
+                ),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 16,
+                  children: <Widget>[
+                    TextButton(
+                      style: subtle,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (BuildContext context) => const TosPage(),
                         ),
-                        TextButton(
-                          style: subtle,
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (BuildContext context) =>
-                                  const PrivacyPolicyPage(),
-                            ),
-                          ),
-                          child: Text(L10n.t('隐私政策')),
+                      ),
+                      child: Text(L10n.t('服务条款')),
+                    ),
+                    TextButton(
+                      style: subtle,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (BuildContext context) =>
+                              const PrivacyPolicyPage(),
                         ),
-                      ],
+                      ),
+                      child: Text(L10n.t('隐私政策')),
                     ),
                   ],
                 ),

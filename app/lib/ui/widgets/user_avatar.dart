@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -11,6 +12,7 @@ import '../pages/account_page.dart';
 import '../theme.dart';
 import '../../l10n/l10n.dart';
 import 'icon_image.dart';
+import 'touch_bleed.dart';
 import 'app_alert_dialog.dart';
 
 class UserAvatar extends StatelessWidget {
@@ -140,12 +142,9 @@ class UserAvatarButton extends StatelessWidget {
       fontWeight: FontWeight.w400,
     );
     final BorderRadius menuRadius = BorderRadius.circular(AppTheme.menuRadius);
-    // MenuAnchor 的 position 是相对锚点盒子左上角的偏移（_MenuLayout 按
-    // position + anchorRect.topLeft 落位），触控端盒子被放大到 minTapTarget，
-    // 按头像直径算菜单会落进盒子里压住头像
-    final double anchorSize = AppTheme.isTouch
-        ? AppTheme.minTapTarget
-        : radius * 2;
+    // 锚点按头像直径排版，菜单相对它落位；按压轮廓两端一致，触控端的 48 点击区由 TapPadding 补出、TouchBleed 溢出承接
+    final double anchorSize = radius * 2;
+    final double tapSize = math.max(AppTheme.pointerTapTarget, anchorSize);
     final bool onAccount =
         context.findAncestorWidgetOfExactType<AccountPage>() != null;
 
@@ -206,26 +205,31 @@ class UserAvatarButton extends StatelessWidget {
           ],
           builder:
               (BuildContext context, MenuController controller, Widget? child) {
-                return Tooltip(
-                  message: L10n.t('账户信息'),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: () {
-                      if (controller.isOpen) {
-                        controller.close();
-                      } else {
-                        controller.open(
-                          position: Offset(
-                            anchorSize - _menuWidth,
-                            anchorSize + 4,
-                          ),
-                        );
-                      }
-                    },
-                    child: SizedBox(
-                      width: anchorSize,
-                      height: anchorSize,
-                      child: Center(child: avatar),
+                void toggle() {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open(
+                      position: Offset(anchorSize - _menuWidth, anchorSize + 4),
+                    );
+                  }
+                }
+
+                return TouchBleed(
+                  extent: anchorSize,
+                  child: Tooltip(
+                    message: L10n.t('账户信息'),
+                    child: TapPadding(
+                      onTap: toggle,
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: toggle,
+                        child: SizedBox(
+                          width: tapSize,
+                          height: tapSize,
+                          child: Center(child: avatar),
+                        ),
+                      ),
                     ),
                   ),
                 );

@@ -91,83 +91,11 @@ extension ClientError {
     static func input(_ message: String) -> Self { .server(status: 400, code: 0, message: message, retryAfter: nil) }
 }
 
-public struct ShopCatalog: Decodable, Sendable {
-    public let money: Double
-    public let planCooldownRemaining: Int, defaultDuration: Int
-    public let notice: String
-    public let products: [ShopProduct]
-}
-public struct ShopProduct: Decodable, Identifiable, Sendable {
-    public struct Countdown: Decodable, Sendable { public let label: String; public let end: Int64 }
-    public enum Kind: String, Decodable, CaseIterable, Sendable { case plan, trafficPackage = "traffic_package", cardKey = "card_key"
-        public var title: String { switch self { case .plan: L10n.t("套餐"); case .trafficPackage: L10n.t("流量包"); case .cardKey: L10n.t("卡密") } }
-        var quotePath: String { switch self { case .plan: "order-status"; case .trafficPackage: "traffic-package-status"; case .cardKey: "card-key-status" } }
-        var buyPath: String { switch self { case .plan: "buy"; case .trafficPackage: "buy-traffic-package"; case .cardKey: "buy-card-key" } }
-    }
-    public let id: Int
-    public let name: String, type: Kind, price: String, basePrice: String, stock: String
-    public let inStock: Bool, hasLimitedSale: Bool
-    public let purchaseLimit: Int, newUserDaysLimit: Int, minRegistrationDays: Int
-    public let countdowns: [Countdown]
-    public let bandwidth: Double?, `class`: Int?, classExpire: Int?, speedlimit: Double?, connector: Int?, autoRenew: Int?
-    public let contentExtra: [String]?, description: String?
-}
-public struct ShopQuote: Decodable, Sendable {
-    public let name: String?, total: String?, basePrice: String?, stock: String?
-    public let originalTotal: String?, remainingValue: String?, discountAmount: String?, refundAmount: String?
-    public let hasRefund: Bool?
-    public let planCooldown: Bool?, planCooldownMsg: String?, planCooldownRemaining: Int?
-    public let hasStockLimit: Bool?, hasLimitedSale: Bool?, hasValidOrder: Int?
-    public let upgradeMsg: String?, couponApplied: Bool?, couponMsg: String?, credit: Int?
-    public let hasTrafficResetFee: Bool?, trafficResetFee: String?, trafficCurrentShopName: String?
-    public let trafficBillingBasePrice: String?, trafficBillingBaseType: String?, trafficUsed: Double?, trafficTotal: Double?, trafficUsagePercent: Double?
-    public let trafficFeePercent: Double?, trafficFeeIsCapped: Bool?
-    public var canPurchase: Bool { planCooldown != true && total.flatMap(MoneyInput.amount) != nil }
-    public var trafficFeeIsShortfall: Bool { trafficBillingBaseType == "fee_shortfall" }
-    public func trafficBillingBaseLine(planName: String) -> String {
-        let price = trafficBillingBasePrice ?? ""
-        return trafficBillingBaseType == "previous_plan" ? L10n.t("计费基准价：{0} 元", [price]) : L10n.t("新套餐：{0} 计费基准价：{1} 元", [planName, price])
-    }
-}
-public struct PurchaseResult: Sendable {
-    public let message: String
-    public let cardKey: String, tradeno: String, paymentUrl: String, payQrcode: String, payScheme: String
-    public var needsPayment: Bool { !tradeno.isEmpty && (!paymentUrl.isEmpty || !payQrcode.isEmpty || !payScheme.isEmpty) }
-}
-struct PurchasePayload: Decodable {
-    let cardKey: String?, tradeno: String?, paymentUrl: String?, payQrcode: String?, payScheme: String?
-    func result(message: String) -> PurchaseResult {
-        .init(message: message, cardKey: cardKey ?? "", tradeno: tradeno ?? "", paymentUrl: paymentUrl ?? "", payQrcode: payQrcode ?? "", payScheme: payScheme ?? "")
-    }
-}
-public struct PaymentStatus: Decodable, Sendable {
-    public let paid: Bool
-    public let total: Double
-    public let cardKey: String
-    public let rechargedToBalance: Bool?
-    public var purchaseNotice: String {
-        rechargedToBalance == true ? L10n.t("商品未能交付，款项已转入余额。") : L10n.t("支付成功，订单已到账。")
-    }
-}
-public struct RechargeInfo: Decodable, Sendable {
-    public struct Payment: Decodable, Identifiable, Sendable { public let id: String, name: String, type: String }
-    public let money: Double
-    public let totalTopUp: String
-    public let payments: [Payment]
-    public var hasEpay: Bool { payments.contains { $0.type == "epay" || $0.id == "epay" } }
-}
-public enum MoneyInput {
-    public static func amount(_ text: String) -> Decimal? {
-        let value = text.replacingOccurrences(of: ",", with: "")
-        guard text.range(of: #"^(\d+|\d{1,3}(,\d{3})+)(\.\d{1,2})?$"#, options: .regularExpression) != nil else { return nil }
-        return Decimal(string: value, locale: Locale(identifier: "en_US_POSIX"))
-    }
-}
 public enum ClientLink {
     public static func external(_ text: String) -> URL? {
         guard text.utf8.count <= 8192, !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
               let url = URL(string: text), url.user == nil, url.password == nil,
-              let scheme = url.scheme?.lowercased(), ["http", "https", "mailto", "tg", "weixin", "alipay", "alipays"].contains(scheme) else { return nil }
+              let scheme = url.scheme?.lowercased(), ["http", "https", "mailto", "tg"].contains(scheme) else { return nil }
         if ["http", "https"].contains(scheme), url.host?.isEmpty != false { return nil }
         return url
     }

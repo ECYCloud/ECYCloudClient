@@ -78,6 +78,14 @@ func ECYSelect(id C.uint64_t, group, node *C.char) C.int {
 	return result(kernel.Select(uint64(id), C.GoString(group), C.GoString(node)))
 }
 
+//export ECYUpdateNodes
+func ECYUpdateNodes(id C.uint64_t, data unsafe.Pointer, size C.int) C.int {
+	if data == nil || size <= 0 || size > kernel.MaximumConfigBytes {
+		return -2
+	}
+	return result(kernel.UpdateNodes(uint64(id), C.GoBytes(data, size)))
+}
+
 //export ECYControl
 func ECYControl(id C.uint64_t, data unsafe.Pointer, size C.int, output unsafe.Pointer, capacity C.int) C.int {
 	if data == nil || size <= 0 || size > 4096 || output == nil || capacity != kernel.MaximumControlBytes {

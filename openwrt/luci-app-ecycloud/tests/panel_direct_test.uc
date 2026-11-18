@@ -21,6 +21,12 @@ const subLookup = "resolveip -t 3 -- 'sub.test' 2>/dev/null";
 testState.responses[siteLookup] = { text: '198.18.0.1\n198.19.255.254\n2001:db8::10\n192.0.2.10\n192.0.2.10\ninvalid\n', status: 0 };
 testState.responses[subLookup] = { text: '192.0.2.20\n2001:db8::20\n', status: 0 };
 
+delete testState.config.router_proxy;
+check(settings().routerProxy, '配置里没有 router_proxy 时必须默认代理路由器自身');
+testState.config.router_proxy = '0';
+check(!settings().routerProxy, '用户关闭代理路由器自身后必须照常生效');
+testState.config.router_proxy = '1';
+
 let requests = [];
 let transportStatus = 200;
 let transportExit = 0;

@@ -506,17 +506,7 @@ func writePanelProviders(config string) error {
 		if current, err := os.ReadFile(target); err == nil && bytes.Equal(current, data) {
 			continue
 		}
-		temp, err := os.CreateTemp(runDir(), ".ecy-provider-")
-		if err != nil {
-			return err
-		}
-		tempPath := temp.Name()
-		temp.Close()
-		defer os.Remove(tempPath)
-		if err := writeKernelFile(tempPath, bytes.NewReader(data)); err != nil {
-			return err
-		}
-		if err := os.Rename(tempPath, target); err != nil {
+		if err := writeKernelFile(target, bytes.NewReader(data)); err != nil {
 			return err
 		}
 	}

@@ -25,7 +25,7 @@ msgstr ""
 msgid "Allow LAN"
 msgstr ""
 
-msgid "Also send traffic originating on the router through the kernel."
+msgid "Also send traffic originating on the router through the kernel. Turn this off if the router runs WireGuard, Tailscale, DDNS, or similar services; otherwise they stop working when the node fails."
 msgstr ""
 
 msgid "All"
@@ -119,6 +119,36 @@ msgid "HTTP and SOCKS proxy port of the kernel."
 msgstr ""
 
 msgid "Handle IPv6 traffic as well."
+msgstr ""
+
+msgid "Region"
+msgstr ""
+
+msgid "China"
+msgstr ""
+
+msgid "Outside China"
+msgstr ""
+
+msgid "Switch to Outside China?"
+msgstr ""
+
+msgid "Switch to China?"
+msgstr ""
+
+msgid "Switch to Outside China"
+msgstr ""
+
+msgid "Switch to China"
+msgstr ""
+
+msgid "With Outside China selected, websites and IP addresses in mainland China are also routed through proxy nodes. Don't choose this while you're in mainland China, or local websites and apps will slow down noticeably and some services may stop working."
+msgstr ""
+
+msgid "With China selected, websites and IP addresses in mainland China connect directly instead of through proxy nodes. Don't choose this while you're outside China, or access to mainland China services may be restricted."
+msgstr ""
+
+msgid "With China selected, China traffic connects directly and all other traffic goes through the proxy. With Outside China selected, all traffic goes through the proxy, including China traffic."
 msgstr ""
 
 msgid "Host that serves the clash profile. Must be https. Leave empty to use the panel URL. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
@@ -320,6 +350,12 @@ msgid "Timeout"
 msgstr ""
 
 msgid "The panel did not publish any node groups."
+msgstr ""
+
+msgid "There is too much data for the router to return in one response."
+msgstr ""
+
+msgid "Node files are still loading"
 msgstr ""
 
 msgid "Traffic"
@@ -718,6 +754,12 @@ msgstr ""
 msgid "No runtime config yet"
 msgstr ""
 
+msgid "The content changed. Open it again."
+msgstr ""
+
+msgid "Unable to prepare the runtime config"
+msgstr ""
+
 msgid "Invalid path"
 msgstr ""
 
@@ -1028,6 +1070,9 @@ msgid "Account switching is in progress. Try again shortly."
 msgstr ""
 
 msgid "Offline profile authorization is invalid. Refresh the profile."
+msgstr ""
+
+msgid "The system clock is behind the time the panel issued the profile. The connection will retry automatically after the clock syncs."
 msgstr ""
 
 msgid "Could not stage the validated profile. Try again."
@@ -1346,4 +1391,10 @@ msgid "Proxy"
 msgstr ""
 
 msgid "Grant access to the ECY Cloud client"
+msgstr ""
+
+msgid "Not enough storage: %d MiB free on the router, but at least %d MiB is needed to start. Free up space or expand storage, then try again."
+msgstr ""
+
+msgid "Couldn't save the setting. The router's storage may be full."
 msgstr ""

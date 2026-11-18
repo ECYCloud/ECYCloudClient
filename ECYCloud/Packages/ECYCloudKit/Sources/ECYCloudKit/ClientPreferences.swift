@@ -11,6 +11,7 @@ public final class ClientPreferences {
     @ObservationIgnored private let defaults: UserDefaults
     public var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: "apple.proxyMode") } }
     public var ipv6: Bool { didSet { defaults.set(ipv6, forKey: "apple.ipv6") } }
+    public var region: String { didSet { defaults.set(region, forKey: "apple.region") } }
     public var tunEnabled: Bool { didSet { defaults.set(tunEnabled, forKey: "apple.tunEnabled") } }
     public var systemProxy: Bool { didSet { defaults.set(systemProxy, forKey: "apple.systemProxy") } }
     public var strictRoute: Bool { didSet { defaults.set(strictRoute, forKey: "apple.strictRoute") } }
@@ -22,6 +23,7 @@ public final class ClientPreferences {
     public var closeToTray: Bool { didSet { defaults.set(closeToTray, forKey: "apple.closeToTray") } }
     public var logLevel: String { didSet { defaults.set(logLevel, forKey: "apple.logLevel") } }
     var ticketInbox: [String: Any] { didSet { defaults.set(ticketInbox, forKey: "apple.ticketInbox") } }
+    @ObservationIgnored var lastUpdateCheck: TimeInterval { didSet { defaults.set(lastUpdateCheck, forKey: "apple.lastUpdateCheck") } }
     public var language: AppLanguage {
         didSet {
             if defaults === UserDefaults.standard { L10n.setLanguage(language) }
@@ -32,6 +34,7 @@ public final class ClientPreferences {
         self.defaults = defaults
         mode = defaults.string(forKey: "apple.proxyMode").flatMap(Mode.init(rawValue:)) ?? .rule
         ipv6 = defaults.bool(forKey: "apple.ipv6")
+        region = defaults.string(forKey: "apple.region") == "overseas" ? "overseas" : "cn"
         tunEnabled = defaults.bool(forKey: "apple.tunEnabled")
         systemProxy = defaults.object(forKey: "apple.systemProxy") as? Bool ?? true
         strictRoute = defaults.bool(forKey: "apple.strictRoute")
@@ -43,12 +46,13 @@ public final class ClientPreferences {
         autoConnect = defaults.bool(forKey: "apple.autoConnect")
         closeToTray = defaults.object(forKey: "apple.closeToTray") as? Bool ?? true
         ticketInbox = defaults.dictionary(forKey: "apple.ticketInbox") ?? [:]
+        lastUpdateCheck = defaults.double(forKey: "apple.lastUpdateCheck")
         logLevel = defaults.string(forKey: "apple.logLevel").flatMap { ["debug", "info", "warning", "error", "silent"].contains($0) ? $0 : nil } ?? "warning"
         language = AppLanguage.resolve(defaults.string(forKey: "apple.language"))
     }
     public var packetProfile: ProfileOptions {
         var options = ProfileOptions.packetFlow
-        options.mode = mode.rawValue; options.ipv6 = ipv6
+        options.mode = mode.rawValue; options.ipv6 = ipv6; options.proxyChina = region == "overseas"
         options.excludedRoutes = excludedRoutes
         return options
     }

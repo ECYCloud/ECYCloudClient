@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -213,6 +214,98 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 	}()
 	cleanup = false
 	return nextID, nil
+}
+
+var panelProvider = regexp.MustCompile(`^ecy-panel-(nodes|[a-f0-9]{64})$`)
+
+// UpdateNodes 只重写面板节点文件并让内核重读，不重建内核，已有连接不断开。
+// 调用方须先确认其余配置与运行中的一致（TunnelLease.differsOnlyInNodes）。
+func UpdateNodes(id uint64, data []byte) error {
+	if len(data) == 0 || len(data) > MaximumConfigBytes {
+		return ErrConfiguration
+	}
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	if current == nil || current.id != id {
+		return ErrStopped
+	}
+	if err := checkProfile(data); err != nil {
+		return err
+	}
+	var config struct {
+		Providers map[string]struct {
+			Type    string
+			Path    string
+			Payload []json.RawMessage
+		} `json:"proxy-providers"`
+	}
+	if json.Unmarshal(data, &config) != nil {
+		return ErrConfiguration
+	}
+	running := tunnel.Providers()
+	files := map[string][]byte{}
+	names := map[string][]string{}
+	for name, item := range config.Providers {
+		if !strings.HasPrefix(name, "ecy-panel-") {
+			continue
+		}
+		if !panelProvider.MatchString(name) || item.Type != "file" || item.Path != name+".json" || len(item.Payload) == 0 || running[name] == nil {
+			return ErrConfiguration
+		}
+		body, err := json.Marshal(map[string]any{"proxies": item.Payload})
+		if err != nil {
+			return ErrConfiguration
+		}
+		files[name] = body
+		for _, raw := range item.Payload {
+			var node struct{ Name string }
+			if json.Unmarshal(raw, &node) != nil || node.Name == "" {
+				return ErrConfiguration
+			}
+			names[name] = append(names[name], node.Name)
+		}
+	}
+	if files["ecy-panel-nodes"] == nil {
+		return ErrConfiguration
+	}
+	for name, body := range files {
+		target := filepath.Join(current.directory, name+".json")
+		if err := os.WriteFile(target+".tmp", body, 0600); err != nil {
+			return ErrConfiguration
+		}
+		if err := os.Rename(target+".tmp", target); err != nil {
+			return ErrConfiguration
+		}
+	}
+	// 内核自己监视节点文件，改名后约 100 毫秒自动重读；此时再调 Update 会与它并发改同一个 Fetcher，超时仍未重读才手动触发
+	loaded := func(name string) bool {
+		proxies := running[name].Proxies()
+		if len(proxies) != len(names[name]) {
+			return false
+		}
+		for index, proxy := range proxies {
+			if proxy.Name() != names[name][index] {
+				return false
+			}
+		}
+		return true
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for name := range files {
+		for !loaded(name) {
+			if time.Now().After(deadline) {
+				if err := running[name].Update(); err != nil || !loaded(name) {
+					return ErrConfiguration
+				}
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	current.logs.mu.Lock()
+	current.logs.secrets = logSecrets(data)
+	current.logs.mu.Unlock()
+	return nil
 }
 
 func Stop(id uint64) {

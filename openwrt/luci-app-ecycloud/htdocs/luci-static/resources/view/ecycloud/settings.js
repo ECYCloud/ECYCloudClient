@@ -265,8 +265,8 @@ return view.extend({
 		api.skinFlag(o);
 
 		o = s.option(form.Flag, 'router_proxy', _('Proxy the router itself'),
-			_('Also send traffic originating on the router through the kernel.'));
-		o.default = '0';
+			_('Also send traffic originating on the router through the kernel. Turn this off if the router runs WireGuard, Tailscale, DDNS, or similar services; otherwise they stop working when the node fails.'));
+		o.default = '1';
 		o.rmempty = false;
 		api.skinFlag(o);
 

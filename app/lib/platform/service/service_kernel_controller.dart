@@ -15,12 +15,10 @@ class ServiceKernelController implements KernelController {
     String? tunProbeCommand,
     bool upgradable = true,
     bool logFromClashApi = false,
-    bool closeTunBeforeStop = false,
   }) : _service = transport,
        _tunProbeCommand = tunProbeCommand,
        _upgradable = upgradable,
-       _logFromClashApi = logFromClashApi,
-       _closeTunBeforeStop = closeTunBeforeStop;
+       _logFromClashApi = logFromClashApi;
 
   static const String _source = 'kernel';
   static const Duration _pollInterval = Duration(seconds: 1);
@@ -35,7 +33,6 @@ class ServiceKernelController implements KernelController {
   final String? _tunProbeCommand;
   final bool _upgradable;
   final bool _logFromClashApi;
-  final bool _closeTunBeforeStop;
   final StreamController<KernelStatus> _statusController =
       StreamController<KernelStatus>.broadcast();
   final StreamController<String> _logController =
@@ -91,12 +88,9 @@ class ServiceKernelController implements KernelController {
   @override
   Future<String> upgrade(String version, {int? proxyPort}) async {
     // 服务替换文件前会停内核，轮询留着只会把这次停机报成「内核异常退出」
+    final bool polled = _poller != null;
     _stopPolling();
     final int generation = _generation;
-    await _closeTunIfRunning();
-    if (generation != _generation) {
-      throw KernelException('内核会话已变化');
-    }
 
     try {
       final Map<String, dynamic> result = await _service.request(
@@ -110,6 +104,9 @@ class ServiceKernelController implements KernelController {
       _update(const KernelStatus.stopped());
       return result['version'] as String? ?? version;
     } on ServiceException catch (e) {
+      if (polled && generation == _generation) {
+        _startPolling();
+      }
       throw KernelException('$e');
     }
   }
@@ -258,10 +255,6 @@ class ServiceKernelController implements KernelController {
   }) async {
     _stopPolling();
     final int generation = _generation;
-    await _closeTunIfRunning();
-    if (generation != _generation) {
-      return;
-    }
     _clashApi = clashApi;
     _update(const KernelStatus(state: KernelState.starting));
 
@@ -353,10 +346,6 @@ class ServiceKernelController implements KernelController {
     final int generation = _generation;
     final KernelStatus before = status;
     _update(const KernelStatus(state: KernelState.stopping));
-    await _closeTunIfRunning();
-    if (generation != _generation) {
-      return;
-    }
 
     try {
       await _service.request('kernel.stop');
@@ -383,10 +372,6 @@ class ServiceKernelController implements KernelController {
     _stopPolling();
     final int generation = _generation;
     _update(const KernelStatus(state: KernelState.stopping));
-    await _closeTunIfRunning();
-    if (generation != _generation) {
-      throw KernelException('内核会话已变化');
-    }
     try {
       await _service.request('kernel.clear', <String, dynamic>{
         'cache_key': cacheKey,
@@ -418,25 +403,6 @@ class ServiceKernelController implements KernelController {
       });
     } on ServiceException catch (e) {
       throw KernelException('绑定配置缓存失败：$e');
-    }
-  }
-
-  // 停进程前先关闭 Windows TUN，避免 NLA 留下同名网络档案。
-  Future<void> _closeTunIfRunning() async {
-    if (!_closeTunBeforeStop) {
-      return;
-    }
-    final ClashApiOptions? api = _clashApi;
-    if (api == null) {
-      return;
-    }
-    final ClashApiClient client = ClashApiClient(api);
-    try {
-      await client.disableTun();
-    } on Object catch (e) {
-      Logger.instance.warn(_source, '停内核前关闭 TUN 失败: $e');
-    } finally {
-      client.close();
     }
   }
 

@@ -16,6 +16,7 @@ export const ACCOUNT_FILE = `${STATE_DIR}/account.json`;
 export const NETWORK_FILE = `${STATE_DIR}/network.json`;
 export const DELAY_FILE = `${STATE_DIR}/delay.json`;
 export const SPEED_FILE = `${STATE_DIR}/speed.json`;
+export const RUNTIME_VIEW = `${STATE_DIR}/runtime-view.txt`;
 export const ANNOUNCE_CACHE = `${STATE_DIR}/announcements.json`;
 export const KICK_FILE = `${STATE_DIR}/device_kicked`;
 const PANEL_ADDRESS_FILE = `${STATE_DIR}/panel-addresses.json`;
@@ -183,8 +184,9 @@ export function settings() {
 		dnsPort: +(raw.dns_port ?? 10201),
 		allowLan: (raw.allow_lan ?? '1') == '1',
 		ipv6: raw.ipv6 == '1',
+		region: raw.region == 'overseas' ? 'overseas' : 'cn',
 		dnsHijack: (raw.dns_hijack ?? '1') == '1',
-		routerProxy: raw.router_proxy == '1',
+		routerProxy: (raw.router_proxy ?? '1') == '1',
 		/* 停止与恢复流程也读设置：非法网卡名只置空、由 TUN 接管时拒绝，抛错会打断 dnsmasq 与防火墙的撤销 */
 		tunDevice: index(tunDevice, '\0') < 0 && !match(tunDevice, /[[:cntrl:][:space:]]/) &&
 			match(tunDevice, /^[A-Za-z0-9_.-]{1,15}$/) ? tunDevice : '',
@@ -212,6 +214,39 @@ export function log(level, message) {
 	if ((levels[level] ?? 2) < (levels[settings().logLevel] ?? 2))
 		return;
 	system(`logger -t ecycloud -p daemon.${level} ${shellquote(message)}`);
+};
+
+const CONFIG_FILE = '/etc/config/ecycloud';
+const CONFIG_DEFAULTS = '/usr/share/ecycloud/config.default';
+/* 磁盘写满后实测出现过 0 字节的 /etc/config/ecycloud：剩余不足就不提交，配置段丢了按出厂默认补回 */
+const CONFIG_RESERVE_KIB = 64;
+
+export function freeKiB(path) {
+	const df = popen(`df -Pk ${shellquote(path)} 2>/dev/null`);
+	const lines = df ? split(trim(df.read('all') ?? ''), '\n') : [];
+	df?.close();
+	const fields = split(trim(lines[length(lines) - 1] ?? ''), /[ \t]+/);
+	return length(lines) > 1 && match(fields[3] ?? '', /^[0-9]+$/) ? +fields[3] : null;
+};
+
+export function commitConfig(uci) {
+	const free = freeKiB('/etc/config');
+	if (free != null && free < CONFIG_RESERVE_KIB) {
+		log('err', sprintf('存储空间不足（剩余 %d KiB），设置未保存', free));
+		return false;
+	}
+	return uci.commit('ecycloud');
+};
+
+export function ensureConfig() {
+	if (cursor().get('ecycloud', 'config') == 'ecycloud')
+		return true;
+	const defaults = readfile(CONFIG_DEFAULTS);
+	const free = freeKiB('/etc/config');
+	if (!length(defaults) || (free != null && free < CONFIG_RESERVE_KIB) || !writeAtomic(CONFIG_FILE, defaults))
+		return false;
+	log('warning', '设置的配置段缺失，已按出厂默认值补回');
+	return true;
 };
 
 export function build() {
@@ -343,7 +378,7 @@ export function saveOrigins(site, sub, bound, accept) {
 			if (length(previous) && saved?.binding == previous)
 				writePrivateJson(path, { ...saved, binding });
 		}
-		uci.commit('ecycloud');
+		commitConfig(uci);
 		log('notice', `panel origin updated: ${origins().site} / ${origins().sub}`);
 	}
 };

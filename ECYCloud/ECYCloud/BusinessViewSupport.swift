@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 import ECYCloudKit
 
 struct ProductRefreshAction: Equatable {
@@ -272,6 +273,29 @@ struct ProductTable: View {
                     }
                 }
             }.padding(.horizontal, 12).padding(.vertical, 13).contentShape(Rectangle())
+        }
+    }
+}
+
+struct PaymentQRCode: View {
+    let text: String
+    let label: String
+    @State private var code: CGImage?
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Group {
+            if let code {
+                Image(decorative: code, scale: 1).interpolation(.none).resizable().scaledToFit()
+                    .frame(maxWidth: 180, maxHeight: 180).padding(12)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ProductPalette(scheme: scheme).segment, lineWidth: 1))
+                    .accessibilityLabel(label)
+            } else { ProductNotice(message: L10n.t("无法生成二维码。")) }
+        }.frame(maxWidth: .infinity).task(id: text) {
+            guard text.utf8.count <= 4096 else { code = nil; return }
+            let filter = CIFilter.qrCodeGenerator(); filter.message = Data(text.utf8)
+            guard let output = filter.outputImage else { return }
+            code = CIContext().createCGImage(output, from: output.extent)
         }
     }
 }

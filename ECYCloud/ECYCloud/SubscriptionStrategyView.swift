@@ -223,7 +223,7 @@ struct SubscriptionStrategyView: View {
         let options = policies(config)
         if !options.contains(providerDraft.policy) { providerDraft.policy = options.first ?? "" }
         guard !providerDraft.url.isEmpty else { state.message = L10n.t("请填写规则集 URL"); return }
-        guard webURL(providerDraft.url) else { state.message = L10n.t("URL 须为 http(s) 链接"); return }
+        guard ClientLink.external(providerDraft.url)?.scheme == "https" else { state.message = L10n.t("规则集 URL 须为 https 链接"); return }
         guard !providerDraft.policy.isEmpty else { state.message = L10n.t("请选择策略"); return }
         guard editingProvider != nil || providers.count < config.maxCustomRuleProviders else { state.message = L10n.t("最多添加 {0} 个远程规则集", [String(describing: config.maxCustomRuleProviders)]); return }
         let index = providers.firstIndex { $0.id == editingProvider }

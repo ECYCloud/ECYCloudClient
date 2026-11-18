@@ -62,8 +62,12 @@ void main() {
             platform: _Platform(),
             settingsStore: _Settings(),
             child: MaterialApp(
+              // 主题是 static final，首次创建时的平台决定触控补边；这里按真机运行时的默认值补齐
               theme: (dark ? AppTheme.dark() : AppTheme.light()).copyWith(
                 platform: platform,
+                materialTapTargetSize: touch
+                    ? MaterialTapTargetSize.padded
+                    : MaterialTapTargetSize.shrinkWrap,
               ),
               home: Scaffold(
                 body: Stack(
@@ -123,7 +127,11 @@ void main() {
         expect(iconBounds.top, closeTo(titleBounds.top, 0.1));
         expect(
           iconBounds.left,
-          closeTo(titleBounds.right + (AppTheme.minTapTarget - 14) / 2, 0.1),
+          // 触控端也按桌面端按钮盒排版，标题与图标的间距两端一致
+          closeTo(
+            titleBounds.right + (AppTheme.pointerTapTarget - 14) / 2,
+            0.1,
+          ),
         );
         expect(iconBounds.size, const Size.square(14));
         final Finder button = find
@@ -140,6 +148,8 @@ void main() {
               )
               .first,
         );
+        // 按压轮廓两端都是 32，触控端只把点击范围补到 48
+        expect(inkBounds.size, const Size.square(AppTheme.pointerTapTarget));
         expect(inkBounds.center.dx, closeTo(iconBounds.center.dx, 0.1));
         expect(inkBounds.center.dy, closeTo(iconBounds.center.dy, 0.1));
         final Finder cardFinder = find
@@ -190,6 +200,10 @@ void main() {
         await tester.tap(icon);
         await tester.pumpAndSettle();
         expect(find.text(message), findsOneWidget);
+        expect(
+          tester.getRect(find.text(message)).top,
+          greaterThan(tester.getRect(icon).bottom),
+        );
         await tester.tap(icon);
         await tester.pumpAndSettle();
         expect(find.text(message), findsNothing);
@@ -323,6 +337,18 @@ void main() {
           await tester.tap(usageHelp);
           await tester.pumpAndSettle();
           expect(find.text(notice), findsOneWidget);
+          // 与流量排行的提示一样出在图标下方，不压住同一行的流量明细按钮
+          final Rect noticeBounds = tester.getRect(find.text(notice));
+          expect(
+            noticeBounds.top,
+            greaterThan(tester.getRect(usageHelp).bottom),
+          );
+          expect(
+            noticeBounds.overlaps(
+              tester.getRect(find.textContaining(L10n.t('流量明细'))),
+            ),
+            isFalse,
+          );
           await tester.tap(usageHelp);
           await tester.pumpAndSettle();
           expect(find.text(notice), findsNothing);

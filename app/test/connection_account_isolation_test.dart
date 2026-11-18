@@ -392,6 +392,52 @@ void main() {
     expect(connection.state, ConnectionPhase.disconnected);
   });
 
+  test('内核升级失败不重启仍在运行的内核', () async {
+    final HttpOverrides? overrides = HttpOverrides.current;
+    HttpOverrides.global = null;
+    addTearDown(() => HttpOverrides.global = overrides);
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(() => server.close(force: true));
+    server.listen((HttpRequest request) async {
+      request.response.write(
+        jsonEncode(switch (request.uri.path) {
+          '/configs' => <String, Object>{
+            'mode': 'rule',
+            'tun': <String, bool>{'enable': true},
+          },
+          '/proxies' => <String, Object>{'proxies': <String, Object>{}},
+          _ => <String, Object>{'version': 'test'},
+        }),
+      );
+      await request.response.close();
+    });
+    final _AttachKernel kernel = _AttachKernel();
+    kernel.reply.complete(ClashApiOptions(port: server.port, secret: 'test'));
+    final ConnectionController connection = ConnectionController(
+      platform: _Platform(),
+      kernel: kernel,
+      settingsStore: _Settings(),
+      panelCache: _Cache(),
+    );
+    addTearDown(connection.dispose);
+    await connection.adoptRunningKernel();
+    expect(connection.state, ConnectionPhase.connected);
+    final List<ConnectionPhase> phases = <ConnectionPhase>[];
+    connection.addListener(() => phases.add(connection.state));
+
+    final Future<String> upgrade = connection.upgradeKernel('v-test');
+    kernel.upgraded.completeError(KernelException('下载内核失败'));
+    await expectLater(upgrade, throwsA(isA<KernelException>()));
+
+    expect(kernel.stops, 0);
+    expect(phases, everyElement(ConnectionPhase.connected));
+    expect(connection.state, ConnectionPhase.connected);
+    expect(connection.controlPlaneReady, isTrue);
+  });
+
   test('内核升级的迟到完成不能重新启动已退出的会话', () async {
     final HttpOverrides? overrides = HttpOverrides.current;
     HttpOverrides.global = null;

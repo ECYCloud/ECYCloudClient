@@ -20,12 +20,21 @@ boot() {
 	fi
 	uci -q set ecycloud.config.enabled="$enabled" || return 1
 	uci -q commit ecycloud || return 1
+	# 断电后 nftables.d 里的片段还在，策略路由和运行状态已丢：不先撤掉，待机内核一监听就吞掉 LAN 流量
+	"$CTL" revert
 	start
+}
+
+# 插件运行期自己改写并已即时生效的键不算：否则这些提交会在别的页面「保存并应用」时被 reload_config 当成改动，白白重启内核
+config_fingerprint() {
+	uci -q show ecycloud | grep -vE '^ecycloud\.config\.(enabled|route_mode|site_url|sub_url)=' | md5sum | cut -d' ' -f1
 }
 
 start_service() {
 	local enabled run_dir
 
+	mkdir -m 700 -p /var/run/ecycloud
+	config_fingerprint > /var/run/ecycloud/config.md5
 	config_load ecycloud
 	config_get_bool enabled config enabled 0
 
@@ -76,6 +85,7 @@ stop_service() {
 }
 
 reload_service() {
+	[ "$(config_fingerprint)" = "$(cat /var/run/ecycloud/config.md5 2>/dev/null)" ] && return 0
 	restart
 }
 

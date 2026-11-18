@@ -167,6 +167,26 @@ public enum TunnelFiles {
         active = true
         updateStatus()
     }
+    public func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? {
+        active && !standbyActive ? try profileOptions(preferences) : nil
+    }
+    // 扩展按 providerConfiguration 里的租约标识读文件：沿用原标识覆盖，系统自行重启隧道时读到的也是新节点
+    public func updateNodes(_ lease: TunnelLease) async throws -> Bool {
+        guard !standbyActive, let manager, manager.connection.status == .connected,
+              let values = (manager.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
+              let owner = values["owner"] as? String, let raw = values["leaseID"] as? String, let id = UUID(uuidString: raw),
+              let running = try? TunnelFiles.load(group: group, owner: owner, id: id), lease.differsOnlyInNodes(from: running) else { return false }
+        try TunnelFiles.save(TunnelLease(id: id, owner: lease.owner, cacheKey: lease.cacheKey, expiresAt: lease.expiresAt, configuration: lease.configuration,
+                                         validationConfiguration: lease.validationConfiguration, logLevel: lease.logLevel), group: group)
+        do { _ = try await request(TunnelCommand(.nodes)) }
+        catch is CancellationError { throw CancellationError() }
+        catch {
+            // 旧版扩展不认这条指令：还原租约文件，由调用方按原方式重启
+            try? TunnelFiles.save(running, group: group)
+            return false
+        }
+        return true
+    }
     public func startStandby(_ lease: TunnelLease) async throws {
         guard let standby else { throw TunnelError.unavailable }
         try await waitUntilStopped()

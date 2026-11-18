@@ -178,7 +178,6 @@ struct AnnouncementsView: View {
 
 struct TrafficHistoryView: View {
     let session: ClientSession
-    var openShop: (() -> Void)?
     @State private var state = FeatureState<TrafficHistory>()
     @State private var expandedDay: String?
     @State private var daySort: Int?
@@ -199,13 +198,6 @@ struct TrafficHistoryView: View {
                             Text(L10n.t("我没有使用某些节点，为什么这些节点也会消耗流量？"))
                             Button(L10n.t("查看说明")) { showInfo = true }.buttonStyle(ProductButtonStyle())
                         }.productFocusSection()
-                        if let openShop {
-                            ProductFlow(spacing: 0) {
-                                Text(L10n.t("流量不够用？前往 "))
-                                Button(L10n.t("商店") + " ›", action: openShop).buttonStyle(ProductButtonStyle())
-                                Text(L10n.t(" 选购流量包"))
-                            }.productFocusSection()
-                        }
                     }.font(.system(size: 14)).foregroundStyle(ProductPalette(scheme: scheme).secondary)
                 }
                 TrafficDayTable(history: history, days: sortedDays(history), expandedDay: $expandedDay,

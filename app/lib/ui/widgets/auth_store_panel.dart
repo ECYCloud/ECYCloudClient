@@ -134,7 +134,7 @@ class AuthStorePanel extends StatelessWidget {
 
   Widget _content(BuildContext context, {required bool split}) {
     final ThemeData theme = Theme.of(context);
-    final double titleSize = split ? 30 : 28;
+    final double titleSize = split ? 30 : 24;
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: maxWidth),
@@ -255,17 +255,19 @@ class _AuthMark extends StatelessWidget {
       children: <Widget>[
         const Image(
           image: AssetImage('assets/app_icon.png'),
-          width: 28,
-          height: 28,
+          width: 44,
+          height: 44,
           filterQuality: FilterQuality.medium,
           excludeFromSemantics: true,
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Text(
           'ECY Cloud',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontSize: 32,
+            fontWeight: FontWeight.w700,
+            height: 1.1,
+            letterSpacing: 32 * -0.03,
           ),
         ),
       ],

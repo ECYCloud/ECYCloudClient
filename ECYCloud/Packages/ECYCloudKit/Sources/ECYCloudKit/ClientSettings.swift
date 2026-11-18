@@ -16,7 +16,7 @@ public enum ClientRelease {
     }
     struct Entry: Decodable {
         let tagName: String, publishedAt: String?
-        let draft: Bool, prerelease: Bool
+        let draft: Bool?, prerelease: Bool
     }
     static func version(_ tag: String) -> String? {
         guard let range = tag.range(of: #"^v?[0-9]+\.[0-9]+\.[0-9]+"#, options: .regularExpression) else { return nil }
@@ -25,7 +25,7 @@ public enum ClientRelease {
     static func target(_ data: Data, current: String) throws -> String {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let entries = try decoder.decode([Entry].self, from: data).filter {
-            !$0.draft && $0.publishedAt.flatMap { ISO8601DateFormatter().date(from: $0) } != nil && version($0.tagName) != nil
+            $0.draft != true && $0.publishedAt.flatMap { ISO8601DateFormatter().date(from: $0) } != nil && version($0.tagName) != nil
         }.sorted { $0.publishedAt! > $1.publishedAt! }
         guard let entry = entries.first(where: { current.hasPrefix("Pre ") || !$0.prerelease }) else { throw ClientError.invalidResponse }
         return (entry.prerelease ? "Pre " : "") + version(entry.tagName)!
@@ -50,10 +50,13 @@ extension ClientSession {
         return version.range(of: #"\d+(?:\.\d+)+\S*"#, options: .regularExpression).map { String(version[$0]) } ?? ""
     }
     public func latestKernelVersion() async throws -> String {
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let entry = try decoder.decode(ClientRelease.Entry.self, from: await githubReleases("MetaCubeX/mihomo", path: "/latest"))
-        guard !entry.draft, !entry.prerelease, let version = ClientRelease.version(entry.tagName) else { throw ClientError.invalidResponse }
-        return version
+        try await releases("kernel", github: "MetaCubeX/mihomo", path: "/latest") {
+            let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let entries = try (try? decoder.decode([ClientRelease.Entry].self, from: $0)) ?? [decoder.decode(ClientRelease.Entry.self, from: $0)]
+            guard let entry = entries.first(where: { $0.draft != true && !$0.prerelease }),
+                  let version = ClientRelease.version(entry.tagName) else { throw ClientError.invalidResponse }
+            return version
+        }
     }
     public func updateGeoData() async throws {
         guard phase == .signedIn, let connection else { throw TunnelError.control }
@@ -89,13 +92,25 @@ extension ClientSession {
         }
         throw ClientError.responseTooLarge
     }
+    public static let updateCheckInterval: TimeInterval = 3600
+    public var untilUpdateCheck: TimeInterval {
+        let since = now().timeIntervalSince1970 - preferences.lastUpdateCheck
+        return since < 0 || since >= Self.updateCheckInterval ? 0 : Self.updateCheckInterval - since
+    }
     public func checkClientUpdate() async throws -> (latest: String, outdated: Bool) {
         let current = ClientRelease.currentVersion
-        let latest = try ClientRelease.target(await githubReleases("ECYCloud/ECYCloudClient", path: "?per_page=30"), current: current)
+        let latest = try await releases("client", github: "ECYCloud/ECYCloudClient", path: "?per_page=30") { try ClientRelease.target($0, current: current) }
+        preferences.lastUpdateCheck = now().timeIntervalSince1970
         return (latest, ClientRelease.newer(latest, than: current))
     }
-    private func githubReleases(_ repository: String, path: String) async throws -> Data {
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases\(path)")!, timeoutInterval: 10)
+    private func releases<T>(_ channel: String, github repository: String, path: String, parse: (Data) throws -> T) async throws -> T {
+        if let mirror = try? JSONSerialization.jsonObject(with: await releaseData(endpoints.site.appendingPathComponent("api/client/v1/releases/\(channel)"))) as? [String: Any],
+           mirror["ret"] as? Int == 1, let entries = mirror["data"] as? [Any],
+           let value = try? parse(JSONSerialization.data(withJSONObject: entries)) { return value }
+        return try parse(await releaseData(URL(string: "https://api.github.com/repos/\(repository)/releases\(path)")!))
+    }
+    private func releaseData(_ url: URL) async throws -> Data {
+        var request = URLRequest(url: url, timeoutInterval: 10)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let result = try await api.transport.send(request)
         guard result.status == 200, result.data.count <= 4 * 1024 * 1024 else { throw ClientError.invalidResponse }

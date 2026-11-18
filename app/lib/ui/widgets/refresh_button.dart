@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'touch_bleed.dart';
 
 class RefreshButton extends StatefulWidget {
   const RefreshButton({
@@ -118,16 +119,15 @@ class _RefreshButtonState extends State<RefreshButton>
 
     final String? label = widget.label;
     if (label == null) {
-      return IconButton(
-        tooltip: widget.tooltip,
-        icon: icon,
-        padding: EdgeInsets.zero,
-        visualDensity: VisualDensity.standard,
-        constraints: BoxConstraints.tightFor(
-          width: AppTheme.minTapTarget,
-          height: AppTheme.minTapTarget,
+      return TouchBleed(
+        child: IconButton(
+          tooltip: widget.tooltip,
+          icon: icon,
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.standard,
+          constraints: AppTheme.iconButtonBox,
+          onPressed: onPressed,
         ),
-        onPressed: onPressed,
       );
     }
 

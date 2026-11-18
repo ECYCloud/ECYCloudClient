@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -47,6 +48,13 @@ func Setup(homeDir string) {
 
 	// 与界面同进程；Go 默认 GC 太晚，规则集一多就被 LMK 杀掉
 	debug.SetGCPercent(10)
+
+	// 其它 goroutine 的 panic 与 fatal error 只进 logcat，用户导出的应用日志里没有；
+	// 留在文件里，由界面进程在 :kernel 死掉后转述（KernelClient.crashCause）
+	if file, err := os.Create(filepath.Join(homeDir, "kernel-crash.log")); err == nil {
+		_ = debug.SetCrashOutput(file, debug.CrashOptions{})
+		_ = file.Close()
+	}
 }
 
 // 内核在 DefaultSocketHook 非空时会忽略 interface-name / routing-mark

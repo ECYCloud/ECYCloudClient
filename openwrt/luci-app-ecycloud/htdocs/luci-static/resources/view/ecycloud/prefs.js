@@ -280,6 +280,32 @@ return view.extend({
 		s = m.section(form.NamedSection, 'config', 'ecycloud', _('Proxy'));
 		s.addremove = false;
 
+		o = s.option(form.ListValue, 'region', _('Region'),
+			_('With China selected, China traffic connects directly and all other traffic goes through the proxy. With Outside China selected, all traffic goes through the proxy, including China traffic.'));
+		o.value('cn', _('China'));
+		o.value('overseas', _('Outside China'));
+		o.rmempty = false;
+		o.cfgvalue = function(section) {
+			return form.ListValue.prototype.cfgvalue.call(this, section) == 'overseas' ? 'overseas' : 'cn';
+		};
+		o.write = function(section, value) {
+			var opt = this;
+			var overseas = value == 'overseas';
+
+			return api.dialog({
+				title: overseas ? _('Switch to Outside China?') : _('Switch to China?'),
+				text: overseas
+					? _('With Outside China selected, websites and IP addresses in mainland China are also routed through proxy nodes. Don\'t choose this while you\'re in mainland China, or local websites and apps will slow down noticeably and some services may stop working.')
+					: _('With China selected, websites and IP addresses in mainland China connect directly instead of through proxy nodes. Don\'t choose this while you\'re outside China, or access to mainland China services may be restricted.'),
+				cancel: true,
+				ok: overseas ? _('Switch to Outside China') : _('Switch to China')
+			}).then(function(confirmed) {
+				if (confirmed)
+					return form.ListValue.prototype.write.call(opt, section, value);
+			});
+		};
+		api.skinListValue(o);
+
 		o = s.option(form.ListValue, 'mode', _('Proxy mode'));
 		o.value('tproxy', _('TPROXY'));
 		o.value('tun', _('TUN'));
@@ -355,8 +381,8 @@ return view.extend({
 		api.skinFlag(o);
 
 		o = s.option(form.Flag, 'router_proxy', _('Proxy the router itself'),
-			_('Also send traffic originating on the router through the kernel.'));
-		o.default = '0';
+			_('Also send traffic originating on the router through the kernel. Turn this off if the router runs WireGuard, Tailscale, DDNS, or similar services; otherwise they stop working when the node fails.'));
+		o.default = '1';
 		o.rmempty = false;
 		api.skinFlag(o);
 

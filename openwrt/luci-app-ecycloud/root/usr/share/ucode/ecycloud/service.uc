@@ -11,9 +11,9 @@ import * as profile from 'ecycloud.profile';
 import * as statistics from 'ecycloud.statistics';
 import * as release from 'ecycloud.release';
 
-import { API_FILE, CONF_DIR, DELAY_FILE, KICK_FILE, PROFILE_FILE, RUN_ROOT, SPEED_FILE, STATE_DIR,
-		 coreRunning, creds, ensurePrivateDir, instances, log, panelDirectHosts, randomHex, sessionBinding, sessionKey, sessionValid, touchAccountDir,
-		 markKicked, readJson, setError, setState, settings, shellquote, state,
+import { API_FILE, CONF_DIR, DELAY_FILE, KICK_FILE, PROFILE_FILE, RUNTIME_VIEW, RUN_ROOT, SPEED_FILE, STATE_DIR,
+		 commitConfig, coreRunning, creds, ensurePrivateDir, freeKiB, instances, log, panelDirectHosts, randomHex, sessionBinding, sessionKey, sessionValid, touchAccountDir,
+		 markKicked, readJson, setError, setState, settings, shellquote, state, timestamp,
 		 writeJson, writePrivateJson } from 'ecycloud.common';
 
 const SELECTOR_FILE = `${CONF_DIR}/selectors.json`;
@@ -26,7 +26,7 @@ const UPDATE_KEEP = 8;
 const UPDATE_INTERRUPTED = '后台更新已中断，请重试';
 const INIT = '/etc/init.d/ecycloud';
 
-/* 与面板 /user/speed-test 同一口径：同账号同节点 1 小时 5 次成功，超级管理员（id=1）不限 */
+/* 与面板 /user/speed-test 同一口径：同账号同节点 1 小时 5 次成功，面板标记 speed_test_unlimited 的账号（超级管理员）不限 */
 const SPEED_LIMIT = 5;
 const SPEED_WINDOW = 3600;
 /* 内核自己按 10 并发分批测整组，客户端取 8：再高就互相抢带宽把延迟测虚高 */
@@ -119,7 +119,7 @@ export function applySelectors() {
 };
 
 function speedUnlimited() {
-	return +(panel.account()?.id ?? 0) == 1;
+	return panel.account()?.speed_test_unlimited == true;
 };
 
 function speedStamps() {
@@ -245,7 +245,7 @@ export function collectGarbage() {
 
 /* tmpfs 里这些结果只属于刚退出的账号，必须在切换锁内删完，新账号才不会读到 */
 function dropAccountState() {
-	for (let path in [ API_FILE, DELAY_FILE, SPEED_FILE, UPDATE_FILE, KICK_FILE ])
+	for (let path in [ API_FILE, DELAY_FILE, SPEED_FILE, UPDATE_FILE, KICK_FILE, RUNTIME_VIEW ])
 		unlink(path);
 	for (let name in (lsdir(STATE_DIR) ?? []))
 		if (match(name, /^(req|resp)-[a-f0-9]+\.(json|conf|err)$/))
@@ -254,6 +254,11 @@ function dropAccountState() {
 	rmdir(SPEED_LOCK);
 	rmdir(UPDATE_LOCK);
 };
+
+/* 缺 geodata 时内核按 geox-url 现下 geoip.metadb 与 GeoSite.dat（约 12 MiB），规则用到 ASN 还要 ASN.mmdb（约 7.5 MiB）；
+   已有 geodata 只留规则集与缓存的余量。写满会让 uci 把配置写成空文件 */
+const GEODATA_RESERVE_KIB = 24 * 1024;
+const RUN_RESERVE_KIB = 4 * 1024;
 
 /* geodata 与账号无关，存一份共享，再硬链接进账号目录；回收账号目录不会删掉它 */
 const GEO_DIR = `${CONF_DIR}/geodata`;
@@ -292,6 +297,13 @@ export function prepare(retrying) {
 	shareGeodata(settings().runDir);
 	collectGarbage();
 
+	const need = profile.geodataMissing(cfg.runDir) ? GEODATA_RESERVE_KIB : RUN_RESERVE_KIB;
+	const free = freeKiB(CONF_DIR);
+	if (free != null && free < need) {
+		setError(sprintf('存储空间不足：路由器剩余 %d MiB，启动至少需要 %d MiB，请清理存储或扩容后重试', int(free / 1024), need / 1024));
+		return false;
+	}
+
 	setState('preparing', '正在准备内核配置');
 
 	let cached = profile.cached(access(profile.PENDING_FILE));
@@ -316,7 +328,11 @@ export function prepare(retrying) {
 			return false;
 		}
 		if (!profile.authorized({ ...fetched.data, binding: sessionBinding() })) {
-			setError('配置离线授权无效，请刷新配置');
+			/* 没有硬件时钟的路由器开机时系统时间落后于面板签发时间，校时完成前不能当成授权无效而放弃自动连接 */
+			if (timestamp(fetched.data.offline_authorization?.issued_at) > time())
+				setState('failed', '', '系统时间早于面板签发配置的时间，校时后将自动重试', true);
+			else
+				setError('配置离线授权无效，请刷新配置');
 			return false;
 		}
 		cached = fetched.data;
@@ -369,7 +385,7 @@ export function standby() {
 function applyKick(account) {
 	const uci = cursor();
 	uci.set('ecycloud', 'config', 'enabled', '0');
-	uci.commit('ecycloud');
+	commitConfig(uci);
 	const reason = account?.data?.device_kick_reason ?? 'limit';
 	markKicked(reason);
 	standby();
@@ -417,7 +433,7 @@ export function deactivate() {
 export function block(reason) {
 	const uci = cursor();
 	uci.set('ecycloud', 'config', 'enabled', '0');
-	uci.commit('ecycloud');
+	commitConfig(uci);
 	writePrivateJson(BLOCK_FILE, { reason });
 	unlink(PROFILE_FILE);
 	unlink(profile.PENDING_FILE);
@@ -537,7 +553,7 @@ export function cleanup() {
 /* 不等旧服务停下：内核只认当前账号目录。带节点凭据的配置随后删掉，规则集与缓存留给同账号下次登录 */
 function retire(dir) {
 	const uci = cursor();
-	if (!uci.set('ecycloud', 'config', 'enabled', '0') || !uci.commit('ecycloud'))
+	if (!uci.set('ecycloud', 'config', 'enabled', '0') || !commitConfig(uci))
 		log('warning', 'connection flag not cleared');
 	system(`(trap "" HUP; /usr/libexec/ecycloud-ctl retire ${shellquote(dir)}) >/dev/null 2>&1 &`);
 };
@@ -991,12 +1007,13 @@ export function runRuleProviders() {
 
 export function update(force, accountResponse, locale) {
 	const cfg = settings();
+	const session = panel.session();
 
-	if (!panel.session().logged_in)
+	if (!session.logged_in)
 		return { ok: false, error: '尚未登录面板' };
 
-	const cached = profile.cached();
 	const account = accountResponse ?? panel.refreshAccount(null, null, locale);
+	const cached = profile.cached();
 	if (account.restricted) {
 		block(account.msg);
 		return { ok: false, error: account.msg };
@@ -1027,7 +1044,7 @@ export function update(force, accountResponse, locale) {
 	const checked = profile.inspect(fetched.data.config);
 	if (!checked.ok)
 		return { ok: false, error: checked.error };
-	if (!profile.authorized({ ...fetched.data, binding: cached?.binding ?? sessionBinding() }))
+	if (panel.session().id != session.id || !profile.authorized({ ...fetched.data, binding: sessionBinding() }))
 		return { ok: false, error: '配置离线授权无效，请刷新配置' };
 
 	if (speedReady && sprintf('%J', fetched.data.config) == sprintf('%J', cached?.config)) {
@@ -1212,10 +1229,13 @@ export function refresh() {
 	let identityAt = 0;
 	let accountAt = 0;
 	let prepared = false;
+	let connected = false;
 
 	while (!stopping() && panel.session().logged_in) {
 		const cfg = settings();
 		const alive = coreRunning() && clash.ready();
+		const wasConnected = connected;
+		connected = alive && cfg.enabled && network.applied()?.active == true;
 		if (alive && access(profile.PENDING_FILE)) {
 			const pending = profile.cached(true);
 			if (pending == null || (+(instances().core?.pid ?? 0) != pending.pending_pid && !profile.store(pending))) {
@@ -1234,7 +1254,6 @@ export function refresh() {
 			identityAt = 0;
 			accountAt = 0;
 		} else {
-			const connected = cfg.enabled && network.applied()?.active == true;
 			if (identityAt == 0 || time() - identityAt >= 60) {
 				panel.touchIdentity(connected);
 				identityAt = time();
@@ -1269,7 +1288,7 @@ export function refresh() {
 			}
 		}
 		if (alive)
-			release.checkPeriodic();
+			release.checkPeriodic(connected && !wasConnected);
 		sleep(alive ? 5000 : 1000);
 	}
 };
@@ -1286,7 +1305,11 @@ export function watchdog() {
 
 	while (!stopping()) {
 		if (!panel.session().logged_in) {
+			/* 会话被面板吊销与主动退出一样，带节点凭据的配置不能留在盘上 */
+			const dir = instances().core?.dir;
 			block('登录已失效，请重新登录');
+			if (dir)
+				retire(dir);
 			break;
 		}
 		const cfg = settings();

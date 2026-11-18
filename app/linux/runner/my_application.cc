@@ -155,12 +155,15 @@ static void my_application_activate(GApplication* application) {
   // Requires the view to be realized so we can start rendering.
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
-  gtk_widget_realize(GTK_WIDGET(view));
 
+  // 必须先于 realize 连接：引擎在 realize 时给窗口接的 delete-event 处理函数恒返回 TRUE，
+  // 接在它后面的处理函数永远收不到事件（窗口尺寸不落盘、关闭到托盘失效）
   g_signal_connect(window, "delete-event", G_CALLBACK(on_persist_window_size),
                    nullptr);
 
   self->platform_channel = platform_channel_new(view, window);
+
+  gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 

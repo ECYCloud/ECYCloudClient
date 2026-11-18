@@ -135,18 +135,9 @@ String _transact(String pipeName, String serviceName, String requestLine) {
   int handle = _invalidHandleValue;
 
   try {
-    handle = createFile(
-      name,
-      _genericRead | _genericWrite,
-      0,
-      nullptr,
-      _openExisting,
-      _securityIdentification,
-      0,
-    );
-
-    if (handle == _invalidHandleValue && getLastError() == _errorPipeBusy) {
-      waitNamedPipe(name, _connectTimeoutMs);
+    // 服务端同一时刻只挂一个待连接实例，WaitNamedPipe 放行后会被并发请求抢走，须在时限内反复等
+    final Stopwatch waited = Stopwatch()..start();
+    while (true) {
       handle = createFile(
         name,
         _genericRead | _genericWrite,
@@ -156,6 +147,14 @@ String _transact(String pipeName, String serviceName, String requestLine) {
         _securityIdentification,
         0,
       );
+      if (handle != _invalidHandleValue || getLastError() != _errorPipeBusy) {
+        break;
+      }
+      final int remaining = _connectTimeoutMs - waited.elapsedMilliseconds;
+      if (remaining <= 0) {
+        break;
+      }
+      waitNamedPipe(name, remaining);
     }
 
     if (handle == _invalidHandleValue) {

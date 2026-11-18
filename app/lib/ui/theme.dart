@@ -46,6 +46,13 @@ class AppTheme {
   // 全局 compact 会让紧约束退化成松约束，盒子按内容缩小并脱离右侧那一列。
   static double get minTapTarget => isTouch ? 48 : pointerTapTarget;
 
+  // 小图标键的按压轮廓两端都是 32。触控端的 48 点击范围由 Material 的触控补边提供
+  // （ThemeData.materialTapTargetSize 在触控端默认 padded），布局照旧占 48。
+  static const BoxConstraints iconButtonBox = BoxConstraints.tightFor(
+    width: pointerTapTarget,
+    height: pointerTapTarget,
+  );
+
   static ButtonStyle _tonalPill(Color cta) =>
       FilledButton.styleFrom(
         backgroundColor: Colors.transparent,

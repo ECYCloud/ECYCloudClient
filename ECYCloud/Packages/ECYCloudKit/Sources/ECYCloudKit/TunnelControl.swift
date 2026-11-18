@@ -3,7 +3,7 @@ import CryptoKit
 import Observation
 
 public struct TunnelCommand: Codable, Sendable {
-    public enum Action: String, Codable, Sendable { case snapshot, logs, select, close, closeAll, mode, probe, probes, logging, version, rules, geodata }
+    public enum Action: String, Codable, Sendable { case snapshot, logs, select, close, closeAll, mode, probe, probes, logging, version, rules, geodata, nodes }
     public let action: Action
     public let page: Int
     public let group: String
@@ -92,6 +92,15 @@ struct SpeedTestAllowance: Decodable, Sendable {
     private func saveQuota() {
         guard let quotaScope else { return }
         defaults?.set(speedStamps, forKey: quotaScope)
+    }
+    // 手动选的节点与测速额度同一账户范围落盘：带 default-selected 的配置关掉了内核的 store-selected，不存就每次回到默认节点
+    private var selectionScope: String? { quotaScope.map { "apple.node-selections." + $0.dropFirst("apple.speed-quota.".count) } }
+    func savedSelections() -> [String: String] {
+        selectionScope.flatMap { defaults?.dictionary(forKey: $0) as? [String: String] } ?? [:]
+    }
+    func saveSelections(_ selections: [String: String]) {
+        guard let selectionScope else { return }
+        defaults?.set(selections, forKey: selectionScope)
     }
     public func result(_ node: String, kind: NodeProbe.Kind) -> NodeProbe? { values[kind.rawValue + "/" + node] }
     public func isTesting(_ node: String, kind: NodeProbe.Kind) -> Bool { testing.contains(kind.rawValue + "/" + node) }
@@ -193,7 +202,7 @@ extension ClientSession {
         try Task.checkCancellation()
         guard generation == nodeProbes.generation else { throw CancellationError() }
         nodeProbes.measuringSpeed = true; ownsSpeedLane = true
-        let unlimited = profile?.id == 1
+        let unlimited = profile?.speedTestUnlimited == true
         let localBlocked = pending.filter { !unlimited && !nodeProbes.canTestSpeed($0) }
         let reserving = pending.filter { !localBlocked.contains($0) }
         for name in localBlocked { nodeProbes.testing.remove("speed/" + name) }

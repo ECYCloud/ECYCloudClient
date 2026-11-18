@@ -9,6 +9,7 @@ class LocalTemplateOptions {
     required this.allowLan,
     required this.ipv6Enabled,
     required this.logLevel,
+    this.proxyChina = false,
     this.authenticateMixedPort = false,
     this.routeMode = 'rule',
     this.tunInterfaceName = defaultTunInterfaceName,
@@ -30,6 +31,7 @@ class LocalTemplateOptions {
   final bool allowLan;
   final bool ipv6Enabled;
   final String logLevel;
+  final bool proxyChina;
   final bool authenticateMixedPort;
   final String routeMode;
   final String tunInterfaceName;

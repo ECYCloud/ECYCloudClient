@@ -4,12 +4,7 @@
 'require poll';
 'require ecycloud.api as api';
 
-function haystack(item) {
-	return [
-		item.host, item.destination_ip, item.destination_port,
-		item.process, item.rule, item.network, item.inbound
-	].concat(item.chains || []).join(' ').toLowerCase();
-}
+var PAGE_SIZE = 100;
 
 function target(item) {
 	var host = String(item.host || '').trim();
@@ -81,65 +76,67 @@ return view.extend({
 	handleReset: null,
 
 	load: function() {
+		var self = this;
+		var detail = this.detail && this.detail.node.isConnected ? this.detail.item.id : '';
+
 		return api.status().then(function(status) {
 			if (!api.signedIn(status))
-				return [ status, { connections: [] } ];
+				return [ status, { connections: [] }, '' ];
 
-			return api.connections().then(function(conns) {
-				return [ status, conns ];
+			return api.connections(self.scope || 'all', self.keyword || '', self.page || 1, PAGE_SIZE, detail).then(function(conns) {
+				return [ status, conns, detail ];
 			});
 		});
 	},
 
 	refresh: function() {
-		return this.load().then(L.bind(this.update, this));
+		var request = this.request = (this.request || 0) + 1;
+
+		return this.load().then(L.bind(function(data) {
+			if (request == this.request)
+				this.update(data);
+		}, this));
+	},
+
+	turn: function(page) {
+		this.page = page;
+		return this.refresh();
 	},
 
 	update: function(data) {
 		this.signedIn = api.signedIn(data[0]);
 		this.running = !!(data[0] && data[0].running);
-		this.store = api.ingestConnections((data[1] && data[1].connections) || []);
-		this.at = +((data[1] && data[1].at) || 0);
-		this.error = (data[1] && data[1].error) || '';
+		this.reply = data[1] || {};
+		this.page = this.reply.page || 1;
+		this.at = +(this.reply.at || 0);
+		this.error = this.reply.error || '';
 		this.paint();
-		this.refreshDetail();
+		this.refreshDetail(data[2]);
 	},
 
 	rows: function() {
-		var store = this.store || { active: [], closed: [] };
-		var keyword = (this.keyword || '').toLowerCase();
-		var scope = this.scope || 'all';
-		var list = [];
-
-		if (scope != 'closed')
-			store.active.forEach(function(item) {
-				list.push({ item: item, active: true });
-			});
-
-		if (scope != 'active')
-			store.closed.forEach(function(item) {
-				list.push({ item: item, active: false });
-			});
-
-		if (keyword)
-			list = list.filter(function(row) {
-				return haystack(row.item).indexOf(keyword) != -1;
-			});
-
-		list.sort(function(a, b) {
-			return startedAt(b.item) - startedAt(a.item);
+		return ((this.reply || {}).connections || []).map(function(item) {
+			return { item: item, active: item.active === true };
 		});
-
-		return list;
 	},
 
-	matchCount: function(items, keyword) {
-		if (!keyword)
-			return items.length;
+	renderPager: function(total) {
+		var reply = this.reply || {};
 
-		return items.filter(function(item) {
-			return haystack(item).indexOf(keyword) != -1;
-		}).length;
+		if (!(reply.pages > 1))
+			return '';
+
+		return E('div', { 'class': 'ecycloud-toolbar' }, [
+			api.pressable('ecycloud-jump', {
+				disabled: reply.page <= 1,
+				click: L.bind(this.turn, this, reply.page - 1)
+			}, [ _('Previous page') ]),
+			E('span', { 'class': 'ecycloud-row-sub' }, [ _('%d / %d · %d items').format(reply.page, reply.pages, total) ]),
+			api.pressable('ecycloud-jump', {
+				disabled: reply.page >= reply.pages,
+				click: L.bind(this.turn, this, reply.page + 1)
+			}, [ _('Next page') ])
+		]);
 	},
 
 	paint: function() {
@@ -172,15 +169,20 @@ return view.extend({
 			return;
 		}
 
-		dom.content(this.body, E('div', { 'class': 'ecycloud-list' }, rows.map(L.bind(this.renderRow, this))));
+		var matched = (this.reply || {}).matched || {};
+		var scope = this.scope || 'all';
+
+		dom.content(this.body, E('div', {}, [
+			E('div', { 'class': 'ecycloud-list' }, rows.map(L.bind(this.renderRow, this))),
+			this.renderPager((scope == 'closed' ? 0 : +matched.active || 0) + (scope == 'active' ? 0 : +matched.closed || 0))
+		]));
 		this.paintFilter();
 	},
 
 	paintFilter: function() {
-		var store = this.store || { active: [], closed: [] };
-		var keyword = (this.keyword || '').toLowerCase();
-		var active = this.matchCount(store.active, keyword);
-		var closed = this.matchCount(store.closed, keyword);
+		var matched = (this.reply || {}).matched || {};
+		var active = +matched.active || 0;
+		var closed = +matched.closed || 0;
 
 		dom.content(this.filterBar, api.segments([
 			{ value: 'all', label: _('All %d').format(active + closed) },
@@ -188,7 +190,7 @@ return view.extend({
 			{ value: 'closed', label: _('Closed %d').format(closed) }
 		], this.scope || 'all', L.bind(function(value) {
 			this.scope = value;
-			this.paint();
+			this.turn(1);
 		}, this)));
 	},
 
@@ -293,9 +295,8 @@ return view.extend({
 		api.isolate(node);
 	},
 
-	refreshDetail: function() {
+	refreshDetail: function(requested) {
 		var detail = this.detail;
-		var store = this.store;
 
 		if (!detail)
 			return;
@@ -305,13 +306,9 @@ return view.extend({
 			return;
 		}
 
-		if (detail.active && this.at != detail.at) {
-			var find = function(list) {
-				return list.filter(function(item) {
-					return item.id == detail.item.id;
-				})[0];
-			};
-			var live = find(store.active);
+		if (detail.active && this.at != detail.at && requested == detail.item.id) {
+			var found = this.reply.detail;
+			var live = found && found.active === true ? found : null;
 			var seconds = this.at - detail.at;
 
 			if (live) {
@@ -323,7 +320,7 @@ return view.extend({
 				detail.item = live;
 			}
 			else {
-				detail.item = find(store.closed) || detail.item;
+				detail.item = found || detail.item;
 				detail.active = false;
 				detail.speed = { up: 0, down: 0 };
 			}
@@ -362,7 +359,8 @@ return view.extend({
 			});
 			search.addEventListener('input', function() {
 				self.keyword = search.value.trim();
-				self.paint();
+				window.clearTimeout(self.searchTimer);
+				self.searchTimer = window.setTimeout(L.bind(self.turn, self, 1), 300);
 			});
 
 			self.update(data);

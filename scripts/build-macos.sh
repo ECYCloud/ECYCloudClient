@@ -195,11 +195,17 @@ install -m 0755 "$script_dir/installer/macos/scripts/preinstall" "$work_dir/scri
 install -m 0755 "$script_dir/installer/macos/scripts/postinstall" "$work_dir/scripts/postinstall"
 
 # 载荷由非 root 构建，ownership recommended 让安装时统一落成 root:wheel
+# helper 只认 /Applications/ECYCloud.app：不随已装应用的位置迁移；原生包与本包装到同一路径、版本号各自递增，
+# 按版本比较时安装器报成功却不替换已装的较高版本
+pkgbuild --analyze --root "$stage_dir" "$work_dir/components.plist"
+plutil -replace 0.BundleIsRelocatable -bool false "$work_dir/components.plist"
+plutil -replace 0.BundleIsVersionChecked -bool false "$work_dir/components.plist"
 pkgbuild --root "$stage_dir" \
     --install-location / \
     --identifier com.ecycloud.client \
     --version "$version" \
     --ownership recommended \
+    --component-plist "$work_dir/components.plist" \
     --scripts "$work_dir/scripts" \
     "$work_dir/component.pkg"
 

@@ -87,20 +87,8 @@ function logText(data) {
 	return data.log || '';
 }
 
-function inboundTypes(conns) {
-	var store = api.ingestConnections((conns && conns.connections) || []);
-	var types = {};
-
-	store.closed.slice().reverse().concat(store.active).forEach(function(item) {
-		if (item.inbound)
-			types[api.connectionSource(item)] = item.inbound;
-	});
-
-	return types;
-}
-
 function fetchLogs() {
-	return Promise.all([ api.logs(LINES), api.connections() ]);
+	return api.logs(LINES);
 }
 
 return view.extend({
@@ -114,7 +102,7 @@ return view.extend({
 		return api.status().then(function(status) {
 			self.signedIn = api.signedIn(status);
 			if (!self.signedIn)
-				return [ '', null ];
+				return '';
 
 			return fetchLogs();
 		});
@@ -195,8 +183,8 @@ return view.extend({
 	},
 
 	update: function(data) {
-		this.raw = logText(data[0]);
-		this.inbound = inboundTypes(data[1]);
+		this.raw = logText(data);
+		this.inbound = (data && data.inbound) || {};
 		this.paint();
 	},
 

@@ -64,6 +64,7 @@ class UserProfile {
     required this.connectorLimit,
     required this.onlineDeviceCount,
     this.onlineDeviceSelf = false,
+    this.speedTestUnlimited = false,
     required this.money,
     required this.lastDayT,
     required this.lastCheckInTime,
@@ -99,6 +100,7 @@ class UserProfile {
     connectorLimit: (json['node_connector'] as num?)?.toInt() ?? 0,
     onlineDeviceCount: (json['online_client_count'] as num?)?.toInt() ?? 0,
     onlineDeviceSelf: json['online_client_self'] == true,
+    speedTestUnlimited: json['speed_test_unlimited'] == true,
     money: (json['money'] as num?)?.toDouble() ?? 0,
     lastDayT: (json['last_day_t'] as num?)?.toInt() ?? 0,
     lastCheckInTime: _checkInTimeText(json['last_check_in_time']),
@@ -141,6 +143,8 @@ class UserProfile {
   final int connectorLimit;
   final int onlineDeviceCount;
   final bool onlineDeviceSelf;
+  // 面板按超级管理员下发：测速不限次数，本地额度预判跳过；面板仍是权威
+  final bool speedTestUnlimited;
   final double money;
   final int lastDayT;
   final String lastCheckInTime;
@@ -187,7 +191,9 @@ class UserProfile {
       classExpire != null && classExpire!.isBefore(DateTime.now());
 
   bool get deviceLimitReached =>
-      connectorLimit > 0 && onlineDeviceCount >= connectorLimit && !onlineDeviceSelf;
+      connectorLimit > 0 &&
+      onlineDeviceCount >= connectorLimit &&
+      !onlineDeviceSelf;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -205,6 +211,7 @@ class UserProfile {
     'node_connector': connectorLimit,
     'online_client_count': onlineDeviceCount,
     'online_client_self': onlineDeviceSelf,
+    'speed_test_unlimited': speedTestUnlimited,
     'money': money,
     'last_day_t': lastDayT,
     'last_check_in_time': lastCheckInTime,

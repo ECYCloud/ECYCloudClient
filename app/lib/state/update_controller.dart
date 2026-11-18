@@ -23,14 +23,17 @@ class UpdateController extends ChangeNotifier {
   UpdateController({
     required ConnectionController connection,
     required PlatformService platform,
+    String? Function()? siteOrigin,
   }) : _connection = connection,
-       _platform = platform;
+       _platform = platform,
+       _siteOrigin = siteOrigin ?? (() => null);
 
-  static const Duration interval = Duration(hours: 24);
+  static const Duration interval = Duration(hours: 1);
   static const String _source = 'update';
 
   final ConnectionController _connection;
   final PlatformService _platform;
+  final String? Function() _siteOrigin;
 
   Timer? _timer;
   Timer? _githubRetryTimer;
@@ -138,7 +141,7 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<bool> githubReachable() async {
-    if (_disposed || !updateNetworkReady || _githubRateLimit != null) {
+    if (_disposed || !updateNetworkReady || _currentRateLimit() != null) {
       return false;
     }
     final http.Client client = _httpClient();
@@ -172,11 +175,46 @@ class UpdateController extends ChangeNotifier {
     return '$app$kernel';
   }
 
+  static File get _lastCheck =>
+      File('${AppPaths.updates.path}${Platform.pathSeparator}last-check');
+
+  Duration _untilNextCheck() {
+    final File file = _lastCheck;
+    final int? last = file.existsSync()
+        ? int.tryParse(file.readAsStringSync().trim())
+        : null;
+    if (last == null) {
+      return Duration.zero;
+    }
+    final Duration since = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(last),
+    );
+    return since.isNegative || since >= interval
+        ? Duration.zero
+        : interval - since;
+  }
+
+  void _checkOnSchedule() {
+    _timer = Timer.periodic(interval, (_) => unawaited(checkAll()));
+    unawaited(checkAll());
+  }
+
   void start() {
     _networkReady = updateNetworkReady;
     _connection.addListener(_onConnectionChanged);
-    unawaited(loadKernelVersion().then((_) => checkAll()));
-    _timer = Timer.periodic(interval, (_) => unawaited(checkAll()));
+    unawaited(
+      loadKernelVersion().then((_) {
+        if (_disposed) return;
+        final Duration wait = updateNetworkReady
+            ? Duration.zero
+            : _untilNextCheck();
+        if (wait == Duration.zero) {
+          _checkOnSchedule();
+        } else {
+          _timer = Timer(wait, _checkOnSchedule);
+        }
+      }),
+    );
   }
 
   @override
@@ -190,7 +228,7 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<void> checkAll() async {
-    if (_disposed || _checking || _githubRateLimit != null) {
+    if (_disposed || _checking || _currentRateLimit() != null) {
       return;
     }
     _checking = true;
@@ -198,6 +236,11 @@ class UpdateController extends ChangeNotifier {
     try {
       await checkApp();
       await checkKernel();
+      if (!_disposed && !_retryWhenConnected) {
+        _lastCheck.writeAsStringSync(
+          '${DateTime.now().millisecondsSinceEpoch}',
+        );
+      }
     } finally {
       _checking = false;
       final bool retry =
@@ -216,9 +259,12 @@ class UpdateController extends ChangeNotifier {
     if (_disposed) return;
     http.Client? client;
     try {
-      if (_githubRateLimit case final limited?) throw limited;
+      if (_currentRateLimit() case final limited?) throw limited;
       client = _httpClient();
-      final AppUpdate update = await AppUpdate.check(client: client);
+      final AppUpdate update = await AppUpdate.check(
+        client: client,
+        siteOrigin: _siteOrigin(),
+      );
       if (_disposed) return;
       _app = update;
       _appError = null;
@@ -240,11 +286,12 @@ class UpdateController extends ChangeNotifier {
     try {
       final String current = await _connection.kernelVersion();
       if (_disposed) return;
-      if (_githubRateLimit case final limited?) throw limited;
+      if (_currentRateLimit() case final limited?) throw limited;
       client = _httpClient();
       final KernelUpdate update = await KernelUpdate.check(
         current,
         client: client,
+        siteOrigin: _siteOrigin(),
       );
       if (_disposed) return;
       _kernel = update;
@@ -267,6 +314,17 @@ class UpdateController extends ChangeNotifier {
       client?.close();
     }
     notifyListeners();
+  }
+
+  // Timer 按单调时钟计时，设备休眠期间不走，重试点以墙上时间为准
+  GithubReleaseException? _currentRateLimit() {
+    final DateTime? retryAt = _githubRateLimit?.retryAt;
+    if (retryAt != null && !DateTime.now().isBefore(retryAt)) {
+      _githubRateLimit = null;
+      _githubRetryTimer?.cancel();
+      _githubRetryTimer = null;
+    }
+    return _githubRateLimit;
   }
 
   void _recordGithubRateLimit(Object error) {
@@ -523,10 +581,10 @@ class UpdateController extends ChangeNotifier {
       _retryAfterCheck = true;
       return;
     }
-    if (!_retryWhenConnected) {
+    // 改一次设置内核就重启一次：上次检查成功还没满一个间隔就不再查，同节点用户共用 GitHub 未登录接口的配额
+    if (!_retryWhenConnected && _untilNextCheck() > Duration.zero) {
       return;
     }
-    _retryWhenConnected = false;
     unawaited(checkAll());
   }
 }

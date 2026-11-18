@@ -444,14 +444,15 @@ func validSessionKey(key string) bool {
 }
 
 func (s *server) releaseKernel() error {
+	// 先还原：停内核失败就返回的话，系统代理会一直指向失效端口
+	if err := s.proxy.restore(); err != nil {
+		logf("还原系统代理失败，快照保留待下次还原: %v", err)
+	}
 	if err := s.kernel.stop(); err != nil {
 		return fmt.Errorf("停止旧内核失败: %w", err)
 	}
 	if s.kernel.status(0).Running {
 		return fmt.Errorf("旧内核尚未退出")
-	}
-	if err := s.proxy.restore(); err != nil {
-		logf("还原系统代理失败，快照保留待下次还原: %v", err)
 	}
 	s.kernel = newKernelManager()
 	return nil
@@ -484,12 +485,12 @@ func dropRuntimeSecrets(dir string) {
 		return
 	}
 	for _, entry := range entries {
-		name := entry.Name()
+		name := strings.TrimSuffix(entry.Name(), ".tmp")
 		if name != "config.json" && name != "config.check.json" &&
 			!(strings.HasPrefix(name, "ecy-panel-") && strings.HasSuffix(name, ".json")) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
 			logf("删除运行密钥失败: %v", err)
 		}
 	}

@@ -37,4 +37,24 @@ void main() {
     expect(profile.remaining, 0);
     expect(profile.transferEnable - profile.used, -600);
   });
+
+  test('测速不限次只认面板下发的标记，不认用户 ID 1', () {
+    final UserProfile idOne = UserProfile.fromJson(<String, dynamic>{
+      'id': 1,
+      'email': 'a@b.c',
+    });
+    final UserProfile flagged = UserProfile.fromJson(<String, dynamic>{
+      'id': 42,
+      'email': 'root@b.c',
+      'speed_test_unlimited': true,
+    });
+
+    expect(idOne.speedTestUnlimited, isFalse);
+    expect(flagged.speedTestUnlimited, isTrue);
+    expect(
+      UserProfile.fromJson(flagged.toJson()).speedTestUnlimited,
+      isTrue,
+      reason: '离线缓存往返后仍保留标记',
+    );
+  });
 }

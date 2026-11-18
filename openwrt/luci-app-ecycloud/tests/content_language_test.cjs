@@ -202,7 +202,9 @@ async function main() {
             return text.replace(/主节点|node-9/g, key => received[key]);
         };
         const context = {
-            what: 'runtime', min: Math.min, max: Math.max, int: Number,
+            what: 'runtime', min: Math.min, max: Math.max, int: Number, length: value => value.length, LOG_LIMIT: 600000,
+            request: { args: {} }, STATE_DIR: '', RUNTIME_VIEW: '', ensurePrivateDir() {}, writeAtomic: (file, text) => { context.saved = text; return true; },
+            readfile: () => context.saved, stat: () => ({}), textChunk: text => ({ text }), inboundTypes: () => ({}),
             popen: () => ({ read: () => raw, close() {} }),
             profile: { cached: () => ({ node_labels: { 'node-9': 'Fixture node' }, group_labels: { '主节点': label } }),
                 runtimeConfig: () => ({ ok: true, text: raw }) },

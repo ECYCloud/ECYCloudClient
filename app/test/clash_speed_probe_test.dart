@@ -26,6 +26,38 @@ void main() {
     await clash.waitReady();
   });
 
+  test('节点文件加载完成前不报告就绪，也不读取分组与节点文件总表', () async {
+    int loads = 0;
+    final List<String> paths = <String>[];
+    final ClashApiClient clash = ClashApiClient(
+      options,
+      httpClient: MockClient((http.Request request) async {
+        paths.add(request.url.path);
+        if (request.url.path == '/providers/proxies/ecy-panel-nodes') {
+          loads++;
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'proxies': <Object>[
+                if (loads > 2)
+                  <String, String>{'name': 'node-1', 'type': 'Shadowsocks'},
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('{"proxies":{}}', 200);
+      }),
+    )..panelProviders = <String>['ecy-panel-nodes'];
+    addTearDown(clash.close);
+    await expectLater(clash.fetchProxies(), throwsA(isA<ClashApiException>()));
+    await clash.waitReady();
+    expect(loads, 3);
+    expect(paths, isNot(contains('/proxies')));
+    expect(paths, isNot(contains('/providers/proxies')));
+    await clash.fetchProxies();
+    expect(paths.last, '/proxies');
+  });
+
   test('控制接口已启动但转发未就绪时继续等待，探测不携带控制密钥', () async {
     final HttpServer proxy = await HttpServer.bind(
       InternetAddress.loopbackIPv4,

@@ -140,7 +140,7 @@ object BoxState {
                 }
                 val payload = provider.getJSONArray("payload")
                 require(payload.length() > 0) { "节点文件不能为空" }
-                val content = JSONObject().put("proxies", payload).toString()
+                val content = JSONObject().put("proxies", payload).toString().replace("\\/", "/")
                 require(content.toByteArray(Charsets.UTF_8).size <= maxRunFileBytes) { "节点文件过大" }
                 files["$name.json"] = content
                 payloadKeys.forEach { provider.remove(it) }
@@ -153,18 +153,23 @@ object BoxState {
                 require(OsConstants.S_ISREG(it.st_mode) && it.st_nlink == 1L) { "节点文件类型或链接数不可信" }
                 if (target.readText() == content) return@forEach
             }
-            val temp = File.createTempFile(".ecy-provider-", ".tmp", root)
-            try {
-                temp.writeText(content)
-                Os.rename(temp.path, target.path)
-            } finally {
-                temp.delete()
-            }
+            replaceFile(target, content)
         }
         // AOSP JSONObject 会把 / 编成 \/，mihomo 的 yaml.v3 不认该转义
         val written = if (stripped) config.toString(2).replace("\\/", "/") else raw
-        configFile(context, key).writeText(written)
+        replaceFile(configFile(context, key), written)
         return written
+    }
+
+    // 开机自启与磁贴只读落盘配置，写到一半被杀会留下半截文件
+    private fun replaceFile(target: File, content: String) {
+        val temp = File.createTempFile(".ecy-", ".tmp", target.parentFile)
+        try {
+            temp.writeText(content)
+            Os.rename(temp.path, target.path)
+        } finally {
+            temp.delete()
+        }
     }
 
     private fun stat(file: File) = try {

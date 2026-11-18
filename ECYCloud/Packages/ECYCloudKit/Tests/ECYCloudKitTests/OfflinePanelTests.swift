@@ -256,6 +256,8 @@ struct OfflinePanelTests {
             let key = api.cacheKey(token: "synthetic-token")
             #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Offline.now)?.profile.id == 7)
             #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Date(timeIntervalSince1970: 1_600_000_000))?.validUntil == nil)
+            #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Date(timeIntervalSince1970: 1_399_999_990))?.validUntil != nil)
+            #expect(cache.restore(account: "member@example.test", binding: binding, sealKey: key, now: Date(timeIntervalSince1970: 1_399_999_989))?.validUntil == nil)
         }
     }
 

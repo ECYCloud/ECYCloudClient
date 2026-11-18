@@ -83,6 +83,17 @@ void main() {
     });
   }
 
+  test('可达性探测走不占未登录配额的 /rate_limit', () async {
+    final List<Uri> requested = <Uri>[];
+    final client = MockClient((request) async {
+      requested.add(request.url);
+      return http.Response('{"resources":{"core":{"remaining":0}}}', 200);
+    });
+    addTearDown(client.close);
+    expect(await GithubRelease.reachable(client), isTrue);
+    expect(requested.single.toString(), 'https://api.github.com/rate_limit');
+  });
+
   testWidgets('更新重试共用总时限，超时中断后不再发送请求', (tester) async {
     int attempts = 0;
     int aborted = 0;
@@ -407,6 +418,102 @@ void main() {
       GithubRelease.list('example/fixture', client: client),
       throwsA(isA<GithubReleaseException>()),
     );
+  });
+
+  group('面板缓存的发布信息', () {
+    const String site = 'https://panel.example';
+    final String name = 'ECYCloud-998.0.0-${AppUpdate.assetSuffix}';
+    Map<String, Object> release(String tag, String url) => <String, Object>{
+      'tag_name': tag,
+      'published_at': '2026-11-16T00:00:00Z',
+      'prerelease': false,
+      'assets': <Object>[
+        <String, Object>{
+          'name': name,
+          'browser_download_url': url,
+          'size': 1,
+          'digest': 'sha256:00',
+        },
+      ],
+    };
+
+    test('先读面板，面板可用时不请求 GitHub', () async {
+      final List<Uri> requested = <Uri>[];
+      final client = MockClient((request) async {
+        requested.add(request.url);
+        return http.Response(
+          jsonEncode(<String, Object>{
+            'ret': 1,
+            'data': <Object>[
+              release('v998.0.0', '${AppUpdate.downloadPrefix}v998.0.0/$name'),
+            ],
+          }),
+          200,
+        );
+      });
+      addTearDown(client.close);
+      final AppUpdate update = await AppUpdate.check(
+        client: client,
+        siteOrigin: site,
+      );
+      expect(update.latest, '998.0.0');
+      expect(update.installer?.name, name);
+      expect(
+        requested.single.toString(),
+        '$site/api/client/v1/releases/client',
+      );
+      final KernelUpdate kernel = await KernelUpdate.check(
+        '1.0.0',
+        client: client,
+        siteOrigin: site,
+      );
+      expect(kernel.latest, '998.0.0');
+      expect(requested.last.toString(), '$site/api/client/v1/releases/kernel');
+    });
+
+    test('面板不可用时回落直连 GitHub', () async {
+      final List<String> hosts = <String>[];
+      final client = MockClient((request) async {
+        hosts.add(request.url.host);
+        if (request.url.host == 'panel.example') {
+          return http.Response('{"ret":0}', 503);
+        }
+        return http.Response(
+          jsonEncode(<Object>[
+            release('v998.0.0', '${AppUpdate.downloadPrefix}v998.0.0/$name'),
+          ]),
+          200,
+        );
+      });
+      addTearDown(client.close);
+      final AppUpdate update = await AppUpdate.check(
+        client: client,
+        siteOrigin: site,
+      );
+      expect(update.latest, '998.0.0');
+      expect(hosts, <String>['panel.example', 'api.github.com']);
+    });
+
+    test('安装包不在所宣称版本的 tag 下时不予安装', () async {
+      final client = MockClient(
+        (request) async => http.Response(
+          jsonEncode(<String, Object>{
+            'ret': 1,
+            'data': <Object>[
+              release('v998.0.0', '${AppUpdate.downloadPrefix}v0.1.0/$name'),
+            ],
+          }),
+          200,
+        ),
+      );
+      addTearDown(client.close);
+      final AppUpdate update = await AppUpdate.check(
+        client: client,
+        siteOrigin: site,
+      );
+      expect(update.latest, '998.0.0');
+      expect(update.installer, isNull);
+    });
   });
 
   test('同通道按号段比大小', () {

@@ -130,6 +130,41 @@ void main() {
     });
   }
 
+  test('设备休眠使恢复计时器延后时，限流按墙上时间到期，手动检查不再被拦', () async {
+    final _Connection connection = _Connection()..setConnected(true);
+    final UpdateController controller = UpdateController(
+      connection: connection,
+      platform: _Platform(),
+    );
+    int requests = 0;
+    try {
+      await HttpOverrides.runZoned(
+        () async {
+          await controller.checkApp();
+          expect(controller.appStatus, contains('HTTP 403'));
+          await controller.checkApp();
+          expect(requests, 1);
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await controller.checkApp();
+          expect(requests, 2);
+          expect(controller.appStatus, isNot(contains('HTTP 403')));
+        },
+        createHttpClient: (_) => _HttpClient(() async {
+          requests++;
+          if (requests == 1) {
+            throw GithubReleaseException(
+              'GitHub 请求过于频繁（HTTP 403）',
+              retryAt: DateTime.now().add(const Duration(milliseconds: 300)),
+            );
+          }
+        }),
+      );
+    } finally {
+      controller.dispose();
+      connection.dispose();
+    }
+  });
+
   testWidgets('限流到期时检查仍在途，结束后补查且不并发', (tester) async {
     final _Connection connection = _Connection();
     final UpdateController controller = UpdateController(
@@ -454,4 +489,146 @@ void main() {
       }),
     );
   });
+
+  File lastCheck() =>
+      File('${AppPaths.updates.path}${Platform.pathSeparator}last-check');
+
+  test('检查成功后记下时间，一个间隔内连接成功不再重复检查', () async {
+    final File marker = lastCheck();
+    if (marker.existsSync()) marker.deleteSync();
+    final _Connection connection = _Connection();
+    final UpdateController controller = UpdateController(
+      connection: connection,
+      platform: _Platform(),
+    );
+    addTearDown(() {
+      controller.dispose();
+      connection.dispose();
+      if (marker.existsSync()) marker.deleteSync();
+    });
+    int direct = 0;
+    int proxied = 0;
+
+    await HttpOverrides.runZoned(
+      () => http.runWithClient(
+        () async {
+          final int before = DateTime.now().millisecondsSinceEpoch;
+          controller.start();
+          await _settle();
+          expect(direct, 2);
+          expect(controller.appStatus, contains('1.0.0'));
+          expect(
+            int.parse(marker.readAsStringSync()),
+            greaterThanOrEqualTo(before),
+          );
+          connection.setConnected(true);
+          await _settle();
+          expect(direct, 2);
+          expect(proxied, 0);
+        },
+        () => MockClient((request) async {
+          direct++;
+          final Map<String, Object> release = <String, Object>{
+            'tag_name': 'v1.0.0',
+            'published_at': '2026-09-18T00:00:00Z',
+            'prerelease': false,
+          };
+          return http.Response(
+            jsonEncode(
+              request.url.path.endsWith('/latest')
+                  ? release
+                  : <Object>[release],
+            ),
+            200,
+          );
+        }),
+      ),
+      createHttpClient: (_) => _HttpClient(() async => proxied++),
+    );
+  });
+
+  test('检查失败不记检查时间', () async {
+    final File marker = lastCheck();
+    if (marker.existsSync()) marker.deleteSync();
+    final _Connection connection = _Connection();
+    final UpdateController controller = UpdateController(
+      connection: connection,
+      platform: _Platform(),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(connection.dispose);
+    int requests = 0;
+
+    await HttpOverrides.runZoned(() async {
+      await controller.checkAll();
+      expect(requests, 2);
+      expect(marker.existsSync(), isFalse);
+    }, createHttpClient: (_) => _HttpClient(() async => requests++));
+  });
+
+  for (final ({String name, Duration age, bool connected, bool immediate})
+      scenario
+      in <({String name, Duration age, bool connected, bool immediate})>[
+        (
+          name: '未连接且不满一小时等到满一小时',
+          age: const Duration(minutes: 50),
+          connected: false,
+          immediate: false,
+        ),
+        (
+          name: '已连接时不等待',
+          age: const Duration(minutes: 50),
+          connected: true,
+          immediate: true,
+        ),
+        (
+          name: '已满一小时不等待',
+          age: const Duration(minutes: 61),
+          connected: false,
+          immediate: true,
+        ),
+        (
+          name: '记录时间在未来不等待',
+          age: const Duration(days: -1),
+          connected: false,
+          immediate: true,
+        ),
+      ]) {
+    testWidgets('启动时按落盘的上次检查时间决定：${scenario.name}', (tester) async {
+      final File marker = lastCheck()
+        ..writeAsStringSync(
+          '${DateTime.now().subtract(scenario.age).millisecondsSinceEpoch}',
+        );
+      final _Connection connection = _Connection()
+        ..setConnected(scenario.connected);
+      final UpdateController controller = UpdateController(
+        connection: connection,
+        platform: _Platform(),
+      );
+      int requests = 0;
+      try {
+        await HttpOverrides.runZoned(() async {
+          controller.start();
+          await tester.pump();
+          if (scenario.immediate) {
+            expect(requests, 2);
+          } else {
+            expect(requests, 0);
+            await tester.pump(const Duration(minutes: 9));
+            expect(requests, 0);
+            await tester.pump(const Duration(minutes: 2));
+            expect(requests, 2);
+          }
+          await tester.pump(const Duration(minutes: 58));
+          expect(requests, 2);
+          await tester.pump(const Duration(minutes: 2));
+          expect(requests, 4);
+        }, createHttpClient: (_) => _HttpClient(() async => requests++));
+      } finally {
+        controller.dispose();
+        connection.dispose();
+        if (marker.existsSync()) marker.deleteSync();
+      }
+    });
+  }
 }

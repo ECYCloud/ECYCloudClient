@@ -53,6 +53,7 @@ class SettingsPage extends StatelessWidget {
                     icon: Icons.vpn_lock_outlined,
                     title: L10n.t('代理'),
                     children: <Widget>[
+                      _RegionTile(connection: connection),
                       if (scope.platform.supportsSystemProxy)
                         SwitchTile(
                           title: L10n.t('设置系统代理'),
@@ -234,10 +235,7 @@ class SettingsPage extends StatelessWidget {
                                     size: 24,
                                   ),
                                   visualDensity: VisualDensity.standard,
-                                  constraints: BoxConstraints.tightFor(
-                                    width: AppTheme.minTapTarget,
-                                    height: AppTheme.minTapTarget,
-                                  ),
+                                  constraints: AppTheme.iconButtonBox,
                                   padding: EdgeInsets.zero,
                                   onPressed: () =>
                                       unawaited(_openLogsDirectory(context)),
@@ -523,6 +521,59 @@ Future<bool> _confirm(
     ),
   );
   return confirmed == true;
+}
+
+class _RegionTile extends StatelessWidget {
+  const _RegionTile({required this.connection});
+
+  final ConnectionController connection;
+
+  Future<void> _change(BuildContext context, String region) async {
+    final AppSettings settings = connection.settings;
+    if (region == settings.region) {
+      return;
+    }
+    final bool overseas = region == AppSettings.regionOverseas;
+    final bool confirmed = await _confirm(
+      context,
+      title: overseas ? L10n.t('确认切换到海外？') : L10n.t('确认切换到中国？'),
+      detail: overseas
+          ? L10n.t(
+              '选择海外后，中国大陆的网站和 IP 也将经代理节点访问。身处中国大陆时请勿选择，否则国内网站、App 会明显变慢，部分服务可能无法使用。',
+            )
+          : L10n.t('选择中国后，中国大陆的网站和 IP 将直接连接，不经过代理节点。身处海外时请勿选择，否则访问中国大陆服务可能受限。'),
+      action: overseas ? L10n.t('切换到海外') : L10n.t('切换到中国'),
+    );
+    if (confirmed) {
+      await connection.updateSettings(
+        connection.settings.copyWith(region: region),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool overseas =
+        connection.settings.region == AppSettings.regionOverseas;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      title: Text(L10n.t('使用地区')),
+      subtitle: Text(
+        overseas
+            ? L10n.t('选择海外时，所有的流量都走代理（包括中国流量）。')
+            : L10n.t('选择中国时，中国的流量走直连，海外的流量走代理。'),
+        style: TextStyle(color: overseas ? scheme.error : null),
+      ),
+      trailing: OptionDropdown<String>(
+        value: connection.settings.region,
+        options: <String, String>{
+          AppSettings.regionChina: L10n.t('中国'),
+          AppSettings.regionOverseas: L10n.t('海外'),
+        },
+        onChanged: (String region) => unawaited(_change(context, region)),
+      ),
+    );
+  }
 }
 
 class _Spinner extends StatelessWidget {

@@ -50,10 +50,16 @@ class AppUpdate {
   }
 
   /// Pre 认时间线上的 tip（tip 是 Last 就回落到正式版）；Last 只跟 Last，忽略 Pre-release
-  static Future<AppUpdate> check({http.Client? client}) async {
+  static Future<AppUpdate> check({
+    http.Client? client,
+    String? siteOrigin,
+  }) async {
     final List<GithubRelease> releases = await GithubRelease.list(
       repo,
       client: client,
+      mirror: siteOrigin == null
+          ? null
+          : Uri.parse('$siteOrigin/api/client/v1/releases/client'),
     );
     final String current = AppConfig.appVersion;
     final GithubRelease? target = _isPre(current)
@@ -65,8 +71,16 @@ class AppUpdate {
     return AppUpdate(
       current: current,
       latest: target.displayVersion,
-      installer: selfInstallable ? target.assetEndingWith(assetSuffix) : null,
+      installer: selfInstallable ? _installerOf(target) : null,
     );
+  }
+
+  // 发布信息可能经面板转发：安装包必须出自所宣称版本的 tag，否则可把旧版官方包冒充成新版
+  static GithubAsset? _installerOf(GithubRelease release) {
+    final GithubAsset? asset = release.assetEndingWith(assetSuffix);
+    final String tag =
+        '${downloadPrefix}v${release.version}${release.prerelease ? '-pre' : ''}/';
+    return asset != null && asset.url.startsWith(tag) ? asset : null;
   }
 
   static String get releasesUrl => 'https://github.com/$repo/releases';

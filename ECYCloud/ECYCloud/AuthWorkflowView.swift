@@ -187,12 +187,12 @@ struct ProductAuthPanel<Content: View>: View {
     }
 
     private func form(split: Bool) -> some View {
-        let titleSize: CGFloat = split ? 30 : 28
+        let titleSize: CGFloat = split ? 30 : 24
         return VStack(spacing: 0) {
             if !split {
-                HStack(spacing: 10) {
-                    Image("ProductLogo").resizable().scaledToFit().frame(width: 28, height: 28).accessibilityHidden(true)
-                    Text("ECY Cloud").font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 12) {
+                    Image("ProductLogo").resizable().scaledToFit().frame(width: 44, height: 44).accessibilityHidden(true)
+                    Text("ECY Cloud").font(.system(size: 32, weight: .bold)).tracking(32 * -0.03)
                 }
                 .padding(.bottom, 28)
             }

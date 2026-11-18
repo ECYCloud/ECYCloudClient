@@ -65,7 +65,11 @@ Map<String, dynamic> remoteProfile() => <String, dynamic>{
   ],
 };
 
-LocalTemplate template({bool tunEnabled = true, bool ipv6Enabled = true}) {
+LocalTemplate template({
+  bool tunEnabled = true,
+  bool ipv6Enabled = true,
+  bool proxyChina = false,
+}) {
   return LocalTemplate(
     LocalTemplateOptions(
       tunEnabled: tunEnabled,
@@ -74,6 +78,7 @@ LocalTemplate template({bool tunEnabled = true, bool ipv6Enabled = true}) {
       allowLan: false,
       ipv6Enabled: ipv6Enabled,
       logLevel: 'warning',
+      proxyChina: proxyChina,
     ),
     const ClashApiOptions(port: 19090, secret: 'secret'),
   );
@@ -783,5 +788,55 @@ void main() {
     final List<String> issues = ProfileInspector.inspect(remote);
     expect(issues, anyElement(contains('node-12')));
     expect(issues, anyElement(contains('不是一行文字')));
+  });
+
+  group('使用地区', () {
+    const List<String> panelRules = <String>[
+      'RULE-SET,geosite-cn,DIRECT',
+      'GEOIP,private,DIRECT,no-resolve',
+      'GEOSITE,CN,DIRECT',
+      'GEOIP,cn,DIRECT,no-resolve',
+      'GEOIP, CN, DIRECT',
+      'GEOSITE,CN,REJECT',
+      'MATCH,主节点',
+    ];
+
+    List<Object?> assembledRules({required bool proxyChina}) {
+      final Map<String, dynamic> remote = remoteProfile()
+        ..['rules'] = List<String>.of(panelRules);
+      return const ProfileAssembler()
+              .assemble(
+                remote: remote,
+                template: template(proxyChina: proxyChina),
+              )
+              .config['rules']
+          as List<Object?>;
+    }
+
+    test('中国：面板规则原样保留', () {
+      expect(assembledRules(proxyChina: false), panelRules);
+    });
+
+    test('海外：只把 GEOSITE/GEOIP CN 的直连改走 MATCH 出站', () {
+      expect(assembledRules(proxyChina: true), <String>[
+        'RULE-SET,geosite-cn,DIRECT',
+        'GEOIP,private,DIRECT,no-resolve',
+        'GEOSITE,CN,主节点',
+        'GEOIP,cn,主节点,no-resolve',
+        'GEOIP,CN,主节点',
+        'GEOSITE,CN,REJECT',
+        'MATCH,主节点',
+      ]);
+    });
+
+    test('海外：没有 MATCH 或 MATCH 直连时不改', () {
+      const List<String> noMatch = <String>['GEOIP,CN,DIRECT'];
+      expect(ProfileAssembler.proxyChinaRules(noMatch), noMatch);
+      const List<String> directMatch = <String>[
+        'GEOIP,CN,DIRECT',
+        'MATCH,direct',
+      ];
+      expect(ProfileAssembler.proxyChinaRules(directMatch), directMatch);
+    });
   });
 }

@@ -538,6 +538,15 @@ class _ShellState extends State<Shell> {
                       : Stack(
                           children: <Widget>[
                             headed,
+                            // 点菜单以外的空白处收起
+                            if (_moreOpen)
+                              Positioned.fill(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () =>
+                                      setState(() => _moreOpen = false),
+                                ),
+                              ),
                             if (_moreOpen)
                               Align(
                                 alignment: Alignment.bottomRight,

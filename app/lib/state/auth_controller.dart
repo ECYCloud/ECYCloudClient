@@ -1014,6 +1014,8 @@ class AuthController extends ChangeNotifier {
     return (_createClient?.call(site, api, device) ??
           PanelApiClient(baseUrl: site, configBaseUrl: api, device: device))
       ..token = token
+      ..cacheBaseUrl = _asOrigin(_credentials.loadSiteOrigin())
+      ..cacheConfigBaseUrl = _asOrigin(_credentials.loadApiOrigin())
       ..onReach = _onPanelReach;
   }
 
@@ -1035,7 +1037,10 @@ class AuthController extends ChangeNotifier {
         reachable,
         bundled.site,
         _asOrigin(_credentials.loadSiteOrigin()),
-        _credentials.saveSiteOrigin,
+        (String next) {
+          _credentials.saveSiteOrigin(next);
+          _api?.cacheBaseUrl = next;
+        },
         (String next) => _siteOrigin = next,
       );
     }
@@ -1046,7 +1051,10 @@ class AuthController extends ChangeNotifier {
         reachable,
         bundled.api,
         _asOrigin(_credentials.loadApiOrigin()),
-        _credentials.saveApiOrigin,
+        (String next) {
+          _credentials.saveApiOrigin(next);
+          _api?.cacheConfigBaseUrl = next;
+        },
         (String next) => _apiOrigin = next,
       );
     }

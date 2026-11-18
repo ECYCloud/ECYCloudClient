@@ -277,6 +277,26 @@ void main() {
     });
   }
 
+  // 修复前：重启途中控制面还没接上，第二项改动只落盘不重启，内核一直跑着旧值
+  test('内核重启途中再改设置，新设置同样生效', () async {
+    seed();
+    await connection.connect();
+    final Future<void> first = connection.updateSettings(
+      connection.settings.copyWith(allowLan: true),
+    );
+    for (int i = 0; i < 100 && kernel.starts < 2; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(kernel.starts, 2);
+    await connection.updateSettings(
+      connection.settings.copyWith(ipv6Enabled: true),
+    );
+    await first;
+    expect(connection.state, ConnectionPhase.connected);
+    expect(kernel.config['allow-lan'], isTrue);
+    expect(kernel.config['ipv6'], isTrue);
+  });
+
   test('首次配置校验失败不能提交离线缓存', () async {
     client.fresh = true;
     kernel.invalid = 'invalid protocol';
@@ -1089,6 +1109,12 @@ class _Kernel implements KernelController {
               },
           ],
         },
+        final String path when path.startsWith('/providers/proxies/') =>
+          <String, Object>{
+            'proxies': <Object>[
+              <String, String>{'name': 'loaded'},
+            ],
+          },
         '/providers/proxies' => <String, Object>{
           'providers': <String, Object>{
             if ((config['proxy-providers'] as Map?)?.containsKey(

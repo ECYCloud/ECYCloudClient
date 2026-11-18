@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'touch_bleed.dart';
 import '../../l10n/l10n.dart';
 
 class DelayBadge extends StatelessWidget {
@@ -61,22 +62,25 @@ class DelayBadge extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 400),
       // 首页当前节点卡的半透明底色压在祖先 Material 的墨水层之上，会把悬停高亮吸掉，
       // 故自带一层透明 Material 让高亮画在底色之上
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: onTest,
-          borderRadius: BorderRadius.circular(AppTheme.minTapTarget / 2),
-          mouseCursor: SystemMouseCursors.click,
-          hoverColor: scheme.primary.withValues(alpha: 0.12),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minWidth: AppTheme.minTapTarget,
-              minHeight: AppTheme.minTapTarget,
-              maxHeight: AppTheme.minTapTarget,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Align(widthFactor: 1, heightFactor: 1, child: content),
+      child: TapPadding(
+        onTap: onTest,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTest,
+            borderRadius: BorderRadius.circular(AppTheme.pointerTapTarget / 2),
+            mouseCursor: SystemMouseCursors.click,
+            hoverColor: scheme.primary.withValues(alpha: 0.12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: AppTheme.pointerTapTarget,
+                minHeight: AppTheme.pointerTapTarget,
+                maxHeight: AppTheme.pointerTapTarget,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Align(widthFactor: 1, heightFactor: 1, child: content),
+              ),
             ),
           ),
         ),

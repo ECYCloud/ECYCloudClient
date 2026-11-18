@@ -4,6 +4,7 @@ import { popen, readfile } from 'fs';
 
 import { STATE_DIR, build, coreRunning, ensurePrivateDir, httpRequest, mihomoBin, readJson, settings, shellquote,
          userAgent, writePrivateJson } from 'ecycloud.common';
+import { call } from 'ecycloud.panel';
 
 const APP_REPO = 'ECYCloud/ECYCloudClient';
 const NIKKI_FEED = 'https://nikkinikki.pages.dev';
@@ -101,7 +102,34 @@ function parseRelease(entry) {
 	};
 };
 
+function parseReleases(entries) {
+	const out = [];
+
+	for (let entry in entries) {
+		const rel = parseRelease(entry);
+		if (rel)
+			push(out, rel);
+	}
+
+	sort(out, function(a, b) {
+		if (a.published == b.published)
+			return 0;
+		return a.published > b.published ? -1 : 1;
+	});
+
+	return out;
+};
+
 function listReleases(repo) {
+	const site = call('/releases/client', { anonymous: true });
+	const siteReleases = site.ok && type(site.data) == 'array' ? parseReleases(site.data) : [];
+	if (length(siteReleases))
+		return { ok: true, releases: siteReleases };
+
+	const previous = cached().app;
+	if (previous?.ok == false && +(previous.retry_at ?? 0) > time())
+		return { ok: false, error: previous.msg, retry_at: previous.retry_at };
+
 	const res = githubGet(`https://api.github.com/repos/${repo}/releases?per_page=30`);
 	if (res.status == 429 || (res.status == 403 && (res.retry_after != null || res.rate_limited))) {
 		const retryAt = max(res.retry_after != null ? time() + res.retry_after : 0, +(res.rate_limit_reset ?? 0));
@@ -113,22 +141,9 @@ function listReleases(repo) {
 	if (type(res.data) != 'array')
 		return { ok: false, error: 'GitHub 返回内容无法解析' };
 
-	const out = [];
-
-	for (let entry in res.data) {
-		const rel = parseRelease(entry);
-		if (rel)
-			push(out, rel);
-	}
-
+	const out = parseReleases(res.data);
 	if (!length(out))
 		return { ok: false, error: 'GitHub 未给出版本号' };
-
-	sort(out, function(a, b) {
-		if (a.published == b.published)
-			return 0;
-		return a.published > b.published ? -1 : 1;
-	});
 
 	return { ok: true, releases: out };
 };
@@ -142,9 +157,6 @@ function newestStable(releases) {
 
 export function checkApp() {
 	const current = build().version ?? '';
-	const previous = cached().app;
-	if (previous?.ok == false && +(previous.retry_at ?? 0) > time())
-		return previous;
 	const listed = listReleases(APP_REPO);
 	if (!listed.ok)
 		return { ok: false, msg: listed.error, retry_at: listed.retry_at };
@@ -232,13 +244,12 @@ export function checkKernel(current) {
 		outdated: length(local) > 0 && newer(latest, local)
 	};
 };
-export function checkPeriodic() {
-	const saved = cached();
-	if (time() < +(saved.next_check ?? 0))
+export function checkPeriodic(force) {
+	if (!force && time() < +(cached().next_check ?? 0))
 		return;
 	const app = checkApp();
 	const kernel = checkKernel();
 	ensurePrivateDir(STATE_DIR);
 	writePrivateJson(UPDATE_FILE, { app, kernel, checked_at: time(),
-		next_check: app.retry_at != null ? max(time(), app.retry_at) + 1 : time() + (app.ok && kernel.ok ? 86400 : 3600) });
+		next_check: app.retry_at != null ? max(time(), app.retry_at) + 1 : time() + 3600 });
 };

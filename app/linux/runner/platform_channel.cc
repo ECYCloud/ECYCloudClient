@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <glib-unix.h>
 #include <libayatana-appindicator/app-indicator.h>
 #include <libsecret/secret.h>
 
@@ -30,6 +31,7 @@ struct _PlatformChannel {
   GHashTable* cursors;
   AppIndicator* indicator;
   gboolean close_to_tray;
+  gboolean quitting;
   gboolean connected;
   gboolean busy;
   gboolean system_proxy;
@@ -196,6 +198,19 @@ static void remove_tray(PlatformChannel* self) {
   self->icon_tint = -1;
 }
 
+// 直接销毁窗口会让进程当场结束，Dart 来不及断开连接并还原 gsettings 里的系统代理；
+// 走窗口关闭请求，引擎会先问 Dart（didRequestAppExit）再退出
+static void request_quit(PlatformChannel* self) {
+  self->quitting = TRUE;
+  remove_tray(self);
+  gtk_window_close(self->window);
+}
+
+static gboolean on_terminate_signal(gpointer user_data) {
+  request_quit(static_cast<PlatformChannel*>(user_data));
+  return G_SOURCE_REMOVE;
+}
+
 static void on_menu_item_activate(GtkMenuItem* item, gpointer user_data) {
   PlatformChannel* self = static_cast<PlatformChannel*>(user_data);
   const gchar* action = static_cast<const gchar*>(
@@ -214,8 +229,7 @@ static void on_menu_item_activate(GtkMenuItem* item, gpointer user_data) {
     return;
   }
   if (g_strcmp0(action, "quit") == 0) {
-    remove_tray(self);
-    gtk_widget_destroy(GTK_WIDGET(self->window));
+    request_quit(self);
     return;
   }
 
@@ -512,7 +526,7 @@ static gboolean on_window_delete(GtkWidget* widget, GdkEvent* event,
                                  gpointer user_data) {
   PlatformChannel* self = static_cast<PlatformChannel*>(user_data);
   // 托盘不可用时不能吞掉关闭，否则窗口再也关不掉
-  if (!self->close_to_tray || self->indicator == nullptr) {
+  if (self->quitting || !self->close_to_tray || self->indicator == nullptr) {
     return FALSE;
   }
   gtk_widget_hide(widget);
@@ -703,6 +717,8 @@ PlatformChannel* platform_channel_new(FlView* view, GtkWindow* window) {
                                             nullptr);
 
   g_signal_connect(window, "delete-event", G_CALLBACK(on_window_delete), self);
+  // 注销 / 关机时会话管理器发 SIGTERM，同样要走完整退出
+  g_unix_signal_add(SIGTERM, on_terminate_signal, self);
   self->icon_tint = -1;
   return self;
 }

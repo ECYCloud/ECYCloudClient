@@ -293,12 +293,12 @@ if (length(ARGV[0])) {
 		config: { proxies: map([ 'node-1', 'node-2', 'node-3', 'node-4' ], name => ({ name, type: 'ss' })),
 			'proxy-groups': [ { name: 'G', type: 'select', proxies: [ 'node-1', 'node-2', 'node-3', 'node-4' ] } ], rules: [ 'MATCH,G' ] }
 	});
-	const shownLabels = group => `${group?.label}|${join('|', map(group?.members ?? [], member => member.label))}|${group?.now_label}`;
-	check(shownLabels(rpc.groups.call({ args: {} }).groups?.[0]) == '主节点|🇭🇰 香港 01| \t\u00a0|node-5|退|',
+	const shownLabels = listed => `${listed.groups?.[0]?.label}|${join('|', map(listed.groups?.[0]?.members ?? [], member => listed.nodes[member].label))}|${listed.groups?.[0]?.now_label}`;
+	check(shownLabels(rpc.groups.call({ args: {} })) == '主节点|🇭🇰 香港 01| \t\u00a0|node-5|退|',
 		'节点页显示名必须与 displayName 一样去掉首尾空白（含全角空格等 Unicode 空白），去空了保留原名');
 	testState.files[API_FILE] = sprintf('%J', { port: 19090, secret: 'synthetic-secret', speed: 'synthetic-speed' });
 	testState.response = { proxies: { G: { type: 'Selector', now: 'node-1', all: [ 'node-1', 'node-2', 'node-3', 'node-4' ] } } };
-	check(shownLabels(rpc.groups.call({ args: {} }).groups?.[0]) == '主节点|🇭🇰 香港 01| \t\u00a0|node-5|退|🇭🇰 香港 01',
+	check(shownLabels(rpc.groups.call({ args: {} })) == '主节点|🇭🇰 香港 01| \t\u00a0|node-5|退|🇭🇰 香港 01',
 		'内核运行时节点页与当前选中的显示名同样去掉首尾空白');
 	delete testState.files[API_FILE];
 	testState.response = null;
@@ -320,6 +320,41 @@ if (length(ARGV[0])) {
 	check(runtimeShown?.proxies?.[0]?.name == 'HK "1" \\' && runtimeShown.proxies[1].name == '' &&
 		join('|', runtimeShown['proxy-groups'][0].proxies) == 'HK "1" \\|' && runtimeShown.rules[0] == 'MATCH,HK "1" \\' &&
 		runtimeShown.rules[1] == 'DOMAIN,example.com,', '运行配置只替换带引号或逗号边界的整段标识，显示名必须按 JSON 转义');
+	testState.files['/etc/ecycloud/run/session-a/config.json'] = sprintf('%J', {
+		proxies: [ { name: 'node-1', type: 'ss' }, { name: 'node-12', type: 'ss' } ],
+		'proxy-groups': [ { name: 'G', type: 'select', proxies: [ 'node-1', 'node-1', 'node-12' ] } ],
+		rules: [ 'MATCH,node-1', 'AND,node-1,node-1,node-1,G' ]
+	});
+	labelProfile({ 'node-1': '香港', 'node-12': 'JP' }, { 'G': '主' });
+	const plainShown = json(rpc.update.call({ args: { what: 'runtime' } }).text);
+	check(join('|', plainShown['proxy-groups'][0].proxies) == '香港|香港|JP' && plainShown['proxy-groups'][0].name == '主' &&
+		plainShown.rules[0] == 'MATCH,香港' && plainShown.rules[1] == 'AND,香港,,香港,主' && testState.files['/var/run/ecycloud/runtime-view.txt'] == null,
+		'一次遍历的译名标注必须与逐条替换逐字节一致（含同一标识紧挨着时共用分隔符的那一处），取完即删暂存');
+	const bigFile = `${settings().runDir}/big.txt`;
+	let bigText = '规';
+	while (length(bigText) < 600000)
+		bigText += bigText;
+	testState.paths[settings().runDir] = settings().runDir;
+	testState.paths[bigFile] = bigFile;
+	testState.info[bigFile] = { type: 'file', size: length(bigText), mtime: 7 };
+	testState.files[bigFile] = bigText;
+	const head = rpc.update.call({ args: { what: 'rule', path: './big.txt' } });
+	const rest = rpc.update.call({ args: { what: 'rule', path: './big.txt', offset: head.next, version: head.version } });
+	check(head.ok && !head.done && length(head.text) == 524286 && head.next == 524286 && rest.done && head.text + rest.text == bigText,
+		'超过单块大小的文本必须分块返回，块边界不能切在多字节字符中间，拼接后与原文一致');
+	check(rpc.update.call({ args: { what: 'rule', path: './big.txt', offset: head.next, version: 'other' } }).stale == true, '后续分块的版本标识不符必须拒绝');
+	testState.info[bigFile].mtime = 8;
+	check(rpc.update.call({ args: { what: 'rule', path: './big.txt', offset: head.next, version: head.version } }).stale == true, '取块途中文件已变化必须让页面重取');
+	delete testState.files[bigFile];
+	delete testState.info[bigFile];
+	testState.files['/var/run/ecycloud/connections.json'] = sprintf('%J', { binding: sessionBinding(), at: 1,
+		closed: [ { id: 'c0', source_ip: 'fd00::9', source_port: '700', inbound: 'Tun' } ],
+		alive: { c1: { id: 'c1', source_ip: '192.168.1.9', source_port: '5000', inbound: 'TProxy' }, c2: { id: 'c2', source_ip: '192.168.1.9', source_port: '5001', inbound: 'TProxy' } } });
+	testState.log = 'msg="[TCP] 192.168.1.9:5000 --> a.test:443"\nmsg="[UDP] [fd00::9]:700 --> b.test:53"\nmsg="[TCP] 10.0.0.1:1 --> c.test:80"';
+	const typed = rpc.logs.call({ args: { lines: 10 } }).inbound;
+	check(typed['192.168.1.9:5000'] == 'TProxy' && typed['[fd00::9]:700'] == 'Tun' && length(keys(typed)) == 2,
+		'日志只带回本批日志里出现过的源地址的入站类型');
+	delete testState.files['/var/run/ecycloud/connections.json'];
 	delete testState.files['/etc/ecycloud/run/session-a/config.json'];
 }
 

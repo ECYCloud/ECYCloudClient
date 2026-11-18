@@ -27,8 +27,8 @@ msgstr "帳戶資訊"
 msgid "Allow LAN"
 msgstr "允許區域網路"
 
-msgid "Also send traffic originating on the router through the kernel."
-msgstr "路由器自身發出的流量也送進核心。"
+msgid "Also send traffic originating on the router through the kernel. Turn this off if the router runs WireGuard, Tailscale, DDNS, or similar services; otherwise they stop working when the node fails."
+msgstr "路由器自身發出的流量也送進核心。路由器上執行 WireGuard、Tailscale、DDNS 等服務時可關閉，否則節點故障會影響這些服務。"
 
 msgid "All"
 msgstr "全部"
@@ -122,6 +122,36 @@ msgstr "核心的 HTTP / SOCKS 代理連接埠。"
 
 msgid "Handle IPv6 traffic as well."
 msgstr "一併處理 IPv6 流量。"
+
+msgid "Region"
+msgstr "使用地區"
+
+msgid "China"
+msgstr "中國"
+
+msgid "Outside China"
+msgstr "海外"
+
+msgid "Switch to Outside China?"
+msgstr "確認切換到海外？"
+
+msgid "Switch to China?"
+msgstr "確認切換到中國？"
+
+msgid "Switch to Outside China"
+msgstr "切換到海外"
+
+msgid "Switch to China"
+msgstr "切換到中國"
+
+msgid "With Outside China selected, websites and IP addresses in mainland China are also routed through proxy nodes. Don't choose this while you're in mainland China, or local websites and apps will slow down noticeably and some services may stop working."
+msgstr "選擇海外後，中國大陸的網站和 IP 也將經代理節點存取。身處中國大陸時請勿選擇，否則國內網站、App 會明顯變慢，部分服務可能無法使用。"
+
+msgid "With China selected, websites and IP addresses in mainland China connect directly instead of through proxy nodes. Don't choose this while you're outside China, or access to mainland China services may be restricted."
+msgstr "選擇中國後，中國大陸的網站和 IP 將直接連線，不經過代理節點。身處海外時請勿選擇，否則存取中國大陸服務可能受限。"
+
+msgid "With China selected, China traffic connects directly and all other traffic goes through the proxy. With Outside China selected, all traffic goes through the proxy, including China traffic."
+msgstr "選擇中國時，中國的流量走直連，海外的流量走代理。選擇海外時，所有的流量都走代理（包括中國流量）。"
 
 msgid "Host that serves the clash profile. Must be https. Leave empty to use the panel URL. If you do not understand these settings, do not change them. Invalid addresses will make the service unusable."
 msgstr "提供 clash 設定的主機，必須是 https。留空則使用面板位址。不懂就請不要亂修改，位址無效會導致無法使用！"
@@ -323,6 +353,12 @@ msgstr "逾時"
 
 msgid "The panel did not publish any node groups."
 msgstr "面板未提供節點分組"
+
+msgid "There is too much data for the router to return in one response."
+msgstr "內容過多，超出路由器單次回應上限"
+
+msgid "Node files are still loading"
+msgstr "節點檔案尚未載入完成"
 
 msgid "Traffic"
 msgstr "流量"
@@ -720,6 +756,12 @@ msgstr "該檔案為二進位規則集，無法以文字檢視"
 msgid "No runtime config yet"
 msgstr "還沒有執行設定"
 
+msgid "The content changed. Open it again."
+msgstr "內容已變更，請重新開啟"
+
+msgid "Unable to prepare the runtime config"
+msgstr "無法暫存執行設定"
+
 msgid "Invalid path"
 msgstr "無效路徑"
 
@@ -1031,6 +1073,9 @@ msgstr "正在切換帳戶，請稍後再試"
 
 msgid "Offline profile authorization is invalid. Refresh the profile."
 msgstr "設定的離線授權無效，請更新設定"
+
+msgid "The system clock is behind the time the panel issued the profile. The connection will retry automatically after the clock syncs."
+msgstr "系統時間早於面板簽發設定的時間，校時後將自動重試"
 
 msgid "Could not stage the validated profile. Try again."
 msgstr "無法暫存已驗證的設定，請重試"
@@ -1349,3 +1394,9 @@ msgstr "代理"
 
 msgid "Grant access to the ECY Cloud client"
 msgstr "授予存取 ECY Cloud 用戶端的權限"
+
+msgid "Not enough storage: %d MiB free on the router, but at least %d MiB is needed to start. Free up space or expand storage, then try again."
+msgstr "儲存空間不足：路由器剩餘 %d MiB，啟動至少需要 %d MiB，請清理儲存空間或擴充容量後重試"
+
+msgid "Couldn't save the setting. The router's storage may be full."
+msgstr "設定儲存失敗，路由器儲存空間可能已滿"

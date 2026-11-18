@@ -9,8 +9,8 @@ public struct TunnelLease: Codable, Sendable {
     public let configuration: Data
     public let validationConfiguration: Data?
     public let logLevel: String?
-    public init(owner: String, cacheKey: String? = nil, expiresAt: Date, configuration: Data, validationConfiguration: Data? = nil, logLevel: String? = nil) {
-        id = UUID(); self.owner = owner; self.cacheKey = cacheKey ?? owner; self.expiresAt = expiresAt; self.configuration = configuration
+    public init(id: UUID = UUID(), owner: String, cacheKey: String? = nil, expiresAt: Date, configuration: Data, validationConfiguration: Data? = nil, logLevel: String? = nil) {
+        self.id = id; self.owner = owner; self.cacheKey = cacheKey ?? owner; self.expiresAt = expiresAt; self.configuration = configuration
         self.validationConfiguration = validationConfiguration
         self.logLevel = logLevel
     }
@@ -49,6 +49,8 @@ public protocol StandbyRuntime: Actor {
     var supportsStandby: Bool { get }
     var restoredConfiguration: Data? { get }
     func startStandby(_ lease: TunnelLease) async throws
+    func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions?
+    func updateNodes(_ lease: TunnelLease) async throws -> Bool
     func stop()
     func waitUntilStopped() async throws
     func request(_ command: TunnelCommand) async throws -> Data
@@ -65,6 +67,8 @@ public extension TunnelDriver {
     var supportsStandby: Bool { false }
     var restoredConfiguration: Data? { nil }
     func startStandby(_ lease: TunnelLease) async throws { throw TunnelError.unavailable }
+    func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? { nil }
+    func updateNodes(_ lease: TunnelLease) async throws -> Bool { false }
     func waitUntilStopped() async throws {}
     func request(_ command: TunnelCommand) async throws -> Data { throw TunnelError.unavailable }
     var panelProxyPort: Int? { nil }
@@ -269,6 +273,19 @@ public enum TunnelError: Error, LocalizedError, Equatable {
         else { try await prepareStandby(lease); message = message ?? notice }
     }
     public func profileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions { try driver.profileOptions(preferences) }
+    func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? {
+        state == .connected && controlPlaneReady ? try driver.liveProfileOptions(preferences) : nil
+    }
+    // 对应 connection_controller.dart 的 _hotReloadPanelProfile：只有节点变化时不重启内核，已有连接不断开
+    func updateNodes(_ lease: TunnelLease) async throws -> Bool {
+        guard state == .connected, controlPlaneReady, owner == lease.owner else { return false }
+        let operation = generation
+        guard try await driver.updateNodes(lease) else { return false }
+        guard operation == generation else { throw CancellationError() }
+        lastLaunch = (lease, true)
+        runtimeConfiguration = lease.configuration
+        return true
+    }
     public func applySystemProxy(_ preferences: ClientPreferences) async throws {
         try await driver.applySystemProxy(enabled: preferences.systemProxy, bypass: preferences.systemProxyBypass)
     }

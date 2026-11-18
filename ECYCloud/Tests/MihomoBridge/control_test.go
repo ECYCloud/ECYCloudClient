@@ -717,3 +717,69 @@ func TestEmptyNodeProviderRefusesButEmptyRuleSetStarts(t *testing.T) {
 	runtime.GC()
 	time.Sleep(200 * time.Millisecond)
 }
+
+func TestUpdateNodesReloadsPanelNodesWithoutRestart(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	build := func(names ...string) []byte {
+		nodes := []any{}
+		for _, name := range names {
+			nodes = append(nodes, map[string]any{"name": name, "type": "socks5", "server": "127.0.0.1", "port": 9, "password": "secret-" + name})
+		}
+		profile := packetProfile(9)
+		profile["proxies"] = []any{}
+		profile["proxy-providers"] = map[string]any{"ecy-panel-nodes": map[string]any{"type": "file", "path": "ecy-panel-nodes.json", "payload": nodes}}
+		profile["proxy-groups"] = []any{map[string]any{"name": "select", "type": "select", "proxies": []string{"REJECT"}, "use": []string{"ecy-panel-nodes"}}}
+		data, err := json.Marshal(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	id, err := kernel.Start(build("node-a", "node-b"), directory, 0, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kernel.Stop(id) })
+	members := func() string {
+		value, err := kernel.Control(id, []byte(`{"action":"snapshot","page":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snapshot struct {
+			Groups []struct {
+				ID      string
+				Members []string
+			}
+		}
+		if err := json.Unmarshal(value, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		for _, group := range snapshot.Groups {
+			if group.ID == "select" {
+				return strings.Join(group.Members, ",")
+			}
+		}
+		return ""
+	}
+	if got := members(); !strings.Contains(got, "node-a") || !strings.Contains(got, "node-b") {
+		t.Fatalf("initial members: %s", got)
+	}
+	if err := kernel.UpdateNodes(id+1, build("node-c")); err != kernel.ErrStopped {
+		t.Fatalf("stale session: %v", err)
+	}
+	if err := kernel.UpdateNodes(id, build()); err != kernel.ErrConfiguration {
+		t.Fatalf("empty payload: %v", err)
+	}
+	if err := kernel.UpdateNodes(id, build("node-a", "node-c")); err != nil {
+		t.Fatal(err)
+	}
+	if got := members(); !strings.Contains(got, "node-a") || !strings.Contains(got, "node-c") || strings.Contains(got, "node-b") {
+		t.Fatalf("updated members: %s", got)
+	}
+	if _, err := kernel.Start(build("node-a"), directory, 0, "", "", ""); err != kernel.ErrBusy {
+		t.Fatalf("kernel was restarted: %v", err)
+	}
+}

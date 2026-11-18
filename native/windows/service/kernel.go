@@ -79,7 +79,13 @@ func seedGeoData() {
 		if _, err := os.Stat(target); err == nil {
 			continue
 		}
-		if err := copyFile(filepath.Join(installDir(), name), target); err != nil {
+		// 写完整再改名：直接写目标，中途被杀留下的半截文件会被当成已有文件沿用
+		temp := target + ".tmp"
+		err := copyFile(filepath.Join(installDir(), name), temp)
+		if err == nil {
+			err = os.Rename(temp, target)
+		}
+		if err != nil {
 			logf("播种 %s 失败，内核将自行下载: %v", name, err)
 		}
 	}
@@ -102,6 +108,9 @@ type kernelManager struct {
 	lastErr  string
 	logs     *logBuffer
 	done     chan struct{}
+
+	control      kernelControl
+	controlBound atomic.Bool
 }
 
 func newKernelManager() *kernelManager {
@@ -143,39 +152,18 @@ func (k *kernelManager) reload(config string) error {
 	return notifyKernelReload(config)
 }
 
-// 控制面地址与密钥按原键名精确读取（内核解析顶层键区分大小写），且只认回环地址；
-// 请求体只给默认路径，内核读回的是刚净化落盘的配置
 func notifyKernelReload(config string) error {
-	var top map[string]json.RawMessage
-	var controller, secret string
-	if json.Unmarshal([]byte(config), &top) != nil || json.Unmarshal(top["external-controller"], &controller) != nil {
-		return fmt.Errorf("配置缺少控制面地址，无法热载")
-	}
-	if raw, ok := top["secret"]; ok && json.Unmarshal(raw, &secret) != nil {
-		return fmt.Errorf("控制面密钥格式不合法")
-	}
-	host, port, err := net.SplitHostPort(controller)
-	if err != nil || !loopbackHost(host) {
-		return fmt.Errorf("控制面只能绑定本机回环地址")
-	}
-	request, err := http.NewRequest(http.MethodPut, "http://"+net.JoinHostPort(host, port)+"/configs?force=true", strings.NewReader(`{"path":""}`))
+	control, err := parseKernelControl(config)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	if secret != "" {
-		request.Header.Set("Authorization", "Bearer "+secret)
-	}
-	transport := &http.Transport{Proxy: nil}
-	defer transport.CloseIdleConnections()
-	response, err := (&http.Client{Timeout: kernelReloadTimeout, Transport: transport}).Do(request)
+	// 请求体只给默认路径，内核读回的是刚净化落盘的配置
+	status, body, err := control.send(http.MethodPut, "/configs?force=true", `{"path":""}`, kernelReloadTimeout)
 	if err != nil {
 		return fmt.Errorf("通知内核重载配置失败: %w", err)
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return fmt.Errorf("内核重载配置失败（HTTP %d）：%s", response.StatusCode, strings.TrimSpace(string(body)))
+	if status != http.StatusNoContent && status != http.StatusOK {
+		return fmt.Errorf("内核重载配置失败（HTTP %d）：%s", status, body)
 	}
 	return nil
 }
@@ -291,11 +279,6 @@ func checkLoopbackInbounds(top map[string]json.RawMessage) error {
 		}
 	}
 	return nil
-}
-
-func loopbackHost(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // 明文下载会被链路上替换规则集、节点订阅与地理数据库：只检查不改写面板的值，与 GUI 结构检查同口径。
@@ -630,6 +613,8 @@ func (k *kernelManager) start(config string) error {
 		return fmt.Errorf("启动内核失败: %w", err)
 	}
 
+	k.control, _ = parseKernelControl(config)
+	k.controlBound.Store(false)
 	k.cmd = cmd
 	k.pid = cmd.Process.Pid
 	k.running = true
@@ -640,8 +625,8 @@ func (k *kernelManager) start(config string) error {
 
 	var pumps sync.WaitGroup
 	pumps.Add(2)
-	go k.pump(stdout, &pumps)
-	go k.pump(stderr, &pumps)
+	go k.pump(stdout, &pumps, k.control.address)
+	go k.pump(stderr, &pumps, k.control.address)
 
 	done := k.done
 	go func() {
@@ -663,13 +648,17 @@ func (k *kernelManager) start(config string) error {
 	return nil
 }
 
-func (k *kernelManager) pump(r io.ReadCloser, wg *sync.WaitGroup) {
+func (k *kernelManager) pump(r io.ReadCloser, wg *sync.WaitGroup, listening string) {
 	defer wg.Done()
 	defer guard("转存内核输出")
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		k.logs.append(scanner.Text())
+		line := scanner.Text()
+		k.logs.append(line)
+		if controlListening(line, listening) {
+			k.controlBound.Store(true)
+		}
 	}
 }
 
@@ -682,7 +671,15 @@ func (k *kernelManager) stop() error {
 	k.stopping = true
 	process := k.cmd.Process
 	done := k.done
+	control := k.control
 	k.mu.Unlock()
+
+	// 被强制结束的内核不经 sing-tun 的 Close()，NLA 会留下同名网络档案；secret 只发给本次内核输出确认过的监听口
+	if k.controlBound.Load() {
+		if err := control.disableTun(); err != nil {
+			logf("停内核前关闭 TUN 失败: %v", err)
+		}
+	}
 
 	if err := interruptKernel(process.Pid); err == nil {
 		select {
@@ -791,45 +788,6 @@ func kernelCheckFailure(out string) string {
 		return reason
 	}
 	return strings.TrimSpace(out)
-}
-
-// 内核日志是 logrus 的 key=value 文本：time="..." level=error msg="..."
-func splitKernelLogLine(line string) (level string, message string, ok bool) {
-	level = logfmtValue(line, "level=")
-	if level == "" {
-		return "", "", false
-	}
-	return level, logfmtValue(line, "msg="), true
-}
-
-func logfmtValue(line string, key string) string {
-	index := strings.Index(line, key)
-	if index < 0 {
-		return ""
-	}
-	rest := line[index+len(key):]
-	if !strings.HasPrefix(rest, `"`) {
-		if end := strings.IndexByte(rest, ' '); end >= 0 {
-			return rest[:end]
-		}
-		return rest
-	}
-	if value, err := strconv.Unquote(rest[:quotedEnd(rest)]); err == nil {
-		return value
-	}
-	return ""
-}
-
-func quotedEnd(rest string) int {
-	for i := 1; i < len(rest); i++ {
-		switch rest[i] {
-		case '\\':
-			i++
-		case '"':
-			return i + 1
-		}
-	}
-	return len(rest)
 }
 
 func (k *kernelManager) kernelVersion() string {

@@ -6,6 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// 运行期 ThemeData 按平台默认触控补边，AppTheme 的主题是静态缓存的，测试按变体平台补上
+MaterialTapTargetSize tapTargetSize() => AppTheme.isTouch
+    ? MaterialTapTargetSize.padded
+    : MaterialTapTargetSize.shrinkWrap;
+
 void main() {
   Future<double> fieldWidth(WidgetTester tester, double viewWidth) async {
     await tester.binding.setSurfaceSize(Size(viewWidth, 800));
@@ -51,7 +56,7 @@ void main() {
           await tester.binding.setSurfaceSize(Size(width, 800));
           await tester.pumpWidget(
             MaterialApp(
-              theme: theme,
+              theme: theme.copyWith(materialTapTargetSize: tapTargetSize()),
               home: Scaffold(
                 body: ListView(
                   padding: AppTheme.pageScrollPadding,
@@ -79,11 +84,15 @@ void main() {
                 .first,
           );
           final Finder current = find.widgetWithText(OutlinedButton, '1');
-          final Size size = tester.getSize(current);
+          final Size size = tester.getSize(
+            find.descendant(of: current, matching: find.byType(Material)).first,
+          );
           expect(size.width, size.height);
+          expect(size.height, AppTheme.pointerTapTarget);
           expect(
-            size.height,
+            tester.getSize(current).height,
             defaultTargetPlatform == TargetPlatform.windows ? 32 : 48,
+            reason: '触控端点击范围',
           );
           final Path outline = materialOf('1').shape!
               .getOuterPath(Offset.zero & size);
@@ -124,7 +133,7 @@ void main() {
             int? requestedPage;
             await tester.pumpWidget(
               MaterialApp(
-                theme: theme,
+                theme: theme.copyWith(materialTapTargetSize: tapTargetSize()),
                 home: Scaffold(
                   body: ListView(
                     padding: AppTheme.pageScrollPadding,
@@ -148,12 +157,16 @@ void main() {
                 OutlinedButton,
                 '$label',
               );
-              final Size size = tester.getSize(button);
+              final Size size = tester.getSize(
+                find
+                    .descendant(of: button, matching: find.byType(Material))
+                    .first,
+              );
               final RenderParagraph text = tester.renderObject<RenderParagraph>(
                 find.descendant(of: button, matching: find.text('$label')),
               );
               final Size textSize = tester.getSize(find.text('$label'));
-              expect(size.height, AppTheme.minTapTarget);
+              expect(size.height, AppTheme.pointerTapTarget);
               expect(size.width, greaterThan(size.height));
               expect(
                 text.getBoxesForSelection(

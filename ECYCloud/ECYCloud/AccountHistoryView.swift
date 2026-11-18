@@ -17,8 +17,6 @@ struct AccountHistoryView: View {
     @State private var kickTarget: AccountHistory.Row?
     @State private var confirmingKick = false
     @State private var operation = UUID()
-    @State private var renewal: AccountHistory.Row.Renewal?
-    @State private var confirmingRenewal = false
     private var colors: ProductPalette { ProductPalette(scheme: scheme) }
     private struct RequestKey: Equatable { let page: Int; let search: String; let refresh: Int }
 
@@ -31,12 +29,6 @@ struct AccountHistoryView: View {
             await load(silent: false)
         }
         .productAutoRefresh(revision: kind == .unlock ? session.profile?.revision(.unlock) : nil) { await load(silent: true) }
-        .alert(renewal?.enabled == false ? L10n.t("确认开启自动续费？") : L10n.t("确认关闭自动续费？"), isPresented: $confirmingRenewal, presenting: renewal) { item in
-            Button(L10n.t("确定")) { Task { await toggleRenewal(item) } }
-            Button(L10n.t("取消"), role: .cancel) { }
-        } message: { item in
-            Text(item.enabled ? L10n.t("关闭后，您可以随时重新开启自动续费。") : L10n.t("开启后将在套餐到期时自动续费。"))
-        }
         .alert(L10n.t("确认将该设备下线？"), isPresented: $confirmingKick, presenting: kickTarget) { row in
             Button(L10n.t("确定")) { Task { await kick(row) } }
             Button(L10n.t("取消"), role: .cancel) { kickTarget = nil }
@@ -119,7 +111,7 @@ struct AccountHistoryView: View {
         case .loginLogs: [L10n.t("登录IP"), L10n.t("归属地"), L10n.t("设备"), L10n.t("状态"), L10n.t("登录方式"), L10n.t("登录时间")]
         case .operationLogs: [L10n.t("操作时间"), L10n.t("操作描述"), L10n.t("操作前"), L10n.t("操作后"), L10n.t("IP地址"), L10n.t("归属地"), L10n.t("请求方法"), L10n.t("请求URL"), "User-Agent"]
         case .balance: [L10n.t("订单号"), L10n.t("类型"), L10n.t("金额"), L10n.t("时间")]
-        case .purchases: [L10n.t("续费"), L10n.t("订单号"), L10n.t("商品名称"), L10n.t("购买价格"), L10n.t("商品详情"), L10n.t("购买时间"), L10n.t("套餐过期时间"), L10n.t("自动续费时间")]
+        case .purchases: [L10n.t("订单号"), L10n.t("商品名称"), L10n.t("购买价格"), L10n.t("商品详情"), L10n.t("购买时间"), L10n.t("套餐过期时间"), L10n.t("自动续费时间")]
         case .unlock: [L10n.t("节点"), "YouTube Premium", "Netflix", "Prime Video", "Disney Plus", "TikTok", "HBO Max", "OpenAI", "Gemini", "Claude", L10n.t("更新时间")]
         }
     }
@@ -158,7 +150,7 @@ struct AccountHistoryView: View {
 
     private func tableRow(_ row: AccountHistory.Row) -> [AnyView] {
         columns.map { column in
-            if column == L10n.t(kind == .purchases ? "续费" : "操作") { return actionCell(row) }
+            if column == L10n.t("操作") { return actionCell(row) }
             if column == L10n.t("商品详情") {
                 guard let content = row.content, !content.isEmpty else { return AnyView(cell("-", muted: true)) }
                 return AnyView(PurchaseDetail(html: content, origin: session.endpoints.site))
@@ -184,15 +176,6 @@ struct AccountHistoryView: View {
                     .buttonStyle(ProductButtonStyle(filled: true, color: colors.danger)).disabled(kicking))
             }
             return AnyView(cell(row.thirdPartyDevice ? L10n.t("不支持") : "", muted: true))
-        }
-        if let renewal = row.renewal {
-            return AnyView(Button(renewal.enabled ? L10n.t("关闭自动续费") : L10n.t("开启自动续费")) {
-                self.renewal = renewal; confirmingRenewal = true
-            }.buttonStyle(ProductButtonStyle()).disabled(kicking))
-        }
-        if !row.renewalUnavailableReason.isEmpty {
-            // 不能操作时显示灰色原因、悬浮禁止光标，与网页购买记录一致
-            return AnyView(cell(L10n.t(row.renewalUnavailableReason), muted: true, selectable: false).productForbiddenCursor())
         }
         return AnyView(cell("-", muted: true))
     }
@@ -246,19 +229,6 @@ struct AccountHistoryView: View {
         do { toast = try await session.kickDevice(deviceID) }
         catch is CancellationError { return }
         catch { toast = (error as? ClientError)?.localizedDescription ?? L10n.t("操作失败，请重试。") }
-        refresh += 1
-    }
-
-    private func toggleRenewal(_ item: AccountHistory.Row.Renewal) async {
-        guard !kicking else { return }
-        kicking = true
-        defer { kicking = false; renewal = nil }
-        do {
-            let message = try await session.toggleRenewal(id: item.id, enabled: !item.enabled)
-            await session.refresh()
-            toast = message.isEmpty ? (item.enabled ? L10n.t("自动续费关闭成功") : L10n.t("自动续费开启成功")) : message
-        } catch is CancellationError { return }
-        catch { toast = (error as? ClientError)?.localizedDescription ?? L10n.t("操作未完成") }
         refresh += 1
     }
 }

@@ -15,9 +15,17 @@ class KernelUpdate {
   static Future<KernelUpdate> check(
     String current, {
     http.Client? client,
+    String? siteOrigin,
   }) async {
     final GithubRelease? release = GithubRelease.newestStable(
-      await GithubRelease.list(repo, client: client, latestStableOnly: true),
+      await GithubRelease.list(
+        repo,
+        client: client,
+        latestStableOnly: true,
+        mirror: siteOrigin == null
+            ? null
+            : Uri.parse('$siteOrigin/api/client/v1/releases/kernel'),
+      ),
     );
     if (release == null) {
       throw GithubReleaseException('GitHub 未给出版本号');

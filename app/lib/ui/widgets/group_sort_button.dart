@@ -26,10 +26,7 @@ class GroupSortButton extends StatelessWidget {
       },
       iconSize: 16,
       visualDensity: VisualDensity.standard,
-      constraints: BoxConstraints.tightFor(
-        width: AppTheme.minTapTarget,
-        height: AppTheme.minTapTarget,
-      ),
+      constraints: AppTheme.iconButtonBox,
       padding: EdgeInsets.zero,
       icon: Icon(switch (mode) {
         NodeGroupSort.name => Icons.sort_by_alpha,

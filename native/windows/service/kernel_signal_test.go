@@ -5,9 +5,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,6 +130,30 @@ func TestKernelStopSavesAndLeavesOtherConsoleRunning(t *testing.T) {
 	}
 	if err := other.stop(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestKernelStopClosesTunOnlyOnConfirmedControlPlane(t *testing.T) {
+	prepareKernelSignalTestLogs(t)
+	for _, bound := range []bool{false, true} {
+		var requests atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPatch && r.URL.Path == "/configs" {
+				requests.Add(1)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		k, _ := startKernelSignalTestProcess(t, false)
+		k.control = kernelControl{address: server.Listener.Addr().String(), secret: "test-control-secret"}
+		k.controlBound.Store(bound)
+		err := k.stop()
+		server.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := requests.Load(); (got == 1) != bound {
+			t.Fatalf("控制面已确认=%v 时发出了 %d 次关 TUN 请求", bound, got)
+		}
 	}
 }
 

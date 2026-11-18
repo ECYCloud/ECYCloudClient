@@ -294,8 +294,7 @@ func redactLog(text string, secrets []string) string {
 	}
 	return text
 }
-func newLogBuffer(config []byte) *logBuffer {
-	b := &logBuffer{}
+func logSecrets(config []byte) (secrets []string) {
 	var object any
 	_ = json.Unmarshal(config, &object)
 	var walk func(any)
@@ -306,7 +305,7 @@ func newLogBuffer(config []byte) *logBuffer {
 				lower := strings.ToLower(key)
 				if strings.Contains(lower, "password") || strings.Contains(lower, "passwd") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || lower == "uuid" || lower == "private-key" || lower == "authorization" {
 					if text, ok := item.(string); ok && text != "" {
-						b.secrets = append(b.secrets, text)
+						secrets = append(secrets, text)
 					}
 				}
 				walk(item)
@@ -318,12 +317,20 @@ func newLogBuffer(config []byte) *logBuffer {
 		}
 	}
 	walk(object)
+	return secrets
+}
+
+func newLogBuffer(config []byte) *logBuffer {
+	b := &logBuffer{secrets: logSecrets(config)}
 	sub := log.Subscribe()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for event := range sub {
-			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(event.Payload, b.secrets)}
+			b.mu.Lock()
+			secrets := b.secrets
+			b.mu.Unlock()
+			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(event.Payload, secrets)}
 			b.mu.Lock()
 			b.sequence++
 			entry.ID = b.sequence

@@ -138,11 +138,11 @@ struct ClientSessionTests {
     @Test func profileRevisionsArePerPageAndOptional() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let legacy = try decoder.decode(UserProfile.self, from: Data(Fixture.profile.utf8))
-        #expect(legacy.revision(.shop) == nil && legacy.revision(.tickets) == nil)
-        let json = Fixture.profile.replacingOccurrences(of: #""plan":null,"#, with: #""plan":null,"revisions":{"shop":"0a1b2c3d4e5f6071","tickets":"8192a3b4c5d6e7f8"},"#)
+        #expect(legacy.revision(.invite) == nil && legacy.revision(.tickets) == nil)
+        let json = Fixture.profile.replacingOccurrences(of: #""plan":null,"#, with: #""plan":null,"revisions":{"invite":"0a1b2c3d4e5f6071","tickets":"8192a3b4c5d6e7f8"},"#)
         let current = try decoder.decode(UserProfile.self, from: Data(json.utf8))
-        #expect(current.revision(.shop) == "0a1b2c3d4e5f6071" && current.revision(.tickets) == "8192a3b4c5d6e7f8")
-        #expect(current.revision(.invite) == nil && current.revision(.unlock) == nil)
+        #expect(current.revision(.invite) == "0a1b2c3d4e5f6071" && current.revision(.tickets) == "8192a3b4c5d6e7f8")
+        #expect(current.revision(.unlock) == nil)
     }
 
     @Test func optionsRetryDNSOnceThenRecover() async {
@@ -1301,6 +1301,21 @@ struct NodeProbeTests {
         value.connection?.disconnect()
     }
 
+    @Test func tunSettingsWhileDisconnectedKeepStandbyKernel() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let driver = RecordingTunnelDriver(); driver.supportsStandby = true
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        try await value.ensureControlPlane()
+        value.preferences.tunEnabled.toggle()
+        try await value.applyTunSettings()
+        #expect(driver.standbyStarts.count == 1 && driver.stopCount == 0)
+        #expect(value.connection?.state == .disconnected && value.connection?.controlPlaneReady == true)
+        value.connection?.disconnect()
+    }
+
     private func session(_ transport: FakeTransport, driver: RecordingTunnelDriver, probes: NodeProbeState? = nil) async -> ClientSession {
         let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
                                   vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: probes ?? NodeProbeState(defaults: nil))
@@ -1704,13 +1719,13 @@ struct BusinessSessionTests {
         }
         #expect(await transport.recorded().count == 3)
     }
-    @Test func restrictedAccountCanReadItsTicketsButCannotPurchase() async throws {
+    @Test func restrictedAccountCanReadItsTicketsButNotOtherPages() async throws {
         let vault = MemoryVault(); vault.value = Fixture.stored
         let transport = FakeTransport([reply("/user/account-status", Fixture.status(0)), reply("/tickets", #"{"tickets":[],"banned":false,"enable_ticket":true,"current_page":1,"last_page":1,"total":0,"per_page":10}"#)])
         let session = makeSession(transport, vault: vault); await session.start()
         let tickets = try await session.tickets(page: 1, search: "")
         #expect(tickets.total == 0)
-        await #expect(throws: CancellationError.self) { try await session.shop() }
+        await #expect(throws: CancellationError.self) { try await session.trafficHistory() }
         #expect(await transport.recorded().count == 2)
     }
     @Test func staleAnnouncementResponseIsDiscardedOnLogout() async throws {
@@ -1789,51 +1804,23 @@ struct BusinessSessionTests {
         await #expect(throws: ClientError.self) { try await session.sendAccountEmail(.oldEmail) }
         #expect(await transport.recorded().count == 5)
     }
-    @Test func paymentPendingIsNeverReportedPaid() async throws {
-        let (session, _) = await restored([reply("/shop/payment-status", #"{"paid":false,"total":12.5,"card_key":""}"#)])
-        #expect(try await session.paymentStatus("2026102000001").paid == false)
-        await #expect(throws: ClientError.self) { try await session.paymentStatus("../another-user") }
-    }
-    @Test func orderRechargedToBalanceIsNotReportedAsPaymentSuccess() async throws {
-        let (session, _) = await restored([
-            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":"","recharged_to_balance":true}"#),
-            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":"","recharged_to_balance":false}"#),
-            reply("/shop/payment-status", #"{"paid":true,"total":12.5,"card_key":""}"#)
-        ])
-        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("商品未能交付，款项已转入余额。"))
-        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("支付成功，订单已到账。"))
-        #expect(try await session.paymentStatus("2026102000001").purchaseNotice == L10n.t("支付成功，订单已到账。"))
-    }
-    @Test(arguments: [("previous_plan", false), ("actual_price", false), ("30day_price", false), ("", false), ("fee_shortfall", true)])
-    func trafficFeeWordingFollowsBillingBaseType(type: String, shortfall: Bool) throws {
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let quote = try decoder.decode(ShopQuote.self, from: Data(#"{"traffic_billing_base_price":"16.44","traffic_billing_base_type":"\#(type)"}"#.utf8))
-        #expect(quote.trafficFeeIsShortfall == shortfall)
-        #expect(quote.trafficBillingBaseLine(planName: "测试套餐") == L10n.t(type == "previous_plan" ? "计费基准价：{0} 元" : "新套餐：{0} 计费基准价：{1} 元", type == "previous_plan" ? ["16.44"] : ["测试套餐", "16.44"]))
-    }
-    @Test func noAutomaticRetryForRechargeAfterNetworkFailure() async throws {
-        let (session, transport) = await restored([.init(path: "/user/recharge/epay", result: .failure(.networkFailure(URLError.networkConnectionLost.rawValue)))])
-        await #expect(throws: ClientError.self) { try await session.recharge(amount: "12.50", payment: "alipay") }
+    @Test func noAutomaticRetryForWriteAfterNetworkFailure() async throws {
+        let (session, transport) = await restored([.init(path: "/tickets/1/close", result: .failure(.networkFailure(URLError.networkConnectionLost.rawValue)))])
+        await #expect(throws: ClientError.self) { try await session.closeTicket(1) }
         #expect(await transport.recorded().count == 4)
     }
-    @Test func nestedWithdrawalAccountIsJSONAndResetUsesPUT() async throws {
-        let (session, transport) = await restored([reply("/user/withdraw/apply", "{}"), reply("/user/invite", "{}")])
-        _ = try await session.withdraw(amount: "10.25", channel: "3", account: ["账号": "synthetic"], save: true)
+    @Test func inviteResetUsesPUT() async throws {
+        let (session, transport) = await restored([reply("/user/invite", "{}")])
         _ = try await session.resetInvite()
-        let requests = await transport.recorded()
-        let body = try #require(JSONSerialization.jsonObject(with: requests[3].httpBody!) as? [String: Any])
-        #expect(body["account_info"] as? [String: String] == ["账号": "synthetic"])
-        #expect(body["save_account"] as? Bool == true)
-        #expect(body["amount"] as? String == "10.25")
-        #expect(requests.last?.httpMethod == "PUT")
+        #expect(await transport.recorded().last?.httpMethod == "PUT")
     }
     @Test func inviteRecordListsKeepSeparateSearches() async throws {
         let (session, transport) = await restored([reply("/user/invite", "{}")])
-        _ = try? await session.invite(invitedPage: 1, invitedSearch: "a", paybackPage: 2, paybackSearch: "b", withdrawPage: 3, withdrawSearch: "c")
+        _ = try? await session.invite(invitedPage: 1, invitedSearch: "a", paybackPage: 2, paybackSearch: "b")
         let url = try #require(await transport.recorded().last?.url)
         let items = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        #expect(items["invited_search"] == "a" && items["payback_search"] == "b" && items["withdraw_search"] == "c")
-        #expect(items["payback_page"] == "2" && items["withdraw_page"] == "3")
+        #expect(items["invited_search"] == "a" && items["payback_search"] == "b")
+        #expect(items["payback_page"] == "2" && items["withdraw_page"] == nil)
     }
     @Test func malformedPaginationIsRejected() async throws {
         let (session, _) = await restored([reply("/tickets", #"{"tickets":[],"banned":false,"enable_ticket":true,"current_page":0,"last_page":0,"total":-1,"per_page":10}"#)])
@@ -1863,18 +1850,9 @@ struct BusinessModelTests {
         #expect(empty.traffic.isEmpty && empty.nodeTraffic.isEmpty)
         #expect(throws: (any Error).self) { try decode(TrafficHistory.self, "{\(prefix),\"traffic\":[1],\"node_traffic\":[]}") }
     }
-    @Test func quoteSupportsCooldownAndServerAmounts() throws {
-        let cooldown = try decode(ShopQuote.self, #"{"plan_cooldown":true,"plan_cooldown_msg":"稍后重试","plan_cooldown_remaining":60}"#)
-        #expect(!cooldown.canPurchase)
-        let quote = try decode(ShopQuote.self, #"{"total":"1,200.50","hasValidOrder":1,"couponApplied":true,"couponMsg":"已应用","credit":10,"remaining_value":"200.00","refund_amount":"1.00","has_refund":true}"#)
-        #expect(quote.canPurchase && quote.hasValidOrder == 1 && quote.couponApplied == true)
-        #expect(quote.remainingValue == "200.00" && quote.refundAmount == "1.00" && quote.hasRefund == true)
-    }
-    @Test func moneyAndExternalLinksRejectUnsafeValues() {
-        #expect(MoneyInput.amount("1,200.50") == Decimal(string: "1200.50"))
-        for text in ["NaN", "-1", "1.001", "1e3", "1,2", ""] { #expect(MoneyInput.amount(text) == nil) }
+    @Test func externalLinksRejectUnsafeValues() {
         for text in ["javascript:alert(1)", "file:///etc/passwd", "https://user:secret@example.test", "https://example.test\n/", "https:"] { #expect(ClientLink.external(text) == nil) }
-        #expect(ClientLink.external("weixin://wxpay/synthetic") != nil)
+        #expect(ClientLink.external("weixin://wxpay/synthetic") == nil)
     }
     @Test func subscriptionDraftEncodingPreservesMihomoFieldsAndOmitsLocalID() throws {
         let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -1917,13 +1895,6 @@ extension BusinessSessionTests {
         let work = Task { try await session.uploadTicketAttachment(data: Data([1]), name: "file.txt") }
         await transport.waitUntilPaused(); await session.logout(); await transport.resume()
         await #expect(throws: CancellationError.self) { try await work.value }
-    }
-    @Test func phpEmptyPurchaseResultSucceedsButNonemptyArrayFails() async throws {
-        let transport = FakeTransport([reply("/shop/buy-traffic-package", "[]"), reply("/shop/buy-traffic-package", "[1]")])
-        let api = PanelAPI(device: Fixture.device, transport: transport)
-        let result = try await api.purchase(Fixture.endpoints, token: "synthetic-token", path: "/shop/buy-traffic-package", body: ["shop": "1"])
-        #expect(!result.needsPayment)
-        await #expect(throws: ClientError.self) { try await api.purchase(Fixture.endpoints, token: "synthetic-token", path: "/shop/buy-traffic-package", body: ["shop": "1"]) }
     }
     @Test func profileReportsConnectionOnlyWhenActuallyConnected() async throws {
         let transport = FakeTransport([reply("/user/profile", Fixture.profile), reply("/user/profile", Fixture.profile)])
@@ -2080,5 +2051,72 @@ extension BusinessSessionTests {
         await transport.resume()
         await #expect(throws: CancellationError.self) { try await request.value }
         #expect(session.announcementState.bundle == nil && session.phase == .signedOut)
+    }
+}
+
+private actor ReleaseTransport: HTTPTransport {
+    let status: Int, site: (status: Int, body: String)
+    private(set) var urls: [String] = []
+    init(status: Int, site: (status: Int, body: String) = (503, #"{"ret":0,"msg":"unavailable"}"#)) {
+        self.status = status
+        self.site = site
+    }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        urls.append(request.url!.absoluteString)
+        guard request.url?.host == "api.github.com" else { return HTTPResult(data: Data(site.body.utf8), status: site.status) }
+        let entry = #"{"tag_name":"v999.0.0","published_at":"2026-01-01T00:00:00Z","draft":false,"prerelease":false}"#
+        return HTTPResult(data: Data((request.url!.path.hasSuffix("/latest") ? entry : "[\(entry)]").utf8), status: status)
+    }
+}
+
+@Suite("客户端更新检查时间", .timeLimit(.minutes(1)), .isolatedUserData)
+@MainActor
+struct ClientUpdateScheduleTests {
+    @Test func successfulCheckIsPersistedAndGatesTheNextOne() async throws {
+        let suite = "ecycloud-update-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var clock = Date(timeIntervalSince1970: 2_000_000_000)
+        func session(_ status: Int) -> ClientSession {
+            ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: ReleaseTransport(status: status)),
+                          vault: MemoryVault(), preferences: ClientPreferences(defaults: defaults), now: { clock })
+        }
+        let limited = session(403)
+        #expect(limited.untilUpdateCheck == 0)
+        await #expect(throws: ClientError.self) { try await limited.checkClientUpdate() }
+        #expect(limited.untilUpdateCheck == 0)
+        let checked = session(200)
+        #expect(try await checked.checkClientUpdate().latest == "999.0.0")
+        #expect(checked.untilUpdateCheck == ClientSession.updateCheckInterval)
+        clock += 3000
+        #expect(session(200).untilUpdateCheck == 600)
+        clock += 600
+        #expect(session(200).untilUpdateCheck == 0)
+        clock -= 7200
+        #expect(session(200).untilUpdateCheck == 0)
+    }
+
+    @Test func siteReleaseCacheIsPreferredOverGitHub() async throws {
+        let suite = "ecycloud-update-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let site = "https://site.example.test/api/client/v1/releases/"
+        let github = "https://api.github.com/repos/"
+        let cached = #"{"ret":1,"data":[{"tag_name":"v998.0.0","published_at":"2026-11-16T00:00:00Z","prerelease":false,"assets":[]}]}"#
+        let cases: [((Int, String), String, [String])] = [
+            ((200, cached), "998.0.0", [site + "client", site + "kernel"]),
+            ((503, #"{"ret":0,"msg":"unavailable"}"#), "999.0.0",
+             [site + "client", github + "ECYCloud/ECYCloudClient/releases?per_page=30", site + "kernel", github + "MetaCubeX/mihomo/releases/latest"]),
+            ((200, #"{"ret":1,"data":[]}"#), "999.0.0",
+             [site + "client", github + "ECYCloud/ECYCloudClient/releases?per_page=30", site + "kernel", github + "MetaCubeX/mihomo/releases/latest"]),
+        ]
+        for (reply, latest, urls) in cases {
+            let transport = ReleaseTransport(status: 200, site: reply)
+            let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                        vault: MemoryVault(), preferences: ClientPreferences(defaults: defaults))
+            #expect(try await session.checkClientUpdate().latest == latest)
+            #expect(try await session.latestKernelVersion() == latest)
+            #expect(await transport.urls == urls)
+        }
     }
 }

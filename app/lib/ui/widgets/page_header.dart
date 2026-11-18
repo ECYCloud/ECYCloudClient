@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'touch_bleed.dart';
 import 'user_avatar.dart';
 
 class ShellChromeBar extends ChangeNotifier {
@@ -54,8 +55,9 @@ class PageHeader extends StatelessWidget {
   static const double _actionIconSize = 20;
 
   static double get _actionButtonSize => AppTheme.minTapTarget;
-  static double get _actionIconInset =>
-      (_actionButtonSize - _actionIconSize) / 2;
+  // 返回键按桌面端尺寸排版（TouchBleed），图标内缩也按桌面端算
+  static const double _actionIconInset =
+      (AppTheme.pointerTapTarget - _actionIconSize) / 2;
 
   @override
   Widget build(BuildContext context) {
@@ -76,26 +78,30 @@ class PageHeader extends StatelessWidget {
         ? _actionButtonSize
         : titleSize * 1.2;
     return Padding(
-      padding: EdgeInsets.fromLTRB(left, 16, AppTheme.pageScrollPadding.right, 16),
+      padding: EdgeInsets.fromLTRB(
+        left,
+        16,
+        AppTheme.pageScrollPadding.right,
+        16,
+      ),
       child: SizedBox(
         height: rowHeight,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (showBackButton) ...<Widget>[
-              IconButton(
-                tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-                icon: const BackButtonIcon(),
-                iconSize: _actionIconSize,
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.standard,
-                constraints: BoxConstraints.tightFor(
-                  width: _actionButtonSize,
-                  height: _actionButtonSize,
+              TouchBleed(
+                child: IconButton(
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  icon: const BackButtonIcon(),
+                  iconSize: _actionIconSize,
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.standard,
+                  constraints: AppTheme.iconButtonBox,
+                  onPressed: () {
+                    Navigator.maybePop(context);
+                  },
                 ),
-                onPressed: () {
-                  Navigator.maybePop(context);
-                },
               ),
               const SizedBox(width: actionGap),
             ],

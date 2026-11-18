@@ -19,6 +19,7 @@ import '../widgets/refresh_button.dart';
 import '../widgets/search_field.dart';
 import '../widgets/speed_badge.dart';
 import '../widgets/tag_chip.dart';
+import '../widgets/touch_bleed.dart';
 import '../../l10n/l10n.dart';
 
 const double _groupCardGap = 10;
@@ -287,24 +288,23 @@ class _GroupCardState extends State<_GroupCard> {
         onPressed: () => setState(() => _sort = NodeGroupSortLogic.next(_sort)),
       ),
       if (wide)
-        IconButton(
-          tooltip: L10n.t('搜索节点名称'),
-          iconSize: 16,
-          visualDensity: VisualDensity.standard,
-          constraints: BoxConstraints.tightFor(
-            width: AppTheme.minTapTarget,
-            height: AppTheme.minTapTarget,
+        TouchBleed(
+          child: IconButton(
+            tooltip: L10n.t('搜索节点名称'),
+            iconSize: 16,
+            visualDensity: VisualDensity.standard,
+            constraints: AppTheme.iconButtonBox,
+            padding: EdgeInsets.zero,
+            style: _searchOpen
+                ? IconButton.styleFrom(
+                    backgroundColor: scheme.onSurfaceVariant.withValues(
+                      alpha: 0.08,
+                    ),
+                  )
+                : null,
+            icon: const Icon(Icons.search),
+            onPressed: _toggleSearch,
           ),
-          padding: EdgeInsets.zero,
-          style: _searchOpen
-              ? IconButton.styleFrom(
-                  backgroundColor: scheme.onSurfaceVariant.withValues(
-                    alpha: 0.08,
-                  ),
-                )
-              : null,
-          icon: const Icon(Icons.search),
-          onPressed: _toggleSearch,
         )
       else
         MenuItemButton(
@@ -321,19 +321,18 @@ class _GroupCardState extends State<_GroupCard> {
           child: Text(L10n.t('搜索节点名称')),
         ),
       if (wide)
-        IconButton(
-          tooltip: L10n.t('定位到当前节点'),
-          iconSize: 16,
-          visualDensity: VisualDensity.standard,
-          constraints: BoxConstraints.tightFor(
-            width: AppTheme.minTapTarget,
-            height: AppTheme.minTapTarget,
+        TouchBleed(
+          child: IconButton(
+            tooltip: L10n.t('定位到当前节点'),
+            iconSize: 16,
+            visualDensity: VisualDensity.standard,
+            constraints: AppTheme.iconButtonBox,
+            padding: EdgeInsets.zero,
+            icon: const Icon(Icons.my_location_outlined),
+            onPressed: group.now.isEmpty
+                ? null
+                : () => unawaited(_locateSelected()),
           ),
-          padding: EdgeInsets.zero,
-          icon: const Icon(Icons.my_location_outlined),
-          onPressed: group.now.isEmpty
-              ? null
-              : () => unawaited(_locateSelected()),
         )
       else
         MenuItemButton(
@@ -447,27 +446,26 @@ class _GroupCardState extends State<_GroupCard> {
                                     BuildContext context,
                                     MenuController controller,
                                     Widget? child,
-                                  ) => IconButton(
-                                    tooltip: L10n.t('更多'),
-                                    iconSize: 18,
-                                    visualDensity: VisualDensity.standard,
-                                    constraints: BoxConstraints.tightFor(
-                                      width: AppTheme.minTapTarget,
-                                      height: AppTheme.minTapTarget,
+                                  ) => TouchBleed(
+                                    child: IconButton(
+                                      tooltip: L10n.t('更多'),
+                                      iconSize: 18,
+                                      visualDensity: VisualDensity.standard,
+                                      constraints: AppTheme.iconButtonBox,
+                                      padding: EdgeInsets.zero,
+                                      icon: testing || speedTesting
+                                          ? const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(Icons.more_horiz),
+                                      onPressed: () => controller.isOpen
+                                          ? controller.close()
+                                          : controller.open(),
                                     ),
-                                    padding: EdgeInsets.zero,
-                                    icon: testing || speedTesting
-                                        ? const SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(Icons.more_horiz),
-                                    onPressed: () => controller.isOpen
-                                        ? controller.close()
-                                        : controller.open(),
                                   ),
                             ),
                           const SizedBox(width: 2),
@@ -539,38 +537,41 @@ class _GroupCardState extends State<_GroupCard> {
                         )
                       else
                         LayoutBuilder(
-                        builder:
-                            (BuildContext context, BoxConstraints constraints) {
-                              final int columns =
-                                  ((constraints.maxWidth + _tileGap) /
-                                          (_minTileWidth + _tileGap))
-                                      .floor()
-                                      .clamp(1, 6);
-                              final double tileWidth =
-                                  (constraints.maxWidth -
-                                      _tileGap * (columns - 1)) /
-                                  columns;
+                          builder:
+                              (
+                                BuildContext context,
+                                BoxConstraints constraints,
+                              ) {
+                                final int columns =
+                                    ((constraints.maxWidth + _tileGap) /
+                                            (_minTileWidth + _tileGap))
+                                        .floor()
+                                        .clamp(1, 6);
+                                final double tileWidth =
+                                    (constraints.maxWidth -
+                                        _tileGap * (columns - 1)) /
+                                    columns;
 
-                              return Wrap(
-                                spacing: _tileGap,
-                                runSpacing: _tileGap,
-                                children: <Widget>[
-                                  for (final String member in members)
-                                    SizedBox(
-                                      key: member == group.now
-                                          ? _selectedTileKey
-                                          : null,
-                                      width: tileWidth,
-                                      child: _buildTile(
-                                        connection,
-                                        group,
-                                        member,
-                                        canSelect: canSelect,
+                                return Wrap(
+                                  spacing: _tileGap,
+                                  runSpacing: _tileGap,
+                                  children: <Widget>[
+                                    for (final String member in members)
+                                      SizedBox(
+                                        key: member == group.now
+                                            ? _selectedTileKey
+                                            : null,
+                                        width: tileWidth,
+                                        child: _buildTile(
+                                          connection,
+                                          group,
+                                          member,
+                                          canSelect: canSelect,
+                                        ),
                                       ),
-                                    ),
-                                ],
-                              );
-                            },
+                                  ],
+                                );
+                              },
                         ),
                     ],
                   ),

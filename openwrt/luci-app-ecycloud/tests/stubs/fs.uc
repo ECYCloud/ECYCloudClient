@@ -1,5 +1,5 @@
 export const testState = global.ecycloudTestState ?? {
-	files: {}, writes: {}, commands: [], paths: {}, info: {},
+	files: { '/var/etc/dnsmasq.conf.test': 'conf-file=/etc/dnsmasq.conf\nconf-dir=/tmp/dnsmasq.d\n' }, writes: {}, commands: [], paths: {}, info: {},
 	random: '0123456789abcdef0123456789abcdef',
 	config: { run_dir: '/etc/ecycloud/run/fixture-session' },
 	onRequest: null, response: null, log: '',

@@ -1,6 +1,6 @@
 'use strict';
 
-import { access, popen } from 'fs';
+import { access, popen, readfile, stat, unlink } from 'fs';
 import { cursor } from 'uci';
 
 import * as clash from 'ecycloud.clash';
@@ -9,22 +9,41 @@ import * as network from 'ecycloud.network';
 import * as panel from 'ecycloud.panel';
 import * as profile from 'ecycloud.profile';
 
-import { build, clearKicked, coreRunning, instances, kickReason, lanDevices, log, origins,
-		 settings, state, wasKicked } from 'ecycloud.common';
+import { RUNTIME_VIEW, STATE_DIR, build, clearKicked, commitConfig, coreRunning, ensureConfig, ensurePrivateDir, instances, kickReason, lanDevices, log, origins,
+		 settings, state, wasKicked, writeAtomic } from 'ecycloud.common';
 import * as release from 'ecycloud.release';
 import * as service from 'ecycloud.service';
 import * as statistics from 'ecycloud.statistics';
 
 const INIT = '/etc/init.d/ecycloud';
+/* ubus 单条消息上限 1048576 字节（实测）：超过后应答被丢弃，调用方只能等到超时 */
+const REPLY_LIMIT = 900000;
+const LOG_LIMIT = 600000;
+const TEXT_CHUNK = 524288;
+const PAGE_LIMIT = 100;
+
+function blobSize(value, name) {
+	let size = 4 + ((length(name) + 6) & ~3);
+	if (type(value) == 'array')
+		for (let item in value)
+			size += blobSize(item, '');
+	else if (type(value) == 'object')
+		for (let key, item in value)
+			size += blobSize(item, key);
+	else
+		size += type(value) == 'string' ? (length(value) + 4) & ~3 : 8;
+	return size;
+};
 
 function background(command) {
 	return system(`${command} >/dev/null 2>&1 &`) == 0;
 };
 
 function toggle(enabled) {
+	if (!ensureConfig())
+		return false;
 	const uci = cursor();
-	uci.set('ecycloud', 'config', 'enabled', enabled ? '1' : '0');
-	uci.commit('ecycloud');
+	return uci.set('ecycloud', 'config', 'enabled', enabled ? '1' : '0') && commitConfig(uci);
 };
 
 function accountView(data) {
@@ -271,13 +290,61 @@ function annotateLabels(text, labels) {
 };
 
 function annotateRuntime(text, labels) {
-	let out = text;
-	for (let entry in labelEntries(labels)) {
-		const shown = replace(replace(entry[1], '\\', '\\\\'), '"', '\\"');
-		for (let edge in [ [ '"', '"' ], [ ',', '"' ], [ ',', ',' ] ])
-			out = replace(out, edge[0] + entry[0] + edge[1], () => edge[0] + shown + edge[1]);
+	const entries = labelEntries(labels);
+	const shown = {};
+	let plain = true;
+	for (let entry in entries) {
+		shown[entry[0]] = replace(replace(entry[1], '\\', '\\\\'), '"', '\\"');
+		plain = plain && !match(entry[0] + shown[entry[0]], /[",]/);
 	}
-	return stripNodeIds(out);
+	for (let entry in entries)
+		plain = plain && !exists(shown, shown[entry[0]]);
+	if (!plain) {
+		/* 显示名里带逗号、引号或恰好是另一个标识时，逐条替换的先后顺序会影响结果，只能按原顺序做 */
+		let out = text;
+		for (let entry in entries)
+			for (let edge in [ [ '"', '"' ], [ ',', '"' ], [ ',', ',' ] ])
+				out = replace(out, edge[0] + entry[0] + edge[1], () => edge[0] + shown[entry[0]] + edge[1]);
+		return stripNodeIds(out);
+	}
+	/* 与逐条替换逐字节等价：同一标识紧挨着出现时，前一处已用掉共用的分隔符，后一处不替换 */
+	const parts = split(text, ',');
+	let listed = null;
+	for (let i = 1; i < length(parts); i++) {
+		const pieces = split(parts[i], '"');
+		const last = length(pieces) - 1;
+		if (last == 0) {
+			if (i < length(parts) - 1 && exists(shown, pieces[0]) && pieces[0] != listed) {
+				listed = pieces[0];
+				parts[i] = shown[pieces[0]];
+			} else
+				listed = null;
+			continue;
+		}
+		listed = null;
+		let quoted = null;
+		for (let j = 1; j < last; j++) {
+			if (exists(shown, pieces[j]) && pieces[j] != quoted) {
+				quoted = pieces[j];
+				pieces[j] = shown[pieces[j]];
+			} else
+				quoted = null;
+		}
+		if (exists(shown, pieces[0]))
+			pieces[0] = shown[pieces[0]];
+		parts[i] = join('"', pieces);
+	}
+	const head = split(parts[0], '"');
+	let quoted = null;
+	for (let j = 1; j < length(head) - 1; j++) {
+		if (exists(shown, head[j]) && head[j] != quoted) {
+			quoted = head[j];
+			head[j] = shown[head[j]];
+		} else
+			quoted = null;
+	}
+	parts[0] = join('"', head);
+	return stripNodeIds(join(',', parts));
 };
 
 /* 键是 mihomo 配置里的类型名（ss / vless），查表前统一小写：内核 Clash API 给的是
@@ -397,16 +464,21 @@ function annotateGroups(view, job, speed) {
 	for (let name in (speed.failed ?? []))
 		speedFailed[name] = true;
 
-	for (let group in groups) {
-		for (let member in (group.members ?? [])) {
-			const leaf = length(member.via) ? member.via : member.name;
-			member.testing = pending[leaf] == true;
-			member.failed = failed[leaf] == true && !(member.delay > 0);
-			member.speed = +(speedValues[leaf] ?? 0);
-			member.speed_testing = speedPending[leaf] == true;
-			member.speed_failed = speedFailed[leaf] == true && !(member.speed > 0);
-		}
+	const nodes = {};
+	for (let name, member in view.nodes) {
+		const leaf = length(member.via) ? member.via : name;
+		member.testing = pending[leaf] == true;
+		member.failed = failed[leaf] == true && !(member.delay > 0);
+		member.speed = +(speedValues[leaf] ?? 0);
+		member.speed_testing = speedPending[leaf] == true;
+		member.speed_failed = speedFailed[leaf] == true && !(member.speed > 0);
+		nodes[name] = {};
+		for (let key, value in member)
+			if (value !== '' && value !== false && value !== 0)
+				nodes[name][key] = value;
+	}
 
+	for (let group in groups) {
 		let testing = false;
 		const leaves = testingGroups[group.name];
 		if (type(leaves) == 'array') {
@@ -435,6 +507,7 @@ function annotateGroups(view, job, speed) {
 
 	return {
 		groups,
+		nodes,
 		flag_regex: view.flag_regex ?? '',
 		testing: service.delayActive() || length(pending) > 0
 	};
@@ -530,6 +603,7 @@ function groupsFromCache() {
 	const extras = {};
 	const nested = {};
 	const groups = [];
+	const nodes = {};
 
 	for (let proxy in profile.nodesOf(cache?.config))
 		if (length(proxy?.name))
@@ -545,11 +619,13 @@ function groupsFromCache() {
 
 		const members = [];
 		for (let member in profile.membersOf(cache.config, group)) {
+			push(members, member);
+			if (nodes[member] != null)
+				continue;
 			const cfg = extras[member] ?? {};
 			const isGroup = member in nested;
 
-			push(members, {
-				name: member,
+			nodes[member] = {
 				label: shownName(member, labels),
 				type: isGroup ? nested[member] : proxyType(cfg.type ?? ''),
 				protocol: isGroup ? '' : proxyType(cfg.type ?? ''),
@@ -561,7 +637,7 @@ function groupsFromCache() {
 				via: '',
 				via_label: '',
 				delay: 0
-			});
+			};
 		}
 
 		push(groups, {
@@ -574,7 +650,7 @@ function groupsFromCache() {
 		});
 	}
 
-	return presentGroups({ groups });
+	return presentGroups({ groups, nodes });
 };
 
 function groupsView() {
@@ -586,6 +662,7 @@ function groupsView() {
 	const cache = profile.cached();
 	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
 	const extras = {};
+	const nodes = {};
 	const ordered = [];
 	const hidden = { 'ecy-speed': true };
 	for (let group in (cache?.config?.['proxy-groups'] ?? []))
@@ -615,6 +692,9 @@ function groupsView() {
 		for (let member in entry.all) {
 			if (member == profile.SPEED_GROUP)
 				continue;
+			push(members, member);
+			if (nodes[member] != null)
+				continue;
 			const node = proxies[member] ?? {};
 			const nested = type(node.all) == 'array';
 			const target = resolveLeaf(proxies, member);
@@ -623,8 +703,7 @@ function groupsView() {
 			const history = (nested ? live.history : node.history) ?? [];
 			const last = history[-1];
 
-			push(members, {
-				name: member,
+			nodes[member] = {
 				label: shownName(member, labels),
 				type: node.type ?? '',
 				protocol: nested ? '' : proxyType(node.type ?? cfg.type ?? ''),
@@ -636,7 +715,7 @@ function groupsView() {
 				via: target == member ? '' : target,
 				via_label: target == member ? '' : shownName(target, labels),
 				delay: +(last?.delay ?? 0)
-			});
+			};
 		}
 
 		push(groups, {
@@ -649,20 +728,81 @@ function groupsView() {
 		});
 	}
 
-	return presentGroups({ groups });
+	return presentGroups({ groups, nodes });
 };
 
-function connectionsView() {
+function connectionSource(conn) {
+	const ip = trim(`${conn.source_ip ?? ''}`);
+	const port = trim(`${conn.source_port ?? ''}`);
+	return !length(ip) || !length(port) ? '' : index(ip, ':') >= 0 ? `[${ip}]:${port}` : `${ip}:${port}`;
+};
+
+/* 与 logs.js 的 SOURCE 同一口径；只回传这批日志里出现过的源地址，连接再多应答也有上界 */
+function inboundTypes(text) {
+	const snapshot = statistics.read();
+	const known = {};
+	const closed = snapshot.closed ?? [];
+	for (let i = length(closed) - 1; i >= 0; i--)
+		if (length(closed[i].inbound))
+			known[connectionSource(closed[i])] = closed[i].inbound;
+	for (let id, conn in (snapshot.alive ?? {}))
+		if (length(conn.inbound))
+			known[connectionSource(conn)] = conn.inbound;
+	const types = {};
+	for (let line in split(text, '\n')) {
+		const source = match(line, /\[(TCP|UDP)\] (\[[^]]+\]:[0-9]+|[^ (]+:[0-9]+)/)?.[2];
+		if (source != null && known[source] != null)
+			types[source] = known[source];
+	}
+	return types;
+};
+
+function connectionsView(args) {
 	const snapshot = statistics.read();
 	const cache = profile.cached();
 	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
-	const label = conn => ({ ...conn, rule: annotateLabels(conn.rule, labels), chains: labeledList(conn.chains, labels) });
-	return { at: +(snapshot.at ?? 0), connections: map(values(snapshot.alive ?? {}), label), closed: map(snapshot.closed ?? [], label) };
+	const rules = {};
+	const label = (conn, active) => ({ ...conn, active, rule: rules[conn.rule] ??= annotateLabels(conn.rule, labels), chains: labeledList(conn.chains, labels) });
+	const keyword = type(args?.keyword) == 'string' ? lc(substr(args.keyword, 0, 256)) : '';
+	const hit = conn => !length(keyword) || index(lc(join(' ', [ conn.host, conn.destination_ip, conn.destination_port,
+		conn.process, conn.rule, conn.network, conn.inbound, ...conn.chains ])), keyword) >= 0;
+	const active = filter(map(values(snapshot.alive ?? {}), conn => label(conn, true)), hit);
+	const closed = filter(map(snapshot.closed ?? [], conn => label(conn, false)), hit);
+	const rows = sort(args?.scope == 'active' ? active : args?.scope == 'closed' ? closed : [ ...active, ...closed ],
+		(a, b) => a.start < b.start ? 1 : a.start > b.start ? -1 : 0);
+	const limit = min(PAGE_LIMIT, max(1, int(args?.limit) || PAGE_LIMIT));
+	const pages = max(1, int((length(rows) + limit - 1) / limit));
+	const page = min(pages, max(1, int(args?.page) || 1));
+	const id = type(args?.id) == 'string' ? args.id : '';
+	const live = length(id) ? snapshot.alive?.[id] : null;
+	const gone = length(id) && live == null ? filter(snapshot.closed ?? [], conn => conn.id == id)[0] : null;
+	return {
+		at: +(snapshot.at ?? 0),
+		total: { active: length(snapshot.alive ?? {}), closed: length(snapshot.closed ?? []) },
+		matched: { active: length(active), closed: length(closed) },
+		page, pages,
+		connections: slice(rows, (page - 1) * limit, page * limit),
+		detail: live != null ? label(live, true) : gone != null ? label(gone, false) : null
+	};
+};
+
+function textChunk(text, info, args, last) {
+	const version = `${info?.mtime}:${info?.size}`;
+	const offset = max(0, int(args?.offset) || 0);
+	if (text == null || (offset > 0 && args?.version != version))
+		return { ok: false, stale: true, msg: '内容已变化，请重新打开', text: '' };
+	let end = min(length(text), offset + TEXT_CHUNK);
+	while (end < length(text) && end > offset && (ord(text, end) & 0xC0) == 0x80)
+		end--;
+	if (last && end >= length(text))
+		unlink(RUNTIME_VIEW);
+	return { ok: true, msg: '', text: substr(text, offset, end - offset), next: end, done: end >= length(text), version };
 };
 
 const methods = {
 	status: {
 		call: function() {
+			ensureConfig();
 			return statusView();
 		}
 	},
@@ -677,8 +817,9 @@ const methods = {
 	},
 
 	connections: {
-		call: function() {
-			return connectionsView();
+		args: { scope: '', keyword: '', page: 1, limit: PAGE_LIMIT, id: '' },
+		call: function(request) {
+			return connectionsView(request.args);
 		}
 	},
 
@@ -699,11 +840,15 @@ const methods = {
 			if (!proc)
 				return { log: '' };
 
-			const out = proc.read('all') ?? '';
+			let out = proc.read('all') ?? '';
 			proc.close();
+			if (length(out) > LOG_LIMIT) {
+				out = substr(out, -LOG_LIMIT);
+				out = substr(out, index(out, '\n') + 1);
+			}
 
 			const cache = profile.cached();
-			return { log: annotateLabels(out, { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) }) };
+			return { log: annotateLabels(out, { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) }), inbound: inboundTypes(out) };
 		}
 	},
 
@@ -754,7 +899,8 @@ const methods = {
 					return { ok: false, msg: checked.error };
 			}
 			const live = instances();
-			toggle(true);
+			if (!toggle(true))
+				return { ok: false, msg: '设置保存失败，路由器存储空间可能已满' };
 
 			if (live.core?.dir == settings().runDir && live.watchdog?.running)
 				return { ok: true, msg: '' };
@@ -842,7 +988,7 @@ const methods = {
 	},
 
 	update: {
-		args: { what: '', path: '', locale: '' },
+		args: { what: '', path: '', locale: '', offset: 0, version: '' },
 		call: function(request) {
 			const what = `${request.args.what ?? ''}`;
 
@@ -850,15 +996,14 @@ const methods = {
 				return clash.ready() ? service.enqueueUpdate('geo', '') : { ok: false, msg: '内核未运行' };
 
 			if (what == 'runtime') {
-				const res = profile.runtimeConfig();
-				const cache = profile.cached();
-				return {
-					ok: res.ok == true,
-					msg: res.error ?? '',
-					text: res.ok
-						? annotateRuntime(res.text ?? '', { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) })
-						: ''
-				};
+				if (!(int(request.args.offset) > 0)) {
+					const res = profile.runtimeConfig();
+					const cache = profile.cached();
+					ensurePrivateDir(STATE_DIR);
+					if (!res.ok || !writeAtomic(RUNTIME_VIEW, annotateRuntime(res.text ?? '', { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) })))
+						return { ok: false, msg: res.error ?? '无法暂存运行配置', text: '' };
+				}
+				return textChunk(readfile(RUNTIME_VIEW), stat(RUNTIME_VIEW), request.args, true);
 			}
 
 			if (what == 'rules')
@@ -866,7 +1011,7 @@ const methods = {
 
 			if (what == 'rule') {
 				const res = profile.readRunFile(request.args.path);
-				return { ok: res.ok == true, msg: res.error ?? '', text: res.text ?? '' };
+				return res.ok ? textChunk(res.text, res.info, request.args) : { ok: false, msg: res.error ?? '', text: '' };
 			}
 
 			if (what == 'check_app')
@@ -1053,7 +1198,7 @@ const methods = {
 
 			const uci = cursor();
 			uci.set('ecycloud', 'config', 'route_mode', mode);
-			uci.commit('ecycloud');
+			commitConfig(uci);
 			profile.setRunMode(settings().runDir, mode);
 			return { ok: true, msg: '' };
 		}
@@ -1074,7 +1219,7 @@ const methods = {
 
 			const uci = cursor();
 			uci.set('ecycloud', 'config', name, value);
-			uci.commit('ecycloud');
+			commitConfig(uci);
 			background(`${INIT} restart`);
 
 			return { ok: true, msg: '' };
@@ -1109,7 +1254,10 @@ function guard(name, inner) {
 		const result = GUEST_OK[name] || checkUpdate || panel.session().logged_in
 			? inner(request) : guestReply();
 		result.session = panel.session();
-		return result;
+		if (blobSize(result, '') <= REPLY_LIMIT)
+			return result;
+		const msg = '内容过多，超出路由器单次应答上限';
+		return { ok: false, msg, error: msg, session: result.session };
 	};
 };
 

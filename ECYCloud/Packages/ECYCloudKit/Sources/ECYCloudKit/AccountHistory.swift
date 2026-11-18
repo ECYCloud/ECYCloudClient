@@ -38,10 +38,7 @@ public struct AccountHistory: Sendable {
         public let online: Bool?
         public let currentDevice: Bool
         public var content: String? = nil
-        public var renewal: Renewal? = nil
-        public var renewalUnavailableReason = ""
         public var thirdPartyDevice = false
-        public struct Renewal: Sendable { public let id: Int; public let enabled: Bool }
     }
     public let rows: [Row]
     public let currentPage: Int
@@ -130,20 +127,17 @@ struct BalanceRecord: Decodable, Sendable {
     }
 }
 struct PurchaseRecord: Decodable, Sendable {
-    let id: Int
     let orderNo: String, shopName: String, content: String, datetime: String, expTime: String
     let name: String?
     let price: Double
-    let autoRenew: Bool, canToggle: Bool
-    let renew: String?, autoRenewUnavailableReason: String?
+    let autoRenew: Bool
+    let renew: String?
     var row: AccountHistory.Row {
         .init(fields: [.init(label: "订单号", value: orderNo), .init(label: "商品名称", value: shopName.isEmpty ? name ?? "" : shopName),
                        .init(label: "购买价格", value: L10n.t("¥ {0}", [String(format: "%.2f", price)])), .init(label: "购买时间", value: datetime),
                        .init(label: "套餐过期时间", value: expTime.isEmpty ? "-" : expTime),
                        .init(label: "自动续费时间", value: autoRenew && renew?.isEmpty == false ? renew ?? "-" : "-")],
-              deviceID: nil, online: nil, currentDevice: false, content: content,
-              renewal: canToggle ? .init(id: id, enabled: autoRenew) : nil,
-              renewalUnavailableReason: autoRenewUnavailableReason ?? "")
+              deviceID: nil, online: nil, currentDevice: false, content: content)
     }
 }
 struct UnlockRecord: Decodable, Sendable {

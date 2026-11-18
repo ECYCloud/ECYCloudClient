@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart'
@@ -162,6 +163,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Map<String, String> _groupIcons = const <String, String>{};
   AssembledProfile? _profile;
   ClashApiOptions? _clashApiOptions;
+  Future<void>? _adoption;
   String _configRevision = '';
   DateTime? _connectedAt;
 
@@ -320,16 +322,21 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _restartTimer?.cancel();
     _restartTimer = null;
 
+    bool installed = false;
     try {
-      return await _kernel.upgrade(
+      final String result = await _kernel.upgrade(
         version,
         proxyPort: wasConnected ? _settings.mixedPort : null,
       );
+      installed = true;
+      return result;
     } finally {
       if (wasConnected && generation == _generation) {
         _userStopped = false;
-        _restartAttempt = 0;
-        await _restartKernel(L10n.t('内核已更新，正在重启'));
+        if (installed) {
+          _restartAttempt = 0;
+          await _restartKernel(L10n.t('内核已更新，正在重启'));
+        }
       }
     }
   }
@@ -480,6 +487,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   /// 控制面是否在线。内核常驻，未连接时它同样为真，节点操作据此放行。
   bool get controlPlaneReady => _clash != null;
 
+  String? _standbyError;
+  String? get standbyError => _standbyError;
+
   bool get busy =>
       _state == ConnectionPhase.connecting ||
       _state == ConnectionPhase.disconnecting;
@@ -609,7 +619,17 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   /// 内核比界面活得久时（Android 上 Activity 被销毁、进程被杀，VpnService 仍在
   /// 跑隧道），界面重新起来必须认回这条连接。认不回的一律停掉：留着就是一条
   /// 界面显示「未连接」、用户也断不开的隧道。
-  Future<void> adoptRunningKernel({bool takeover = false}) async {
+  Future<void> adoptRunningKernel({bool takeover = false}) {
+    final Future<void> run = _adoptRunningKernel(takeover);
+    _adoption = run;
+    return run.whenComplete(() {
+      if (identical(_adoption, run)) {
+        _adoption = null;
+      }
+    });
+  }
+
+  Future<void> _adoptRunningKernel(bool takeover) async {
     final int generation = ++_generation;
     final ClashApiOptions? live = await _kernel.attach();
     if (live == null || generation != _generation) {
@@ -619,7 +639,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _userStopped = false;
     _setState(ConnectionPhase.connecting, error: null);
 
-    final ClashApiClient clash = ClashApiClient(live);
+    final ClashApiClient clash = ClashApiClient(live)
+      ..panelProviders = _panelProviderNames();
     try {
       await clash.waitReady(
         timeout: const Duration(seconds: 10),
@@ -630,6 +651,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _clash = clash;
+      _clashApiOptions = live;
       await _refreshProxies();
       final ({String mode, bool tunEnabled, int mixedPort}) runtime =
           await clash.fetchRuntime();
@@ -671,6 +693,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> startStandby() async {
+    // 认回还在等后台应答时不能抢先起常驻内核：那会作废认回，并把正在跑的隧道换成不接管的内核
+    final Future<void>? adoption = _adoption;
+    if (adoption != null) {
+      try {
+        await adoption;
+      } on Object catch (_) {}
+    }
     if (_clash != null || busy || _api == null) {
       return;
     }
@@ -873,6 +902,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _autoConnectTimer = null;
     _captureSelectorSnapshot();
     _startupStage = stage;
+    _standbyError = null;
     if (takeover) {
       _setState(ConnectionPhase.connecting, error: null);
     } else {
@@ -971,6 +1001,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         }
       } else {
         Logger.instance.warn(_source, '内核常驻启动失败：$reason');
+        _standbyError = reason;
         _setState(ConnectionPhase.disconnected, error: null);
       }
     }
@@ -1030,7 +1061,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> updateSettings(AppSettings next) async {
     final int generation = _generation;
-    final bool needsRestart = _settings.affectsKernel(next) && _clash != null;
+    final bool needsRestart =
+        _settings.affectsKernel(next) && (_clash != null || _launching);
     final bool proxyChanged =
         _settings.systemProxyEnabled != next.systemProxyEnabled ||
         !listEquals(_settings.systemProxyBypass, next.systemProxyBypass);
@@ -1597,7 +1629,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     notifyListeners();
 
-    final bool unlimited = (_profileOf?.call()?.id ?? 0) == 1;
+    final bool unlimited = _profileOf?.call()?.speedTestUnlimited ?? false;
     final List<String> localBlocked = <String>[
       for (final String name in pending)
         if (!unlimited && !_speedQuota.canTest(name)) name,
@@ -2105,7 +2137,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!identical(api, _api)) {
         return;
       }
-      await refreshProfileFromPanel();
+      await refreshProfileFromPanel(refreshRules: false);
     } on ApiException catch (e) {
       if (identical(api, _api) && e.transient) {
         _panelOffline = true;
@@ -2264,6 +2296,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       clash = ClashApiClient(clashApi);
     }
     final int readySeconds = (60 + _providerTotal * 8).clamp(60, 180);
+    clash.panelProviders = _panelProviderNames();
     try {
       await clash.waitReady(
         timeout: Duration(seconds: readySeconds),
@@ -2432,6 +2465,20 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   static const Duration _statsInterval = Duration(seconds: 1);
   static const Duration _sysProxyGuardInterval = Duration(seconds: 60);
 
+  // Linux 的系统代理写在用户会话的 gsettings 里，特权 helper 还原不了：
+  // 退出前必须由界面自己断开并还原，否则代理一直指向已停掉的本地端口
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      try {
+        await shutdown();
+      } on Object catch (e) {
+        Logger.instance.warn(_source, '退出前清理失败: $e');
+      }
+    }
+    return AppExitResponse.exit;
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final bool background =
@@ -2451,9 +2498,35 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     // 回到前台：这期间内核可能被通知栏磁贴单独开了起来，界面得认回这条隧道，
     // 否则会显示成未连接、用户也断不开
-    if (!background && !busy && _clash == null) {
-      unawaited(adoptRunningKernel());
+    if (!background && !busy) {
+      unawaited(_clash == null ? adoptRunningKernel() : _syncTakeover());
     }
+  }
+
+  // 常驻内核在跑时 _clash 不为空，隧道仍可能被磁贴接管：控制面没变，只把接管状态认回来
+  Future<void> _syncTakeover() async {
+    final ClashApiClient? clash = _clash;
+    final int generation = _generation;
+    if (clash == null || _takeover) {
+      return;
+    }
+    try {
+      final ({String mode, bool tunEnabled, int mixedPort}) runtime =
+          await clash.fetchRuntime();
+      if (generation != _generation ||
+          !identical(clash, _clash) ||
+          busy ||
+          !runtime.tunEnabled) {
+        return;
+      }
+    } on Object catch (_) {
+      return;
+    }
+    _userStopped = false;
+    _takeover = true;
+    _connectedAt = _kernel.startedAt;
+    _scheduleStatsRefresh();
+    _setState(ConnectionPhase.connected, error: null);
   }
 
   void _scheduleStatsRefresh() {
@@ -2688,7 +2761,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 返回给人看的结果文案；已有刷新在进行时返回 null（调用方勿提示）。
-  Future<String?> refreshProfileFromPanel({bool force = false}) async {
+  Future<String?> refreshProfileFromPanel({
+    bool force = false,
+    bool refreshRules = true,
+  }) async {
     final int generation = _generation;
     final PanelApiClient? api = _api;
     if (api == null) {
@@ -2734,6 +2810,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!identical(api, _api)) {
         return null;
       }
+      // 拉取失败但退回了离线缓存：配置没更新过，不能报成「已是最新」
+      if (_panelOffline) {
+        return L10n.t('更新失败：{0}', <Object>[L10n.t('面板暂不可达')]);
+      }
       final bool changed = jsonEncode(_remote) != previous;
       final bool running = _clash != null && _kernel.status.running;
       if (!running && _state == ConnectionPhase.connected) {
@@ -2745,7 +2825,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!changed) {
         if (running) {
           _commitRemote();
-          await _refreshRuleProviders();
+          if (refreshRules) await _refreshRuleProviders();
           if (_groups.isEmpty) {
             await _refreshProxies();
           }
@@ -2948,11 +3028,22 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  List<String> _panelProviderNames() {
+    final Object? providers = _profile?.config['proxy-providers'];
+    return providers is Map
+        ? providers.keys
+              .cast<String>()
+              .where((String name) => name.startsWith('ecy-panel-'))
+              .toList()
+        : const <String>[];
+  }
+
   Future<void> _refreshProxies({bool notify = true}) async {
     final ClashApiClient? clash = _clash;
     if (clash == null) {
       return;
     }
+    clash.panelProviders = _panelProviderNames();
 
     final (List<ProxyGroup>, List<ProxyNode>) result = await clash
         .fetchProxies();

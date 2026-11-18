@@ -221,40 +221,23 @@ class _InvitePageState extends State<InvitePage>
     if (summary == null || api == null) {
       return;
     }
-    final _WithdrawApplyResult? result = await showDialog<_WithdrawApplyResult>(
+    final String? msg = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) =>
           _WithdrawApplyDialog(summary: summary, api: api),
     );
-    if (result == null || !mounted) {
+    if (msg == null || !mounted) {
       return;
     }
-    try {
-      final String msg = await api.applyWithdraw(
-        amount: result.amount,
-        channelId: result.channelId,
-        accountInfo: result.accountInfo,
-        saveAccount: result.saveAccount,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg.isEmpty ? L10n.t('提现成功') : msg),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      await AppScope.of(context).auth.refreshProfile();
-      await _load();
-    } on ApiException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg.isEmpty ? L10n.t('提现成功') : msg),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    await AppScope.of(context).auth.refreshProfile();
+    await _load();
   }
 
   Future<void> _cancelWithdraw(int recordId) async {
@@ -679,20 +662,6 @@ class _InviteCopyRow extends StatelessWidget {
   }
 }
 
-class _WithdrawApplyResult {
-  const _WithdrawApplyResult({
-    required this.amount,
-    required this.channelId,
-    this.accountInfo = const <String, String>{},
-    this.saveAccount = false,
-  });
-
-  final double amount;
-  final String channelId;
-  final Map<String, String> accountInfo;
-  final bool saveAccount;
-}
-
 class _WithdrawApplyDialog extends StatefulWidget {
   const _WithdrawApplyDialog({required this.summary, required this.api});
 
@@ -709,6 +678,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
   String _savedAccountId = '';
   bool _saveAccount = false;
   bool _fieldsBusy = false;
+  bool _submitting = false;
   String? _fieldsError;
   String? _amountError;
   List<WithdrawChannelField> _fields = const <WithdrawChannelField>[];
@@ -804,7 +774,7 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final double? parsed = double.tryParse(_amount.text.trim());
     if (parsed == null || !parsed.isFinite || parsed <= 0) {
       setState(() => _amountError = L10n.t('请输入有效的提现金额'));
@@ -813,8 +783,9 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
     if (!_toBalance && (_fieldsBusy || _fieldsError != null)) {
       return;
     }
-    Navigator.of(context).pop(
-      _WithdrawApplyResult(
+    setState(() => _submitting = true);
+    try {
+      final String msg = await widget.api.applyWithdraw(
         amount: parsed,
         channelId: _channelId,
         accountInfo: <String, String>{
@@ -823,8 +794,24 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
             e.key: e.value.text.trim(),
         },
         saveAccount: _saveAccount,
-      ),
-    );
+      );
+      if (mounted) {
+        Navigator.of(context).pop(msg);
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
   }
 
   @override
@@ -872,15 +859,18 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
               const SizedBox(height: 12),
               Text(L10n.t('提现方式'), style: theme.textTheme.bodySmall),
               const SizedBox(height: 6),
-              LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) =>
-                    OptionDropdown<String>(
-                      value: _channelId,
-                      width: constraints.maxWidth,
-                      options: channelOptions,
-                      onChanged: (String value) =>
-                          unawaited(_selectChannel(value)),
-                    ),
+              SizedBox(
+                height: AppTheme.controlHeight,
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) =>
+                      OptionDropdown<String>(
+                        value: _channelId,
+                        width: constraints.maxWidth,
+                        options: channelOptions,
+                        onChanged: (String value) =>
+                            unawaited(_selectChannel(value)),
+                      ),
+                ),
               ),
             ],
             if (!_toBalance) ...<Widget>[
@@ -906,15 +896,18 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
                   const SizedBox(height: 12),
                   Text(L10n.t('已保存的账户'), style: theme.textTheme.bodySmall),
                   const SizedBox(height: 6),
-                  LayoutBuilder(
-                    builder:
-                        (BuildContext context, BoxConstraints constraints) =>
-                            OptionDropdown<String>(
-                              value: _savedAccountId,
-                              width: constraints.maxWidth,
-                              options: savedOptions,
-                              onChanged: _fillSaved,
-                            ),
+                  SizedBox(
+                    height: AppTheme.controlHeight,
+                    child: LayoutBuilder(
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) =>
+                              OptionDropdown<String>(
+                                value: _savedAccountId,
+                                width: constraints.maxWidth,
+                                options: savedOptions,
+                                onChanged: _fillSaved,
+                              ),
+                    ),
                   ),
                 ],
                 for (final WithdrawChannelField field in _fields) ...<Widget>[
@@ -945,11 +938,13 @@ class _WithdrawApplyDialogState extends State<_WithdrawApplyDialog> {
       ),
       actions: <Widget>[
         FilledButton(
-          onPressed: _fieldsBusy || _fieldsError != null ? null : _submit,
+          onPressed: _submitting || _fieldsBusy || _fieldsError != null
+              ? null
+              : _submit,
           child: Text(L10n.t('申请')),
         ),
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
           child: Text(L10n.t('取消')),
         ),
       ],

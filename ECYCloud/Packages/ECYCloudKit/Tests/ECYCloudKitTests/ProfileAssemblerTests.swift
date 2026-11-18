@@ -152,6 +152,24 @@ struct ProfileAssemblerTests {
         #expect(throws: ClientError.configuration) { try ProfileAssembler.assemble(remote, options: unsafe) }
     }
 
+    @Test func overseasRegionRoutesChinaRulesThroughMatchTarget() throws {
+        func rules(_ source: [String], proxyChina: Bool) throws -> [String]? {
+            var config = try json(remote)
+            config["rules"] = source
+            config["rule-providers"] = ["direct": ["type": "file", "path": "rules/direct.yaml", "behavior": "domain"]]
+            var value = options
+            value.proxyChina = proxyChina
+            return try json(ProfileAssembler.assemble(JSONSerialization.data(withJSONObject: config), options: value).data)["rules"] as? [String]
+        }
+        let source = ["GEOSITE,CN,DIRECT", "GEOIP,cn,DIRECT,no-resolve", "GEOIP, CN, DIRECT", "GEOIP,private,DIRECT", "RULE-SET,direct,DIRECT", "MATCH,synthetic-group"]
+        #expect(try rules(source, proxyChina: true) == ["GEOSITE,CN,synthetic-group", "GEOIP,cn,synthetic-group,no-resolve", "GEOIP,CN,synthetic-group",
+                                                         "GEOIP,private,DIRECT", "RULE-SET,direct,DIRECT", "MATCH,synthetic-group"])
+        #expect(try rules(source, proxyChina: false) == source)
+        for unchanged in [["GEOSITE,CN,DIRECT", "FINAL,synthetic-group"], ["GEOSITE,CN,DIRECT", "MATCH, direct"]] {
+            #expect(try rules(unchanged, proxyChina: true) == unchanged)
+        }
+    }
+
     @Test func selectableGroupsUseProviderMembersAndPreserveIdentifiers() throws {
         var source = try json(remote)
         let payload = source["proxies"]!
@@ -210,5 +228,23 @@ struct ProfileAssemblerTests {
         #expect(catalog.groups(for: .global).isEmpty)
         let runtime = [NodeSelectionGroup(id: "GLOBAL", members: ["DIRECT", "manual"], type: "select")]
         #expect(catalog.groups(for: .global, runtime: runtime).first?.members == ["DIRECT", "manual"])
+    }
+
+    @Test func onlyNodeChangesAllowUpdatingWithoutRestart() throws {
+        func lease(nodes: [String], selected: String? = nil, storeSelected: Bool = true, rule: String = "MATCH,synthetic-group") throws -> TunnelLease {
+            var group: [String: Any] = ["name": "synthetic-group", "type": "select", "use": ["ecy-panel-nodes"]]
+            group["default-selected"] = selected
+            let config: [String: Any] = [
+                "proxy-providers": ["ecy-panel-nodes": ["type": "file", "path": "ecy-panel-nodes.json",
+                                                         "payload": nodes.map { ["name": $0, "type": "ss"] }]],
+                "proxy-groups": [group], "rules": [rule], "profile": ["store-selected": storeSelected]
+            ]
+            return TunnelLease(owner: "owner", expiresAt: .distantFuture, configuration: try JSONSerialization.data(withJSONObject: config))
+        }
+        let running = try lease(nodes: ["a", "b"])
+        #expect(try lease(nodes: ["a"], selected: "a", storeSelected: false).differsOnlyInNodes(from: running))
+        #expect(try !lease(nodes: ["a"], rule: "MATCH,DIRECT").differsOnlyInNodes(from: running))
+        let other = TunnelLease(owner: "other", expiresAt: .distantFuture, configuration: running.configuration)
+        #expect(!other.differsOnlyInNodes(from: running))
     }
 }

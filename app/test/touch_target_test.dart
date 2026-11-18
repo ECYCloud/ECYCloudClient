@@ -8,6 +8,7 @@ import 'package:ecycloud_client/ui/widgets/group_speed_test_button.dart';
 import 'package:ecycloud_client/ui/widgets/speed_badge.dart';
 import 'package:ecycloud_client/ui/widgets/page_header.dart';
 import 'package:ecycloud_client/ui/widgets/refresh_button.dart';
+import 'package:ecycloud_client/ui/widgets/touch_bleed.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,7 +46,54 @@ void main() {
         const Size.square(48),
         reason: '图标按钮 $i 触控盒',
       );
+      // 按压轮廓与桌面端一样是 32，只有点击范围补到 48
+      expect(
+        tester.getSize(
+          find
+              .descendant(
+                of: iconButtons.at(i),
+                matching: find.byWidgetPredicate(
+                  (Widget w) => w is InkResponse,
+                ),
+              )
+              .first,
+        ),
+        const Size.square(AppTheme.pointerTapTarget),
+        reason: '图标按钮 $i 按压轮廓',
+      );
     }
+  });
+
+  testWidgets('触控端图标键按桌面端尺寸排版，溢出部分仍接点击', (WidgetTester tester) async {
+    int taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const SizedBox(width: 40, height: 60),
+                RefreshButton(onRefresh: () async => taps++),
+                const SizedBox(width: 40),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final Rect slot = tester.getRect(find.byType(TouchBleed));
+    expect(slot.size, const Size.square(AppTheme.pointerTapTarget));
+    expect(
+      tester.getSize(find.byType(IconButton)),
+      Size.square(AppTheme.minTapTarget),
+    );
+    expect(tester.getCenter(find.byType(IconButton)), slot.center);
+    await tester.tapAt(slot.centerRight + const Offset(6, 0));
+    await tester.pumpAndSettle();
+    expect(taps, 1);
   });
 
   test('桌面端小图标键收回 32', () {
@@ -101,17 +149,59 @@ void main() {
       tester.getSize(find.byType(GroupSpeedTestButton)),
       Size.square(AppTheme.minTapTarget),
     );
+    for (final Type badge in <Type>[DelayBadge, SpeedBadge]) {
+      expect(
+        tester
+            .getSize(
+              find
+                  .descendant(
+                    of: find.byType(badge),
+                    matching: find.byType(InkWell),
+                  )
+                  .first,
+            )
+            .height,
+        AppTheme.pointerTapTarget,
+        reason: '$badge 按压轮廓',
+      );
+    }
+  });
+
+  testWidgets('延迟标签轮廓外的触控补边也能触发测试', (WidgetTester tester) async {
+    int taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Center(
+            child: DelayBadge(
+              delay: 0,
+              testing: false,
+              unreachable: false,
+              onTest: () => taps++,
+            ),
+          ),
+        ),
+      ),
+    );
+    final Rect ink = tester.getRect(find.byType(InkWell));
+    await tester.tapAt(ink.topCenter - const Offset(0, 6));
+    await tester.pumpAndSettle();
+    await tester.tapAt(ink.center);
+    await tester.pumpAndSettle();
+    expect(taps, 2);
   });
 
   test('登录记住密码用可聚焦 InkWell，不用 GestureDetector', () {
-    final String login = File('lib/ui/pages/login_page.dart').readAsStringSync();
+    final String login = File('lib/ui/pages/login_page.dart')
+        .readAsStringSync();
     expect(login.contains('GestureDetector('), isFalse);
     expect(login.contains('InkWell('), isTrue);
   });
 
   test('首页公告键取同一份触控盒', () {
     final String home = File('lib/ui/pages/home_page.dart').readAsStringSync();
-    expect(home.contains('AppTheme.minTapTarget'), isTrue);
+    expect(home.contains('AppTheme.iconButtonBox'), isTrue);
     expect(home.contains('AppTheme.pointerTapTarget'), isTrue);
     final int button = home.indexOf('IconButton(');
     final int badge = home.indexOf('Badge(', button);
@@ -170,7 +260,10 @@ void main() {
     expect(icon.center, button.center);
     expect(dot.top, box.top);
     expect(dot.right, box.right);
-    expect(box.right - icon.right, (AppTheme.pointerTapTarget - icon.width) / 2);
+    expect(
+      box.right - icon.right,
+      (AppTheme.pointerTapTarget - icon.width) / 2,
+    );
   });
 
   testWidgets('密码框后缀不把输入框撑高', (WidgetTester tester) async {
@@ -253,10 +346,12 @@ void main() {
       AppTheme.pointerTapTarget,
     );
 
-    final String nodes = File(
-      'lib/ui/pages/nodes_page.dart',
-    ).readAsStringSync();
-    expect(nodes.contains('crossAxisAlignment: CrossAxisAlignment.end'), isTrue);
+    final String nodes = File('lib/ui/pages/nodes_page.dart')
+        .readAsStringSync();
+    expect(
+      nodes.contains('crossAxisAlignment: CrossAxisAlignment.end'),
+      isTrue,
+    );
     expect(nodes.contains('AppTheme.pointerTapTarget * 2'), isTrue);
     expect(nodes.contains('isTouch ? 10'), isFalse);
   });

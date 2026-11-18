@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:ecycloud_client/domain/kernel/kernel_controller.dart';
 import 'package:ecycloud_client/domain/config/local_template.dart';
@@ -250,6 +251,69 @@ void main() {
     expect(transport.statusCalls, 0);
   });
 
+  for (final bool failed in <bool>[false, true]) {
+    test('界面不向控制面发关 TUN 请求，升级失败后恢复轮询：失败=$failed', () async {
+      final HttpOverrides? overrides = HttpOverrides.current;
+      HttpOverrides.global = null;
+      addTearDown(() => HttpOverrides.global = overrides);
+      final HttpServer server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => server.close(force: true));
+      final List<String> controlRequests = <String>[];
+      server.listen((HttpRequest request) async {
+        controlRequests.add('${request.method} ${request.uri.path}');
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      });
+      final _Transport transport = _Transport()
+        ..upgradeWait = Completer<Map<String, dynamic>>()
+        ..bindLines = <String>[
+          'level=info msg="RESTful API listening at: 127.0.0.1:${server.port}"',
+        ];
+      final ServiceKernelController kernel = ServiceKernelController(
+        transport: transport,
+      );
+      addTearDown(kernel.dispose);
+      final ClashApiOptions options = ClashApiOptions(
+        port: server.port,
+        secret: 'test-secret',
+      );
+      await kernel.start(configJson: '{}', clashApi: options);
+      transport.status.complete(_running);
+      await Future<void>.delayed(Duration.zero);
+      expect(kernel.status.state, KernelState.running);
+      final int polls = transport.statusCalls;
+
+      final Future<String> upgrade = kernel.upgrade('1.2.3', proxyPort: 7890);
+      await transport.upgradeRequested.future;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(controlRequests, isEmpty, reason: '下载期间 TUN 必须保持接管');
+      expect(transport.commands, isNot(contains('kernel.stop')));
+
+      if (failed) {
+        transport.upgradeWait!.completeError(ServiceException('下载内核失败'));
+        await expectLater(upgrade, throwsA(isA<KernelException>()));
+        await Future<void>.delayed(Duration.zero);
+        expect(kernel.status.state, KernelState.running);
+        expect(kernel.clashApi, isNotNull);
+        expect(transport.statusCalls, greaterThan(polls));
+      } else {
+        transport.upgradeWait!.complete(<String, dynamic>{'version': '1.2.3'});
+        expect(await upgrade, '1.2.3');
+        expect(kernel.status.state, KernelState.stopped);
+        expect(transport.statusCalls, polls);
+      }
+      expect(transport.commands, isNot(contains('kernel.stop')));
+
+      await kernel.start(configJson: '{}', clashApi: options);
+      await kernel.stop();
+      await kernel.clearSession(_key);
+      expect(controlRequests, isEmpty, reason: '关 TUN 由特权服务在停内核前统一处理');
+    });
+  }
+
   test('Android 同进程内核由封装模块确认控制面，不等特权侧日志', () async {
     final _Transport transport = _Transport()..bindLines = <String>[];
     final ServiceKernelController kernel = ServiceKernelController(
@@ -297,13 +361,20 @@ class _Transport implements ServiceTransport {
   String? clearedKey;
   bool stopFails = false;
   bool checkFails = false;
+  Completer<Map<String, dynamic>>? upgradeWait;
+  final Completer<void> upgradeRequested = Completer<void>();
+  final List<String> commands = <String>[];
 
   @override
   Future<Map<String, dynamic>> request(
     String command, [
     Map<String, dynamic> payload = const <String, dynamic>{},
   ]) async {
+    commands.add(command);
     switch (command) {
+      case 'kernel.upgrade':
+        upgradeRequested.complete();
+        return upgradeWait!.future;
       case 'kernel.stop':
         if (stopFails) throw ServiceException('测试停止失败');
         return <String, dynamic>{};

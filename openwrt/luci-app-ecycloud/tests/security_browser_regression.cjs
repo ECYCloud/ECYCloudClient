@@ -119,14 +119,14 @@ const attacks = [
             const statsB = { today: '2026-10-04', rank: { '2026-10-04': { hosts: { 'private-b.test': 321 } } } };
             await status('a', statsA);
             const connections = api.connections();
-            pending.shift().resolve({ session: session('a'), connections: [], closed: [{ id: 'old', host: 'private-a.test' }] });
+            pending.shift().resolve({ session: session('a'), connections: [], total: { active: 0, closed: 1 } });
             await connections;
             const same = api.trafficRank('today', {}).hosts;
             const late = api.groups().then(() => false, () => true);
             const old = pending.shift();
             await status('b');
             const cleared = {
-                closed: api.ingestConnections([]).closed,
+                closed: api.closedConnections(),
                 hosts: api.trafficRank('today', {}).hosts,
             };
             old.resolve({ session: session('a'), groups: [{ name: 'private-a' }] });
@@ -138,7 +138,7 @@ const attacks = [
                 guest: api.trafficRank('today', {}).hosts };
         }, source);
         assert.equal(isolation.same[0].name, 'private-a.test');
-        assert.deepEqual(isolation.cleared, { closed: [], hosts: [] });
+        assert.deepEqual(isolation.cleared, { closed: 0, hosts: [] });
         assert.equal(isolation.rejected, true);
         assert.equal(isolation.retained[0].name, 'private-b.test');
         assert.deepEqual(isolation.guest, []);

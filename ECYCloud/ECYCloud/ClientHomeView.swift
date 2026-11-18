@@ -6,7 +6,6 @@ struct ClientHomeView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.productVerticalBarTop) private var verticalBarTop
     @State private var selection: Page = .home
-    @State private var shopCategory: ShopProduct.Kind = .plan
     @State private var popup: Announcement?
     @Environment(AccountMenu.self) private var menu
     @State private var showTraffic = false
@@ -24,13 +23,12 @@ struct ClientHomeView: View {
     @State private var slotDevices: [OnlineDevice]?
     @State private var slotSelection = ""
     private enum Page: String, CaseIterable {
-        case home = "首页", nodes = "节点", shop = "商店", tickets = "工单", invite = "邀请", unlock = "解锁", connections = "连接", logs = "日志", settings = "设置"
+        case home = "首页", nodes = "节点", tickets = "工单", invite = "邀请", unlock = "解锁", connections = "连接", logs = "日志", settings = "设置"
         // 对应 app/lib/ui/shell.dart 的 _destinations（icon / selectedIcon）与 nav_glyph.dart 的解锁字形
         func icon(filled: Bool) -> String {
             switch self {
             case .home: filled ? "home" : "home_outlined"
             case .nodes: filled ? "dns" : "dns_outlined"
-            case .shop: filled ? "shopping_bag" : "shopping_bag_outlined"
             case .tickets: filled ? "confirmation_number" : "confirmation_number_outlined"
             case .invite: filled ? "group_add" : "group_add_outlined"
             case .unlock: filled ? "lock_open_right_filled" : "lock_open_right"
@@ -114,10 +112,6 @@ struct ClientHomeView: View {
             if session.profile?.deviceKickReason == "limit_denied" { await loadSlotDevices() } else { kickNotice = true }
         }
         .productDialog(item: $popup) { item in AnnouncementsView(session: session, popup: item) { popup = nil } }
-        .onChange(of: menu.shopTrafficRequest) {
-            showTraffic = false; restrictedTickets = false; menu.rootRequest += 1
-            shopCategory = .trafficPackage; selection = .shop
-        }
         .navigationDestination(isPresented: $showTraffic) { TrafficPage(session: session) }
         .navigationDestination(isPresented: $restrictedTickets) { FeatureSheet(title: L10n.t("工单")) { TicketsView(session: session) } }
         .productDialog(isPresented: $showAnnouncements) { AnnouncementsView(session: session) { showAnnouncements = false } }
@@ -142,9 +136,8 @@ struct ClientHomeView: View {
 
     @ViewBuilder private func pageView(_ page: Page, wide: Bool) -> some View {
         switch page {
-        case .home: DashboardView(session: session, wide: wide, openNodes: { selection = .nodes }, openTraffic: { showTraffic = true }, openShop: { selection = .shop }, requestDeviceSlot: { Task { await loadSlotDevices() } })
+        case .home: DashboardView(session: session, wide: wide, openNodes: { selection = .nodes }, openTraffic: { showTraffic = true }, requestDeviceSlot: { Task { await loadSlotDevices() } })
         case .nodes: nodeList(wide: wide)
-        case .shop: ShopView(session: session, category: $shopCategory)
         case .tickets: TicketsView(session: session)
         case .invite: InviteView(session: session)
         case .unlock: AccountHistoryView(session: session, kind: .unlock, embedded: true)
@@ -477,25 +470,21 @@ struct AccountInfoPage: View {
     @State private var editAccount = false
     @State private var page: AccountPage?
     @State private var history: AccountHistoryKind?
-    @State private var renewal: Bool?
-    @State private var toast: String?
     @State private var allowDelete = false
     private var colors: ProductPalette { ProductPalette(scheme: scheme) }
 
     var body: some View {
         FeatureSheet(title: L10n.t("账户信息"), onAccount: true) { account(session.profile) }.toolbar(.hidden)
-            .productToast($toast)
             .navigationDestination(item: $page) { page in accountDestination(page) }
             .navigationDestination(isPresented: $editAccount) { AccountEditView(session: session) }
             .navigationDestination(item: $history) { kind in AccountHistoryView(session: session, kind: kind) }
     }
 
-    private enum AccountPage: String, CaseIterable, Identifiable { case traffic = "流量记录", recharge = "余额充值", strategy = "自定义策略", deletion = "删除账号"; var id: Self { self } }
+    private enum AccountPage: String, CaseIterable, Identifiable { case traffic = "流量记录", strategy = "自定义策略", deletion = "删除账号"; var id: Self { self } }
 
     @ViewBuilder private func accountDestination(_ page: AccountPage) -> some View {
         switch page {
         case .traffic: TrafficPage(session: session)
-        case .recharge: FeatureSheet(title: L10n.t(page.rawValue)) { RechargeView(session: session) }
         case .strategy: SubscriptionStrategyView(session: session)
         case .deletion: DeleteAccountView(session: session)
         }
@@ -519,8 +508,6 @@ struct AccountInfoPage: View {
                     divider
                     accountLink(L10n.t("操作记录"), icon: "manage_history") { history = .operationLogs }
                     divider
-                    accountLink(L10n.t("余额充值"), icon: "currency_yen") { page = .recharge }
-                    divider
                     accountLink(L10n.t("余额记录"), icon: "receipt_long_outlined") { history = .balance }
                     divider
                     accountLink(L10n.t("购买记录"), icon: "shopping_bag_outlined") { history = .purchases }
@@ -531,21 +518,6 @@ struct AccountInfoPage: View {
         }
         .task(id: profile?.id) { allowDelete = (try? await session.accountOptions())?.enableKill == true }
         .preference(key: ProductRefreshKey.self, value: ProductRefreshAction(id: "account", disabled: session.busy, run: { await session.refresh() }))
-        .alert(renewal == true ? L10n.t("确认开启自动续费？") : L10n.t("确认关闭自动续费？"), isPresented: Binding(get: { renewal != nil }, set: { if !$0 { renewal = nil } }), presenting: renewal) { enable in
-            Button(L10n.t("确定")) {
-                guard let id = profile?.plan?.id else { return }
-                Task {
-                    do {
-                        let result = try await session.toggleRenewal(id: id, enabled: enable)
-                        await session.refresh()
-                        toast = result.isEmpty ? (enable ? L10n.t("自动续费开启成功") : L10n.t("自动续费关闭成功")) : result
-                    } catch { toast = (error as? ClientError)?.localizedDescription ?? L10n.t("操作未完成") }
-                }
-            }
-            Button(L10n.t("取消"), role: .cancel) {}
-        } message: { enable in
-            Text(enable ? L10n.t("开启后将在套餐到期时自动续费。") : L10n.t("关闭后，您可以随时重新开启自动续费。"))
-        }
     }
 
     private func userCard(_ profile: UserProfile) -> some View {
@@ -574,18 +546,6 @@ struct AccountInfoPage: View {
                 metric(L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit))
                 metric(L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
                     : "\(profile.onlineClientCount) / \(profile.nodeConnector)")
-                // 不能开启时显示禁用开关与原因，与网页购买记录一致
-                if let plan = profile.plan, plan.id != nil,
-                   plan.canToggleAutoRenew == true || plan.autoRenewUnavailableReason?.isEmpty == false {
-                    let canToggle = plan.canToggleAutoRenew == true
-                    Toggle(isOn: Binding(get: { plan.autoRenew == true }, set: { renewal = $0 })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.t("自动续费"))
-                            Text(plan.autoRenew == true ? plan.renewAt ?? "—" : canToggle ? L10n.t("已关闭") : L10n.t(plan.autoRenewUnavailableReason ?? ""))
-                                .font(.system(size: 13)).foregroundStyle(colors.secondary)
-                        }
-                    }.toggleStyle(ProductToggleStyle()).disabled(!canToggle).productForbiddenCursor(!canToggle).padding(.top, 4)
-                }
             }
         }.headerAction {
             if allowDelete {
@@ -622,7 +582,7 @@ struct TrafficPage: View {
     let session: ClientSession
     @Environment(AccountMenu.self) private var menu
     var body: some View {
-        FeatureSheet(title: L10n.t("流量记录")) { TrafficHistoryView(session: session, openShop: { menu.shopTrafficRequest += 1 }) }
+        FeatureSheet(title: L10n.t("流量记录")) { TrafficHistoryView(session: session) }
     }
 }
 
@@ -674,7 +634,6 @@ private struct ProductAvatar: View {
     let session: ClientSession
     var confirmLogout = false
     var rootRequest = 0
-    var shopTrafficRequest = 0
     init(session: ClientSession) { self.session = session }
 }
 

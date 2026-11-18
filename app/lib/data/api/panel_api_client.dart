@@ -69,13 +69,16 @@ class RemoteProfile {
         : null;
   }
 
+  // 面板签发时间取整到秒，本机校时也有误差：只对签发一侧留 10 秒，到期一侧不放宽（三端同值）
+  static const Duration offlineIssuedSkew = Duration(seconds: 10);
+
   bool usableOffline(PanelApiClient api, {DateTime? now}) {
     final DateTime time = now ?? DateTime.now();
     final DateTime? issued = offlineIssuedAt;
     final DateTime? until = offlineUntil;
     return issued != null &&
         until != null &&
-        !time.isBefore(issued) &&
+        !time.add(offlineIssuedSkew).isBefore(issued) &&
         time.isBefore(until) &&
         cacheBinding.isNotEmpty &&
         cacheBinding == api.cacheBinding;
@@ -185,6 +188,10 @@ class PanelApiClient {
   final String configBaseUrl;
   final DeviceInfo device;
 
+  // 离线缓存绑定落盘的面板地址：回退到出包地址只换请求地址，绑定跟着换缓存就读不出来
+  String? cacheBaseUrl;
+  String? cacheConfigBaseUrl;
+
   int? fallbackProxyPort;
   String? fallbackProxyCredential;
 
@@ -208,8 +215,8 @@ class PanelApiClient {
             .convert(
               utf8.encode(
                 jsonEncode(<String>[
-                  _originOf(baseUrl),
-                  _originOf(configBaseUrl),
+                  _originOf(cacheBaseUrl ?? baseUrl),
+                  _originOf(cacheConfigBaseUrl ?? configBaseUrl),
                   device.deviceId,
                   token!,
                 ]),

@@ -16,6 +16,7 @@ struct ClientSettingsView: View {
     @State private var appOutdated = false
     @State private var kernelStatus: String?
     @State private var kernelChecked = false
+    @State private var pendingRegion: String?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
     #if os(macOS)
@@ -42,12 +43,25 @@ struct ClientSettingsView: View {
                 if let connection = session.connection {
                     let proxyLocked = working || ![.disconnected, .connected].contains(connection.state)
                     ProductSection(title: L10n.t("代理"), icon: "vpn_lock_outlined") {
+                        let overseas = preferences.region == "overseas"
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.t("使用地区"))
+                                Text(overseas ? L10n.t("选择海外时，所有的流量都走代理（包括中国流量）。") : L10n.t("选择中国时，中国的流量走直连，海外的流量走代理。"))
+                                    .font(.system(size: 12)).foregroundStyle(overseas ? AnyShapeStyle(colors.danger) : AnyShapeStyle(.secondary))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            ProductDropdown(values: ["cn", "overseas"], selection: Binding(get: { preferences.region }, set: { if $0 != preferences.region { pendingRegion = $0 } })) {
+                                $0 == "overseas" ? L10n.t("海外") : L10n.t("中国")
+                            }.frame(width: 116)
+                        }.padding(rowInsets)
+                        Divider()
                         #if os(macOS)
                         settingToggle(L10n.t("设置系统代理"), detail: L10n.t("把系统代理指向本机混合端口，只对读取该设置的程序生效，其余程序需要 TUN 模式；退出与崩溃后自动还原"), value: $preferences.systemProxy, edit: false, proxyOnly: true)
                         Divider()
-                        settingToggle(L10n.t("TUN 模式"), detail: L10n.t("接管系统全部流量，需要后台服务与虚拟网卡驱动"), value: $preferences.tunEnabled, edit: true)
+                        settingToggle(L10n.t("TUN 模式"), detail: L10n.t("接管系统全部流量，需要后台服务与虚拟网卡驱动"), value: $preferences.tunEnabled, edit: true, tunOnly: true)
                         Divider()
-                        settingToggle(L10n.t("严格路由"), detail: L10n.t("阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用"), value: $preferences.strictRoute).disabled(!preferences.tunEnabled)
+                        settingToggle(L10n.t("严格路由"), detail: L10n.t("阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用"), value: $preferences.strictRoute, tunOnly: true).disabled(!preferences.tunEnabled)
                         Divider()
                         settingToggle(L10n.t("允许局域网连接"), detail: L10n.t("混合端口监听全部网卡，供同网段其它设备使用"), value: $preferences.allowLAN)
                         #else
@@ -159,9 +173,7 @@ struct ClientSettingsView: View {
                         Text(ClientRelease.currentVersion)
                     }.padding(rowInsets)
                     Divider()
-                    refreshRow(.app, L10n.t("检查更新"), appStatus ?? L10n.t("尚未检查"), help: L10n.t("检查客户端更新"), trailing: appOutdated ? AnyView(
-                        Button(L10n.t("打开发布页") + " ›") { openURL(ClientRelease.releasesURL) }.buttonStyle(ProductButtonStyle())
-                    ) : nil) {
+                    refreshRow(.app, L10n.t("检查更新"), appStatus ?? L10n.t("尚未检查"), help: L10n.t("检查客户端更新"), trailing: releaseLink) {
                         do {
                             let result = try await session.checkClientUpdate()
                             appOutdated = result.outdated
@@ -170,6 +182,9 @@ struct ClientSettingsView: View {
                         catch { appStatus = L10n.t("检查失败：{0}", [error.localizedDescription]) }
                         toast = status(L10n.t("客户端"), appStatus ?? "")
                     }
+                    #if os(tvOS)
+                    if appOutdated { VStack(alignment: .leading, spacing: 6) { ReleasePageCode() }.foregroundStyle(colors.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(rowInsets) }
+                    #endif
                     Divider()
                     refreshRow(.kernel, L10n.t("mihomo 内核"), kernelStatus ?? L10n.t("正在读取版本…"), help: L10n.t("检查内核更新")) {
                         let current = (try? await session.kernelVersion()) ?? ""
@@ -192,6 +207,21 @@ struct ClientSettingsView: View {
             }.padding(.leading, 14).padding(.trailing, 16).padding(.top, 16).padding(.bottom, 14)
         }
         .productToast($toast)
+        .productDialog(isPresented: Binding(get: { pendingRegion != nil }, set: { if !$0 { pendingRegion = nil } })) {
+            let overseas = pendingRegion == "overseas"
+            ProductDialog(title: overseas ? L10n.t("确认切换到海外？") : L10n.t("确认切换到中国？")) {
+                Text(overseas ? L10n.t("选择海外后，中国大陆的网站和 IP 也将经代理节点访问。身处中国大陆时请勿选择，否则国内网站、App 会明显变慢，部分服务可能无法使用。")
+                     : L10n.t("选择中国后，中国大陆的网站和 IP 将直接连接，不经过代理节点。身处海外时请勿选择，否则访问中国大陆服务可能受限。"))
+            } actions: {
+                Button(overseas ? L10n.t("切换到海外") : L10n.t("切换到中国")) {
+                    guard let region = pendingRegion else { return }
+                    pendingRegion = nil
+                    session.preferences.region = region
+                    run(.apply) { try await session.applyProxySettings() }
+                }.buttonStyle(ProductButtonStyle(filled: true))
+                Button(L10n.t("取消")) { pendingRegion = nil }.buttonStyle(ProductButtonStyle())
+            }
+        }
         .task(id: session.connection?.controlPlaneReady) {
             guard !kernelChecked else { return }
             let version = (try? await session.kernelVersion()) ?? ""
@@ -224,10 +254,14 @@ struct ClientSettingsView: View {
             if let detail { Text(verbatim: detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func settingToggle(_ title: String, detail: String? = nil, value: Binding<Bool>, edit: Bool? = nil, proxyOnly: Bool = false) -> some View {
+    private func settingToggle(_ title: String, detail: String? = nil, value: Binding<Bool>, edit: Bool? = nil, proxyOnly: Bool = false, tunOnly: Bool = false) -> some View {
         Toggle(isOn: Binding(get: { value.wrappedValue }, set: { next in
             value.wrappedValue = next
-            run(.apply) { if proxyOnly { try await session.applySystemProxySettings() } else { try await session.applyProxySettings() } }
+            run(.apply) {
+                if proxyOnly { try await session.applySystemProxySettings() }
+                else if tunOnly { try await session.applyTunSettings() }
+                else { try await session.applyProxySettings() }
+            }
         })) {
             text(title, detail, edit: edit)
         }.toggleStyle(ProductToggleStyle()).padding(rowInsets)
@@ -246,6 +280,13 @@ struct ClientSettingsView: View {
                 ProductGlyph(name: "chevron_right", size: 24).foregroundStyle(colors.secondary)
             }.padding(rowInsets).contentShape(Rectangle()).productHoverLayer(Rectangle())
         }.buttonStyle(.productPlain)
+    }
+    private var releaseLink: AnyView? {
+        #if os(tvOS)
+        nil
+        #else
+        appOutdated ? AnyView(Button(L10n.t("打开发布页") + " ›") { openURL(ClientRelease.releasesURL) }.buttonStyle(ProductButtonStyle())) : nil
+        #endif
     }
     private func refreshRow(_ kind: Activity, _ title: String, _ detail: String, help: String, progress: Bool = false,
                             trailing: AnyView? = nil, perform: @escaping @MainActor () async -> Void) -> some View {
@@ -444,7 +485,7 @@ struct NetworkSegmentsEditor: View {
         Task {
             defer { working = false }
             do {
-                if routes { try await session.applyProxySettings() } else { try await session.applySystemProxySettings() }
+                if routes { try await session.applyTunSettings() } else { try await session.applySystemProxySettings() }
                 finished(L10n.t("保存成功"))
             }
             catch is CancellationError {} catch { finished(L10n.t("保存失败：{0}", [error.localizedDescription])) }
@@ -508,3 +549,13 @@ private struct RuleProvidersView: View {
         }
     }
 }
+
+#if os(tvOS)
+// tvOS 没有浏览器，openURL 打不开网页，发布页入口改为地址与二维码
+struct ReleasePageCode: View {
+    var body: some View {
+        Text(verbatim: ClientRelease.releasesURL.absoluteString)
+        PaymentQRCode(text: ClientRelease.releasesURL.absoluteString, label: L10n.t("打开发布页")).frame(width: 160, height: 160)
+    }
+}
+#endif

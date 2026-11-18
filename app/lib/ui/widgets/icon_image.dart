@@ -136,7 +136,9 @@ class RemoteIcon extends StatelessWidget {
             return null;
           }
           final Uint8List bytes = await file.readAsBytes();
-          return generation == _generation ? bytes : null;
+          if (_isImage(bytes)) {
+            return generation == _generation ? bytes : null;
+          }
         }
         // 地址由面板下发：明文 http 会把用得上哪个策略组暴露在链路上
         final Uri? uri = Uri.tryParse(url);
@@ -439,9 +441,21 @@ class _IconBytes extends StatelessWidget {
               ? fallback
               : const SizedBox.shrink();
         }
+        // 魔数对得上但解不开的文件（下载截断、面板给了坏图）退回内置图形
         return data.first == 0x3C
-            ? SvgPicture.memory(data, fit: fit)
-            : Image.memory(data, fit: fit, gaplessPlayback: true);
+            ? SvgPicture.memory(
+                data,
+                fit: fit,
+                errorBuilder: (BuildContext _, Object _, StackTrace _) =>
+                    fallback,
+              )
+            : Image.memory(
+                data,
+                fit: fit,
+                gaplessPlayback: true,
+                errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
+                    fallback,
+              );
       },
     ),
   );

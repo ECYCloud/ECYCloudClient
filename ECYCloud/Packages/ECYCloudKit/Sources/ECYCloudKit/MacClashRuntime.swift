@@ -4,9 +4,10 @@ import CryptoKit
 
 @MainActor final class MacClashRuntime {
     let mixedPort: Int
-    private let port: Int, secret: String
+    let port: Int, secret: String
     private let transport: any HTTPTransport
-    private let redactor: MacLogRedactor
+    private var redactor: MacLogRedactor
+    private let nodeProviders: [String]
     private let ruleFiles: [String: String]
     private var logStore: ClientLogStore?
     private var active: [String: [String: Any]] = [:]
@@ -37,10 +38,24 @@ import CryptoKit
               secret.utf8.allSatisfy({ (33...126).contains($0) }) else { throw TunnelError.configuration }
         self.port = port; mixedPort = mixed; self.secret = secret; self.transport = transport
         redactor = MacLogRedactor(configuration: configuration)
+        servers = Self.nodeServers(configuration)
+        nodeProviders = (configuration["proxy-providers"] as? [String: Any] ?? [:]).keys.filter { $0.hasPrefix("ecy-panel-") }.sorted()
         ruleFiles = (configuration["rule-providers"] as? [String: [String: Any]] ?? [:]).compactMapValues { $0["path"] as? String }
-        let payloads = (configuration["proxy-providers"] as? [String: [String: Any]] ?? [:]).values.flatMap { $0["payload"] as? [[String: Any]] ?? [] }
-        servers = Set(((configuration["proxies"] as? [[String: Any]] ?? []) + payloads).compactMap { ($0["server"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased() })
         self.logStore = logStore
+    }
+
+    private static func nodeServers(_ configuration: [String: Any]) -> Set<String> {
+        let payloads = (configuration["proxy-providers"] as? [String: [String: Any]] ?? [:]).values.flatMap { $0["payload"] as? [[String: Any]] ?? [] }
+        return Set(((configuration["proxies"] as? [[String: Any]] ?? []) + payloads).compactMap { ($0["server"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased() })
+    }
+
+    // 对应 clash_api_client.dart 的 updateProxyProviders：节点文件已由 helper 落盘，内核按文件重读，不重启进程
+    func updateNodes(_ configuration: [String: Any]) async throws {
+        redactor = MacLogRedactor(configuration: configuration)
+        servers = Self.nodeServers(configuration)
+        for name in nodeProviders {
+            _ = try await api("/providers/proxies/" + encoded(name), method: "PUT", timeout: 120)
+        }
     }
 
     private func url(_ path: String, query: [URLQueryItem] = []) -> URL {
@@ -72,6 +87,11 @@ import CryptoKit
 
     func ready() async throws {
         _ = try await api("/version", timeout: 2)
+        // 控制口先于节点文件就绪：这时读分组，内核会把空组回落的 REJECT 当作 url-test 的结果缓存 10 秒。
+        // 只能逐个读节点文件：/providers/proxies 总表会连分组一起输出，同样触发这份缓存
+        for name in nodeProviders {
+            guard (try await api("/providers/proxies/" + encoded(name), timeout: 2)["proxies"] as? [Any])?.isEmpty == false else { throw TunnelError.start }
+        }
         _ = try await api("/proxies/ecy-speed", method: "PUT", body: ["name": "DIRECT"], timeout: 2)
         // 转发探测只携带独立测速口令，不能把控制密钥交给代理出站。
         let status = try await MacSocket.forwardProbe(port: probePort, controller: port, credential: speedCredential)
@@ -175,6 +195,7 @@ import CryptoKit
             })]
         case .geodata:
             _ = try await api("/configs/geo", method: "POST", timeout: 100); result = ["ok": true]
+        case .nodes: throw TunnelError.control
         case .snapshot: result = try await snapshot(command)
         case .logs:
             guard ["", "debug", "info", "warning", "error"].contains(command.level) else { throw TunnelError.control }

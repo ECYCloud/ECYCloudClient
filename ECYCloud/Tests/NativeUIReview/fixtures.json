@@ -184,95 +184,6 @@
       }
     ]
   },
-  "/shop/products": {
-    "money": 12.5,
-    "plan_cooldown_remaining": 0,
-    "default_duration": 30,
-    "notice": "<p>请在购买前核对套餐有效期与流量。此处为离线虚构商品。</p>",
-    "products": [
-      {
-        "id": 1,
-        "name": "虚构月度套餐",
-        "type": "plan",
-        "price": "12.00",
-        "base_price": "15.00",
-        "stock": "不限量",
-        "in_stock": true,
-        "has_limited_sale": false,
-        "purchase_limit": 0,
-        "new_user_days_limit": 0,
-        "min_registration_days": 0,
-        "countdowns": [],
-        "bandwidth": 100,
-        "class": 1,
-        "class_expire": 30,
-        "speedlimit": 100,
-        "connector": 3,
-        "auto_renew": 1,
-        "content_extra": [
-          "虚构商品，仅用于离线检查"
-        ]
-      },
-      {
-        "id": 2,
-        "name": "虚构季度套餐",
-        "type": "plan",
-        "price": "30.00",
-        "base_price": "15.00",
-        "stock": "不限量",
-        "in_stock": true,
-        "has_limited_sale": false,
-        "purchase_limit": 0,
-        "new_user_days_limit": 0,
-        "min_registration_days": 0,
-        "countdowns": [],
-        "bandwidth": 100,
-        "class": 1,
-        "class_expire": 60,
-        "speedlimit": 100,
-        "connector": 3,
-        "auto_renew": 1,
-        "content_extra": [
-          "虚构商品，仅用于离线检查"
-        ]
-      },
-      {
-        "id": 3,
-        "name": "虚构年度套餐",
-        "type": "plan",
-        "price": "100.00",
-        "base_price": "15.00",
-        "stock": "不限量",
-        "in_stock": true,
-        "has_limited_sale": false,
-        "purchase_limit": 0,
-        "new_user_days_limit": 0,
-        "min_registration_days": 0,
-        "countdowns": [],
-        "bandwidth": 100,
-        "class": 1,
-        "class_expire": 90,
-        "speedlimit": 100,
-        "connector": 3,
-        "auto_renew": 1,
-        "content_extra": [
-          "虚构商品，仅用于离线检查"
-        ]
-      }
-    ]
-  },
-  "/shop/order-status": {
-    "name": "虚构月度套餐",
-    "base_price": "12.00",
-    "total": "10.00",
-    "stock": "不限量",
-    "has_stock_limit": false,
-    "plan_cooldown": false,
-    "hasValidOrder": 0,
-    "couponApplied": true,
-    "couponMsg": "测试优惠已应用",
-    "credit": 2
-  },
   "/user/subscription-config": {
     "customizable_groups": [
       "select",
@@ -352,5 +263,60 @@
     "denied": []
   },
   "/user/node-speed": {},
-  "/user/node-latency": {}
+  "/user/node-latency": {},
+  "/user/invite": {
+    "code": "REVIEW01",
+    "invite_url": "https://site.example.test/auth/register?code=REVIEW01",
+    "invited_users_count": 1,
+    "rebate_users_count": 1,
+    "rebate_frequency_limit": 0,
+    "paybacks_sum": 12.5,
+    "code_payback": 20,
+    "invited_users": [
+      {
+        "id": 21,
+        "reg_date": "2026-01-02 08:00:00"
+      }
+    ],
+    "paybacks": [
+      {
+        "id": 5,
+        "userid": 21,
+        "ref_get": 12.5,
+        "datetime": "2026-01-03 09:30:00"
+      }
+    ],
+    "invited_current_page": 1,
+    "invited_last_page": 1,
+    "invited_total": 1,
+    "invited_per_page": 10,
+    "payback_current_page": 1,
+    "payback_last_page": 1,
+    "payback_total": 1,
+    "payback_per_page": 10
+  },
+  "/user/unlock": {
+    "results": [
+      {
+        "node_name": "测试节点 · 正常",
+        "created_at": "2026-01-03 09:30:00",
+        "unlock_item": {
+          "YouTube_Premium": "Yes (Region: US)",
+          "Netflix": "Yes (Region: US)",
+          "AmazonPrime": "Yes (Region: US)",
+          "DisneyPlus": "No",
+          "TikTok": "Yes (Region: US)",
+          "HBOMax": "No",
+          "OpenAI": "Yes (Region: US)",
+          "Gemini": "Yes (Region: US)",
+          "Claude": "Yes (Region: US)"
+        }
+      }
+    ],
+    "unlock_check_interval": 60,
+    "current_page": 1,
+    "last_page": 1,
+    "total": 1,
+    "per_page": 10
+  }
 }

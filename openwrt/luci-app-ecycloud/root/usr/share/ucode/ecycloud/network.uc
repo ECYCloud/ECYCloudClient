@@ -84,6 +84,9 @@ function ruleset(cfg, devices) {
 		'\tchain prerouting {',
 		'\t\ttype filter hook prerouting priority mangle; policy accept;',
 		`\t\tmeta l4proto tcp socket transparent 1 meta mark set ${TPROXY_MARK} accept`,
+		/* 回包（端口转发到 LAN 服务器的应答）与发往路由器自身地址的流量不是要代理的新连接 */
+		'\t\tct direction reply accept',
+		'\t\tfib daddr type local accept',
 		'\t\tmeta l4proto { tcp, udp } th dport 53 accept',
 		'\t\tip daddr @reserved4 accept',
 		cfg.ipv6 ? '\t\tip6 daddr @reserved6 accept' : '\t\tmeta nfproto ipv6 accept');
@@ -96,10 +99,10 @@ function ruleset(cfg, devices) {
 		'\t}',
 		'',
 		'\tchain ecycloud_tproxy {',
-		`\t\tmeta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to :${cfg.tproxyPort} meta mark set ${TPROXY_MARK} accept`);
+		`\t\tmeta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:${cfg.tproxyPort} meta mark set ${TPROXY_MARK} accept`);
 
 	if (cfg.ipv6)
-		push(lines, `\t\tmeta nfproto ipv6 meta l4proto { tcp, udp } tproxy ip6 to :${cfg.tproxyPort} meta mark set ${TPROXY_MARK} accept`);
+		push(lines, `\t\tmeta nfproto ipv6 meta l4proto { tcp, udp } tproxy ip6 to [::1]:${cfg.tproxyPort} meta mark set ${TPROXY_MARK} accept`);
 
 	push(lines, '\t}');
 
@@ -109,6 +112,7 @@ function ruleset(cfg, devices) {
 			'\tchain output {',
 			'\t\ttype route hook output priority mangle; policy accept;',
 			`\t\tmeta mark ${ROUTING_MARK} accept`,
+			'\t\tct direction reply accept',
 			'\t\tmeta l4proto { tcp, udp } th dport 53 accept',
 			'\t\tip daddr @reserved4 accept',
 			cfg.ipv6 ? '\t\tip6 daddr @reserved6 accept' : '\t\tmeta nfproto ipv6 accept');
@@ -170,7 +174,9 @@ function dnsmasqConfDir(section) {
 		return null;
 
 	const configured = cursor().get('dhcp', section, 'confdir');
-	const dir = length(configured) ? split(configured, ',')[0] : `/tmp/dnsmasq.${section}.d`;
+	/* 默认目录随系统版本不同（23.05 为 /tmp/dnsmasq.d，24.10 起按实例名区分），未配置时只认 dnsmasq 启动脚本实际写下的那一个 */
+	const dir = length(configured) ? split(configured, ',')[0]
+		: match(readfile(`/var/etc/dnsmasq.conf.${section}`) ?? '', /(^|\n)conf-dir=([^,\n]+)/)?.[2];
 
 	return substr(dir, 0, 1) == '/' ? dir : null;
 };

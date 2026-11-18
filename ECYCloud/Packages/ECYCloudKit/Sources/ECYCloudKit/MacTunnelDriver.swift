@@ -42,9 +42,19 @@ import Security
         let ports = try MacPorts.allocate(mixed: preferences.mixedPort)
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw TunnelError.start }
-        var options = ProfileOptions(mixedPort: ports.mixed, controllerPort: ports.controller, secret: Data(bytes).base64EncodedString())
+        return options(preferences, mixed: ports.mixed, controller: ports.controller, secret: Data(bytes).base64EncodedString())
+    }
+
+    public func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? {
+        guard takeover, let runtime, lease != nil, stopping == nil, preferences.mixedPort == runtime.mixedPort else { return nil }
+        return options(preferences, mixed: runtime.mixedPort, controller: runtime.port, secret: runtime.secret)
+    }
+
+    private func options(_ preferences: ClientPreferences, mixed: Int, controller: Int, secret: String) -> ProfileOptions {
+        var options = ProfileOptions(mixedPort: mixed, controllerPort: controller, secret: secret)
         options.mode = preferences.mode.rawValue
         options.ipv6 = preferences.ipv6
+        options.proxyChina = preferences.region == "overseas"
         options.tunEnabled = preferences.tunEnabled
         options.strictRoute = preferences.strictRoute
         options.allowLAN = preferences.allowLAN
@@ -97,11 +107,8 @@ import Security
         }
         _ = try await helper.request("ping", payload: [:]); try current()
         _ = try await helper.request("kernel.bind", payload: ["cache_key": lease.cacheKey]); try current()
-        let check = try await helper.request("kernel.check", payload: ["config": String(decoding: validation, as: UTF8.self)])
+        try await check(validation)
         try current()
-        guard check["valid"] as? Bool == true else {
-            throw (check["error"] as? String).flatMap { $0.isEmpty ? nil : TunnelError.failed(L10n.t("配置校验未通过：{0}", [L10n.message($0)])) } ?? TunnelError.configuration
-        }
         if takeover { statusChanged?(.connecting) }
         var cursor = try await helper.request("kernel.status", payload: ["log_cursor": 0])["log_cursor"] as? Int ?? 0
         try current()
@@ -164,6 +171,28 @@ import Security
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
+    }
+
+    private func check(_ validation: Data) async throws {
+        let check = try await helper.request("kernel.check", payload: ["config": String(decoding: validation, as: UTF8.self)])
+        guard check["valid"] as? Bool == true else {
+            throw (check["error"] as? String).flatMap { $0.isEmpty ? nil : TunnelError.failed(L10n.t("配置校验未通过：{0}", [L10n.message($0)])) } ?? TunnelError.configuration
+        }
+    }
+
+    public func updateNodes(_ lease: TunnelLease) async throws -> Bool {
+        guard takeover, let running = self.lease, let runtime, stopping == nil, lease.expiresAt > .now,
+              lease.differsOnlyInNodes(from: running), let validation = lease.validationConfiguration,
+              let config = try JSONSerialization.jsonObject(with: lease.configuration) as? [String: Any] else { return false }
+        let operation = epoch
+        try await check(validation)
+        guard epoch == operation else { throw CancellationError() }
+        _ = try await helper.request("kernel.write", payload: ["config": String(decoding: lease.configuration, as: UTF8.self)])
+        guard epoch == operation else { throw CancellationError() }
+        try await runtime.updateNodes(config)
+        guard epoch == operation else { throw CancellationError() }
+        self.lease = lease
+        return true
     }
 
     public func waitUntilStopped() async throws {

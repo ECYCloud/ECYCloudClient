@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -100,6 +99,12 @@ func (s *server) upgradeKernel(version string, proxyPort int) (string, error) {
 	}
 	defer s.upgrading.Unlock()
 	defer s.setUpgradeProgress("", 0)
+
+	if _, err := os.Stat(kernelPath() + kernelBackupExt); err == nil {
+		return "", fmt.Errorf("存在尚未提交的旧内核备份，拒绝覆盖升级")
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("检查旧内核备份失败: %w", err)
+	}
 
 	s.setUpgradeProgress("resolving", 0)
 	name, url, want, err := resolveKernelAsset(version, proxyPort)
@@ -349,32 +354,28 @@ func extractOne(source io.Reader, path string, mode os.FileMode) error {
 func installKernel(source string) error {
 	path := kernelPath()
 	backup := path + kernelBackupExt
-	if _, err := os.Stat(backup); err == nil {
-		return fmt.Errorf("存在尚未提交的旧内核备份，拒绝覆盖升级")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("检查旧内核备份失败: %w", err)
-	}
+	staged := path + ".new"
+	defer os.Remove(staged)
 
+	// 升级目录可能在别的文件系统上，先拷进安装目录再改名顶替：
+	// 直接往内核路径上写，中途被杀会留下半截内核，校验与再次升级都过不去
+	if err := copyFile(source, staged); err != nil {
+		return err
+	}
 	if info, err := os.Lstat(path); err == nil {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("现有内核不是普通文件，拒绝替换")
 		}
-		if err := os.Rename(path, backup); err != nil {
-			return fmt.Errorf("移走旧的 %s 失败: %w", kernelExeName, err)
+		if err := os.Link(path, backup); err != nil {
+			return fmt.Errorf("备份旧的 %s 失败: %w", kernelExeName, err)
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("检查现有内核失败: %w", err)
 	}
-
-	// 不能用 os.Rename：安装目录与升级目录可能不在同一个文件系统上
-	if err := copyFile(source, path); err != nil {
-		os.Remove(path)
-		if restoreErr := os.Rename(backup, path); restoreErr != nil {
-			return errors.Join(err, fmt.Errorf("回滚 %s 失败: %w", kernelExeName, restoreErr))
-		}
-		return err
+	if err := os.Rename(staged, path); err != nil {
+		os.Remove(backup)
+		return fmt.Errorf("替换 %s 失败: %w", kernelExeName, err)
 	}
-
 	return nil
 }
 

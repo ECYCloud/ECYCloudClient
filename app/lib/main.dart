@@ -110,6 +110,7 @@ Future<void> main(List<String> args) async {
   final UpdateController update = UpdateController(
     connection: connection,
     platform: platform,
+    siteOrigin: () => auth.siteOrigin,
   );
 
   _traceFirstFrame();

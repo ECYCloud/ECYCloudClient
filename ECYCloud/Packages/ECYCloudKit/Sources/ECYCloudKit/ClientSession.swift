@@ -1,9 +1,7 @@
 import Foundation
 import CryptoKit
 import Observation
-#if DEBUG
 import OSLog
-#endif
 
 @MainActor
 @Observable
@@ -46,7 +44,7 @@ public final class ClientSession {
     @ObservationIgnored private var offered: [Bool: URL] = [:]
     // 最近一轮新地址探测；测试据此等探测结束
     @ObservationIgnored var originProbe: Task<Void, Never>?
-    @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored let now: () -> Date
     @ObservationIgnored private var saved: StoredSession?
     @ObservationIgnored private let cache: PanelResponseCache?
     // 凭离线缓存进入时为离线授权到期时间；面板重新可达后清空，回到以令牌有效期为准
@@ -153,6 +151,7 @@ public final class ClientSession {
             let userID = profile?.id ?? session.userID
             announcementState.configure(site: endpoints.site, userID: userID)
             nodeProbes.configure(site: endpoints.site, userID: userID)
+            if nodeSelections.isEmpty { nodeSelections = nodeProbes.savedSelections() }
             trafficRank.configure(site: endpoints.site, userID: userID)
             phase = .signedIn
             await reconcileConnection()
@@ -434,6 +433,7 @@ public final class ClientSession {
             panelOffline = false
             announcementState.configure(site: endpoints.site, userID: result.user?.id)
             nodeProbes.configure(site: endpoints.site, userID: result.user?.id)
+            if nodeSelections.isEmpty { nodeSelections = nodeProbes.savedSelections() }
             trafficRank.configure(site: endpoints.site, userID: result.user?.id)
             stopKickedConnection()
             accountStatus = result.accountStatus
@@ -573,8 +573,12 @@ public final class ClientSession {
                 await reconcileConnection()
             }
             nodeSelections = nodeSelections.filter { group, node in result.selectionGroups.contains { $0.id == group && $0.members.contains(node) } }
-            if let previousRevision, previousRevision != result.revision, connection?.state == .connected {
-                try await applyProxySettings()
+            if let previousRevision, previousRevision != result.revision, let connection, connection.state == .connected {
+                var updated = false
+                if let live = try connection.liveProfileOptions(preferences) {
+                    updated = try await connection.updateNodes(makeLease(takeover: true, options: live))
+                }
+                if !updated { try await applyProxySettings() }
             } else if runtimeActive, connection?.supportsStandby == true, connection?.state == .disconnected {
                 Task { [weak self] in
                     guard let self, operation == generation, runtimeActive, connection?.state == .disconnected,
@@ -645,6 +649,7 @@ public final class ClientSession {
               let group = catalog?.selectionGroups.first(where: { $0.id == group }) else { return }
         if node.isEmpty { nodeSelections.removeValue(forKey: group.id) }
         else if group.members.contains(node) { nodeSelections[group.id] = node }
+        nodeProbes.saveSelections(nodeSelections)
     }
 
     public func connect() async { await connect(reclaimed: false) }
@@ -700,6 +705,11 @@ public final class ClientSession {
         if let message = connection.message { throw ClientError.input(message) }
     }
 
+    public func applyTunSettings() async throws {
+        guard connection?.state != .disconnected else { return }
+        try await applyProxySettings()
+    }
+
     public func runtimeConfigurationText() throws -> String {
         guard phase == .signedIn, let data = connection?.runtimeConfiguration else { throw TunnelError.control }
         let text = try Self.maskedRuntimeConfiguration(data)
@@ -732,10 +742,10 @@ public final class ClientSession {
         })
     }
 
-    private func makeLease(takeover: Bool) throws -> TunnelLease {
+    private func makeLease(takeover: Bool, options: ProfileOptions? = nil) throws -> TunnelLease {
         guard let connection, phase == .signedIn, let saved, let catalog, let owner = connectionOwner else { throw TunnelError.control }
         guard !catalogExpired, offlineUntil.map({ $0 > now() }) != false else { throw ClientError.input(L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
-        var options = try connection.profileOptions(preferences)
+        var options = try options ?? connection.profileOptions(preferences)
         if !takeover { options.tunEnabled = false }
         let profile = try catalog.assemble(options: options, selections: nodeSelections)
         return TunnelLease(owner: owner, cacheKey: Self.accountKey(of: saved), expiresAt: sessionExpiry ?? saved.expiresAt, configuration: profile.data,
@@ -807,6 +817,7 @@ public final class ClientSession {
         panelOffline = false
         announcementState.configure(site: endpoints.site, userID: value.id)
         nodeProbes.configure(site: endpoints.site, userID: value.id)
+        if nodeSelections.isEmpty { nodeSelections = nodeProbes.savedSelections() }
         trafficRank.configure(site: endpoints.site, userID: value.id)
         stopKickedConnection()
         accountStatus = nil

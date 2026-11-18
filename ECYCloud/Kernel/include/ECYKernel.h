@@ -11,6 +11,8 @@ int ECYSubmit(uint64_t session, void *data, int size);
 // Supply exactly 65535 bytes. Positive = packet length; 0 = timeout; negative = error.
 int ECYRead(uint64_t session, void *data, int capacity);
 int ECYSelect(uint64_t session, const char *group, const char *node);
+// Rewrites the panel node files from a full configuration and reloads them without restarting the kernel; 0 = updated.
+int ECYUpdateNodes(uint64_t session, void *data, int size);
 // Supply exactly ECY_CONTROL_CAPACITY bytes; it must equal MaximumControlBytes in Kernel/control.go.
 #define ECY_CONTROL_CAPACITY 1048576
 int ECYControl(uint64_t session, void *data, int size, void *output, int capacity);

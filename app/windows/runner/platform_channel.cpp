@@ -834,7 +834,9 @@ bool PlatformChannel::InstallTray() {
   data.hIcon = small_icon_;
   wcsncpy_s(data.szTip, TrayTip().c_str(), _TRUNCATE);
 
-  tray_installed_ = ::Shell_NotifyIconW(NIM_ADD, &data) != FALSE;
+  // Windows 10 起主屏 DPI 变化也会广播 TaskbarCreated，此时图标仍在，NIM_ADD 对已存在的图标返回失败
+  tray_installed_ = ::Shell_NotifyIconW(NIM_ADD, &data) != FALSE ||
+                    ::Shell_NotifyIconW(NIM_MODIFY, &data) != FALSE;
   ::SendMessageW(window_, WM_SETICON, ICON_SMALL,
                  reinterpret_cast<LPARAM>(small_icon_));
   ::SendMessageW(window_, WM_SETICON, ICON_BIG,

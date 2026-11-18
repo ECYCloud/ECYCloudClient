@@ -136,6 +136,8 @@ sed -e "s/APP_VERSION/$version.$build/g" -e "s/HOST_ARCHITECTURES/$hosts/g" -e '
     "$root_dir/scripts/installer/macos/distribution.xml" > "$work/distribution.xml"
 pkgbuild --analyze --root "$stage" "$work/components.plist"
 plutil -replace 0.BundleIsRelocatable -bool false "$work/components.plist"
+# Flutter 包与原生包装到同一路径、版本号各自递增：按版本比较时安装器报成功却不替换已装的较高版本
+plutil -replace 0.BundleIsVersionChecked -bool false "$work/components.plist"
 pkgbuild --root "$stage" --install-location / --identifier com.ecycloud.client --version "$version.$build" \
     --ownership recommended --component-plist "$work/components.plist" --scripts "$work/scripts" "$work/component.pkg"
 product=(--distribution "$work/distribution.xml" --package-path "$work" --resources "$work/resources")

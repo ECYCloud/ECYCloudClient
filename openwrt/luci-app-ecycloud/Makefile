@@ -49,6 +49,7 @@ define Build/Prepare/luci-app-ecycloud
 		echo "build.json still has placeholders after substitution" >&2; \
 		exit 1; \
 	fi
+	$(CP) $(PKG_BUILD_DIR)/root/etc/config/ecycloud $(PKG_BUILD_DIR)/root/usr/share/ecycloud/config.default
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/ecycloud \
 		$(PKG_BUILD_DIR)/root/usr/libexec/ecycloud-ctl
 endef

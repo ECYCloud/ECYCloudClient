@@ -82,7 +82,8 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
     super.dispose();
   }
 
-  Future<void> _load({bool labelsOnly = false}) async {
+  // saved 非空时只重置这次提交过的区块：其它区块里还没保存的编辑不能被服务端旧值冲掉
+  Future<void> _load({bool labelsOnly = false, Set<String>? saved}) async {
     final PanelApiClient? api = AppScope.of(context).auth.api;
     if (api == null) {
       return;
@@ -100,19 +101,30 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       setState(() {
         _config = config;
         if (!labelsOnly) {
-          _disabled
-            ..clear()
-            ..addAll(config.disabledGroups);
-          _hosts.text = config.customHosts;
-          _rules.text = config.customRules;
-          _customGroups
-            ..clear()
-            ..addAll(config.customGroups);
-          _customRuleProviders
-            ..clear()
-            ..addAll(config.customRuleProviders);
-          _clearGroupForm();
-          _clearProviderForm();
+          bool reset(String key) => saved == null || saved.contains(key);
+          if (reset('disabled_groups')) {
+            _disabled
+              ..clear()
+              ..addAll(config.disabledGroups);
+          }
+          if (reset('custom_hosts')) {
+            _hosts.text = config.customHosts;
+          }
+          if (reset('custom_rules')) {
+            _rules.text = config.customRules;
+          }
+          if (reset('custom_groups')) {
+            _customGroups
+              ..clear()
+              ..addAll(config.customGroups);
+            _clearGroupForm();
+          }
+          if (reset('custom_rule_providers')) {
+            _customRuleProviders
+              ..clear()
+              ..addAll(config.customRuleProviders);
+            _clearProviderForm();
+          }
         }
         _loading = false;
       });
@@ -146,7 +158,7 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
           behavior: SnackBarBehavior.floating,
         ),
       );
-      await _load();
+      await _load(saved: body.keys.toSet());
     } on ApiException catch (e) {
       if (!mounted) {
         return;
@@ -397,10 +409,11 @@ class _SubscriptionStrategyPageState extends State<SubscriptionStrategyPage>
       );
       return;
     }
-    if (!(url.startsWith('http://') || url.startsWith('https://'))) {
+    // 客户端结构检查只接受 https 规则集：放行 http 会让整份面板配置被拒收
+    if (!url.startsWith('https://')) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(L10n.t('URL 须为 http(s) 链接')),
+          content: Text(L10n.t('规则集 URL 须为 https 链接')),
           behavior: SnackBarBehavior.floating,
         ),
       );

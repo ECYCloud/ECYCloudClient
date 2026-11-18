@@ -1,6 +1,24 @@
 import Foundation
 import CryptoKit
 
+extension TunnelLease {
+    // 对应 profile_assembler.dart 的 canUpdateNodes：除节点文件内容与各组默认选中项外完全一致，才能只更新节点
+    func differsOnlyInNodes(from running: TunnelLease) -> Bool {
+        func signature(_ data: Data) -> Data? {
+            guard var config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  var providers = config["proxy-providers"] as? [String: [String: Any]], providers["ecy-panel-nodes"] != nil else { return nil }
+            for name in providers.keys where name.hasPrefix("ecy-panel-") { providers[name]?["payload"] = nil }
+            config["proxy-providers"] = providers
+            config["proxy-groups"] = (config["proxy-groups"] as? [[String: Any]])?.map { $0.filter { $0.key != "default-selected" } }
+            // 默认选中项会连带改 store-selected；只更新节点时内核不重读这一项
+            config["profile"] = (config["profile"] as? [String: Any])?.filter { $0.key != "store-selected" }
+            return try? JSONSerialization.data(withJSONObject: config, options: [.sortedKeys])
+        }
+        guard owner == running.owner, cacheKey == running.cacheKey, let before = signature(running.configuration) else { return false }
+        return before == signature(configuration)
+    }
+}
+
 public struct ProfileOptions: Sendable {
     public enum Input: Sendable { case proxy, packetFlow }
     public var input: Input = .proxy
@@ -11,6 +29,7 @@ public struct ProfileOptions: Sendable {
     public var logLevel = "warning"
     public var allowLAN = false
     public var ipv6 = false
+    public var proxyChina = false
     public var tunEnabled = true
     public var strictRoute = true
     public var tunStack = "mixed"
@@ -107,6 +126,7 @@ public enum ProfileAssembler {
         if var ntp = config["ntp"] as? [String: Any], ntp["write-to-system"] != nil { ntp["write-to-system"] = false; config["ntp"] = ntp }
         var dns = config["dns"] as! [String: Any]
         dns["listen"] = ""; dns["ipv6"] = options.ipv6; config["dns"] = dns
+        if options.proxyChina, let rules = config["rules"] as? [Any] { config["rules"] = proxyChinaRules(rules) }
         var groups = config["proxy-groups"] as! [[String: Any]]
         let providers = config["proxy-providers"] as? [String: [String: Any]] ?? [:]
         var appliedSelection = false
@@ -155,6 +175,20 @@ public enum ProfileAssembler {
         return try AssembledProfile(data: JSONSerialization.data(withJSONObject: config, options: [.sortedKeys, .withoutEscapingSlashes]),
                                     validationData: JSONSerialization.data(withJSONObject: validation, options: [.sortedKeys, .withoutEscapingSlashes]),
                                     remoteProviderCount: count, usesFakeIP: dns["enable"] as? Bool == true && (dns["enhanced-mode"] as? String)?.lowercased() == "fake-ip")
+    }
+
+    private static func proxyChinaRules(_ rules: [Any]) -> [Any] {
+        guard let target = rules.lazy.map({ "\($0)".components(separatedBy: ",") })
+            .first(where: { $0.count >= 2 && $0[0].trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "MATCH" })?[1]
+            .trimmingCharacters(in: .whitespacesAndNewlines), target.uppercased() != "DIRECT" else { return rules }
+        return rules.map { rule in
+            guard let rule = rule as? String else { return rule }
+            var fields = rule.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard fields.count >= 3, ["GEOIP", "GEOSITE"].contains(fields[0].uppercased()), fields[1].lowercased() == "cn",
+                  fields[2].uppercased() == "DIRECT" else { return rule }
+            fields[2] = target
+            return fields.joined(separator: ",")
+        }
     }
 
     static func safeProviderPath(_ path: String) -> Bool {
