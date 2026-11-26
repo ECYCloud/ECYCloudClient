@@ -1,3 +1,7 @@
+// 用 /bin/sh 写的假 gsettings 代替系统命令，Windows 上跑不了
+@TestOn('!windows')
+library;
+
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

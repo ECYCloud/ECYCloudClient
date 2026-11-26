@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ecycloud_client/core/app_paths.dart';
+import 'package:ecycloud_client/core/logger.dart';
 import 'package:ecycloud_client/data/api/api_exception.dart';
 import 'package:ecycloud_client/data/api/panel_api_client.dart';
 import 'package:ecycloud_client/data/models/user_profile.dart';
@@ -71,6 +72,8 @@ void main() {
     JsonFileStore(AppPaths.trafficRank, 'test').clear();
     HttpOverrides.global = overrides;
     AppPaths.useSession('');
+    // 会话已是空时 useSession 不会关日志句柄，Windows 上删不掉打开中的日志
+    await Logger.instance.dispose();
     if (AppPaths.sessions.existsSync()) {
       AppPaths.sessions.deleteSync(recursive: true);
     }
