@@ -50,10 +50,9 @@ func install() (resultErr error) {
 	}
 
 	service, err := manager.CreateService(serviceName, exe, mgr.Config{
-		DisplayName:      serviceDisplayName,
-		Description:      serviceDescription,
-		StartType:        mgr.StartAutomatic,
-		DelayedAutoStart: true,
+		DisplayName: serviceDisplayName,
+		Description: serviceDescription,
+		StartType:   mgr.StartAutomatic,
 	}, "run")
 	if err != nil {
 		return fmt.Errorf("创建服务失败: %w", err)

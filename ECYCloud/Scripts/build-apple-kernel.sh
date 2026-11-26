@@ -31,8 +31,9 @@ for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator;
 exec xcrun --sdk "$sdk" clang -target "$arch-apple-$target" "\$@"
 SH
         chmod +x "$work_dir/clang-$sdk-$arch"
+        # with_low_memory 是 mihomo / sing 官方的低内存构建：中转缓冲减半，空闲连接不常占缓冲；包隧道扩展只有 50 MiB
         env GOOS=ios GOARCH="$goarch" CGO_ENABLED=1 CGO_CFLAGS="-target $arch-apple-$target" CGO_LDFLAGS="-target $arch-apple-$target" CC="$work_dir/clang-$sdk-$arch" \
-            "$go_bin" -C "$project_dir" build -mod=readonly -trimpath -ldflags="-s -w -X github.com/metacubex/mihomo/constant.Version=$kernel_version" -buildmode=c-archive -o "$work_dir/$sdk/$arch.a" ./Kernel/bridge
+            "$go_bin" -C "$project_dir" build -mod=readonly -trimpath -tags with_low_memory -ldflags="-s -w -X github.com/metacubex/mihomo/constant.Version=$kernel_version" -buildmode=c-archive -o "$work_dir/$sdk/$arch.a" ./Kernel/bridge
         libs+=("$work_dir/$sdk/$arch.a")
     done
     xcrun lipo -create "${libs[@]}" -output "$work_dir/$sdk/libECYKernel.a"

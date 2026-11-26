@@ -297,6 +297,8 @@ class _Platform implements PlatformService {
   @override
   Future<void> setImeEnabled({required bool enabled}) async {}
   @override
+  Future<bool> secretStoreAvailable() async => true;
+  @override
   bool get isTelevision => false;
   @override
   Future<void> initialize() => Completer<void>().future;

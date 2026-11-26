@@ -8,7 +8,12 @@ class TestWindow : public FlutterWindow {
  public:
   explicit TestWindow(const flutter::DartProject& project) : FlutterWindow(project) {}
 
-  void SendFontChange() { MessageHandler(nullptr, WM_FONTCHANGE, 0, 0); }
+  void SendFontChange() {
+    MessageHandler(nullptr, WM_FONTCHANGE, 0, 0);
+    MessageHandler(nullptr, WM_SHOWWINDOW, TRUE, 0);
+    MessageHandler(nullptr, WM_SIZE, SIZE_RESTORED, 0);
+    MessageHandler(nullptr, WM_ACTIVATE, WA_ACTIVE, 0);
+  }
   void TearDown() { OnDestroy(); }
 };
 
@@ -29,7 +34,7 @@ int main() {
   const bool before_create = SendFontChange(&window);
   window.TearDown();
   const bool after_destroy = SendFontChange(&window);
-  std::printf("引擎创建前的字体广播：%s\n销毁后的字体广播：%s\n",
+  std::printf("引擎创建前的字体广播与显示消息：%s\n销毁后的字体广播与显示消息：%s\n",
               before_create ? "通过" : "空指针崩溃",
               after_destroy ? "通过" : "空指针崩溃");
   return before_create && after_destroy ? EXIT_SUCCESS : EXIT_FAILURE;

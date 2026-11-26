@@ -41,10 +41,42 @@ class _OptionDropdownState<T> extends State<OptionDropdown<T>> {
   // 遥控器之后按任何方向键都没有反应
   final FocusNode _trigger = FocusNode();
 
+  // 选项超过这个数时菜单里只构建可见的几项。上千个选项全部构建，打开菜单的那一帧要两百多毫秒，
+  // 展开期间每次刷新又全部重排一遍
+  static const int _lazyAbove = 64;
+  ScrollController? _scroll;
+
   @override
   void dispose() {
     _trigger.dispose();
+    _scroll?.dispose();
     super.dispose();
+  }
+
+  double _menuHeight() {
+    final double full = widget.height * widget.options.length;
+    return full > widget.maxMenuHeight ? widget.maxMenuHeight : full;
+  }
+
+  // 每次展开都从选中项附近开始：懒构建的列表里，没滚到的选中项不存在，焦点也就进不了菜单
+  void _scrollToValue() {
+    final double height = widget.height;
+    final double menuHeight = _menuHeight();
+    final T? value = widget.value;
+    final int index = value == null
+        ? -1
+        : widget.options.keys.toList().indexOf(value);
+    setState(() {
+      _scroll?.dispose();
+      _scroll = ScrollController(
+        initialScrollOffset: index < 0
+            ? 0
+            : (index * height - (menuHeight - height) / 2).clamp(
+                0,
+                height * widget.options.length - menuHeight,
+              ),
+      );
+    });
   }
 
   @override
@@ -67,9 +99,56 @@ class _OptionDropdownState<T> extends State<OptionDropdown<T>> {
         : (options.isEmpty ? null : options.keys.first);
 
     final BorderRadius menuRadius = BorderRadius.circular(AppTheme.menuRadius);
-    final double menuHeight = height * options.length > widget.maxMenuHeight
-        ? widget.maxMenuHeight
-        : height * options.length;
+    final double menuHeight = _menuHeight();
+    final bool lazy = options.length > _lazyAbove;
+    final List<MapEntry<T, String>> entries = options.entries.toList(
+      growable: false,
+    );
+    Widget item(int index) {
+      final MapEntry<T, String> entry = entries[index];
+      return SizedBox(
+        width: width,
+        height: height,
+        child: MenuItemButton(
+          autofocus: entry.key == entryFocus,
+          onPressed: enabled ? () => widget.onChanged(entry.key) : null,
+          style: MenuItemButton.styleFrom(
+            minimumSize: Size(width, height),
+            fixedSize: Size(width, height),
+            maximumSize: Size(width, height),
+            padding: const EdgeInsets.fromLTRB(
+              12,
+              0,
+              AppTheme.overlayScrollGutter,
+              0,
+            ),
+            alignment: Alignment.centerLeft,
+            visualDensity: VisualDensity.standard,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: _itemRadius(
+                menuRadius,
+                index: index,
+                length: entries.length,
+              ),
+            ),
+            textStyle: style,
+            foregroundColor: entry.key == value
+                ? scheme.primary
+                : scheme.onSurface,
+            backgroundColor: entry.key == value
+                ? scheme.primary.withValues(alpha: 0.08)
+                : null,
+          ),
+          child: _OptionRow(
+            label: entry.value,
+            leading: widget.itemLeading?.call(entry.key),
+            trailing: widget.itemTrailing?.call(entry.key),
+            style: style,
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       width: width,
@@ -89,52 +168,31 @@ class _OptionDropdownState<T> extends State<OptionDropdown<T>> {
               RoundedRectangleBorder(borderRadius: menuRadius),
             ),
           ),
-          menuChildren: <Widget>[
-            for (final (int index, MapEntry<T, String> entry)
-                in options.entries.indexed)
-              SizedBox(
-                width: width,
-                height: height,
-                child: MenuItemButton(
-                  autofocus: entry.key == entryFocus,
-                  onPressed: enabled ? () => widget.onChanged(entry.key) : null,
-                  style: MenuItemButton.styleFrom(
-                    minimumSize: Size(width, height),
-                    fixedSize: Size(width, height),
-                    maximumSize: Size(width, height),
-                    padding: const EdgeInsets.fromLTRB(
-                      12,
-                      0,
-                      AppTheme.overlayScrollGutter,
-                      0,
-                    ),
-                    alignment: Alignment.centerLeft,
-                    visualDensity: VisualDensity.standard,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: _itemRadius(
-                        menuRadius,
-                        index: index,
-                        length: options.length,
+          onOpen: lazy ? _scrollToValue : null,
+          menuChildren: lazy
+              ? <Widget>[
+                  SizedBox(
+                    width: width,
+                    height: menuHeight,
+                    child: Scrollbar(
+                      controller: _scroll,
+                      thumbVisibility: true,
+                      child: ListView.builder(
+                        key: ObjectKey(_scroll),
+                        controller: _scroll,
+                        // 给滚动条让位的 overlayScrollGutter 已在各选项的右内边距里
+                        padding: EdgeInsets.zero,
+                        itemExtent: height,
+                        itemCount: entries.length,
+                        itemBuilder: (_, int index) => item(index),
                       ),
                     ),
-                    textStyle: style,
-                    foregroundColor: entry.key == value
-                        ? scheme.primary
-                        : scheme.onSurface,
-                    backgroundColor: entry.key == value
-                        ? scheme.primary.withValues(alpha: 0.08)
-                        : null,
                   ),
-                  child: _OptionRow(
-                    label: entry.value,
-                    leading: widget.itemLeading?.call(entry.key),
-                    trailing: widget.itemTrailing?.call(entry.key),
-                    style: style,
-                  ),
-                ),
-              ),
-          ],
+                ]
+              : <Widget>[
+                  for (int index = 0; index < entries.length; index++)
+                    item(index),
+                ],
           builder:
               (BuildContext context, MenuController controller, Widget? child) {
                 final bool open = controller.isOpen;

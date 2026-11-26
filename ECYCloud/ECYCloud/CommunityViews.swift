@@ -94,7 +94,7 @@ struct ProductDialog<Content: View, Actions: View>: View {
             }
             .frame(maxHeight: contentHeight)
             .scrollBounceBehavior(.basedOnSize)
-            HStack(spacing: 8) { actions }.frame(maxWidth: .infinity, alignment: .trailing).padding(.top, 24)
+            HStack(spacing: 8) { actions }.frame(maxWidth: .infinity, alignment: .trailing).productFocusSection().padding(.top, 24)
         }
         .font(.system(size: 13)).foregroundStyle(colors.text)
         .padding(24).frame(minWidth: 280, maxWidth: 560)
@@ -461,14 +461,23 @@ struct TicketComposerView: View {
     @State private var text = ""
     @State private var attachments: [TicketAttachment] = []
     @State private var uploading = false
+    @State private var attachLog = false
     @State private var working = false
     @State private var toast: String?
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
+        let colors = ProductPalette(scheme: scheme)
         ProductDialog(title: replyTo == nil ? L10n.t("创建工单") : L10n.t("回复工单")) {
             VStack(alignment: .leading, spacing: 0) {
-                if replyTo == nil { ProductTextField(hint: L10n.t("标题"), text: $title, labeled: true).padding(.bottom, 12) }
+                if replyTo == nil {
+                    Text(L10n.t("请把问题表达清楚：出现时间、设备与客户端版本、节点名称、具体现象和已尝试的操作，最好附上截图或运行日志。信息过少（例如“用不了”“连不上”）可能会被忽略。")).font(.system(size: 12)).foregroundStyle(colors.secondary)
+                        .fixedSize(horizontal: false, vertical: true).padding(.bottom, 12)
+                    ProductTextField(hint: L10n.t("标题"), text: $title, labeled: true).padding(.bottom, 12)
+                }
                 TicketEditor(text: $text)
-                TicketAttachmentPicker(session: session, attachments: $attachments, uploading: $uploading, message: $toast).padding(.top, 10)
+                Text(L10n.t("如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。")).font(.system(size: 12)).foregroundStyle(colors.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+                picker.padding(.top, 6)
             }
         } actions: {
             Button(L10n.t("提交")) { Task { await submit() } }.buttonStyle(ProductButtonStyle(filled: true)).disabled(uploading || working)
@@ -476,13 +485,19 @@ struct TicketComposerView: View {
         }
         // 对应 _TicketEditorDialog 的 SizedBox(width: 460) 加 AlertDialog 左右各 24 内边距
         .frame(maxWidth: 508)
+        // 提示条贴屏幕底部（Flutter 的 SnackBar 在 Scaffold 底部），直接挂在弹窗上会盖住提交与取消
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .productToast($toast)
+    }
+    private var picker: TicketAttachmentPicker {
+        TicketAttachmentPicker(session: session, attachments: $attachments, uploading: $uploading, message: $toast, attachLog: $attachLog)
     }
     private func submit() async {
         let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard replyTo != nil || !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !blank || !attachments.isEmpty, !working else { return }
+        guard replyTo != nil || !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !blank || !attachments.isEmpty || attachLog, !working else { return }
         working = true
         defer { working = false }
+        if attachLog, !(await picker.uploadRuntimeLog()) { return }
         do {
             if let replyTo {
                 _ = try await session.replyTicket(replyTo, text: text, attachments: attachments)

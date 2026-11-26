@@ -32,6 +32,18 @@ class _Platform implements PlatformService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _PermissionPlatform implements PlatformService {
+  int calls = 0;
+  @override
+  Future<bool> runInstaller(String path) async {
+    calls++;
+    throw InstallPermissionRequired();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   test('更新包地址解析后仍须落在本仓库的发布路径下', () {
     for (final String url in <String>[
@@ -173,4 +185,117 @@ void main() {
       if (await partial.exists()) await partial.delete();
     });
   }
+
+  for (final bool intact in <bool>[true, false]) {
+    test('已下载的同一安装包校验通过才复用，不再重新下载：${intact ? '完整' : '被改动'}', () async {
+      final List<int> bytes = <int>[1, 2, 3, 4];
+      final String name = 'ECYCloud-999.0.1-${AppUpdate.assetSuffix}';
+      final String url = '${AppUpdate.downloadPrefix}v999.0.1/$name';
+      final _Connection connection = _Connection();
+      final _Platform platform = _Platform();
+      final UpdateController controller = UpdateController(
+        connection: connection,
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(connection.dispose);
+      final File target = File('${AppPaths.updates.path}/$name');
+      // 同样大小但内容不同的文件必须重新下载，不能只凭大小认定
+      await target.writeAsBytes(intact ? bytes : <int>[4, 3, 2, 1]);
+      int downloads = 0;
+
+      Future<http.StreamedResponse> respond(http.BaseRequest request, _) async {
+        if (request.url.host == 'api.github.com') {
+          return http.StreamedResponse(
+            Stream<List<int>>.value(
+              utf8.encode(
+                jsonEncode(<Object>[
+                  <String, Object>{
+                    'tag_name': 'v999.0.1',
+                    'published_at': '2026-09-18T00:00:00Z',
+                    'prerelease': false,
+                    'assets': <Object>[
+                      <String, Object>{
+                        'name': name,
+                        'browser_download_url': url,
+                        'size': bytes.length,
+                        'digest': 'sha256:${sha256.convert(bytes)}',
+                      },
+                    ],
+                  },
+                ]),
+              ),
+            ),
+            200,
+          );
+        }
+        downloads++;
+        return http.StreamedResponse(Stream<List<int>>.value(bytes), 200);
+      }
+
+      await http.runWithClient(() async {
+        await controller.checkApp();
+        await controller.installApp();
+      }, () => MockClient.streaming(respond));
+
+      expect(downloads, intact ? 0 : 1);
+      expect(platform.installedBytes, bytes);
+      expect(await target.readAsBytes(), bytes);
+      await target.delete();
+    });
+  }
+
+  test('未授权安装未知应用时提示授权后重试，不报更新失败且保留安装包', () async {
+    final List<int> bytes = <int>[1, 2, 3, 4];
+    final String name = 'ECYCloud-999.0.2-${AppUpdate.assetSuffix}';
+    final String url = '${AppUpdate.downloadPrefix}v999.0.2/$name';
+    final _Connection connection = _Connection();
+    final _PermissionPlatform platform = _PermissionPlatform();
+    final UpdateController controller = UpdateController(
+      connection: connection,
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(connection.dispose);
+    final File target = File('${AppPaths.updates.path}/$name');
+
+    Future<http.StreamedResponse> respond(http.BaseRequest request, _) async {
+      if (request.url.host == 'api.github.com') {
+        return http.StreamedResponse(
+          Stream<List<int>>.value(
+            utf8.encode(
+              jsonEncode(<Object>[
+                <String, Object>{
+                  'tag_name': 'v999.0.2',
+                  'published_at': '2026-09-18T00:00:00Z',
+                  'prerelease': false,
+                  'assets': <Object>[
+                    <String, Object>{
+                      'name': name,
+                      'browser_download_url': url,
+                      'size': bytes.length,
+                      'digest': 'sha256:${sha256.convert(bytes)}',
+                    },
+                  ],
+                },
+              ]),
+            ),
+          ),
+          200,
+        );
+      }
+      return http.StreamedResponse(Stream<List<int>>.value(bytes), 200);
+    }
+
+    await http.runWithClient(() async {
+      await controller.checkApp();
+      await controller.installApp();
+    }, () => MockClient.streaming(respond));
+
+    expect(platform.calls, 1);
+    expect(controller.appStatus, contains('「更新」'));
+    expect(controller.appStatus, isNot(contains('更新失败')));
+    expect(await target.readAsBytes(), bytes);
+    await target.delete();
+  });
 }

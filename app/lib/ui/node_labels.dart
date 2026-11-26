@@ -66,6 +66,12 @@ class NodeLabels {
     _epoch++;
   }
 
+  /// 追加按页取到的节点的显示名；不重置地区缓存
+  static void addNodeLabels(Map<String, String> labels) {
+    _nodeNames = <String, String>{..._nodeNames, ...labels};
+    _labelEpoch = -1;
+  }
+
   /// 在后台 isolate 内预跑取词正则，把 names 解析出的地区码填进缓存。带硬超时并强杀
   /// isolate：遇到灾难性回溯的正则不会拖住界面，只是这一轮不显示旗帜。仅由控制器在
   /// 装配 / 拉到节点列表后 await 调用。
@@ -273,8 +279,19 @@ class NodeLabels {
   static List<MapEntry<String, String>> _labels =
       const <MapEntry<String, String>>[];
   static List<(RegExp, String)> _labelPatterns = const <(RegExp, String)>[];
+  // 节点标识都是 node-数字：正文扫一遍、按标识查表。逐个节点各跑一遍正则的话，
+  // 耗时是「行数 × 节点数」，内核一次吐几千行日志就能把界面卡住几十秒
+  static Map<String, String> _nodeIdLabels = const <String, String>{};
+  static final RegExp _nodeIdToken = RegExp(
+    r'(?<![\p{L}\p{N}_-])node-\d+(?![\p{L}\p{N}_-])',
+    unicode: true,
+  );
+  static final RegExp _nodeIdInConfig = RegExp(
+    r'(?<=")node-\d+(?=")|(?<=,)node-\d+(?=[",])',
+  );
+  static final RegExp _nodeIdOnly = RegExp(r'^node-\d+$');
 
-  // 每条正文要过全部节点的正则，日志页筛选与滚动会反复替换同一批正文；上限对齐日志环形缓冲
+  // 其余标识（策略组名等）仍逐个替换，日志页筛选与滚动会反复替换同一批正文；上限对齐日志环形缓冲
   static final Map<String, String> _annotated = <String, String>{};
   static const int _annotatedLimit = 4096;
 
@@ -297,15 +314,20 @@ class NodeLabels {
           (MapEntry<String, String> a, MapEntry<String, String> b) =>
               b.key.length.compareTo(a.key.length),
         );
+    _nodeIdLabels = <String, String>{
+      for (final MapEntry<String, String> entry in _labels)
+        if (_nodeIdOnly.hasMatch(entry.key)) entry.key: entry.value,
+    };
     _labelPatterns = <(RegExp, String)>[
       for (final MapEntry<String, String> entry in _labels)
-        (
-          RegExp(
-            '(?<![\\p{L}\\p{N}_-])${RegExp.escape(entry.key)}(?![\\p{L}\\p{N}_-])',
-            unicode: true,
+        if (!_nodeIdOnly.hasMatch(entry.key))
+          (
+            RegExp(
+              '(?<![\\p{L}\\p{N}_-])${RegExp.escape(entry.key)}(?![\\p{L}\\p{N}_-])',
+              unicode: true,
+            ),
+            entry.value,
           ),
-          entry.value,
-        ),
     ];
   }
 
@@ -323,7 +345,10 @@ class NodeLabels {
     if (cached != null) {
       return cached;
     }
-    String out = raw;
+    String out = raw.replaceAllMapped(
+      _nodeIdToken,
+      (Match match) => _nodeIdLabels[match[0]] ?? match[0]!,
+    );
     for (final (RegExp pattern, String label) in _labelPatterns) {
       out = out.replaceAll(pattern, label);
     }
@@ -337,11 +362,18 @@ class NodeLabels {
     if (raw.isEmpty) {
       return raw;
     }
-    String out = raw;
-    for (final MapEntry<String, String> entry in _mappedLabels()) {
-      final String shown = entry.value
-          .replaceAll(r'\', r'\\')
-          .replaceAll('"', r'\"');
+    String escaped(String label) =>
+        label.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+    final List<MapEntry<String, String>> labels = _mappedLabels();
+    String out = raw.replaceAllMapped(_nodeIdInConfig, (Match match) {
+      final String? label = _nodeIdLabels[match[0]];
+      return label == null ? match[0]! : escaped(label);
+    });
+    for (final MapEntry<String, String> entry in labels) {
+      if (_nodeIdLabels.containsKey(entry.key)) {
+        continue;
+      }
+      final String shown = escaped(entry.value);
       out = out.replaceAll('"${entry.key}"', '"$shown"');
       out = out.replaceAll(',${entry.key}"', ',$shown"');
       out = out.replaceAll(',${entry.key},', ',$shown,');

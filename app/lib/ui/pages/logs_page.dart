@@ -30,6 +30,7 @@ class _LogsPageState extends State<LogsPage> {
   LogLevel? _level;
   String _keyword = '';
   Timer? _pending;
+  bool _active = true;
   late ConnectionController _connection;
 
   @override
@@ -42,6 +43,7 @@ class _LogsPageState extends State<LogsPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _connection = AppScope.of(context).connection;
+    _active = ShellChrome.maybeOf(context)?.active ?? true;
     _visible = _filter();
   }
 
@@ -101,8 +103,9 @@ class _LogsPageState extends State<LogsPage> {
     setState(() => _visible = _filter());
   }
 
+  // 隐藏时不过滤也不重建，切回本页时 didChangeDependencies 会按最新日志重算
   void _onEntry(LogEntry entry) {
-    if (!mounted || _pending != null) {
+    if (!mounted || !_active || _pending != null) {
       return;
     }
     _pending = Timer(_refreshInterval, () => mounted ? _refresh() : null);
@@ -199,7 +202,7 @@ class _LogsPageState extends State<LogsPage> {
       },
     );
 
-    return ListenableBuilder(
+    return ShellListenableBuilder(
       listenable: _connection,
       builder: (BuildContext context, _) =>
           _list(theme, scheme, visible, filter, _inboundTypes(_connection)),

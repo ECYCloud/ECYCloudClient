@@ -56,14 +56,6 @@ object BoxState {
     @Volatile
     var exitCode: Int? = null
 
-    // 系统只有一个 VPN 槽位，授权被别的应用抢走后自动重启只会反复弹授权框，上层不得重试
-    @Volatile
-    var revoked = false
-
-    // 不置位则界面进程会把内核消失当成崩溃并自动重连，表现为隧道关不掉
-    @Volatile
-    var stoppedByUser = false
-
     // 本进程内核已绑定的登录会话；mihomo 的 cache.db 按进程只打开一次，换会话只能换进程
     @Volatile
     var session: String? = null
@@ -103,6 +95,36 @@ object BoxState {
     fun runDir(context: Context, key: String): File = File(sessionDir(context, key), "run")
 
     fun configFile(context: Context, key: String): File = File(runDir(context, key), "config.json")
+
+    // 用户断开、VPN 被系统或其它应用停用后界面不得当成崩溃重连；内核进程随后可能被系统回收，只记在内存会丢
+    fun markStopped(context: Context, reason: String) {
+        val key = sessionKey(context) ?: return
+        runCatching { File(runDir(context, key), STOP_REASON_FILE).writeText(reason) }
+    }
+
+    fun stopReason(context: Context): String? {
+        val key = sessionKey(context) ?: return null
+        return runCatching { File(runDir(context, key), STOP_REASON_FILE).readText() }.getOrNull()
+            ?.takeIf { it == STOPPED_BY_USER || it == REVOKED }
+    }
+
+    fun clearStopReason(context: Context, key: String) {
+        File(runDir(context, key), STOP_REASON_FILE).delete()
+    }
+
+    // 文件在即隧道接管中、且不是正常停止；内容是连续原生自恢复的次数
+    fun recoveryAttempts(context: Context): Int? {
+        val key = sessionKey(context) ?: return null
+        return runCatching { File(runDir(context, key), TAKEOVER_FILE).readText().trim().toInt() }.getOrNull()
+    }
+
+    fun setRecoveryAttempts(context: Context, key: String, attempts: Int) {
+        runCatching { File(runDir(context, key), TAKEOVER_FILE).writeText(attempts.toString()) }
+    }
+
+    fun clearTakeover(context: Context, key: String) {
+        File(runDir(context, key), TAKEOVER_FILE).delete()
+    }
 
     // 退出时删掉带节点凭据的配置，规则集与 cache.db 留给同账号下次登录
     fun dropRuntimeSecrets(context: Context, key: String) {
@@ -188,6 +210,12 @@ object BoxState {
     }.getOrDefault(false)
 
     private const val maxRunFileBytes = 8L shl 20
+
+    // 与 kernel.status 的应答字段同名
+    const val STOPPED_BY_USER = "stopped_by_user"
+    const val REVOKED = "revoked"
+    private const val STOP_REASON_FILE = "stop-reason"
+    private const val TAKEOVER_FILE = "takeover"
 
     fun resolveWithin(base: File, relative: String): File {
         val rel = relative.trim()

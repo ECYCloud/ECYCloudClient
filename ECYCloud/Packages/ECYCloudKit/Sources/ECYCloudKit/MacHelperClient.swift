@@ -3,20 +3,42 @@ import Foundation
 import Darwin
 
 @MainActor protocol MacHelperTransport {
-    func request(_ command: String, payload: [String: Any]) async throws -> [String: Any]
+    func request(_ command: String, payload: [String: Any], timeout: Duration) async throws -> [String: Any]
+}
+
+extension MacHelperTransport {
+    func request(_ command: String, payload: [String: Any]) async throws -> [String: Any] {
+        try await request(command, payload: payload, timeout: .seconds(40))
+    }
 }
 
 @MainActor final class MacHelperClient: MacHelperTransport {
-    private let queue = DispatchQueue(label: "com.ecycloud.client.helper")
-    func request(_ command: String, payload: [String: Any] = [:]) async throws -> [String: Any] {
+    private let queue = DispatchQueue(label: "com.ecycloud.client.helper", attributes: .concurrent)
+    private let socketPath: String
+    private let restartWindow: Duration
+    init(socketPath: String = "/var/run/ecycloud/helper.sock", restartWindow: Duration = .seconds(3)) {
+        self.socketPath = socketPath; self.restartWindow = restartWindow
+    }
+    private struct Unreachable: Error {}
+    func request(_ command: String, payload: [String: Any] = [:], timeout: Duration = .seconds(40)) async throws -> [String: Any] {
         var value = payload
         value["command"] = command
         let data = try JSONSerialization.data(withJSONObject: value)
-        let response: Data = try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do { continuation.resume(returning: try Self.transact(data)) }
-                catch { continuation.resume(throwing: error) }
+        let path = socketPath
+        func send() async throws -> Data {
+            try await withCheckedThrowingContinuation { continuation in
+                queue.async {
+                    do { continuation.resume(returning: try Self.transact(data, path: path, timeout: timeout)) }
+                    catch { continuation.resume(throwing: error) }
+                }
             }
+        }
+        // 与 helper_client.dart 一致：helper 被 launchd 重新拉起的几秒内连不上，等一会儿再试一次
+        let response: Data
+        do { response = try await send() }
+        catch is Unreachable {
+            try await Task.sleep(for: restartWindow)
+            do { response = try await send() } catch is Unreachable { throw TunnelError.helperUnavailable }
         }
         guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any] else { throw TunnelError.control }
         guard result["ok"] as? Bool == true else {
@@ -25,13 +47,13 @@ import Darwin
         return result["data"] as? [String: Any] ?? [:]
     }
 
-    nonisolated private static func transact(_ data: Data) throws -> Data {
+    nonisolated private static func transact(_ data: Data, path socketPath: String, timeout: Duration) throws -> Data {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw TunnelError.helperUnavailable }
         defer { Darwin.close(fd) }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
-        let path = Array("/var/run/ecycloud/helper.sock".utf8CString)
+        let path = Array(socketPath.utf8CString)
         withUnsafeMutableBytes(of: &address.sun_path) { destination in
             path.withUnsafeBytes { destination.copyBytes(from: $0) }
         }
@@ -39,25 +61,28 @@ import Darwin
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        guard connected == 0 else { throw TunnelError.helperUnavailable }
+        guard connected == 0 else { throw Unreachable() }
         var uid: uid_t = 0, gid: gid_t = 0
         guard getpeereid(fd, &uid, &gid) == 0, uid == 0 else { throw TunnelError.helperUnavailable }
-        return try converse(fd: fd, payload: data, greetingTimeout: .seconds(5))
+        return try converse(fd: fd, payload: data, greetingTimeout: min(.seconds(5), timeout), timeout: timeout)
     }
 
     // helper 只受理握手之后由同一进程写出、带本次随机数的请求，不能在读到握手前预写。
     // 握手时限须短于 helper 读请求的 10 秒：旧版 helper 不发握手，只会干等请求。
-    nonisolated static func converse(fd: Int32, payload: Data, greetingTimeout: Duration) throws -> Data {
+    nonisolated static func converse(fd: Int32, payload: Data, greetingTimeout: Duration, timeout: Duration = .seconds(40)) throws -> Data {
+        let deadline = ContinuousClock.now + timeout
         let greeting = try MacSocket.readLine(fd: fd, maximum: 64 * 1024, timeout: greetingTimeout)
-        guard let challenge = try? JSONSerialization.jsonObject(with: greeting) as? [String: Any],
-              let nonce = (challenge["data"] as? [String: Any])?["nonce"] as? String,
+        guard let challenge = try? JSONSerialization.jsonObject(with: greeting) as? [String: Any] else { throw TunnelError.helperUnavailable }
+        guard let nonce = (challenge["data"] as? [String: Any])?["nonce"] as? String,
               var request = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
+            // helper 在应答前已拒绝本进程（身份或签名校验未通过），握手行里只有原因：照实提示，不当作没装
+            if let error = challenge["error"] as? String, !error.isEmpty { throw TunnelError.failed(L10n.message(error)) }
             throw TunnelError.helperUnavailable
         }
         request["nonce"] = nonce
         let data = try JSONSerialization.data(withJSONObject: request) + Data([10])
         guard data.count <= 4 * 1024 * 1024 else { throw TunnelError.configuration }
-        return try MacSocket.exchange(fd: fd, data: data, maximum: 8 * 1024 * 1024, timeout: .seconds(40))
+        return try MacSocket.exchange(fd: fd, data: data, maximum: 8 * 1024 * 1024, timeout: ContinuousClock.now.duration(to: deadline))
     }
 }
 
@@ -138,13 +163,13 @@ enum MacSocket {
         while true {
             try Task.checkCancellation()
             let remaining = ContinuousClock.now.duration(to: deadline)
-            guard remaining > .zero else { throw TunnelError.helperUnavailable }
+            guard remaining > .zero else { throw TunnelError.helperTimeout }
             let milliseconds = min(40_000, max(1, Int(remaining.components.seconds * 1000 + remaining.components.attoseconds / 1_000_000_000_000_000)))
             var descriptor = pollfd(fd: fd, events: event, revents: 0)
             let result = poll(&descriptor, 1, Int32(milliseconds))
             if result > 0 { return }
             if result < 0 && errno == EINTR { continue }
-            throw TunnelError.helperUnavailable
+            throw result == 0 ? TunnelError.helperTimeout : TunnelError.helperUnavailable
         }
     }
 }

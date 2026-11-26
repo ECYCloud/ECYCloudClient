@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.os.Process
+import android.os.SystemClock
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.thread
 import kotlin.concurrent.withLock
 
 // 禁止引用 com.ecycloud.mihomo.*：静态初始化会 loadLibrary("gojni")，把 Go 运行时载进界面进程
@@ -29,6 +32,9 @@ object KernelClient {
     @Volatile
     private var bound = false
 
+    @Volatile
+    private var boundAt = 0L
+
     private lateinit var app: Context
 
     private val callback = object : IUiCallback.Stub() {
@@ -46,7 +52,11 @@ object KernelClient {
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            lock.withLock { service = null }
+            lock.withLock {
+                service = null
+                boundAt = 0L
+                arrived.signalAll()
+            }
         }
     }
 
@@ -61,15 +71,41 @@ object KernelClient {
             connection,
             Context.BIND_AUTO_CREATE,
         )
+        boundAt = SystemClock.elapsedRealtime()
+    }
+
+    // 内核进程死后系统只按退避重启服务，连续死亡就不再重启，部分 ROM 还会拦下这种重启；
+    // 由前台界面重新绑定属于调用方发起的启动，会立即拉起新进程
+    @Synchronized
+    private fun revive() {
+        if (service != null || (bound && SystemClock.elapsedRealtime() - boundAt < COMMAND_WAIT_MS)) {
+            return
+        }
+        if (bound) {
+            runCatching { app.unbindService(connection) }
+            bound = false
+        }
+        bind(app)
     }
 
     fun <T> call(block: (IKernelService) -> T): T {
-        val remote = handle(COMMAND_WAIT_MS) ?: error("内核进程未就绪")
+        val remote = handle(COMMAND_WAIT_MS, revive = true) ?: error("内核进程未就绪")
         return try {
             block(remote)
         } catch (e: RemoteException) {
             error(crashReason() ?: "内核进程已退出")
         }
+    }
+
+    // 配置里每个分组各带一份完整节点，按 UTF-16 传输会超过 Binder 单次事务约 1 MiB 的上限，只能经管道交给内核进程
+    fun <T> send(config: String, block: (IKernelService, ParcelFileDescriptor) -> T): T {
+        val (source, sink) = ParcelFileDescriptor.createPipe()
+        thread {
+            runCatching {
+                ParcelFileDescriptor.AutoCloseOutputStream(sink).use { it.write(config.toByteArray()) }
+            }
+        }
+        return source.use { call { remote -> block(remote, it) } }
     }
 
     // Go 运行时崩溃前写下的 panic / fatal error 原因（Mihomo.setup 登记，每个内核进程起来时清空）
@@ -115,16 +151,22 @@ object KernelClient {
         } finally {
             runCatching { binder.unlinkToDeath(death, 0) }
             lock.withLock {
-                if (service?.asBinder() == binder) service = null
+                if (service?.asBinder() == binder) {
+                    service = null
+                    boundAt = 0L
+                }
             }
         }
     }
 
-    private fun handle(timeoutMs: Long): IKernelService? {
+    private fun handle(timeoutMs: Long, revive: Boolean = false): IKernelService? {
         service?.let { return it }
         lock.withLock {
             var remaining = TimeUnit.MILLISECONDS.toNanos(timeoutMs)
             while (service == null) {
+                if (revive) {
+                    revive()
+                }
                 if (remaining <= 0) {
                     return null
                 }

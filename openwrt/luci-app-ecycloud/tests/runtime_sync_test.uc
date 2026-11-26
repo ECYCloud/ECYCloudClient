@@ -2,11 +2,11 @@
 
 import { testState } from 'fs';
 import { ACCOUNT_FILE, ANNOUNCE_FILE, API_FILE, CRED_FILE, KICK_FILE, PROFILE_FILE, SPEED_FILE, STATE_FILE, coreRunning, origins, readJson, sessionBinding, sessionValid,
-         setState, settings, timestamp } from 'ecycloud.common';
-import { cached, store } from 'ecycloud.profile';
+         setState, settings, timestamp, urlencode } from 'ecycloud.common';
+import { cached, issuedReached, store } from 'ecycloud.profile';
 import { endpoint, providerProgress } from 'ecycloud.clash';
 import { call, refreshAccount } from 'ecycloud.panel';
-import { activate, block, deactivate, enqueueSpeed, prepare, refresh, retryPrepare, runSpeed, speedQuota, update, watchdog } from 'ecycloud.service';
+import { activate, block, deactivate, enqueueSpeed, prepare, refresh, retryPrepare, runSpeed, speedQuota, standby, update, watchdog } from 'ecycloud.service';
 import * as statistics from 'ecycloud.statistics';
 import * as panel from 'ecycloud.panel';
 import * as clash from 'ecycloud.clash';
@@ -47,11 +47,11 @@ testState.config.sub_url = 'https://sub.test';
 now += 86400;
 check(cached() == null, '离线授权到期必须拒绝');
 now -= 86400 + 120;
-check(cached() == null, '时间回拨到授权签发之前必须拒绝');
+check(cached() != null && !issuedReached(cached()), '本机时间慢于签发时间只影响离线复用，运行中的缓存不能因此失效');
 now += 50;
-check(cached() != null, '本机时间比签发时间慢 10 秒以内属于校时误差，不能判成授权无效');
+check(issuedReached(cached()), '本机时间比签发时间慢 10 秒以内属于校时误差，离线复用仍可用');
 now -= 1;
-check(cached() == null, '本机时间比签发时间慢超过 10 秒必须拒绝');
+check(!issuedReached(cached()), '本机时间比签发时间慢超过 10 秒，离线复用必须拒绝');
 now += 86400 + 71;
 check(cached() == null, '签发一侧的容差不能让到期的授权继续可用');
 now -= 86400 + 120;
@@ -97,16 +97,64 @@ testState.commands = [];
 check(providerProgress().ready == 1 && !activate(settings()) && readJson(STATE_FILE).stage == 'starting',
 	'未加载的规则集必须显示真实进度并延后接管');
 check(!length(filter(testState.commands, c => index(c, 'fw4') >= 0)), '规则集加载期间不能先修改防火墙');
+now += 61;
+testState.response.tun = { enable: true };
+check(activate(settings()) && length(filter(testState.commands, c => index(c, 'fw4') >= 0)) > 0,
+	'规则集下载失败时同一内核等满 60 秒仍没加载完就先接管，不能永远停在加载中');
+deactivate();
+now -= 61;
+testState.commands = [];
 testState.response.providers.pending.updatedAt = '2026-10-04T00:00:00Z';
 check(providerProgress().ready == 2, '合法空规则集也必须按内核加载时间判断就绪');
 
 testState.files[runFile] = sprintf('%J', remote.config);
-testState.response = {};
+testState.response = { tun: { enable: false } };
+testState.commands = [];
+check(!activate(settings()) && readJson(STATE_FILE).stage == 'failed' && index(readJson(STATE_FILE).error, 'TUN 接管失败') == 0 &&
+	readJson(runFile).tun.enable != true && length(filter(testState.commands, c => index(c, 'fw4 reload') >= 0)) >= 2,
+	'内核没能建出 TUN（运行态 tun.enable 仍为 false）时不能显示已接管，必须报失败并撤销网络设置');
+testState.response = { tun: { enable: true } };
 testState.commands = [];
 check(activate(settings()) && readJson(runFile).tun.enable == true, 'TUN 必须通过控制面启用并保存真实状态');
 testState.config.enabled = '0';
 check(deactivate() && readJson(runFile).tun.enable == false, 'TUN 关闭必须保存状态并恢复网络');
+check(profile.write('/etc/ecycloud/run/fixture-session', { ...remote.config, tun: { enable: true, stack: 'mixed' } }).ok &&
+	readJson(runFile).tun.enable == true && readJson('/etc/ecycloud/run/fixture-session/kernel.json').tun.enable == false,
+	'procd 重启内核读的 kernel.json 必须关着 TUN，只能由看门狗核对后经控制面打开');
+testState.files[runFile] = sprintf('%J', remote.config);
 check(!length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud restart') >= 0)), 'TUN 手动启停不能重启内核');
+
+/* 节点文件加载前转来的 DNS 等也会读 url-test，内核把空组回落的 REJECT 缓存 10 秒：接管前要先清掉，且只清 url-test */
+testState.files[runFile] = sprintf('%J', { ...remote.config, 'proxy-groups': [ ...remote.config['proxy-groups'],
+	{ name: '自动选择', type: 'url-test', proxies: [ 'fixture-node' ] } ] });
+testState.config.enabled = '1';
+let resets = [];
+let resetStatus = 204;
+testState.onRequest = () => {
+	testState.httpStatus = 200;
+	for (let path, text in testState.files)
+		if (match(path, /\/req-[a-f0-9]+\.conf$/) && index(text, 'request = "DELETE"') >= 0) {
+			push(resets, { url: match(text, /url = "([^"]+)"/)?.[1], at: length(testState.commands) });
+			testState.httpStatus = resetStatus;
+		}
+};
+testState.response = { tun: { enable: true } };
+testState.commands = [];
+const firstFw4 = () => length(filter(testState.commands, c => index(c, 'fw4') >= 0)) ?
+	index(testState.commands, filter(testState.commands, c => index(c, 'fw4') >= 0)[0]) + 1 : 0;
+check(activate(settings()) && length(resets) == 1 && resets[0].url == `http://127.0.0.1:19090/proxies/${urlencode('自动选择')}` &&
+	firstFw4() > resets[0].at, '接管透明代理前必须先清掉 url-test 的选点缓存，且只清 url-test');
+deactivate();
+resets = [];
+resetStatus = 500;
+testState.commands = [];
+check(activate(settings()) && length(resets) == 1 && firstFw4() > 0, '清缓存失败不能阻止接管');
+deactivate();
+resetStatus = 204;
+testState.onRequest = null;
+testState.httpStatus = 200;
+testState.config.enabled = '0';
+testState.files[runFile] = sprintf('%J', remote.config);
 
 store({ ...remote, offline_authorization: { issued_at: now - 60, valid_until: now + 1800 } });
 let renewed = 0;
@@ -254,6 +302,7 @@ statistics.clear();
 delete testState.files[PROFILE_FILE];
 delete testState.files['/proc/41/cmdline'];
 testState.config.enabled = '1';
+testState.files['/usr/libexec/mihomo'] = '';
 testState.httpStatus = 503;
 testState.response = null;
 check(!prepare() && readJson(STATE_FILE).retryable == true, '临时服务错误必须可重试');
@@ -269,8 +318,15 @@ check(!prepare() && readJson(STATE_FILE).retryable == false, '永久权限拒绝
 testState.httpStatus = 200;
 const earlyClock = { ret: 1, data: { ...remote, offline_authorization: { issued_at: time() + 3600, valid_until: time() + 90000 } } };
 testState.response = earlyClock;
-check(!prepare() && readJson(STATE_FILE).retryable == true && index(readJson(STATE_FILE).error, '系统时间') == 0,
-	'系统时间落后于面板签发时间时必须等校时后重试，不能判成授权无效');
+check(prepare() && cached(true) != null, '系统时间落后于面板签发时间时，刚从面板取到的配置照常可用（与另两端一致）');
+let clockFetches = 0;
+testState.onRequest = () => { clockFetches++; };
+testState.httpStatus = 503;
+check(!prepare() && clockFetches > 0 && readJson(STATE_FILE).retryable == true,
+	'缓存签发时间晚于本机时间超过 10 秒时，启动不能离线复用缓存，必须先向面板取配置');
+testState.onRequest = null;
+testState.httpStatus = 200;
+delete testState.files[profile.PENDING_FILE];
 earlyClock.data.offline_authorization = { issued_at: time() - 7200, valid_until: time() - 3600 };
 check(!prepare() && readJson(STATE_FILE).retryable == false && cached() == null && cached(true) == null,
 	'已到期的离线授权不能因时钟问题被重试或放行');
@@ -291,6 +347,7 @@ function securityFixture(enabled) {
 		enabled, mode: 'tproxy', refresh_interval: '0' };
 	testState.files[CRED_FILE] = sprintf('%J', credentials);
 	testState.files[API_FILE] = sprintf('%J', { port: 19090, secret: 'synthetic-secret', speed: 'synthetic-speed' });
+	testState.files['/usr/libexec/mihomo'] = '';
 	testState.files['/proc/41/cmdline'] = '/usr/libexec/mihomo\0-d\0/etc/ecycloud/run/fixture-session\0';
 	testState.files[STATE_FILE] = sprintf('%J', { stage: enabled == '1' ? 'running' : 'stopped' });
 	testState.response = { version: 'fixture' };
@@ -335,24 +392,200 @@ check(legacyUpdate.ok && legacyUpdate.reloaded == true && readJson(runFile).list
 check(testState.config.enabled == '0' && !length(filter(testState.commands, c => index(c, ' restart') >= 0)),
 	'旧口令修复不得接管待机网络或重启可热载的内核');
 
+const BLOCKED = '/var/run/ecycloud/blocked.json';
+const serviceCommands = () => filter(testState.commands, c => match(c, /\/etc\/init\.d\/ecycloud (stop|restart)/));
 for (let enabled in [ '0', '1' ]) {
 	securityFixture(enabled);
 	testState.files[PROFILE_FILE] = sprintf('%J', { ...readJson(PROFILE_FILE),
 		offline_authorization: { issued_at: now - 60, valid_until: now - 1 } });
 	let rounds = 0;
-	global.sleep = () => { if (++rounds == 2) testState.files['/var/run/ecycloud/stopping'] = ''; };
+	global.sleep = () => {
+		if (++rounds == 1)
+			check(!length(serviceCommands()) && length(filter(readJson('/var/run/ecycloud/update.json')?.tasks ?? [], t => t.kind == 'profile')) == 1,
+				`启用状态 ${enabled}：离线授权到点必须先排一次在线续期，等待期间不撤销接管`);
+		now += 31;
+		if (rounds == 3) testState.files['/var/run/ecycloud/stopping'] = '';
+	};
 	watchdog();
-	check(length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud stop') >= 0)) > 0,
-		`启用状态 ${enabled} 的常驻内核都必须在离线授权过期时停止`);
+	check(length(filter(serviceCommands(), c => index(c, enabled == '1' ? ' restart' : ' stop') >= 0)) > 0 && readJson(PROFILE_FILE) == null &&
+		testState.config.enabled == enabled && (readJson(BLOCKED)?.renew == true) == (enabled == '1') && readJson(STATE_FILE).retryable == (enabled == '1'),
+		`启用状态 ${enabled}：续期没成功就撤销接管、删掉过期缓存；已连接的保留连接开关并重启服务继续向面板取配置，待机的停服务`);
 }
+securityFixture('1');
+testState.files[PROFILE_FILE] = sprintf('%J', { ...readJson(PROFILE_FILE),
+	offline_authorization: { issued_at: now - 60, valid_until: now - 1 } });
+let renewRounds = 0;
+global.sleep = () => {
+	if (++renewRounds == 1)
+		store({ ...remote, offline_authorization: { issued_at: now, valid_until: now + 86400 } });
+	if (renewRounds == 2) testState.files['/var/run/ecycloud/stopping'] = '';
+};
+watchdog();
+check(!length(serviceCommands()) && testState.config.enabled == '1' && cached() != null, '到点在线续期成功后不能撤销接管或重启内核');
 securityFixture('0');
 testState.httpStatus = 503;
 testState.files[PROFILE_FILE] = sprintf('%J', { ...readJson(PROFILE_FILE),
 	offline_authorization: { issued_at: now - 60, valid_until: now - 1 } });
-global.sleep = () => { testState.files['/var/run/ecycloud/stopping'] = ''; };
+renewRounds = 0;
+global.sleep = () => { now += 31; if (++renewRounds == 2) testState.files['/var/run/ecycloud/stopping'] = ''; };
 watchdog();
-check(length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud stop') >= 0)) > 0,
+check(length(filter(serviceCommands(), c => index(c, ' stop') >= 0)) > 0,
 	'待机控制面未响应也不能让已过期的内核继续运行');
+for (let renew in [ false, true ]) {
+	securityFixture('1');
+	testState.files[BLOCKED] = sprintf('%J', { reason: 'fixture-expired', renew });
+	delete testState.files[PROFILE_FILE];
+	testState.response = { ret: 1, data: { ...remote, config: { ...remote.config, proxies: [] },
+		offline_authorization: { issued_at: now, valid_until: now + 86400 } } };
+	check(!prepare() && readJson(STATE_FILE).retryable == renew && (readJson(BLOCKED) != null) == renew,
+		renew ? '离线授权到期后面板还没续期（不下发节点）时必须继续重试' : '普通连接遇到面板配置不规范仍不能无限重试');
+	check(renew ? readJson(STATE_FILE).error == 'fixture-expired' &&
+		length(filter(testState.commands, c => index(c, '面板未续期：面板配置不规范') >= 0)) > 0 :
+		index(readJson(STATE_FILE).error, '面板配置不规范') == 0,
+		renew ? '续期被拒时状态沿用到期提示，面板给的原因只写日志，不能弹「面板配置不规范」' : '普通连接仍要原样显示面板配置问题');
+}
+testState.response = { ret: 1, data: { ...remote, offline_authorization: { issued_at: now, valid_until: now + 86400 } } };
+check(prepare() && readJson(BLOCKED) == null, '续期后取到有效配置必须恢复启动并清掉到期标记');
+testState.response = null;
+for (let renew in [ true, false ]) {
+	securityFixture('1');
+	testState.files[BLOCKED] = sprintf('%J', { reason: 'fixture-expired', renew });
+	delete testState.files[PROFILE_FILE];
+	let fetches = 0;
+	let naps = 0;
+	testState.onRequest = () => {
+		fetches++;
+		testState.httpStatus = renew ? 200 : 503;
+		testState.response = renew ? { ret: 1, data: { ...remote, config: { ...remote.config, proxies: [] },
+			offline_authorization: { issued_at: now, valid_until: now + 86400 } } } : { ret: 0 };
+	};
+	const fetchedAt = [];
+	const counted = testState.onRequest;
+	testState.onRequest = () => { push(fetchedAt, naps); counted(); };
+	global.sleep = () => { now++; if (++naps == 1000) testState.config.enabled = '0'; };
+	retryPrepare();
+	check(renew ? join(',', fetchedAt) == '30,90,210,450,750' : fetches == 37, renew
+		? `面板拒绝续期后第一次重试等 30 秒，之后翻倍、最长 300 秒一次，1000 秒内应在 30,90,210,450,750 秒拉配置，实际 ${join(',', fetchedAt)}`
+		: `其它可重试错误仍按最长 30 秒一次重试，1000 秒内应 37 次，实际 ${fetches} 次`);
+}
+securityFixture('1');
+testState.files[BLOCKED] = sprintf('%J', { reason: 'fixture-expired', renew: true });
+delete testState.files[PROFILE_FILE];
+testState.onRequest = () => {
+	testState.httpStatus = 200;
+	testState.response = { ret: 1, data: { ...remote, config: { ...remote.config, proxies: [] },
+		offline_authorization: { issued_at: now, valid_until: now + 86400 } } };
+};
+let napsBeforeStart = 0;
+global.sleep = () => {
+	now++;
+	if (++napsBeforeStart == 70) {
+		testState.onRequest = null;
+		testState.response = null;
+		store({ ...remote, offline_authorization: { issued_at: now, valid_until: now + 86400 } }, true);
+		testState.info[profile.PENDING_FILE] = { type: 'file', nlink: 1, mtime: now };
+	}
+	if (napsBeforeStart == 400) testState.config.enabled = '0';
+};
+retryPrepare();
+check(napsBeforeStart == 70 && length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud start') >= 0)) == 1,
+	'续期重试等待期间界面手动刷新拿到了新配置，必须立即启动，不能等满这一轮的长间隔');
+delete testState.info[profile.PENDING_FILE];
+
+const RENEWING = '/etc/ecycloud/renewing.json';
+const reboot = () => {
+	for (let path in keys(testState.files))
+		if (index(path, '/var/run/') == 0)
+			delete testState.files[path];
+};
+const noNodes = () => {
+	testState.httpStatus = 200;
+	testState.response = { ret: 1, data: { ...remote, config: { ...remote.config, proxies: [] },
+		offline_authorization: { issued_at: now, valid_until: now + 86400 } } };
+};
+securityFixture('1');
+let renewWrites = 0;
+testState.onWrite = path => { if (index(path, RENEWING) == 0) renewWrites++; };
+block('配置离线授权已到期，面板续期后将自动恢复连接', true);
+block('配置离线授权已到期，面板续期后将自动恢复连接', true);
+check(readJson(RENEWING)?.reason == '配置离线授权已到期，面板续期后将自动恢复连接' && renewWrites == 1,
+	'等面板续期的状态必须另存闪存，且只在状态变化时写一次');
+reboot();
+delete testState.files[PROFILE_FILE];
+noNodes();
+check(!prepare() && readJson(STATE_FILE).retryable == true && readJson(STATE_FILE).error == '配置离线授权已到期，面板续期后将自动恢复连接',
+	'续期失败期间路由器重启后，开机启动仍要按续期处理：可重试并显示到期提示');
+let rebootNaps = 0;
+const rebootFetches = [];
+testState.onRequest = () => {
+	push(rebootFetches, rebootNaps);
+	if (length(rebootFetches) < 3)
+		noNodes();
+	else
+		testState.response = { ret: 1, data: { ...remote, offline_authorization: { issued_at: now, valid_until: now + 86400 } } };
+};
+testState.commands = [];
+global.sleep = () => { now++; if (++rebootNaps == 1000) testState.config.enabled = '0'; };
+retryPrepare();
+check(join(',', rebootFetches) == '30,90,210' && length(filter(testState.commands, c => index(c, '/etc/init.d/ecycloud start') >= 0)) == 1 &&
+	readJson(RENEWING) == null && renewWrites == 1,
+	`重启后仍按 30 秒起、翻倍的续期退避重试，续费后自动恢复连接并清掉续期状态，实际在 ${join(',', rebootFetches)} 秒拉配置`);
+testState.onRequest = null;
+testState.onWrite = null;
+
+securityFixture('1');
+block('fixture-config-error');
+check(readJson(RENEWING) == null, '非续期的拦截不得写续期状态');
+reboot();
+delete testState.files[PROFILE_FILE];
+noNodes();
+check(!prepare() && readJson(STATE_FILE).retryable == false && index(readJson(STATE_FILE).error, '面板配置不规范') == 0,
+	'真正的配置错误在重启后不能被当成续期而无限重试');
+securityFixture('1');
+block('fixture-expired', true);
+check(readJson(RENEWING) != null, '续期状态必须已写入');
+block('fixture-config-error');
+check(readJson(RENEWING) == null, '续期期间转成真正的拦截（如账号受限）时必须清掉续期状态');
+block('fixture-expired', true);
+standby();
+check(readJson(RENEWING) == null, '用户主动停止后必须清掉续期状态');
+block('fixture-expired', true);
+panel.clearToken();
+check(readJson(RENEWING) == null, '退出登录或会话失效时必须清掉续期状态');
+securityFixture('1');
+testState.files[RENEWING] = sprintf('%J', { session: 'other-session', reason: 'fixture-expired' });
+delete testState.files[PROFILE_FILE];
+noNodes();
+check(!prepare() && readJson(STATE_FILE).retryable == false, '别的登录会话留下的续期状态不得生效');
+testState.response = null;
+testState.config.enabled = '1';
+securityFixture('1');
+delete testState.files['/etc/ecycloud/run/fixture-session/config.json'];
+testState.commandStatus = -9;
+check(!prepare() && readJson(STATE_FILE).retryable == true && index(readJson(STATE_FILE).error, '配置校验未能完成') == 0,
+	'校验进程被杀（如内存不足）时启动必须按可重试失败退避重试，不能当成配置不合法就此放弃');
+testState.commandStatus = 0;
+delete testState.files['/usr/libexec/mihomo'];
+check(!prepare() && readJson(STATE_FILE).retryable == true, '内核文件暂时不可执行（升级中、权限被改）时启动必须可重试');
+testState.files['/usr/libexec/mihomo'] = '';
+securityFixture('1');
+testState.config.device = 'br-lan';
+let backoffRounds = 0;
+global.sleep = ms => { now += ms / 1000; if (++backoffRounds == 40) testState.files['/var/run/ecycloud/stopping'] = ''; };
+watchdog();
+const takeoverFailures = length(filter(testState.commands, c => index(c, '透明代理规则未生效') >= 0));
+check(takeoverFailures >= 4 && takeoverFailures <= 7 && readJson(STATE_FILE).stage == 'failed',
+	`接管持续失败（每次都要重载防火墙）必须按 1/2/4… 秒退避，40 秒内实际重试 ${takeoverFailures} 次`);
+securityFixture('1');
+let hungRounds = 0;
+global.sleep = ms => {
+	now += ms / 1000;
+	if (++hungRounds == 1) testState.httpStatus = 0;
+	if (hungRounds == 40) testState.files['/var/run/ecycloud/stopping'] = '';
+};
+watchdog();
+check(length(filter(testState.commands, c => c == 'kill -9 41 2>/dev/null')) == 1, '内核进程还在但控制面连续 30 秒无响应（假死）必须杀掉交给 procd 重启');
+testState.httpStatus = 200;
 
 securityFixture('0');
 let accountRequests = 0;
@@ -492,8 +725,16 @@ if (rpc != null) {
 		let requests = 0;
 		testState.onRequest = () => { requests++; testState.httpStatus = 503; testState.response = { ret: 0 }; };
 		const result = rpc.refresh_account.call({ args: { use_cache: scenario != 'refresh' } });
-		check((result.ok == true) == (scenario == 'valid'), '只有有效同会话缓存且无下线通知时才能直接用于连接');
+		const offline = scenario in [ 'notice', 'missing-account', 'refresh' ];
+		check((result.ok == true) == (scenario == 'valid' || offline) && (result.offline == true) == offline,
+			'面板 5xx 且当前会话离线授权有效时可凭缓存连接（重启后没有账户缓存也一样），授权失效或会话已换不能');
 		check(requests == (scenario == 'valid' ? 0 : 1), '正常刷新和无有效缓存的连接仍必须请求面板');
+	}
+	for (let status in [ 429, 403 ]) {
+		securityFixture('0');
+		testState.onRequest = () => { testState.httpStatus = status; testState.response = { ret: 0 }; };
+		const result = rpc.refresh_account.call({ args: { use_cache: false } });
+		check((result.ok == true) == (status == 429), '限流可凭有效缓存连接，明确拒绝不能');
 	}
 }
 
@@ -542,6 +783,29 @@ for (let message in [ '账号不存在或已被禁用', 'fixture-unauthorized', 
 	testState.httpStatus = 401;
 	testState.response = { ret: 0, msg: message };
 	check(call('/user/account-status').status == 401 && !sessionValid(), '任何鉴权401都必须清理本地会话，不依赖文案');
+}
+securityFixture('0');
+let announceConf = '';
+testState.onRequest = () => {
+	for (let path, text in testState.files)
+		if (match(path, /\/req-[a-f0-9]+\.conf$/) && index(text, '/announcements') >= 0)
+			announceConf = text;
+	testState.response = { ret: 1, data: { announcements: [] } };
+};
+check(panel.fetchAnnouncements('zh-CN').ok && index(announceConf, 'max-time = 5\n') >= 0,
+	'公告与刷新配置共用串行的后台队列，必须用短超时，面板挂起时不能让排在后面的任务久等');
+for (let banned in [ true, false ]) {
+	securityFixture('0');
+	testState.onRequest = () => {
+		for (let path, text in testState.files)
+			if (match(path, /\/req-[a-f0-9]+\.conf$/)) {
+				const status = index(text, '/user/account-status') >= 0 && banned;
+				testState.httpStatus = status ? 200 : 401;
+				testState.response = status ? { ret: 1, data: { enable: 0, ban_reason: 'fixture-ban' } } : { ret: 0, msg: '账号不存在或已被禁用' };
+			}
+	};
+	check(call('/config/revision').status == 401 && sessionValid() == banned,
+		banned ? '封禁账号访问放行名单以外的接口回 401 时，同一令牌查账号状态仍是 200，不能清会话' : '账号状态也回 401 才清会话');
 }
 securityFixture('0');
 testState.httpStatus = 401;
@@ -983,6 +1247,37 @@ if (rpc != null) {
 
 	const fetchProfile = testState.onRequest;
 	securityFixture('0');
+	testState.files['/proc/self/status'] = 'Name:\tucode\nPid:\t4242\n';
+	let announceRequests = 0;
+	testState.onRequest = () => {
+		if (index(latestRequest(), '/announcements') >= 0)
+			announceRequests++;
+		testState.response = { ret: 1, data: { announcements: [ { id: 7, title: 'fixture-notice', date: '2026-11-01', updated_at: 'u7', content: '' } ] } };
+	};
+	testState.commands = [];
+	const announceArgs = path => ({ args: { what: 'announcements', path, locale: 'zh-CN' } });
+	const firstRead = rpc.update.call(announceArgs(''));
+	check(firstRead.ok && firstRead.loaded == false && announceRequests == 0 && workerStarts() == 0,
+		'首页读公告只读路由器缓存，没有缓存时也不能在 rpcd 里请求面板');
+	const announceTask = rpc.update.call(announceArgs('refresh'));
+	check(announceTask.ok && announceTask.pending == true && length(announceTask.id) == 16 && announceRequests == 0 && workerStarts() == 1,
+		'公告刷新必须立即返回并交给后台任务，面板挂起时 rpcd 的 status 等调用不能排在它后面等');
+	check(rpc.update.call(announceArgs('refresh')).id == announceTask.id && workerStarts() == 2, '排队中的公告刷新必须合并成同一个任务');
+	check(taskOf(announceTask.id)?.state == 'queued' && !rpc.update.call({ args: { what: 'announcements', path: 'refresh', locale: 'x\r\ny' } }).ok,
+		'status 必须带上排队中的公告任务，非法语言不得排进后台队列');
+	runUpdates();
+	const announceDone = taskOf(announceTask.id);
+	const announceView = rpc.update.call(announceArgs(''));
+	check(announceDone?.state == 'done' && announceDone.ok && announceRequests == 1 && announceView.loaded && announceView.items[0].title == 'fixture-notice' &&
+		announceView.has_unread && announceRequests == 1, '后台任务拉到公告后，界面读缓存即可显示，读取不再请求面板');
+	testState.httpStatus = 0;
+	const failedTask = rpc.update.call(announceArgs('refresh'));
+	runUpdates();
+	testState.httpStatus = 200;
+	check(taskOf(failedTask.id)?.ok == false && rpc.update.call(announceArgs('')).items[0].title == 'fixture-notice',
+		'后台拉取失败时任务报失败，已缓存的公告保留');
+
+	securityFixture('0');
 	testState.onRequest = fetchProfile;
 	testState.files['/proc/self/status'] = 'Name:\tucode\nPid:\t4242\n';
 	delete testState.files[PROFILE_FILE];
@@ -1006,6 +1301,20 @@ if (rpc != null) {
 	check(cached(true) == null && rpc.start.call({ args: { refreshed: true } }).ok && profileFetches == 1 && workerStarts() == 0 && testState.config.enabled == '1',
 		'带 refreshed 的启动不能再次排队刷新');
 	testState.onRequest = null;
+}
+
+for (let days in [ 2, 10 ]) {
+	securityFixture('0');
+	delete testState.files['/proc/41/cmdline'];
+	const at = gmtime(now + days * 86400);
+	testState.files[CRED_FILE] = sprintf('%J', { ...credentials,
+		expires_at: sprintf('%04d-%02d-%02dT%02d:%02d:%02dZ', at.year, at.mon, at.mday, at.hour, at.min, at.sec) });
+	let expiryRounds = 0;
+	global.sleep = () => { now += 3600; if (++expiryRounds == 30) testState.files['/var/run/ecycloud/stopping'] = ''; };
+	refresh();
+	const warnings = length(filter(testState.commands, c => index(c, 'logger') == 0 && index(c, 'daemon.warning') > 0 && index(c, '登录将于') >= 0));
+	check(warnings == (days == 2 ? 2 : 0), days == 2
+		? `登录剩余 3 天以内时后台每天写一条到期提醒，30 小时内应 2 条，实际 ${warnings} 条` : '登录剩余超过 3 天时不写到期提醒');
 }
 
 printf('OpenWrt 运行逻辑同步回归通过：%d 项断言。\n', assertions);

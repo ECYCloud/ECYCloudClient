@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart'
+    show RenderAbstractViewport, SliverConstraints;
 
 import '../../domain/kernel/clash_api_client.dart';
 import '../../domain/nodes/node_group_sort.dart';
@@ -10,6 +12,7 @@ import '../node_labels.dart';
 import '../theme.dart';
 import '../widgets/delay_badge.dart';
 import '../widgets/flag_icon.dart';
+import '../widgets/gapped_sliver_list.dart';
 import '../widgets/group_delay_test_button.dart';
 import '../widgets/group_icon.dart';
 import '../widgets/group_sort_button.dart';
@@ -32,7 +35,7 @@ class NodesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ConnectionController connection = AppScope.of(context).connection;
 
-    return ListenableBuilder(
+    return ShellListenableBuilder(
       listenable: connection,
       builder: (BuildContext context, _) {
         final List<ProxyGroup> groups = connection.groupsForMode;
@@ -108,6 +111,7 @@ class _GroupCardState extends State<_GroupCard> {
   // 须放下 VLESS + TCP + REALITY + XUDP 单行，再窄就减列而不是把标签折行
   static const double _minTileWidth = 260;
   static const double _tileGap = 8;
+  static const double _tileEstimate = 52;
 
   final GlobalKey _selectedTileKey = GlobalKey();
   final TextEditingController _searchController = TextEditingController();
@@ -117,6 +121,7 @@ class _GroupCardState extends State<_GroupCard> {
   NodeGroupSort _sort = NodeGroupSort.name;
   bool _searchOpen = false;
   String _query = '';
+  Timer? _searchTimer;
 
   @override
   void initState() {
@@ -126,9 +131,27 @@ class _GroupCardState extends State<_GroupCard> {
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  // 面板上还有没列出的成员时，本地过滤只看得到已知节点，停止输入 400 毫秒后再向面板查
+  void _search(String value) {
+    setState(() => _query = value.trim().toLowerCase());
+    _searchTimer?.cancel();
+    final ConnectionController connection = widget.connection;
+    final ProxyGroup group = widget.group;
+    if (_query.isEmpty ||
+        connection.memberTotalOf(group) <= group.members.length) {
+      return;
+    }
+    final String query = _query;
+    _searchTimer = Timer(
+      const Duration(milliseconds: 400),
+      () => unawaited(connection.loadMoreNodes(group.name, query: query)),
+    );
   }
 
   void _toast(String? message) {
@@ -188,7 +211,7 @@ class _GroupCardState extends State<_GroupCard> {
     if (AppTheme.isWide(context)) {
       return <Widget>[
         Text(
-          L10n.t('{0} 个节点{1}', <Object>[group.members.length, now]),
+          L10n.t('{0} 个节点{1}', <Object>[connection.memberTotalOf(group), now]),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: style,
@@ -257,17 +280,37 @@ class _GroupCardState extends State<_GroupCard> {
       group.name,
     );
     final bool wide = AppTheme.isWide(context);
-    final List<String> members = <String>[
-      for (final String member in NodeGroupSortLogic.apply(
-        members: group.members,
-        mode: _sort,
-        delayOf: (String name) =>
-            connection.delayOf(connection.resolveNode(name)),
-        speedOf: (String name) =>
-            connection.speedOf(connection.resolveNode(name)),
-      ))
-        if (!_searchOpen || _query.isEmpty || _matchesQuery(member)) member,
-    ];
+    final bool searching = _searchOpen && _query.isNotEmpty;
+    // 折叠着的分组不排序：每次刷新所有分组都会重建，成员多时白白排一遍
+    final List<String> members = !_expanded
+        ? const <String>[]
+        : <String>[
+            for (final String member in NodeGroupSortLogic.apply(
+              members: group.members,
+              mode: _sort,
+              delayOf: (String name) =>
+                  connection.delayOf(connection.resolveNode(name)),
+              speedOf: (String name) =>
+                  connection.speedOf(connection.resolveNode(name)),
+            ))
+              if (!searching ||
+                  _matchesQuery(member) ||
+                  connection.nodeMatched(group.name, member, _query))
+                member,
+          ];
+    final bool loading = connection.loadingNodes(group.name);
+    final String? loadError = connection.nodesErrorOf(group.name);
+    final bool more =
+        _expanded &&
+        connection.memberTotalOf(group) > group.members.length &&
+        (loadError != null ||
+            connection.hasMoreNodes(
+              group.name,
+              query: searching ? _query : '',
+            ));
+    void loadMore() => unawaited(
+      connection.loadMoreNodes(group.name, query: searching ? _query : ''),
+    );
 
     final List<Widget> actions = <Widget>[
       GroupDelayTestButton(
@@ -411,7 +454,7 @@ class _GroupCardState extends State<_GroupCard> {
                                               : L10n.t('自动')) +
                                           (wide
                                               ? ''
-                                              : ' · ${group.members.length}'),
+                                              : ' · ${connection.memberTotalOf(group)}'),
                                     ),
                                   ],
                                 ),
@@ -488,93 +531,138 @@ class _GroupCardState extends State<_GroupCard> {
           ),
         ),
         if (_expanded)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: AppTheme.pageScrollPadding.left,
-                right: AppTheme.pageScrollPadding.right,
-              ),
-              child: Material(
+          SliverPadding(
+            padding: EdgeInsets.only(
+              left: AppTheme.pageScrollPadding.left,
+              right: AppTheme.pageScrollPadding.right,
+            ),
+            sliver: DecoratedSliver(
+              decoration: ShapeDecoration(
                 color: scheme.surfaceContainerLowest,
                 shape: bodyShape,
-                clipBehavior: Clip.antiAlias,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const SizedBox(height: 10),
-                      if (_searchOpen)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                          child: SearchField(
-                            controller: _searchController,
-                            focusNode: _searchFocus,
-                            hintText: L10n.t('搜索节点名称'),
-                            width: double.infinity,
-                            onChanged: (String value) => setState(
-                              () => _query = value.trim().toLowerCase(),
-                            ),
-                          ),
-                        ),
-                      if (!group.selectable)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                          child: _AutoGroupHint(
-                            connection: connection,
-                            group: group,
-                          ),
-                        ),
-                      if (_query.isNotEmpty && members.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            L10n.t('没有符合条件的节点'),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        )
-                      else
-                        LayoutBuilder(
-                          builder:
-                              (
-                                BuildContext context,
-                                BoxConstraints constraints,
-                              ) {
-                                final int columns =
-                                    ((constraints.maxWidth + _tileGap) /
-                                            (_minTileWidth + _tileGap))
-                                        .floor()
-                                        .clamp(1, 6);
-                                final double tileWidth =
-                                    (constraints.maxWidth -
-                                        _tileGap * (columns - 1)) /
-                                    columns;
-
-                                return Wrap(
-                                  spacing: _tileGap,
-                                  runSpacing: _tileGap,
-                                  children: <Widget>[
-                                    for (final String member in members)
-                                      SizedBox(
-                                        key: member == group.now
-                                            ? _selectedTileKey
-                                            : null,
-                                        width: tileWidth,
-                                        child: _buildTile(
-                                          connection,
-                                          group,
-                                          member,
-                                          canSelect: canSelect,
-                                        ),
+              ),
+              sliver: SliverPadding(
+                padding: const EdgeInsets.only(bottom: 12),
+                sliver: SliverMainAxisGroup(
+                  slivers: <Widget>[
+                    SliverToBoxAdapter(
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const SizedBox(height: 10),
+                            if (_searchOpen)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  10,
+                                ),
+                                child: SearchField(
+                                  controller: _searchController,
+                                  focusNode: _searchFocus,
+                                  hintText: L10n.t('搜索节点名称'),
+                                  width: double.infinity,
+                                  onChanged: _search,
+                                ),
+                              ),
+                            if (!group.selectable)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  0,
+                                ),
+                                child: _AutoGroupHint(
+                                  connection: connection,
+                                  group: group,
+                                ),
+                              ),
+                            if (_query.isNotEmpty && members.isEmpty)
+                              loading || loadError != null
+                                  ? _MoreNodes(
+                                      loading: loading,
+                                      error: loadError,
+                                      onLoad: loadMore,
+                                    )
+                                  : Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
                                       ),
-                                  ],
-                                );
-                              },
+                                      child: Text(
+                                        L10n.t('没有符合条件的节点'),
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                          ],
                         ),
-                    ],
-                  ),
+                      ),
+                    ),
+                    // 成员可能上万个：按行懒加载，只构建滚动到的那几行，一次全部构建会卡死界面
+                    if (members.isNotEmpty)
+                      SliverLayoutBuilder(
+                        builder:
+                            (
+                              BuildContext context,
+                              SliverConstraints constraints,
+                            ) {
+                              final int columns =
+                                  ((constraints.crossAxisExtent + _tileGap) /
+                                          (_minTileWidth + _tileGap))
+                                      .floor()
+                                      .clamp(1, 6);
+                              final double tileWidth =
+                                  (constraints.crossAxisExtent -
+                                      _tileGap * (columns - 1)) /
+                                  columns;
+
+                              final int rows =
+                                  (members.length + columns - 1) ~/ columns;
+                              return GappedSliverList(
+                                // 末尾多出的一行滚到才构建，构建即向面板取下一页
+                                itemCount: rows + (more ? 1 : 0),
+                                gap: _tileGap,
+                                rowEstimate: _tileEstimate,
+                                itemBuilder: (BuildContext context, int row) =>
+                                    row == rows
+                                    ? _MoreNodes(
+                                        loading: loading,
+                                        error: loadError,
+                                        onLoad: loadMore,
+                                      )
+                                    : Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        spacing: _tileGap,
+                                        children: <Widget>[
+                                          for (final String member
+                                              in members
+                                                  .skip(row * columns)
+                                                  .take(columns))
+                                            SizedBox(
+                                              key: member == group.now
+                                                  ? _selectedTileKey
+                                                  : null,
+                                              width: tileWidth,
+                                              child: _buildTile(
+                                                connection,
+                                                group,
+                                                member,
+                                                canSelect: canSelect,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                              );
+                            },
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -615,6 +703,95 @@ class _GroupCardState extends State<_GroupCard> {
         top: top ? radius : Radius.zero,
         bottom: bottom ? radius : Radius.zero,
       ),
+    );
+  }
+}
+
+class _MoreNodes extends StatefulWidget {
+  const _MoreNodes({
+    required this.loading,
+    required this.error,
+    required this.onLoad,
+  });
+
+  final bool loading;
+  final String? error;
+  final VoidCallback onLoad;
+
+  @override
+  State<_MoreNodes> createState() => _MoreNodesState();
+}
+
+class _MoreNodesState extends State<_MoreNodes> {
+  ScrollPosition? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ScrollPosition? position = Scrollable.maybeOf(context)?.position;
+    if (!identical(position, _position)) {
+      _position?.removeListener(_loadWhenReached);
+      _position = position?..addListener(_loadWhenReached);
+    }
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_loadWhenReached);
+    super.dispose();
+  }
+
+  // 只在这一行真的滚进视口时取下一页：列表为了算滚动条会预先量一遍全部行，
+  // 以「构建到这一行」为准就会不等滚动一页接一页取到底
+  void _loadWhenReached() {
+    final ScrollPosition? position = _position;
+    final RenderObject? box = mounted ? context.findRenderObject() : null;
+    if (widget.loading ||
+        widget.error != null ||
+        position == null ||
+        box == null ||
+        !box.attached) {
+      return;
+    }
+    final double top = RenderAbstractViewport.of(box)
+        .getOffsetToReveal(box, 0)
+        .offset;
+    if (top < position.pixels + position.viewportDimension) {
+      widget.onLoad();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final String? error = widget.error;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadWhenReached());
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: error == null
+          ? const SizedBox(
+              height: 32,
+              child: Center(
+                child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          : Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    L10n.t('加载失败：{0}', <Object>[error]),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                TextButton(onPressed: widget.onLoad, child: Text(L10n.t('重试'))),
+              ],
+            ),
     );
   }
 }

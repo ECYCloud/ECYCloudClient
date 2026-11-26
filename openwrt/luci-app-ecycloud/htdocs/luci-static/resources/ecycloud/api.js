@@ -64,7 +64,7 @@ var RANK_LIMIT = 10;
 var kickWatch = false;
 var kickBusy = false;
 var groupTests = { testing: new Map(), speed_testing: new Map() };
-var groupsRpc = declare('groups');
+var groupsRpc = declare('groups', [ 'search' ]);
 var memberDefaults = {
 	label: '', type: '', protocol: '', network: '', tls: '', udp: '', is_group: false, group_selectable: false,
 	via: '', via_label: '', delay: 0, testing: false, failed: false, speed: 0, speed_testing: false, speed_failed: false
@@ -315,7 +315,7 @@ return baseclass.extend({
 			return data;
 		});
 	},
-	groups: function() {
+	groups: function(search) {
 		var request = ++groupsRequest;
 		var ready = {};
 		Object.keys(groupTests).forEach(function(field) {
@@ -325,7 +325,7 @@ return baseclass.extend({
 					ready[field].set(name, test);
 			});
 		});
-		return groupsRpc().then(function(data) {
+		return groupsRpc(search || {}).then(function(data) {
 			var nodes = data.nodes || {};
 			(data.groups || []).forEach(function(group) {
 				group.members = (group.members || []).map(function(name) {
@@ -354,7 +354,9 @@ return baseclass.extend({
 		});
 	},
 	logs: declare('logs', [ 'lines' ]),
-	login: declare('login', [ 'email', 'password', 'code' ]),
+	login: declare('login', [ 'email', 'password', 'code', 'remember' ]),
+	remembered: declare('remembered'),
+	forgetRemembered: declare('forget_remembered'),
 	sendLoginVerify: declare('send_login_verify', [ 'email' ]),
 	loginCode: declare('login_code', [ 'email', 'code' ]),
 	logout: declare('logout'),
@@ -388,10 +390,11 @@ return baseclass.extend({
 		});
 	},
 	selectRpc: declare('select', [ 'group', 'name' ]),
+	searchNodesRpc: declare('search_nodes', [ 'group', 'keyword', 'offset' ]),
 	delay: declare('delay', [ 'name' ]),
-	test_group: declare('test_group', [ 'group' ]),
+	test_group: declare('test_group', [ 'group', 'names' ]),
 	speed_test: declare('speed_test', [ 'name' ]),
-	test_group_speed: declare('test_group_speed', [ 'group' ]),
+	test_group_speed: declare('test_group_speed', [ 'group', 'names' ]),
 	reselect: declare('reselect', [ 'group' ]),
 	mode: declare('mode', [ 'mode' ]),
 	set: declare('set', [ 'name', 'value' ]),
@@ -596,7 +599,15 @@ return baseclass.extend({
 	},
 
 	fetchAnnouncements: function(force) {
-		return this.announcementRequest(force ? 'refresh' : '');
+		var self = this;
+		return this.announcementRequest(force ? 'refresh' : '').then(function(res) {
+			if (!force)
+				return res && res.ok !== false && !res.loaded ? self.fetchAnnouncements(true) : res;
+			return self.announcementRequest('').then(function(view) {
+				return res && res.ok === false
+					? Object.assign({}, view, { ok: false, error: res.msg || '', msg: res.msg || '' }) : view;
+			});
+		});
 	},
 
 	announcementRequest: function(action) {
@@ -2130,10 +2141,36 @@ return baseclass.extend({
 	},
 
 	select: function(group, name) {
+		var self = this;
 		return this.selectRpc(group, name).then(function(res) {
+			return res && res.pending ? self.waitUpdate(res.id) : res;
+		}).then(function(res) {
 			if (res && typeof res.ok == 'boolean')
 				return res;
 			return { ok: false, msg: (res && res.msg) || _('Request failed') };
+		}).catch(function(err) {
+			return { ok: false, msg: (err && err.message) || _('Request failed') };
+		});
+	},
+
+	/* 向面板取分组里尚未装入的节点：keyword 为空按顺序往下取，offset 省略取第一页。
+	   面板的节点已变时后端先刷新配置，随后从第一页重取，结果带 restarted */
+	searchNodes: function(group, keyword, offset, restarted) {
+		var self = this;
+		return this.searchNodesRpc(group, keyword, offset == null ? -1 : offset).then(function(res) {
+			if (res && res.pending && !restarted)
+				return self.waitUpdate(res.id).then(function(task) {
+					return task.ok ? self.searchNodes(group, keyword, null, true) : task;
+				});
+			if (!res || res.pending || typeof res.ok != 'boolean')
+				return { ok: false, msg: (res && res.msg) || _('Request failed') };
+			if (res.ok) {
+				res.restarted = !!restarted;
+				res.nodes = (res.nodes || []).map(function(node) {
+					return Object.assign({}, memberDefaults, node);
+				});
+			}
+			return res;
 		}).catch(function(err) {
 			return { ok: false, msg: (err && err.message) || _('Request failed') };
 		});
@@ -2707,7 +2744,7 @@ return baseclass.extend({
 		return list.filter(function(group) { return group.name != 'GLOBAL'; });
 	},
 
-	testGroup: function(group, speed) {
+	testGroup: function(group, speed, listed) {
 		var name = group && group.name ? group.name : group;
 		var field = speed ? 'speed_testing' : 'testing';
 		var tests = groupTests[field];
@@ -2717,7 +2754,7 @@ return baseclass.extend({
 		tests.set(name, test);
 		if (group && group.name)
 			group[field] = true;
-		test.request = (speed ? this.test_group_speed(name) : this.test_group(name)).then(function(res) {
+		test.request = (speed ? this.test_group_speed(name, listed || []) : this.test_group(name, listed || [])).then(function(res) {
 			if (res && res.ok)
 				test.pending = false;
 			return res;
@@ -2735,8 +2772,8 @@ return baseclass.extend({
 		return this.speed_test(name);
 	},
 
-	testGroupSpeed: function(group) {
-		return this.testGroup(group, true);
+	testGroupSpeed: function(group, listed) {
+		return this.testGroup(group, true, listed);
 	},
 
 	jump: function(href, label, opts) {

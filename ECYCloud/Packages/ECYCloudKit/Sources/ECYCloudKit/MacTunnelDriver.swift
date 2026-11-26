@@ -9,6 +9,8 @@ import Security
     private let helper: any MacHelperTransport
     private let transport: any HTTPTransport
     private let installed: () -> Bool
+    private let stopBudget: Duration
+    private var stopFailure: TunnelError?
     private var epoch = 0
     private var owner: String?
     private var lease: TunnelLease?
@@ -30,8 +32,9 @@ import Security
             Bundle.main.executableURL?.resolvingSymlinksInPath().path == "/Applications/ECYCloud.app/Contents/MacOS/ECYCloud"
         })
     }
-    init(helper: any MacHelperTransport, transport: any HTTPTransport, installed: @escaping () -> Bool) {
-        self.helper = helper; self.transport = transport; self.installed = installed
+    // 与 helper_client.dart 的握手时限同一量级：helper 卡住时 Flutter 约 15 秒报「停止内核失败」
+    init(helper: any MacHelperTransport, transport: any HTTPTransport, installed: @escaping () -> Bool, stopBudget: Duration = .seconds(15)) {
+        self.helper = helper; self.transport = transport; self.installed = installed; self.stopBudget = stopBudget
     }
 
     public func profileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions {
@@ -46,7 +49,7 @@ import Security
     }
 
     public func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? {
-        guard takeover, let runtime, lease != nil, stopping == nil, preferences.mixedPort == runtime.mixedPort else { return nil }
+        guard let runtime, lease != nil, stopping == nil, preferences.mixedPort == runtime.mixedPort else { return nil }
         return options(preferences, mixed: runtime.mixedPort, controller: runtime.port, secret: runtime.secret)
     }
 
@@ -119,25 +122,28 @@ import Security
         while ContinuousClock.now < deadline {
             try current()
             do {
-                if !bound {
-                    let status = try await helper.request("kernel.status", payload: ["log_cursor": cursor])
-                    try current()
-                    cursor = status["log_cursor"] as? Int ?? cursor
-                    let lines = status["log_lines"] as? [String] ?? []
-                    client.appendLogs(lines)
-                    guard status["running"] as? Bool != false else { throw TunnelError.exited(Self.exitReason(status)) }
-                    bound = try client.controllerBound(lines)
-                }
+                let status = try await helper.request("kernel.status", payload: ["log_cursor": cursor])
+                try current()
+                cursor = status["log_cursor"] as? Int ?? cursor
+                let lines = status["log_lines"] as? [String] ?? []
+                client.appendLogs(lines)
+                guard status["running"] as? Bool != false else { throw TunnelError.exited(Self.exitReason(status)) }
+                bound = try client.controllerBound(lines) || bound
                 if bound { try await client.ready(); ready = true; break }
             }
             catch is CancellationError { throw CancellationError() }
             catch TunnelError.controllerPortInUse(let port) { throw TunnelError.controllerPortInUse(port) }
+            catch TunnelError.speedPortInUse(let port) { throw TunnelError.speedPortInUse(port) }
             catch TunnelError.exited(let reason) { throw TunnelError.failed(reason) }
             catch {}
             try await Task.sleep(for: .milliseconds(250))
         }
         try current()
         guard ready else { throw TunnelError.failed(L10n.t("内核启动失败，请重试")) }
+        if (config["tun"] as? [String: Any])?["enable"] as? Bool == true {
+            guard try await client.tunEnabled() else { throw TunnelError.failed(L10n.t("内核未能接管 TUN，详见内核日志")) }
+            try current()
+        }
         if takeover && systemProxy {
             guard try await client.listensOnMixedPort() else { throw TunnelError.mixedPortInUse(client.mixedPort) }
             try current()
@@ -166,7 +172,7 @@ import Security
                 } catch {
                     guard self.epoch == operation else { return }
                     failures += 1
-                    if failures >= 3 { self.failureOccurred?(.helperUnavailable); self.stop(); return }
+                    if failures >= 3 { self.failureOccurred?(Self.helperFailure(error)); self.stop(); return }
                 }
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
@@ -181,7 +187,7 @@ import Security
     }
 
     public func updateNodes(_ lease: TunnelLease) async throws -> Bool {
-        guard takeover, let running = self.lease, let runtime, stopping == nil, lease.expiresAt > .now,
+        guard let running = self.lease, let runtime, stopping == nil, lease.expiresAt > .now,
               lease.differsOnlyInNodes(from: running), let validation = lease.validationConfiguration,
               let config = try JSONSerialization.jsonObject(with: lease.configuration) as? [String: Any] else { return false }
         let operation = epoch
@@ -189,20 +195,21 @@ import Security
         guard epoch == operation else { throw CancellationError() }
         _ = try await helper.request("kernel.write", payload: ["config": String(decoding: lease.configuration, as: UTF8.self)])
         guard epoch == operation else { throw CancellationError() }
-        try await runtime.updateNodes(config)
+        try await runtime.updateNodes(config, previous: running.configuration)
         guard epoch == operation else { throw CancellationError() }
         self.lease = lease
         return true
     }
 
     public func waitUntilStopped() async throws {
-        await stopping?.value
-        if lease != nil, runtime == nil, stopping == nil {
+        let pending = stopping
+        await pending?.value
+        if pending == nil, lease != nil, runtime == nil, stopping == nil {
             let operation = epoch
             stopping = Task { [weak self] in await self?.release(operation) }
         }
         await stopping?.value
-        guard lease == nil else { throw TunnelError.helperUnavailable }
+        guard lease == nil else { throw stopFailure ?? TunnelError.helperUnavailable }
     }
 
     public func stop() {
@@ -229,26 +236,41 @@ import Security
     }
 
     private func release(_ operation: Int) async {
-        guard await retry("kernel.stop", operation: operation) else {
-            if epoch == operation { stopping = nil; failureOccurred?(.helperUnavailable) }
+        if let failure = await retry("kernel.stop", operation: operation) {
+            guard epoch == operation else { return }
+            stopping = nil
+            let reported = TunnelError.failed(L10n.t("停止内核失败：{0}", [failure.localizedDescription]))
+            stopFailure = reported
+            failureOccurred?(reported)
             return
         }
         guard epoch == operation else { return }
         lease = nil
-        let restored = await retry("proxy.restore", operation: operation)
+        let restored = await retry("proxy.restore", operation: operation) == nil
         guard epoch == operation else { return }
         stopping = nil
         statusChanged?(.disconnected)
         if !restored { failureOccurred?(.proxyRestore) }
     }
 
-    private func retry(_ command: String, operation: Int) async -> Bool {
+    private func retry(_ command: String, operation: Int) async -> TunnelError? {
+        let deadline = ContinuousClock.now + stopBudget
+        var failure = TunnelError.helperUnavailable
         for attempt in 0..<3 {
-            if (try? await helper.request(command, payload: [:])) != nil { return true }
-            guard epoch == operation else { return false }
-            if attempt < 2 { try? await Task.sleep(for: .seconds(1)) }
+            do { _ = try await helper.request(command, payload: [:], timeout: ContinuousClock.now.duration(to: deadline)); return nil }
+            catch { failure = Self.helperFailure(error) }
+            guard epoch == operation, attempt < 2, ContinuousClock.now + .seconds(1) < deadline else { return failure }
+            try? await Task.sleep(for: .seconds(1))
         }
-        return false
+        return failure
+    }
+
+    // helper 可达却拒绝了本进程（如覆盖安装后旧进程的代码签名校验失败）时，MacHelperClient 给出的是 helper 的原因，不能再改报成未安装
+    private static func helperFailure(_ error: Error) -> TunnelError {
+        switch error as? TunnelError {
+        case .failed?, .helperTimeout?: error as! TunnelError
+        default: .helperUnavailable
+        }
     }
 
     private static func exitReason(_ status: [String: Any]) -> String {

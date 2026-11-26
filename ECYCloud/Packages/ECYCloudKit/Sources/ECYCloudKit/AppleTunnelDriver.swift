@@ -4,7 +4,13 @@ import Foundation
 
 public enum TunnelFiles {
     public static func directory(group: String) throws -> URL {
-        guard let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else { throw TunnelError.unavailable }
+        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else { throw TunnelError.unavailable }
+        #if os(tvOS)
+        // tvOS 真机上共享容器只有 Library/Caches 可写（模拟器不限制）
+        let base = container.appendingPathComponent("Library/Caches", isDirectory: true)
+        #else
+        let base = container
+        #endif
         let path = base.appendingPathComponent("VPN", isDirectory: true)
         try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true, attributes: protection)
         var result = path
@@ -13,12 +19,13 @@ public enum TunnelFiles {
         seedGeoData(path)
         return path
     }
-    public static func runDirectory(group: String, lease: TunnelLease) throws -> URL {
+    public static func runDirectory(group: String, lease: TunnelLease, standby: Bool = false) throws -> URL {
         let base = try directory(group: group)
-        for item in (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [] where UUID(uuidString: item) != nil {
+        let prefix = standby ? "standby-" : ""
+        for item in (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [] where item.hasPrefix(prefix) && UUID(uuidString: String(item.dropFirst(prefix.count))) != nil {
             try? FileManager.default.removeItem(at: base.appendingPathComponent(item, isDirectory: true))
         }
-        let path = base.appendingPathComponent(lease.id.uuidString, isDirectory: true)
+        let path = base.appendingPathComponent(prefix + lease.id.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false, attributes: protection)
         for name in kernelData where FileManager.default.fileExists(atPath: base.appendingPathComponent(name).path) {
             try FileManager.default.createSymbolicLink(atPath: path.appendingPathComponent(name).path, withDestinationPath: "../" + name)
@@ -83,9 +90,14 @@ public enum TunnelFiles {
     }
     public static func save(_ lease: TunnelLease, group: String) throws {
         guard lease.configuration.count <= URLSessionTransport.maximumResponseBytes, lease.expiresAt > Date() else { throw TunnelError.configuration }
-        let file = try directory(group: group).appendingPathComponent(lease.id.uuidString + ".json")
+        let base = try directory(group: group), name = lease.id.uuidString + ".json"
+        let file = base.appendingPathComponent(name)
         try JSONEncoder().encode(lease).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        for item in (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
+        where item != name && item.hasSuffix(".json") && UUID(uuidString: String(item.dropLast(5))) != nil {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent(item))
+        }
     }
     public static func load(group: String, owner: String, id: UUID) throws -> TunnelLease {
         let file = try directory(group: group).appendingPathComponent(id.uuidString + ".json")
@@ -111,15 +123,16 @@ public enum TunnelFiles {
     private var manager: NETunnelProviderManager?
     private var epoch = 0
     private var notification: NSObjectProtocol?
+    private var configurationChange: NSObjectProtocol?
+    private var starting = false
+    private var progressed = false
     private let standby: (any StandbyRuntime)?
     private var standbyActive = false
+    private var standbyLease: TunnelLease?
     private var stopping: Task<Void, Never>?
     public var supportsStandby: Bool { standby != nil }
     public var restoredConfiguration: Data? {
-        guard manager?.connection.status == .connected,
-              let values = (manager?.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
-              let owner = values["owner"] as? String, let raw = values["leaseID"] as? String, let id = UUID(uuidString: raw) else { return nil }
-        return try? TunnelFiles.load(group: group, owner: owner, id: id).configuration
+        manager?.connection.status == .connected ? lease(of: manager)?.configuration : nil
     }
     public init(applicationID: String, standby: (any StandbyRuntime)? = nil) {
         bundleID = applicationID + ".tunnel"
@@ -156,11 +169,18 @@ public enum TunnelFiles {
         selected.protocolConfiguration = configuration
         selected.localizedDescription = "ECY Cloud"
         selected.isEnabled = true
-        selected.isOnDemandEnabled = false
-        do { try await selected.saveToPreferences(); try await selected.loadFromPreferences() }
-        catch { throw TunnelError.permission }
-        guard operation == epoch, lease.expiresAt > Date() else { throw CancellationError() }
+        selected.onDemandRules = [NEOnDemandRuleConnect()]
+        selected.isOnDemandEnabled = true
+        starting = true; progressed = false
         try TunnelFiles.save(lease, group: group)
+        do { try await selected.saveToPreferences(); try await selected.loadFromPreferences() }
+        catch { TunnelFiles.clear(group: group, id: lease.id); throw TunnelError.permission }
+        guard operation == epoch, lease.expiresAt > Date() else {
+            selected.isOnDemandEnabled = false
+            try? await selected.saveToPreferences()
+            TunnelFiles.clear(group: group, id: lease.id)
+            throw CancellationError()
+        }
         manager = selected; observe()
         do { try selected.connection.startVPNTunnel() }
         catch { TunnelFiles.clear(group: group, id: lease.id); throw TunnelError.start }
@@ -168,15 +188,20 @@ public enum TunnelFiles {
         updateStatus()
     }
     public func liveProfileOptions(_ preferences: ClientPreferences) throws -> ProfileOptions? {
-        active && !standbyActive ? try profileOptions(preferences) : nil
+        active || standbyActive ? try profileOptions(preferences) : nil
     }
     // 扩展按 providerConfiguration 里的租约标识读文件：沿用原标识覆盖，系统自行重启隧道时读到的也是新节点
     public func updateNodes(_ lease: TunnelLease) async throws -> Bool {
-        guard !standbyActive, let manager, manager.connection.status == .connected,
-              let values = (manager.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
-              let owner = values["owner"] as? String, let raw = values["leaseID"] as? String, let id = UUID(uuidString: raw),
-              let running = try? TunnelFiles.load(group: group, owner: owner, id: id), lease.differsOnlyInNodes(from: running) else { return false }
-        try TunnelFiles.save(TunnelLease(id: id, owner: lease.owner, cacheKey: lease.cacheKey, expiresAt: lease.expiresAt, configuration: lease.configuration,
+        if standbyActive {
+            guard let standby, let running = standbyLease, lease.differsOnlyInNodes(from: running) else { return false }
+            let next = TunnelLease(id: running.id, owner: lease.owner, cacheKey: lease.cacheKey, expiresAt: lease.expiresAt, configuration: lease.configuration,
+                                   validationConfiguration: lease.validationConfiguration, logLevel: lease.logLevel)
+            guard try await standby.updateNodes(next) else { return false }
+            standbyLease = next
+            return true
+        }
+        guard manager?.connection.status == .connected, let running = self.lease(of: manager), lease.differsOnlyInNodes(from: running) else { return false }
+        try TunnelFiles.save(TunnelLease(id: running.id, owner: lease.owner, cacheKey: lease.cacheKey, expiresAt: lease.expiresAt, configuration: lease.configuration,
                                          validationConfiguration: lease.validationConfiguration, logLevel: lease.logLevel), group: group)
         do { _ = try await request(TunnelCommand(.nodes)) }
         catch is CancellationError { throw CancellationError() }
@@ -195,27 +220,44 @@ public enum TunnelFiles {
         try await standby.start(lease)
         guard operation == epoch else { throw CancellationError() }
         standbyActive = true
+        standbyLease = lease
     }
     public func stop() {
         epoch += 1
         let operation = epoch
         active = false
+        starting = false
         standbyActive = false
+        standbyLease = nil
+        let previous = stopping, known = manager
+        stopping = Task {
+            await previous?.value
+            await standby?.stop()
+            var targets = known.map { [$0] } ?? []
+            if known == nil {
+                let existing = (try? await managers()) ?? []
+                guard epoch == operation else { return }
+                manager = existing.first
+                observe()
+                targets = existing
+            }
+            for item in targets {
+                // 按需连接开着时停隧道，系统会立即按规则重连：先关掉并保存，再停
+                if item.isOnDemandEnabled { item.isOnDemandEnabled = false; try? await item.saveToPreferences() }
+                clearLease(item)
+                item.connection.stopVPNTunnel()
+            }
+            updateStatus()
+        }
+    }
+    public func stopStandby() {
+        standbyActive = false
+        standbyLease = nil
         let previous = stopping
         stopping = Task {
             await previous?.value
             await standby?.stop()
-            if manager == nil {
-                let existing = try? await managers()
-                guard epoch == operation else { return }
-                manager = existing?.first
-                observe()
-                for item in existing ?? [] { clearLease(item); item.connection.stopVPNTunnel() }
-                updateStatus()
-            }
         }
-        clearLease(manager)
-        if let manager { manager.connection.stopVPNTunnel(); updateStatus() }
     }
     public func waitUntilStopped() async throws {
         await stopping?.value
@@ -249,6 +291,11 @@ public enum TunnelFiles {
         try Task.checkCancellation()
         return result
     }
+    private func lease(of manager: NETunnelProviderManager?) -> TunnelLease? {
+        guard let values = (manager?.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
+              let owner = values["owner"] as? String, let raw = values["leaseID"] as? String, let id = UUID(uuidString: raw) else { return nil }
+        return try? TunnelFiles.load(group: group, owner: owner, id: id)
+    }
     private func clearLease(_ manager: NETunnelProviderManager?) {
         let id = (manager?.protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration?["leaseID"] as? String
         TunnelFiles.clear(group: group, id: id.flatMap(UUID.init(uuidString:)))
@@ -264,19 +311,41 @@ public enum TunnelFiles {
         notification = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: manager.connection, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.updateStatus() }
         }
+        // 用户能在系统设置里改按需连接；内存里的配置不会自己跟着变
+        if configurationChange == nil {
+            configurationChange = NotificationCenter.default.addObserver(forName: .NEVPNConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let manager = self.manager else { return }
+                    try? await manager.loadFromPreferences()
+                    if manager === self.manager { self.updateStatus() }
+                }
+            }
+        }
     }
     private func updateStatus() {
-        let state: ConnectionState
-        switch manager?.connection.status {
+        let status = manager?.connection.status
+        var state: ConnectionState
+        switch status {
         case .connecting: state = .connecting
         case .connected: state = .connected
         case .reasserting: state = .reconnecting
         case .disconnecting: state = .disconnecting
         default: state = .disconnected
         }
+        if status == .connected { starting = false } else if status == .connecting, starting { progressed = true }
+        if status == .disconnected, let manager, manager.isOnDemandEnabled {
+            state = .tunnelDisconnected(starting: starting, progressed: progressed, leaseValid: lease(of: manager) != nil)
+            if state == .disconnected {
+                // 不会再连上的隧道留着按需连接，系统会一直反复拉起扩展
+                starting = false
+                manager.isOnDemandEnabled = false
+                Task { try? await manager.saveToPreferences() }
+            }
+        }
         if standbyActive && state == .disconnected { return }
         if state == .disconnected, active, let connection = manager?.connection {
             active = false
+            clearLease(manager)
             let operation = epoch
             connection.fetchLastDisconnectError { [weak self] error in
                 let text = error?.localizedDescription

@@ -26,7 +26,9 @@ class RememberedLogin {
 
 class CredentialStore {
   CredentialStore({JsonFileStore? store})
-    : _store = store ?? JsonFileStore(AppPaths.credentials, 'credential');
+    : _store =
+          store ??
+          JsonFileStore(AppPaths.credentials, 'credential', ownerOnly: true);
 
   final JsonFileStore _store;
 

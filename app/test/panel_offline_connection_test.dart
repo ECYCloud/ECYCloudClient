@@ -14,6 +14,8 @@ import 'package:ecycloud_client/data/store/settings_store.dart';
 import 'package:ecycloud_client/data/store/speed_test_quota_store.dart';
 import 'package:ecycloud_client/data/store/traffic_rank_store.dart';
 import 'package:ecycloud_client/domain/config/local_template.dart';
+import 'package:ecycloud_client/domain/config/node_catalog.dart';
+import 'package:ecycloud_client/domain/config/node_working_set.dart';
 import 'package:ecycloud_client/domain/config/profile_assembler.dart';
 import 'package:ecycloud_client/domain/kernel/kernel_controller.dart';
 import 'package:ecycloud_client/domain/kernel/node_speed_tester.dart';
@@ -62,6 +64,7 @@ void main() {
     L10n.current = AppLanguage.zhCN;
     await connection.shutdown();
     connection.dispose();
+    await kernel.statuses.close();
     client.close();
     JsonFileStore(AppPaths.selectorCache, 'test').clear();
     JsonFileStore(AppPaths.speedTestQuota, 'test').clear();
@@ -384,6 +387,32 @@ void main() {
     });
   }
 
+  test('排队中的测速在退出重新登录后不再继续', () async {
+    kernel.probeSpeeds = true;
+    seed();
+    connection.attachProfileLookup(
+      () => UserProfile.fromJson(<String, dynamic>{'id': 2}),
+    );
+    await connection.connect();
+    speedTester.hold = Completer<void>();
+    final Future<String?> first = connection.testSpeed('node-1');
+    final Future<String?> queued = connection.testSpeed('node-2');
+    while (speedTester.downloads == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    await endSession();
+    connection.attachApi(null);
+    seed();
+    await connection.connect();
+    speedTester.hold!.complete();
+    await first;
+    await queued;
+    expect(speedTester.downloads, 1);
+    expect(client.speedReservations, 1);
+    expect(connection.speedOf('node-1'), 0);
+    expect(connection.testingSpeedNodes, isEmpty);
+  });
+
   test('连续上报失败仍只允许五次成功测速，第六次在本地拒绝', () async {
     kernel.probeSpeeds = true;
     client.reportError = ApiException('模拟上报失败', statusCode: 503);
@@ -404,10 +433,63 @@ void main() {
     expect(client.speedReservations, 5);
   });
 
+  // 修复前：内核没停掉也被当成「常驻起不来」，界面显示无错误的未连接，TUN 与内核却还在接管
+  test('断开时特权侧挂起、内核停不掉：显示失败原因，不显示成已断开', () async {
+    seed();
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.connected);
+
+    kernel.serviceHung = true;
+    await connection.disconnect();
+    kernel.serviceHung = false;
+
+    expect(connection.state, ConnectionPhase.failed);
+    expect(connection.error, contains('停止内核失败'));
+    expect(kernel.server, isNotNull);
+  });
+
+  test('停内核失败后重新连接，连接时长从这次连上算起', () async {
+    seed();
+    await connection.connect();
+    final DateTime first = connection.connectedAt!;
+
+    kernel.serviceHung = true;
+    await connection.disconnect();
+    kernel.serviceHung = false;
+    expect(connection.state, ConnectionPhase.failed);
+    expect(connection.connectedAt, isNull);
+
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.connected);
+    expect(connection.connectedAt!.isAfter(first), isTrue);
+  });
+
+  // 修复前：kernel.start 先推送的失败状态把「连接中内核退出」标记置上且不复位，界面只剩「内核启动失败，请重试」
+  test('连接时内核启动失败，界面显示特权侧给出的原因', () async {
+    seed();
+    kernel.startError = '用户未授予 VPN 权限';
+    await connection.connect();
+    kernel.startError = null;
+
+    expect(connection.state, ConnectionPhase.failed);
+    expect(connection.error, contains('用户未授予 VPN 权限'));
+  });
+
+  test('启动时常驻内核起不来：仍是无错误的未连接', () async {
+    seed();
+    kernel.serviceHung = true;
+    await connection.startStandby();
+    kernel.serviceHung = false;
+
+    expect(connection.state, ConnectionPhase.disconnected);
+    expect(connection.error, isNull);
+  });
+
   test('普通下线立即保存排行并保留内核待机、缓存和令牌，原会话可以重连', () async {
     kernel.probeTraffic = true;
     final Completer<void> sampled = Completer<void>();
-    connection.addListener(() {
+    connection.statsUpdates.addListener(() {
       final List<TrafficRankRow> hosts = connection.trafficRankHosts(
         TrafficRankDay.today,
       );
@@ -485,6 +567,110 @@ void main() {
     expect(kernel.status.running, isFalse);
     expect(connection.state, ConnectionPhase.failed);
     expect(connection.error, contains('授权已到期'));
+  });
+
+  // 修复前：到点直接停用，面板在到期前一刻已续期也没用
+  test('缓存授权到点先向面板取一次配置，面板已续期则保持连接', () async {
+    seed(lifetime: const Duration(milliseconds: 700));
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    client.fresh = true;
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(kernel.status.running, isTrue);
+    expect(kernel.starts, 1);
+    expect(connection.state, ConnectionPhase.connected);
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'candidate',
+    );
+  });
+
+  // 修复前：载入已过期的缓存即停用，正在进行的连接（桌面为启动后自动连接）被作废
+  test('缓存授权已过期而面板已续期时，载入缓存不打断随后的连接', () async {
+    client.fresh = true;
+    client.clashDelay = const Duration(milliseconds: 50);
+    seed(lifetime: const Duration(seconds: -1));
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(connection.state, ConnectionPhase.connected);
+    expect(connection.error, isNull);
+    expect(kernel.status.running, isTrue);
+  });
+
+  // 修复前：封禁账户访问配置接口回 401 即退出登录，进不了受限页
+  test('非放行接口返回 401 而账户状态接口仍应答时不清除会话', () async {
+    seed();
+    client.revisionError = ApiException('账号不存在或已被禁用', statusCode: 401);
+    int verified = 0;
+    bool rejected = false;
+    connection.onPanelSync = () async => verified++;
+    connection.onSessionRejected = () async => rejected = true;
+    await connection.connect();
+    for (int i = 0; i < 50 && verified < 2; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(verified, 2);
+    expect(rejected, isFalse);
+  });
+
+  test('账户状态接口同样返回 401 时才清除会话', () async {
+    seed();
+    final ApiException revoked = ApiException('登录已失效', statusCode: 401);
+    client.revisionError = revoked;
+    bool rejected = false;
+    connection.onPanelSync = () async => throw revoked;
+    connection.onSessionRejected = () async => rejected = true;
+    await connection.connect();
+    for (int i = 0; i < 50 && !rejected; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(rejected, isTrue);
+  });
+
+  // 修复前：选择与模式只改运行态，原生侧按落盘配置重新拉起内核时退回连接时的值
+  test('运行中换节点与路由模式写回落盘配置，不重启内核', () async {
+    client.nodes = <String>['node-1', 'node-2'];
+    seed();
+    await connection.connect();
+    final int starts = kernel.starts;
+    await connection.selectProxy('group', 'node-2');
+    expect(
+      (kernel.config['proxy-groups'] as List).cast<Map>().firstWhere(
+        (Map group) => group['name'] == 'group',
+      )['default-selected'],
+      'node-2',
+    );
+    await connection.setRouteMode('global');
+    expect(kernel.config['mode'], 'global');
+    expect(kernel.starts, starts);
+    expect(kernel.status.running, isTrue);
+    expect(connection.state, ConnectionPhase.connected);
+  });
+
+  // 修复前：TUN 没起来（内核把 tun.enable 抹成 false）界面仍显示已连接
+  test('开启 TUN 而内核未能接管时连接失败，不显示已连接', () async {
+    seed();
+    await connection.updateSettings(
+      connection.settings.copyWith(tunEnabled: true),
+    );
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.failed);
+    expect(connection.error, contains('TUN'));
+  });
+
+  // 修复前：未连接时升级内核，待机内核被停后不再拉起，控制面一直指着已停的内核
+  test('未连接时升级内核后重启待机内核', () async {
+    seed();
+    for (int i = 0; i < 100 && !connection.controlPlaneReady; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(connection.state, ConnectionPhase.disconnected);
+    expect(kernel.starts, 1);
+    await connection.upgradeKernel('v-test');
+    expect(kernel.starts, 2);
+    expect(kernel.status.running, isTrue);
+    expect(connection.controlPlaneReady, isTrue);
+    expect(connection.state, ConnectionPhase.disconnected);
   });
 
   test('配置戳接口明确拒绝时，不用全量接口的网络故障掩盖撤销', () async {
@@ -579,6 +765,56 @@ void main() {
     expect(connection.groups.single.now, 'node-1');
   });
 
+  // 节点文件加载前 TUN 劫持的 DNS 等也会读 url-test，内核把空组回落的 REJECT 缓存 10 秒，界面不读分组也躲不开
+  test('内核启动与全量热载后先清 url-test 缓存再读分组，且只清 url-test', () async {
+    final String reset = 'DELETE /proxies/${Uri.encodeComponent('自动选择')}';
+    List<String> order(int from) => kernel.requests
+        .sublist(from)
+        .where((String r) => r == reset || r == 'GET /proxies')
+        .take(2)
+        .toList();
+    client
+      ..nodeProviders = true
+      ..extra = <String, Object>{
+        'dns': <String, Object>{'enable': true, 'enhanced-mode': 'redir-host'},
+        'proxy-groups': <Object>[
+          <String, Object>{
+            'name': 'group',
+            'type': 'select',
+            'use': <String>['ecy-panel-nodes'],
+          },
+          <String, Object>{
+            'name': '自动选择',
+            'type': 'url-test',
+            'use': <String>['ecy-panel-nodes'],
+            'url': 'https://cp.cloudflare.com/generate_204',
+            'interval': 300,
+          },
+        ],
+      };
+    seed();
+    await connection.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(connection.state, ConnectionPhase.connected);
+    expect(order(0), <String>[reset, 'GET /proxies']);
+    expect(
+      kernel.requests.where((String r) => r.startsWith('DELETE /proxies/')),
+      <String>[reset],
+    );
+
+    final int before = kernel.requests.length;
+    client
+      ..fresh = true
+      ..extra = <String, Object>{
+        ...client.extra,
+        'rules': <String>['DOMAIN,reload.example.test,DIRECT', 'MATCH,group'],
+      };
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(kernel.privilegedReloads, hasLength(1));
+    expect(kernel.starts, 1);
+    expect(order(before), <String>[reset, 'GET /proxies']);
+  });
+
   // 旧版后台组件不认 kernel.reload：改为经特权侧净化的重启，不能退回原文热载，也不能静默失败
   test('后台组件不支持热载时改为重启内核，不退回原文热载', () async {
     client.extra = <String, Object>{
@@ -651,6 +887,364 @@ void main() {
     expect(kernel.starts, 1);
     expect(connection.groups.single.members, <String>['node-2']);
     expect(connection.connectedAt, connectedAt);
+  });
+
+  test('节点副本超过内核装载上限时只装在用的节点，选中与测延迟按需装入，不重启内核', () async {
+    final int total = NodeWorkingSet.copyBudget + 500;
+    client
+      ..nodeProviders = true
+      ..nodes = <String>[for (int id = 1; id <= total; id++) 'node-$id'];
+    seed();
+    await connection.connect();
+    expect(
+      connection.state,
+      ConnectionPhase.connected,
+      reason: connection.error,
+    );
+    List<String> inKernel(String provider) => <String>[
+      for (final Object? node
+          in ((kernel.config['proxy-providers'] as Map)[provider]
+                  as Map)['payload']
+              as List)
+        (node as Map)['name'] as String,
+    ];
+    expect(inKernel('ecy-panel-nodes'), hasLength(NodeWorkingSet.copyBudget));
+    expect(connection.groups.single.members, hasLength(total));
+
+    final String far = 'node-${total - 10}';
+    expect(inKernel('ecy-panel-nodes'), isNot(contains(far)));
+    await connection.selectProxy('group', far);
+    expect(inKernel('ecy-panel-nodes'), contains(far));
+    expect(inKernel('ecy-panel-nodes'), hasLength(NodeWorkingSet.copyBudget));
+    expect(connection.groups.single.now, far);
+    expect(connection.groups.single.members, hasLength(total));
+
+    final String other = 'node-${total - 20}';
+    final int updates = kernel.providerUpdates;
+    await connection.testDelay(other);
+    expect(inKernel(NodeWorkingSet.probeProvider), <String>[other]);
+    expect(inKernel('ecy-panel-nodes'), isNot(contains(other)));
+    expect(kernel.providerUpdates, updates + 1);
+    expect(kernel.starts, 1);
+    expect(kernel.stops, 0);
+    expect(kernel.fullReloads, 0);
+
+    // 选中的节点记进了选择记录，重装配置后仍在内核里
+    client
+      ..fresh = true
+      ..nodePort = 8443;
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(inKernel('ecy-panel-nodes'), contains(far));
+    expect(kernel.starts, 1);
+    // 接受新配置时的候选校验同样只带在用的节点，整份目录不交给内核
+    expect(kernel.validatedNodes, NodeWorkingSet.copyBudget);
+  });
+
+  test('内核拒收装入的节点时撤回，之后的装配不再带它', () async {
+    final int total = NodeWorkingSet.copyBudget + 500;
+    client
+      ..nodeProviders = true
+      ..nodes = <String>[for (int id = 1; id <= total; id++) 'node-$id'];
+    seed();
+    await connection.connect();
+    List<String> inKernel() => <String>[
+      for (final Object? node
+          in ((kernel.config['proxy-providers'] as Map)['ecy-panel-nodes']
+                  as Map)['payload']
+              as List)
+        (node as Map)['name'] as String,
+    ];
+
+    final String far = 'node-${total - 10}';
+    kernel.failUpdate = true;
+    await expectLater(connection.selectProxy('group', far), throwsA(anything));
+    expect(inKernel(), isNot(contains(far)));
+    expect(connection.groups.single.now, isNot(far));
+
+    client
+      ..fresh = true
+      ..nodePort = 8443;
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(inKernel(), isNot(contains(far)));
+    expect(kernel.starts, 1);
+  });
+
+  group('节点目录分页', () {
+    List<String> inKernel([String provider = 'ecy-panel-nodes']) => <String>[
+      for (final Object? node
+          in ((kernel.config['proxy-providers'] as Map)[provider]
+                  as Map)['payload']
+              as List)
+        (node as Map)['name'] as String,
+    ];
+    List<String> cached() => <String>[
+      for (final Object? node
+          in ((cache
+                          .loadRemote('a@example.test', client.cacheKey)!
+                          .config['proxy-providers']
+                      as Map)['ecy-panel-nodes']
+                  as Map)['payload']
+              as List)
+        (node as Map)['name'] as String,
+    ];
+    Future<void> connectPaged() async {
+      client
+        ..nodeProviders = true
+        ..fresh = true
+        ..pagedHead = 3
+        ..nodes = <String>[for (int id = 1; id <= 500; id++) 'node-$id'];
+      connection.attachApi(client, accountKey: 'a@example.test');
+      await connection.connect();
+      expect(
+        connection.state,
+        ConnectionPhase.connected,
+        reason: connection.error,
+      );
+    }
+
+    test('取配置后按名补齐用户选过的节点，并入的配置落盘，离线重启仍带着它', () async {
+      JsonFileStore(AppPaths.selectorCache, 'test').write(<String, dynamic>{
+        'account': 'a@example.test',
+        'selected': <String, String>{'group': 'node-400'},
+      });
+      await connectPaged();
+      expect(client.nodeRequests, <Map<String, Object?>>[
+        <String, Object?>{
+          'names': <String>['node-400'],
+        },
+      ]);
+      expect(inKernel(), <String>['node-1', 'node-2', 'node-3', 'node-400']);
+      expect(connection.groups.single.now, 'node-400');
+      expect(connection.memberTotalOf(connection.groups.single), 500);
+      final RemoteProfile saved = cache.loadRemote(
+        'a@example.test',
+        client.cacheKey,
+      )!;
+      expect(saved.catalog!.ranks['node-400'], 399);
+      expect(saved.nodeLabels['node-400'], 'label-node-400');
+      expect(cached(), <String>['node-1', 'node-2', 'node-3', 'node-400']);
+
+      await connection.shutdown();
+      client.fresh = false;
+      await connection.connect();
+      expect(connection.state, ConnectionPhase.connected);
+      expect(inKernel(), contains('node-400'));
+      expect(connection.groups.single.now, 'node-400');
+    });
+
+    test('按名补齐选过的节点时请求失败，这次取配置按失败处理，沿用上一份缓存', () async {
+      JsonFileStore(AppPaths.selectorCache, 'test').write(<String, dynamic>{
+        'account': 'a@example.test',
+        'selected': <String, String>{'group': 'node-400'},
+      });
+      await connectPaged();
+      final List<String> before = cached();
+      expect(before, contains('node-400'));
+
+      client
+        ..revision += 1
+        ..nodePort = 8443
+        ..nodesError = ApiException('模拟面板不可达', connectFailed: true);
+      expect(await connection.refreshProfileFromPanel(), startsWith('更新失败'));
+      final RemoteProfile kept = cache.loadRemote(
+        'a@example.test',
+        client.cacheKey,
+      )!;
+      expect(kept.revision, 'candidate-0');
+      expect(cached(), before);
+      expect(inKernel(), before);
+      expect(connection.groups.single.now, 'node-400');
+      expect(kernel.starts, 1);
+
+      client.nodesError = null;
+      expect(await connection.refreshProfileFromPanel(), '更新成功');
+      expect(
+        cache.loadRemote('a@example.test', client.cacheKey)!.revision,
+        'candidate-1',
+      );
+      expect(inKernel(), before);
+      expect(connection.groups.single.now, 'node-400');
+    });
+
+    test('面板成功应答但不含某个选过的节点（已删除或已无权限）时照常接受配置', () async {
+      JsonFileStore(AppPaths.selectorCache, 'test').write(<String, dynamic>{
+        'account': 'a@example.test',
+        'selected': <String, String>{'group': 'node-9999'},
+      });
+      await connectPaged();
+      expect(client.nodeRequests.single['names'], <String>['node-9999']);
+      expect(inKernel(), <String>['node-1', 'node-2', 'node-3']);
+      expect(cached(), <String>['node-1', 'node-2', 'node-3']);
+      expect(connection.groups.single.now, 'node-1');
+    });
+
+    test('翻页取到的节点只供界面列出，选中时才并入、落盘并装入内核，不重启', () async {
+      await connectPaged();
+      expect(client.nodeRequests, isEmpty);
+      expect(connection.groups.single.members, hasLength(3));
+      expect(connection.memberTotalOf(connection.groups.single), 500);
+      expect(connection.hasMoreNodes('group'), isTrue);
+
+      await connection.loadMoreNodes('group');
+      await connection.loadMoreNodes('group');
+      expect(client.nodeRequests, <Map<String, Object?>>[
+        <String, Object?>{'provider': 'ecy-panel-nodes', 'offset': 3},
+        <String, Object?>{'provider': 'ecy-panel-nodes', 'offset': 103},
+      ]);
+      expect(connection.groups.single.members, hasLength(203));
+      expect(connection.memberTotalOf(connection.groups.single), 500);
+      expect(connection.typeOf('node-150'), 'Shadowsocks');
+      expect(inKernel(), hasLength(3));
+      expect(cached(), hasLength(3));
+
+      await connection.selectProxy('group', 'node-150');
+      expect(inKernel(), <String>['node-1', 'node-2', 'node-3', 'node-150']);
+      expect(connection.groups.single.now, 'node-150');
+      expect(cached(), <String>['node-1', 'node-2', 'node-3', 'node-150']);
+      expect(connection.groups.single.members, hasLength(203));
+      expect(kernel.starts, 1);
+      expect(kernel.stops, 0);
+      expect(kernel.fullReloads, 0);
+
+      // 翻到最后一页后不再请求
+      for (int page = 0; page < 6; page++) {
+        await connection.loadMoreNodes('group');
+      }
+      expect(connection.hasMoreNodes('group'), isFalse);
+      expect(connection.groups.single.members, hasLength(500));
+      expect(client.nodeRequests, hasLength(5));
+    });
+
+    test('搜索向面板查，命中的节点进列表，换关键字重新查', () async {
+      await connectPaged();
+      expect(connection.hasMoreNodes('group', query: 'node-49'), isFalse);
+      await connection.loadMoreNodes('group', query: 'node-49');
+      expect(client.nodeRequests.single, <String, Object?>{
+        'provider': 'ecy-panel-nodes',
+        'offset': 0,
+        'search': 'node-49',
+      });
+      expect(connection.groups.single.members, hasLength(3 + 11));
+      expect(connection.nodeMatched('group', 'node-490', 'node-49'), isTrue);
+      expect(connection.nodeMatched('group', 'node-1', 'node-49'), isFalse);
+      expect(connection.hasMoreNodes('group', query: 'node-49'), isFalse);
+
+      await connection.loadMoreNodes('group', query: 'node-2');
+      expect(client.nodeRequests.last['search'], 'node-2');
+      expect(connection.hasMoreNodes('group', query: 'node-2'), isTrue);
+      expect(connection.nodeMatched('group', 'node-490', 'node-49'), isFalse);
+      await connection.loadMoreNodes('group', query: 'node-2');
+      expect(client.nodeRequests.last['offset'], 100);
+      expect(connection.hasMoreNodes('group', query: 'node-2'), isFalse);
+      expect(inKernel(), hasLength(3));
+    });
+
+    test('给只在浏览缓存里的节点测延迟：先并入面板配置，再经探测节点文件测', () async {
+      await connectPaged();
+      await connection.loadMoreNodes('group');
+      final int updates = kernel.providerUpdates;
+      await connection.testDelay('node-50');
+      expect(inKernel(NodeWorkingSet.probeProvider), <String>['node-50']);
+      expect(cached(), contains('node-50'));
+      expect(kernel.providerUpdates, updates + 1);
+      expect(kernel.starts, 1);
+    });
+
+    test('面板的节点已变（目录换版）时丢弃这一页、清空浏览缓存并刷新配置', () async {
+      await connectPaged();
+      await connection.loadMoreNodes('group');
+      expect(connection.groups.single.members, hasLength(103));
+      final int calls = client.clashCalls;
+      client.catalogStamp = 's2';
+      await connection.loadMoreNodes('group');
+      expect(connection.groups.single.members, hasLength(3));
+      for (int i = 0; i < 80 && client.clashCalls == calls; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+      expect(client.clashCalls, calls + 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await connection.loadMoreNodes('group');
+      expect(connection.groups.single.members, hasLength(103));
+      expect(client.nodeRequests.last['offset'], 3);
+    });
+
+    test('面板不可达时翻页给出失败原因，已知节点照常可用，恢复后可重试', () async {
+      await connectPaged();
+      client.nodesError = ApiException('模拟面板不可达', connectFailed: true);
+      await connection.loadMoreNodes('group');
+      expect(connection.nodesErrorOf('group'), '模拟面板不可达');
+      expect(connection.loadingNodes('group'), isFalse);
+      expect(connection.groups.single.members, hasLength(3));
+      await connection.selectProxy('group', 'node-2');
+      expect(connection.groups.single.now, 'node-2');
+      expect(connection.state, ConnectionPhase.connected);
+
+      client.nodesError = null;
+      await connection.loadMoreNodes('group');
+      expect(connection.nodesErrorOf('group'), isNull);
+      expect(connection.groups.single.members, hasLength(103));
+    });
+
+    test('内核拒收从浏览缓存选中的节点时，面板配置与缓存都恢复原样', () async {
+      await connectPaged();
+      await connection.loadMoreNodes('group');
+      kernel.failUpdate = true;
+      await expectLater(
+        connection.selectProxy('group', 'node-50'),
+        throwsA(anything),
+      );
+      expect(inKernel(), <String>['node-1', 'node-2', 'node-3']);
+      expect(cached(), <String>['node-1', 'node-2', 'node-3']);
+    });
+  });
+
+  test('内核用缓存的配置启动失败后，再点连接会向面板核对并换用新配置', () async {
+    seed();
+    kernel.invalid = 'invalid protocol';
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.failed);
+    expect(kernel.starts, 0);
+
+    client.fresh = true;
+    kernel.invalid = null;
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.connected);
+    expect(client.clashCalls, 1);
+    expect(
+      cache.loadRemote('a@example.test', client.cacheKey)?.revision,
+      'candidate',
+    );
+  });
+
+  test('面板配置有变更需重启内核时，同一份配置只校验一次', () async {
+    client
+      ..nodeProviders = true
+      ..fresh = true
+      ..extra = <String, Object>{
+        'dns': <String, Object>{'enable': true, 'enhanced-mode': 'fake-ip'},
+      };
+    connection.attachApi(client, accountKey: 'a@example.test');
+    await connection.connect();
+    expect(connection.state, ConnectionPhase.connected);
+    expect(kernel.validations, 1);
+
+    client
+      ..revision += 1
+      ..extra = <String, Object>{
+        'dns': <String, Object>{'enable': true, 'enhanced-mode': 'fake-ip'},
+        'rules': <String>['DOMAIN,example.test,DIRECT', 'MATCH,group'],
+      };
+    expect(await connection.refreshProfileFromPanel(), '更新成功');
+    expect(kernel.starts, 2);
+    expect(kernel.validations, 2);
+    expect(connection.state, ConnectionPhase.connected);
+
+    // 设置变了，装配条件与校验过的那份不同：仍要校验
+    await connection.updateSettings(
+      connection.settings.copyWith(ipv6Enabled: true),
+    );
+    expect(kernel.starts, 3);
+    expect(kernel.validations, 3);
   });
 
   test('手动刷新面板配置在配置戳未变时仍拉取全量配置', () async {
@@ -858,7 +1452,13 @@ class _Client extends PanelApiClient {
   bool denyReport = false;
   ApiException configError = ApiException('offline', connectFailed: true);
   ApiException? revisionError;
+  // 非空即分页模式：配置只带前 pagedHead 个节点，其余经 fetchNodes 取
+  int? pagedHead;
+  String catalogStamp = 's1';
+  ApiException? nodesError;
+  final List<Map<String, Object?>> nodeRequests = <Map<String, Object?>>[];
   Duration fetchedAgo = const Duration(seconds: 1);
+  Duration clashDelay = Duration.zero;
   Duration? updateInterval;
   RemoteProfile profile(Duration lifetime) => RemoteProfile(
     config: <String, dynamic>{
@@ -868,7 +1468,7 @@ class _Client extends PanelApiClient {
           'ecy-panel-nodes': <String, Object>{
             'type': 'file',
             'path': 'ecy-panel-nodes.json',
-            'payload': nodeConfigs,
+            'payload': nodeConfigs.take(pagedHead ?? nodes.length).toList(),
           },
         },
       'proxy-groups': <Object>[
@@ -895,7 +1495,60 @@ class _Client extends PanelApiClient {
     offlineUntil: DateTime.now().add(lifetime),
     cacheBinding: cacheBinding,
     updateInterval: updateInterval,
+    catalog: pagedHead == null
+        ? null
+        : NodeCatalog(
+            stamp: catalogStamp,
+            providers: <String, CatalogProvider>{
+              'ecy-panel-nodes': (
+                key: 'ecy-panel-nodes',
+                total: nodes.length,
+                head: pagedHead!,
+              ),
+            },
+            ranks: <String, int>{
+              for (int i = 0; i < pagedHead!; i++) nodes[i]: i,
+            },
+          ),
   );
+  @override
+  Future<NodePage> fetchNodes({
+    String? provider,
+    int offset = 0,
+    int limit = 100,
+    String search = '',
+    List<String>? names,
+    int? fallbackProxyPort,
+  }) async {
+    nodeRequests.add(<String, Object?>{
+      'provider': ?provider,
+      'offset': ?(names == null ? offset : null),
+      'search': ?(search.isEmpty ? null : search),
+      'names': ?names,
+    });
+    if (nodesError != null) throw nodesError!;
+    final List<int> ranks = <int>[
+      for (int i = 0; i < nodes.length; i++)
+        if (names?.contains(nodes[i]) ?? 'label-${nodes[i]}'.contains(search))
+          i,
+    ].skip(offset).toList();
+    final List<Object> configs = nodeConfigs;
+    return (
+      stamp: catalogStamp,
+      more: names == null && ranks.length > limit,
+      nodes: <CatalogNode>[
+        for (final int rank in names == null ? ranks.take(limit) : ranks)
+          CatalogNode(
+            name: nodes[rank],
+            rank: rank,
+            label: 'label-${nodes[rank]}',
+            providers: const <String>['ecy-panel-nodes'],
+            proxy: (configs[rank] as Map).cast<String, dynamic>(),
+          ),
+      ],
+    );
+  }
+
   List<Object> get nodeConfigs => <Object>[
     for (final String node in nodes)
       <String, Object>{
@@ -933,6 +1586,7 @@ class _Client extends PanelApiClient {
   @override
   Future<RemoteProfile> fetchClashProfile({int? fallbackProxyPort}) async {
     clashCalls++;
+    await Future<void>.delayed(clashDelay);
     if (fresh) return profile(const Duration(hours: 2));
     throw configError;
   }
@@ -996,11 +1650,18 @@ class _Kernel implements KernelController {
   // 控制面直接收到的 PUT /configs（原文热载）与交给特权侧的 kernel.reload 分开计
   int fullReloads = 0;
   final List<Map<String, dynamic>> privilegedReloads = <Map<String, dynamic>>[];
+  final List<String> requests = <String>[];
   bool reloadUnsupported = false;
   int closedConnections = 0;
   int providerUpdates = 0;
   bool failWrite = false;
   bool failUpdate = false;
+  // 特权侧挂起不应答：经它的指令全部失败，内核本身仍在跑
+  bool serviceHung = false;
+  // 与 ServiceKernelController 一致：kernel.start 出错时先推送失败状态，再抛出带原因的异常
+  String? startError;
+  final StreamController<KernelStatus> statuses =
+      StreamController<KernelStatus>.broadcast();
   Map<String, dynamic> config = <String, dynamic>{};
   String binding = '';
   String? invalid;
@@ -1009,7 +1670,7 @@ class _Kernel implements KernelController {
       ? const KernelStatus.stopped()
       : const KernelStatus(state: KernelState.running);
   @override
-  Stream<KernelStatus> get statusStream => const Stream<KernelStatus>.empty();
+  Stream<KernelStatus> get statusStream => statuses.stream;
   @override
   Stream<String> get kernelLog => const Stream<String>.empty();
   @override
@@ -1024,8 +1685,24 @@ class _Kernel implements KernelController {
     }
   }
 
+  int validatedNodes = 0;
+  int validations = 0;
   @override
-  Future<String?> validate(String configJson) async => invalid;
+  Future<String?> validate(String configJson) async {
+    if (serviceHung) throw KernelException('后台服务暂不可用：模拟挂起');
+    validations++;
+    final Object? providers =
+        (jsonDecode(configJson) as Map)['proxy-providers'];
+    final Object? panel = providers is Map
+        ? providers['ecy-panel-nodes']
+        : null;
+    final int nodes = panel is Map ? (panel['payload'] as List).length : 0;
+    if (nodes > validatedNodes) {
+      validatedNodes = nodes;
+    }
+    return invalid;
+  }
+
   @override
   Future<void> start({
     required String configJson,
@@ -1033,6 +1710,11 @@ class _Kernel implements KernelController {
   }) async {
     await stop();
     starts++;
+    final String? error = startError;
+    if (error != null) {
+      statuses.add(KernelStatus(state: KernelState.failed, message: error));
+      throw KernelException('内核启动失败：$error');
+    }
     config = jsonDecode(configJson) as Map<String, dynamic>;
     if (probeSpeeds) {
       final Map listener = (config['listeners'] as List).single as Map;
@@ -1061,6 +1743,13 @@ class _Kernel implements KernelController {
         };
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, clashApi.port);
     server!.listen((HttpRequest request) async {
+      requests.add('${request.method} ${request.uri.path}');
+      if (request.method == 'DELETE' &&
+          request.uri.pathSegments.first == 'proxies') {
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+        return;
+      }
       if (request.method == 'DELETE' &&
           request.uri.pathSegments.first == 'connections') {
         closedConnections++;
@@ -1146,6 +1835,7 @@ class _Kernel implements KernelController {
 
   @override
   Future<void> stop() async {
+    if (serviceHung) throw KernelException('停止内核失败：模拟挂起');
     final old = server;
     if (old != null) stops++;
     server = null;
@@ -1159,7 +1849,7 @@ class _Kernel implements KernelController {
   Future<void> clearSession(String cacheKey) => stop();
   @override
   Future<void> persistConfig(String configJson) async {
-    if (failWrite) throw KernelException('模拟写入失败');
+    if (failWrite || serviceHung) throw KernelException('模拟写入失败');
     config = jsonDecode(configJson) as Map<String, dynamic>;
   }
 
@@ -1170,6 +1860,13 @@ class _Kernel implements KernelController {
     }
     config = jsonDecode(configJson) as Map<String, dynamic>;
     privilegedReloads.add(config);
+  }
+
+  // 与特权侧一致：替换文件前先停内核
+  @override
+  Future<String> upgrade(String version, {int? proxyPort}) async {
+    await stop();
+    return version;
   }
 
   @override
@@ -1187,6 +1884,12 @@ class _Platform implements PlatformService {
   bool get supportsLaunchAtLogin => false;
   @override
   String get tunInterfaceName => 'ECYCloud';
+  @override
+  bool get tunSetsSystemDns => false;
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+  @override
+  bool get lanNamesViaSystemDns => false;
   @override
   bool get supportsSystemProxy => false;
   @override
@@ -1213,6 +1916,7 @@ class _Settings extends SettingsStore {
 class _SpeedTester extends NodeSpeedTester {
   int downloads = 0;
   bool failed = false;
+  Completer<void>? hold;
 
   @override
   Future<int> download({
@@ -1221,6 +1925,7 @@ class _SpeedTester extends NodeSpeedTester {
     void Function(int speed)? onPeak,
   }) async {
     downloads++;
+    await hold?.future;
     if (failed) throw NodeSpeedTestException('模拟下载失败');
     return 65536;
   }

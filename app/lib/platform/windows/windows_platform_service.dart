@@ -64,6 +64,15 @@ class WindowsPlatformService implements PlatformService {
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
 
   @override
+  bool get tunSetsSystemDns => false;
+
+  @override
+  bool get strictRouteNeedsTunIPv6 => true;
+
+  @override
+  bool get lanNamesViaSystemDns => true;
+
+  @override
   Future<void> initialize() async {
     await _channel.invokeMethod<void>('tray.install');
 
@@ -111,6 +120,9 @@ class WindowsPlatformService implements PlatformService {
       snapshotPresent: result['snapshot_present'] == true,
     );
   }
+
+  @override
+  Future<bool?> tunRoutesIntact({required int? tableIndex}) async => null;
 
   @override
   Future<bool> launchAtLoginEnabled() async =>
@@ -209,6 +221,9 @@ class WindowsPlatformService implements PlatformService {
 
   @override
   Future<void> deleteSecret(String name) async {}
+
+  @override
+  Future<bool> secretStoreAvailable() async => true;
 
   @override
   Future<void> dispose() async {

@@ -8,8 +8,10 @@ export const STATE_DIR = '/var/run/ecycloud';
 export const RUN_ROOT = `${CONF_DIR}/run`;
 export const BUILD_FILE = '/usr/share/ecycloud/build.json';
 export const CRED_FILE = `${CONF_DIR}/credentials.json`;
+const REMEMBER_FILE = `${CONF_DIR}/remembered-login.json`;
 export const ANNOUNCE_FILE = `${CONF_DIR}/announcement.json`;
 export const PROFILE_FILE = `${CONF_DIR}/profile.json`;
+export const RENEW_FILE = `${CONF_DIR}/renewing.json`;
 export const STATE_FILE = `${STATE_DIR}/state.json`;
 export const API_FILE = `${STATE_DIR}/api.json`;
 export const ACCOUNT_FILE = `${STATE_DIR}/account.json`;
@@ -94,6 +96,23 @@ export function writePrivateJson(path, value) {
 	const ok = writeJson(path, value);
 	chmod(path, FILE_MODE);
 	return ok;
+};
+
+/* 登录页“记住账号密码”：只存在路由器上仅 root 可读的文件里，不交给浏览器保存 */
+export function remembered() {
+	const saved = readJson(REMEMBER_FILE);
+	if (type(saved?.email) != 'string' || !length(saved.email))
+		return null;
+	return { email: saved.email, password: type(saved.password) == 'string' ? saved.password : '' };
+};
+
+export function saveRemembered(email, password) {
+	ensurePrivateDir(CONF_DIR);
+	return writePrivateJson(REMEMBER_FILE, { email, password });
+};
+
+export function forgetRemembered() {
+	return !access(REMEMBER_FILE) || unlink(REMEMBER_FILE);
 };
 
 export function uciList(value) {
@@ -236,6 +255,16 @@ export function commitConfig(uci) {
 		return false;
 	}
 	return uci.commit('ecycloud');
+};
+
+export function writeFlashJson(path, value) {
+	const free = freeKiB(CONF_DIR);
+	if (free != null && free < CONFIG_RESERVE_KIB) {
+		log('err', sprintf('存储空间不足（剩余 %d KiB），%s 未保存', free, path));
+		return false;
+	}
+	ensurePrivateDir(CONF_DIR);
+	return writePrivateJson(path, value);
 };
 
 export function ensureConfig() {
@@ -487,8 +516,8 @@ export function setState(stage, message, error, retryable) {
 	});
 };
 
-export function setError(message) {
-	setState('failed', '', message);
+export function setError(message, retryable) {
+	setState('failed', '', message, retryable);
 	log('err', message);
 };
 

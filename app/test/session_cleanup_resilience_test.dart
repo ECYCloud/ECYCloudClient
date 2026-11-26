@@ -148,6 +148,7 @@ void main() {
     for (final bool ours in <bool>[true, false]) {
       test('快照损坏时删除并只关掉指向本客户端的代理：$ours', () async {
         AppPaths.proxySnapshot.writeAsStringSync('{broken');
+        gsettings.values['org.gnome.system.proxy mode'] = "'manual'";
         gsettings.values['org.gnome.system.proxy.http port'] = ours
             ? '10203'
             : '8080';
@@ -319,6 +320,7 @@ class _Kernel implements KernelController {
   Future<void> stop() async {
     if (stopError != null) throw stopError!;
   }
+
   @override
   Future<void> clearSession(String cacheKey) async {
     await clearWait?.future;
@@ -347,6 +349,12 @@ class _Platform implements PlatformService {
   bool get supportsLaunchAtLogin => false;
   @override
   String get tunInterfaceName => 'ECYCloud';
+  @override
+  bool get tunSetsSystemDns => false;
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+  @override
+  bool get lanNamesViaSystemDns => false;
   @override
   String get platformId => 'windows';
   @override

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"ecycloud/apple/Kernel"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
@@ -347,5 +348,42 @@ func TestInlineProviderRestartReleasesAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		kernel.Stop(id)
+	}
+}
+
+// 系统一次交来一批包：入队满时等内核取走，压力退回系统的包队列，不能丢包；停止时阻塞中的提交立即返回
+func TestSubmitWaitsForQueueAndStopReleasesIt(t *testing.T) {
+	id := startPacketCore(t, packetProfile(9))
+	packet := make([]byte, 28+1200)
+	packet[0], packet[8], packet[9] = 0x45, 64, 17
+	binary.BigEndian.PutUint16(packet[2:], uint16(len(packet)))
+	copy(packet[12:16], []byte{198, 18, 0, 2})
+	copy(packet[16:20], []byte{192, 0, 2, 9})
+	binary.BigEndian.PutUint16(packet[20:], 40000)
+	binary.BigEndian.PutUint16(packet[22:], 9)
+	binary.BigEndian.PutUint16(packet[24:], uint16(8+1200))
+	for i := 0; i < 4096; i++ {
+		if err := kernel.Submit(id, packet); err != nil {
+			t.Fatalf("第 %d 个包：%v", i, err)
+		}
+	}
+	released := make(chan error, 1)
+	go func() {
+		for {
+			if err := kernel.Submit(id, packet); err != nil {
+				released <- err
+				return
+			}
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	kernel.Stop(id)
+	select {
+	case err := <-released:
+		if err != kernel.ErrStopped {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("停止后提交仍阻塞")
 	}
 }

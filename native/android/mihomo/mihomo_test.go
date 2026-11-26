@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/metacubex/mihomo/component/profile/cachefile"
@@ -100,5 +101,16 @@ func TestStartPreservesFakeIPAfterValidationAndRestart(t *testing.T) {
 	}
 	if host, ok := resolver.FindHostByIP(oldIP); !ok || host != "alpha.example.invalid" {
 		t.Fatalf("重启改变了旧地址映射：%q, %v", host, ok)
+	}
+}
+
+func TestSystemDNSServersAddPortAndKeepScope(t *testing.T) {
+	got := systemDNSServers("192.168.1.1 fe80::1%wlan0\n not-an-ip 192.168.1.1 2001:db8::53")
+	want := []string{"192.168.1.1:53", "[fe80::1%wlan0]:53", "[2001:db8::53]:53"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("systemDNSServers = %v, want %v", got, want)
+	}
+	if got := systemDNSServers(""); len(got) != 0 {
+		t.Fatalf("empty = %v", got)
 	}
 }

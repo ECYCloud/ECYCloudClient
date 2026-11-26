@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ecycloud_client/data/api/panel_api_client.dart';
 import 'package:ecycloud_client/data/api/api_exception.dart';
 import 'package:ecycloud_client/data/models/user_profile.dart';
+import 'package:ecycloud_client/data/store/cache_seal.dart';
 import 'package:ecycloud_client/data/store/json_file_store.dart';
 import 'package:ecycloud_client/data/store/panel_response_cache.dart';
 
@@ -179,6 +180,61 @@ void main() {
     expect(loaded?.nodeLabels['node-1'], '香港');
     expect(loaded?.updateInterval, isNull);
     expect(cache.loadRemote('other@example.com', _sealKey), isNull);
+  });
+
+  test('面板配置缓存先压缩再加密，未压缩的旧缓存仍能读取', () {
+    final File file = File('${tempDir.path}/remote.json');
+    final PanelResponseCache cache = PanelResponseCache(
+      profileStore: JsonFileStore(File('${tempDir.path}/profile.json'), 't'),
+      remoteStore: JsonFileStore(file, 't'),
+    );
+    final RemoteProfile remote = RemoteProfile(
+      config: <String, dynamic>{
+        'proxies': <Map<String, dynamic>>[
+          for (int id = 1; id <= 2000; id++)
+            <String, dynamic>{
+              'name': 'node-$id',
+              'type': 'ss',
+              'server': 'node.example.test',
+              'port': 8000 + id,
+              'cipher': 'aes-128-gcm',
+              'password': 'account-node-password',
+            },
+        ],
+      },
+      revision: 'rev-10',
+      groupIcons: const <String, String>{},
+      nodeLabels: const <String, String>{},
+      flagRegex: '',
+    );
+    cache.saveRemote('user@example.com', remote, _sealKey);
+    final Map<String, dynamic> stored =
+        jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    expect(
+      (stored['sealed'] as String).length,
+      lessThan(jsonEncode(remote.config).length ~/ 4),
+    );
+    final RemoteProfile? loaded = cache.loadRemote(
+      'user@example.com',
+      _sealKey,
+    );
+    expect(loaded?.revision, 'rev-10');
+    expect((loaded?.config['proxies'] as List).length, 2000);
+
+    stored['sealed'] = CacheSeal.seal(
+      _sealKey,
+      jsonEncode(<String, dynamic>{
+        'revision': 'rev-old',
+        'flag_regex': '',
+        'group_icons': <String, String>{},
+        'node_labels': <String, String>{},
+        'group_labels': <String, String>{},
+        'config': <String, dynamic>{'proxies': <Object>[]},
+      }),
+      'user@example.com',
+    );
+    file.writeAsStringSync(jsonEncode(stored));
+    expect(cache.loadRemote('user@example.com', _sealKey)?.revision, 'rev-old');
   });
 
   test('面板配置缓存只以令牌派生的密钥加密落盘，拷到别处或换了登录都解不开', () {

@@ -58,6 +58,28 @@ void main() {
     expect(paths.last, '/proxies');
   });
 
+  test('清除 url-test 缓存逐组发 DELETE，内核未接受时报错', () async {
+    final List<String> requests = <String>[];
+    final ClashApiClient clash = ClashApiClient(
+      options,
+      httpClient: MockClient((http.Request request) async {
+        requests.add('${request.method} ${request.url.path}');
+        expect(request.headers['Authorization'], 'Bearer test');
+        return http.Response('', request.url.path.endsWith('bad') ? 400 : 204);
+      }),
+    );
+    addTearDown(clash.close);
+    await clash.resetUrlTests(<String>['自动选择', 'a/b']);
+    expect(requests, <String>[
+      'DELETE /proxies/${Uri.encodeComponent('自动选择')}',
+      'DELETE /proxies/a%2Fb',
+    ]);
+    await expectLater(
+      clash.resetUrlTests(<String>['bad']),
+      throwsA(isA<ClashApiException>()),
+    );
+  });
+
   test('控制接口已启动但转发未就绪时继续等待，探测不携带控制密钥', () async {
     final HttpServer proxy = await HttpServer.bind(
       InternetAddress.loopbackIPv4,

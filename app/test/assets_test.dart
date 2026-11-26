@@ -194,6 +194,26 @@ void main() {
     );
   });
 
+  test('节点很多、日志很密时每行只扫一遍，耗时不随节点数成倍增长', () {
+    NodeLabels.configure(r'/[\p{L}\p{N}]+/u', <String, String>{
+      for (int id = 1; id <= 20000; id++) 'node-$id': '节点 $id',
+    });
+    final Stopwatch watch = Stopwatch()..start();
+    for (int line = 1; line <= 5000; line++) {
+      expect(
+        NodeLabels.annotateText('[TCP] $line --> a.test using 主节点[node-$line]'),
+        endsWith('主节点[节点 $line]'),
+      );
+    }
+    expect(
+      NodeLabels.annotateRuntimeConfig('{"proxies":["node-7","DIRECT"]}'),
+      '{"proxies":["节点 7","DIRECT"]}',
+    );
+    // 逐个节点各跑一遍正则时这里是一亿次扫描，要几分钟
+    expect(watch.elapsed, lessThan(const Duration(seconds: 20)));
+    NodeLabels.configure(r'/[\p{L}\p{N}]+/u');
+  });
+
   test('下发的策略组译名覆盖日志和运行配置展示，不改写原始配置', () {
     NodeLabels.configure(
       '',

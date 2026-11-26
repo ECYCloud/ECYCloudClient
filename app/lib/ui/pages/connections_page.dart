@@ -32,8 +32,11 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   Widget build(BuildContext context) {
     final ConnectionController connection = AppScope.of(context).connection;
 
-    return ListenableBuilder(
-      listenable: connection,
+    return ShellListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[
+        connection,
+        connection.statsUpdates,
+      ]),
       builder: (BuildContext context, _) => CustomScrollView(
         slivers: <Widget>[
           PinnedHeaderSliver(
@@ -425,11 +428,13 @@ class _ConnectionDetailDialogState extends State<_ConnectionDetailDialog> {
   void initState() {
     super.initState();
     widget.connection.addListener(_onUpdate);
+    widget.connection.statsUpdates.addListener(_onUpdate);
   }
 
   @override
   void dispose() {
     widget.connection.removeListener(_onUpdate);
+    widget.connection.statsUpdates.removeListener(_onUpdate);
     super.dispose();
   }
 

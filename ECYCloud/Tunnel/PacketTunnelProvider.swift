@@ -115,7 +115,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self?.cancelTunnelWithError(TunnelError.expired)
         }
         expiration = expiry
-        control.asyncAfter(deadline: .now() + date.timeIntervalSinceNow, execute: expiry)
+        control.asyncAfter(wallDeadline: .now() + date.timeIntervalSinceNow, execute: expiry)
     }
     private func failStart(_ error: Error) {
         cleanup()
@@ -126,7 +126,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         expiration?.cancel(); expiration = nil
         let id = currentID; setID(0)
         if id != 0 { ECYStop(id) }
-        TunnelFiles.clear(group: group, id: leaseID)
         leaseID = nil
         if let runDirectory {
             if id != 0, let runLease { TunnelFiles.keepCache(group: group, lease: runLease, from: runDirectory) }

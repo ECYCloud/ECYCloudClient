@@ -6,6 +6,7 @@
 'require ecycloud.api as api';
 
 var REMEMBER = 'ecycloud-remember';
+var SESSION_NOTICE_MS = 7 * 86400000;
 
 function loginField(title, nodes) {
 	return E('div', { 'class': 'ecycloud-login-field' }, [
@@ -511,6 +512,7 @@ return view.extend({
 		}
 		this.connectButton = connect;
 		this.connectPhase = phase;
+		var expiresAt = Date.parse(status.session.expires_at || '');
 
 		connect.addEventListener('click', function() {
 			if (live || busy) {
@@ -547,7 +549,13 @@ return view.extend({
 						this.renderAnnounceBtn()
 					])
 				])
-			])
+			]),
+			expiresAt - Date.now() <= SESSION_NOTICE_MS
+				? E('div', { 'class': 'ecycloud-hint' }, [
+					_('Your sign-in expires on %s. To stay connected, sign out and sign back in before then.')
+						.format(api.timestamp(expiresAt / 1000))
+				])
+				: ''
 		]);
 	},
 
@@ -997,19 +1005,14 @@ return view.extend({
 		var showTotp = false;
 		var cooldown = 0;
 		var timer = null;
-		var saved = null;
+		var restored = null;
 		var site = (status && status.site) || '';
 
+		/* 记住的账号密码改存路由器，清掉旧版留在浏览器里的记录 */
 		try {
-			saved = JSON.parse(window.localStorage.getItem(REMEMBER) || 'null');
-			if (saved && Object.prototype.hasOwnProperty.call(saved, 'password')) {
-				saved = { email: saved.email || '' };
-				window.localStorage.setItem(REMEMBER, JSON.stringify(saved));
-			}
+			window.localStorage.removeItem(REMEMBER);
 		}
-		catch (e) {
-			saved = null;
-		}
+		catch (e) {}
 
 		var brandName = E('div', { 'class': 'ecycloud-login-name' }, [ 'ECY Cloud' ]);
 		var siteName = E('div', { 'class': 'ecycloud-login-site' }, [ siteHost(site) ]);
@@ -1031,12 +1034,11 @@ return view.extend({
 		var password = api.input({ type: 'password', autocomplete: 'current-password' });
 		var totp = api.input({ type: 'text', autocomplete: 'one-time-code' });
 		var verify = api.input({ type: 'text', autocomplete: 'one-time-code' });
-		var rememberOn = !!(saved && saved.email);
 		var remember = api.pressable('ecycloud-login-remember', {
-			'aria-pressed': rememberOn ? 'true' : 'false'
+			'aria-pressed': 'false'
 		}, [
 			E('span', { 'class': 'ecycloud-login-check', 'aria-hidden': 'true' }),
-			_('Remember email')
+			_('Remember email and password')
 		]);
 		var sendBtn = api.pressable('ecycloud-login-send', {}, [ _('Send code') ]);
 		var switchBtn = api.pressable('ecycloud-login-alt', {}, [ _('Email code sign-in') ]);
@@ -1085,9 +1087,23 @@ return view.extend({
 		this.loginTerms = termsLink;
 		this.loginPrivacy = privacyLink;
 
-		if (saved && saved.email) {
-			email.value = saved.email;
-		}
+		api.remembered().then(function(saved) {
+			if (!saved || !saved.email || email.value)
+				return;
+			restored = { email: saved.email, password: saved.password || '' };
+			email.value = restored.email;
+			password.value = restored.password;
+			remember.setAttribute('aria-pressed', 'true');
+		}).catch(function() {});
+
+		/* 回填的密码只属于记住的邮箱；改成别的邮箱就清掉，不能拿它去试另一个账户 */
+		email.addEventListener('input', function() {
+			if (!restored || email.value.trim().toLowerCase() == restored.email.toLowerCase())
+				return;
+			if (password.value == restored.password)
+				password.value = '';
+			restored = null;
+		});
 
 		var paintSend = function() {
 			sendBtn.disabled = cooldown > 0;
@@ -1156,7 +1172,7 @@ return view.extend({
 			var next = !rememberChecked();
 			remember.setAttribute('aria-pressed', next ? 'true' : 'false');
 			if (!next)
-				window.localStorage.removeItem(REMEMBER);
+				api.forgetRemembered().catch(function() {});
 		});
 
 		var submit = ui.createHandlerFn(this, function() {
@@ -1164,7 +1180,7 @@ return view.extend({
 
 			var request = emailCodeMode
 				? api.loginCode(address, verify.value.trim())
-				: api.login(address, password.value, totp.value);
+				: api.login(address, password.value, totp.value, rememberChecked());
 
 			return request.then(L.bind(function(res) {
 				api.notify(res, _('Signed in'));
@@ -1174,15 +1190,6 @@ return view.extend({
 					paintScreen();
 					totp.focus();
 					return;
-				}
-
-				if (res.ok && !emailCodeMode) {
-					if (rememberChecked())
-						window.localStorage.setItem(REMEMBER, JSON.stringify({
-							email: address
-						}));
-					else
-						window.localStorage.removeItem(REMEMBER);
 				}
 
 				if (!res.ok)

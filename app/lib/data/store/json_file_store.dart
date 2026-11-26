@@ -4,12 +4,14 @@ import 'dart:io';
 import '../../core/logger.dart';
 
 class JsonFileStore {
-  JsonFileStore(File file, this.source) : _locate = (() => file);
+  JsonFileStore(File file, this.source, {this.ownerOnly = false})
+    : _locate = (() => file);
 
-  JsonFileStore.at(this._locate, this.source);
+  JsonFileStore.at(this._locate, this.source) : ownerOnly = false;
 
   final File Function() _locate;
   final String source;
+  final bool ownerOnly;
 
   File get file => _locate();
 
@@ -33,6 +35,16 @@ class JsonFileStore {
     final File file = this.file;
     final File temp = File('${file.path}.tmp');
     temp.writeAsStringSync(jsonEncode(data), flush: true);
+    if (ownerOnly && (Platform.isLinux || Platform.isMacOS)) {
+      final ProcessResult result = Process.runSync('chmod', <String>[
+        '600',
+        temp.path,
+      ]);
+      if (result.exitCode != 0) {
+        temp.deleteSync();
+        throw FileSystemException('无法限制文件权限', file.path);
+      }
+    }
     temp.renameSync(file.path);
   }
 

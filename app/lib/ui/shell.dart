@@ -157,9 +157,13 @@ class _ShellState extends State<Shell> {
     _chrome.set(title: L10n.t(_destinations[index].label));
   }
 
+  // IndexedStack 不停隐藏页的动画：转圈等会一直排帧，连带整窗重绘
   Widget _chromePage(int index, Widget page) {
-    return AppTextSelection(
-      child: ShellChrome(active: _index == index, bar: _chrome, child: page),
+    return TickerMode(
+      enabled: _index == index,
+      child: AppTextSelection(
+        child: ShellChrome(active: _index == index, bar: _chrome, child: page),
+      ),
     );
   }
 

@@ -5,6 +5,7 @@ import ECYCloudKit
 struct RuntimeConnectionsView: View {
     let session: ClientSession
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.productPageActive) private var pageActive
     @Environment(\.colorScheme) private var scheme
     @State private var state = FeatureState<TunnelSnapshot>()
     @State private var search = ""
@@ -41,12 +42,13 @@ struct RuntimeConnectionsView: View {
                 }
             } else { Text(L10n.t("连接后可查看连接明细")).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
-        .task(id: "\(connected)|\(scenePhase)|\(search)") {
+        .task(id: "\(connected)|\(scenePhase)|\(search)|\(pageActive)") {
             guard connected, scenePhase == .active else {
                 state.value = nil; connections = []
                 if !connected { revision += 1 }
                 return
             }
+            guard pageActive else { return }
             while !Task.isCancelled && connected {
                 await load()
                 do { try await Task.sleep(for: .seconds(1)) } catch { break }
@@ -222,6 +224,7 @@ private struct ConnectionDetailDialog: View {
 struct RuntimeLogsView: View {
     let session: ClientSession
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.productPageActive) private var pageActive
     @State private var state = FeatureState<TunnelLogs>()
     @State private var level = ""
     @State private var search = ""
@@ -264,8 +267,9 @@ struct RuntimeLogsView: View {
             }
         }
 
-        .task(id: "\(connected)|\(scenePhase)|\(level)|\(search)") {
+        .task(id: "\(connected)|\(scenePhase)|\(level)|\(search)|\(pageActive)") {
             guard connected, scenePhase == .active else { state.value = nil; entries = []; return }
+            guard pageActive else { return }
             while !Task.isCancelled && connected {
                 await load()
                 do { try await Task.sleep(for: .seconds(1)) } catch { break }

@@ -14,15 +14,13 @@ import (
 
 var lastStart atomic.Int32
 
-// Result: 0 = success/timeout, -1 = stopped, -2 = invalid, -3 = queue full, -4 = no nodes.
+// Result: 0 = success/timeout, -1 = stopped, -2 = invalid, -4 = no nodes.
 func result(err error) C.int {
 	switch err {
 	case nil:
 		return 0
 	case kernel.ErrStopped:
 		return -1
-	case kernel.ErrQueueFull:
-		return -3
 	case kernel.ErrNoNodes:
 		return -4
 	default:

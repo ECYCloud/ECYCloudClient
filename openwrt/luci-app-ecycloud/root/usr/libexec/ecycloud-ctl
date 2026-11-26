@@ -27,6 +27,10 @@ case 'revert':
 case 'cleanup':
 	exit(service.cleanup() ? 0 : 1);
 
+case 'save-cache':
+	service.persistCache();
+	exit(0);
+
 case 'gc':
 	service.collectGarbage();
 	exit(0);
@@ -83,6 +87,6 @@ case 'update': {
 }
 
 default:
-	warn('usage: ecycloud-ctl kernel|rundir|prepare|retry|cleanup|revert|gc|retire <dir>|update [force]|update-tasks|watchdog|refresh|statistics|delay|speed|rules|close-via|icons\n');
+	warn('usage: ecycloud-ctl kernel|rundir|prepare|retry|cleanup|save-cache|revert|gc|retire <dir>|update [force]|update-tasks|watchdog|refresh|statistics|delay|speed|rules|close-via|icons\n');
 	exit(1);
 }

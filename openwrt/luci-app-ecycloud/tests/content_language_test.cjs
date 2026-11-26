@@ -47,12 +47,23 @@ async function main() {
         assert.ok(output.includes(language == 'en-US' ? 'No reset' : '不重設'), '首页实际渲染翻译流量重置说明');
         assert.ok(output.includes(language == 'en-US' ? 'Never used' : '從未使用'), '首页实际渲染翻译上次使用说明');
         assert.equal(account.last_ss_time, '从未使用喵', '原始账户字段不改写');
+        Object.assign(apiView, { phase: () => 'disconnected', card: children => node('div', {}, children), segments: () => node('div'),
+            timestamp: seconds => 'at-' + Math.round(seconds) });
+        const expiryNotice = language == 'en-US'
+            ? 'Your sign-in expires on %s. To stay connected, sign out and sign back in before then.'
+            : catalogs['zh-tw']['Your sign-in expires on %s. To stay connected, sign out and sign back in before then.'];
+        const soon = Date.now() + 3 * 86400000;
+        assert.ok(textOf(overview.renderConnection({ session: { expires_at: new Date(soon).toISOString() } }))
+            .includes(expiryNotice.replace('%s', 'at-' + Math.round(soon / 1000))), '登录 7 天内到期时首页必须提示到期时间');
+        for (const later of [new Date(Date.now() + 8 * 86400000).toISOString(), '10000-01-01T00:00:00+08:00', ''])
+            assert.ok(!textOf(overview.renderConnection({ session: { expires_at: later } })).includes(expiryNotice.split('%s')[0]),
+                '登录剩余超过 7 天或面板不限时长时首页不提示');
         const connections = loadView('connections');
         const body = node('div');
         connections.paint.call({ signedIn: true, running: true, error: '内核未运行', rows: () => [], body, paintFilter() {} });
         assert.equal(textOf(body), language == 'en-US' ? 'The kernel is not running' : catalogs['zh-tw']['The kernel is not running'], '连接页实际渲染翻译接口错误');
         const nodes = loadView('nodes');
-        Object.assign(nodes, { open: {}, sort: {}, searchOpen: {}, query: {} });
+        Object.assign(nodes, { open: { '主节点': true }, sort: {}, searchOpen: {}, query: {}, listed: {}, listing: {} });
         const group = { name: '主节点', label: language == 'en-US' ? 'Main nodes' : '主節點', type: 'Selector',
             now: 'node-1', now_label: 'Fixture node', members: [{ name: 'node-1', label: 'Fixture node' }] };
         const card = nodes.renderGroup(group);
@@ -150,14 +161,45 @@ async function main() {
     api.resolveLang = () => language;
     api.update = (...args) => new Promise(resolve => requests.push({ args, resolve }));
 
+    const tick = () => new Promise(resolve => setImmediate(resolve));
     const old = api.fetchAnnouncements();
     assert.deepEqual(requests[0].args, ['announcements', '', 'zh-CN']);
     language = 'en-US';
-    requests[0].resolve({ items: [{ title: '旧语言' }] });
-    await new Promise(resolve => setImmediate(resolve));
+    requests[0].resolve({ ok: true, loaded: true, items: [{ title: '旧语言' }] });
+    await tick();
     assert.deepEqual(requests[1].args, ['announcements', 'refresh', 'en-US']);
-    requests[1].resolve({ items: [{ title: 'fixture-en' }] });
+    requests[1].resolve({ id: 'task', kind: 'announcements', state: 'done', ok: true, msg: '' });
+    await tick();
+    assert.deepEqual(requests[2].args, ['announcements', '', 'en-US'], '后台任务完成后必须重新读取路由器上的公告缓存');
+    requests[2].resolve({ ok: true, loaded: true, items: [{ title: 'fixture-en' }] });
     assert.equal((await old).items[0].title, 'fixture-en', '旧语言响应不得进入当前语言界面');
+
+    requests.length = 0;
+    const cachedRead = api.fetchAnnouncements();
+    requests[0].resolve({ ok: true, loaded: true, items: [{ title: 'cached' }] });
+    assert.equal((await cachedRead).items[0].title, 'cached');
+    assert.equal(requests.length, 1, '路由器已有公告缓存时打开首页或点铃铛只读缓存，不排拉取任务');
+
+    requests.length = 0;
+    const firstRead = api.fetchAnnouncements();
+    requests[0].resolve({ ok: true, loaded: false, items: [] });
+    await tick();
+    assert.deepEqual(requests[1].args, ['announcements', 'refresh', 'en-US'], '没有缓存时必须交给后台任务拉取');
+    requests[1].resolve({ id: 'task', kind: 'announcements', state: 'done', ok: true, msg: '' });
+    await tick();
+    requests[2].resolve({ ok: true, loaded: false, items: [] });
+    assert.equal((await firstRead).loaded, false);
+    assert.equal(requests.length, 3, '任务完成后仍没有缓存（如面板限流）时不能接着排任务，避免反复请求');
+
+    requests.length = 0;
+    const failed = api.fetchAnnouncements(true);
+    requests[0].resolve({ id: 'task', kind: 'announcements', state: 'done', ok: false, msg: 'fixture-timeout' });
+    await tick();
+    requests[1].resolve({ ok: true, loaded: true, items: [{ title: 'kept' }] });
+    const failedView = await failed;
+    assert.ok(failedView.ok === false && failedView.error == 'fixture-timeout' && failedView.items[0].title == 'kept',
+        '后台拉取失败时保留已缓存的公告并带回失败原因');
+    requests.length = 0;
 
     for (const [invoke, action] of [[() => api.markAnnouncementsSeen(), 'seen'],
         [() => api.markAnnouncementSeen(2), 'seen:2'], [() => api.dismissAnnouncementPopup(), 'popup']]) {

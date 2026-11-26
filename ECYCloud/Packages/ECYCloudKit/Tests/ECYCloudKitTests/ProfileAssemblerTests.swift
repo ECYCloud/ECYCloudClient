@@ -32,6 +32,16 @@ struct ProfileAssemblerTests {
         #expect((result["proxy-groups"] as? [[String: Any]])?.contains { $0["name"] as? String == "ecy-speed" } == false)
     }
 
+    #if os(macOS)
+    // macOS 由 helper 的内核建 TUN，要显式接管系统 DNS；包隧道的 DNS 由系统扩展下发
+    @Test func macTunTakesOverSystemDNSOnlyOutsidePacketFlow() throws {
+        let helper = try json(ProfileAssembler.assemble(remote, options: options).data)
+        let packet = try json(ProfileAssembler.assemble(remote, options: .packetFlow).data)
+        #expect((helper["tun"] as? [String: Any])?["dns-mode"] as? String == "hijack")
+        #expect((packet["tun"] as? [String: Any])?["dns-mode"] == nil)
+    }
+    #endif
+
     @Test func closesUnownedPortsAndPreservesPanelRulesAndDNS() throws {
         let value = try ProfileAssembler.assemble(remote, options: options)
         #expect(!String(decoding: value.data, as: UTF8.self).contains(#"\/"#))
@@ -177,21 +187,19 @@ struct ProfileAssemblerTests {
         source["proxy-providers"] = ["ecy-panel-nodes": ["type": "file", "path": "ecy-panel-nodes.json", "payload": payload]]
         source["proxy-groups"] = [["name": "synthetic-group", "type": "select", "proxies": ["DIRECT"], "use": ["ecy-panel-nodes"]]]
         let envelope: [String: Any] = ["revision": "synthetic", "config": source, "node_labels": ["synthetic-node": "合成显示名"], "group_labels": ["synthetic-group": "合成分组"]]
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let catalog = try decoder.decode(NodeCatalog.self, from: JSONSerialization.data(withJSONObject: envelope))
+        let catalog = try NodeCatalog(envelope)
         #expect(catalog.selectionGroups.count == 1)
         #expect(catalog.selectionGroups[0].members == ["DIRECT", "synthetic-node"])
         #expect(catalog.nodes[0].id == "synthetic-node" && catalog.nodes[0].name == "合成显示名")
         #expect(catalog.mainGroupID == "synthetic-group" && catalog.displayName("synthetic-group") == "合成分组")
         let result = try json(catalog.assemble(options: .packetFlow, selections: ["synthetic-group": "synthetic-node"]).data)
         #expect((result["proxy-groups"] as? [[String: Any]])?.first?["default-selected"] as? String == "synthetic-node")
-        #expect((result["proxy-providers"] as? [String: [String: Any]])?["ecy-panel-nodes"]?["type"] as? String == "inline")
+        #expect((result["proxy-providers"] as? [String: [String: Any]])?["ecy-panel-nodes"]?["type"] as? String == "file")
     }
 
     @Test func nodeCatalogRetainsConfigurationKeysForAssembly() throws {
         let envelope: [String: Any] = ["revision": "synthetic", "config": try json(remote), "node_labels": [String: String]()]
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let catalog = try decoder.decode(NodeCatalog.self, from: JSONSerialization.data(withJSONObject: envelope))
+        let catalog = try NodeCatalog(envelope)
         let result = try json(catalog.assemble(options: options).data)
         #expect((result["proxies"] as? [[String: Any]])?.first?["extra_test_key"] as? String == "preserve")
         #expect((result["proxies"] as? [[String: Any]])?.first?["password"] as? String == "synthetic-password")
@@ -205,8 +213,7 @@ struct ProfileAssemblerTests {
             ["name": "node-4", "type": "future-protocol", "tls": true]
         ]
         let envelope: [String: Any] = ["revision": "synthetic", "config": ["proxies": nodes], "node_labels": [String: String]()]
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let catalog = try decoder.decode(NodeCatalog.self, from: JSONSerialization.data(withJSONObject: envelope))
+        let catalog = try NodeCatalog(envelope)
         #expect(catalog.nodes.map { [$0.protocolName, $0.network, $0.tls, $0.udp] } == [
             ["VLESS", "WS", "REALITY", "XUDP"], ["Shadowsocks", "", "", "UDP"], ["Hysteria2", "", "TLS", ""], ["future-protocol", "", "TLS", ""]
         ])
@@ -220,8 +227,7 @@ struct ProfileAssemblerTests {
             ["name": "hidden", "type": "select", "hidden": true, "proxies": ["synthetic-node"]]
         ]
         let envelope: [String: Any] = ["revision": "synthetic", "config": source, "node_labels": [String: String]()]
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let catalog = try decoder.decode(NodeCatalog.self, from: JSONSerialization.data(withJSONObject: envelope))
+        let catalog = try NodeCatalog(envelope)
         #expect(catalog.groups.map(\.id) == ["manual", "automatic"])
         #expect(catalog.selectionGroups.map(\.id) == ["manual"])
         #expect(catalog.groups(for: .direct).isEmpty)

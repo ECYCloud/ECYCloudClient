@@ -51,6 +51,15 @@ public final class ClientSession {
     @ObservationIgnored private var offlineUntil: Date?
     // 对应 connection_controller.dart 的 _canUseOffline：授权窗口外的缓存配置只供显示，面板更新前不得拉起内核
     @ObservationIgnored private var catalogExpired = false
+    // 对应 connection_controller.dart 的 _recentNodes / _probeNodes：节点超过内核装载上限时，最近选用的固定装入，待测的临时装入
+    @ObservationIgnored var recentNodes: [String] = []
+    @ObservationIgnored var probeNodes: [String] = []
+    @ObservationIgnored private var nodeReload: Task<Void, any Error>?
+    // 面板只下发了一部分节点时的浏览状态，见 NodeBrowsing.swift
+    public internal(set) var browsed = NodeBrowse()
+    public internal(set) var loadingPages: Set<String> = []
+    var pageOffsets: [String: Int] = [:]
+    @ObservationIgnored var nodeAbsorb: Task<Void, any Error>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var rememberedGeneration = 0
     @ObservationIgnored private var loggingOut = false
@@ -73,6 +82,7 @@ public final class ClientSession {
         self.nodeProbes = nodeProbes ?? NodeProbeState(now: now)
         self.trafficRank = trafficRank ?? TrafficRankStore(now: now)
         connection?.runtimeDidReset = { [weak self] keepingResults in self?.nodeProbes.clear(keepingResults: keepingResults) }
+        connection?.relaunchLease = { [weak self] takeover in try? self?.makeLease(takeover: takeover) }
         api.route.connected = { [weak connection] in connection?.state == .connected }
         api.route.proxyPort = { [weak connection] in connection?.panelProxyPort }
         api.route.reached = { [weak self] url, reachable in self?.reached(url, reachable) }
@@ -159,16 +169,7 @@ public final class ClientSession {
             let status = try await api.accountStatus(endpoints, token: session.token)
             guard operation == generation else { return }
             guard status.email == session.email else { throw ClientError.invalidResponse }
-            if !status.isNormal {
-                announcementState.configure(site: nil, userID: nil)
-                connection?.disconnect()
-                profile = nil
-                catalog = nil
-                offlineUntil = nil
-                accountStatus = status
-                phase = .restricted
-                return
-            }
+            if !status.isNormal { restrict(status); return }
             let response = try await api.profileResponse(endpoints, token: session.token, connected: connection?.state == .connected)
             guard operation == generation else { return }
             try accept(response.value, session: session)
@@ -300,8 +301,9 @@ public final class ClientSession {
         if clearLocal() { message = text }
     }
 
+    // 面板不可达时资料来自缓存，在线计数早已过时：名额由节点实时判定，见 docs/server-api.md「名额判定」
     public var needsDeviceSlot: Bool {
-        guard let profile else { return false }
+        guard let profile, !panelOffline else { return false }
         return profile.deviceKickReason == "limit_denied" ||
             (profile.nodeConnector > 0 && profile.onlineClientCount >= profile.nodeConnector && profile.onlineClientSelf == false)
     }
@@ -327,7 +329,7 @@ public final class ClientSession {
     }
 
     public func acknowledgeDeviceKick() async throws {
-        guard !busy else { throw CancellationError() }
+        while busy { try await Task.sleep(for: .milliseconds(100)) }
         busy = true
         do {
             _ = try await authenticated { try await api.perform("/user/device-kick-ack", origin: endpoints.site, token: $0.token, body: [:]) }
@@ -394,7 +396,7 @@ public final class ClientSession {
             // 连不上面板属于会话状态，由各页自身的加载错误与首页连接状态呈现，不再逐个写进全局提示
             let unreachable = switch error as? ClientError { case .network, .networkFailure, .unreachable: true; default: false }
             if unreachable { panelOffline = true }
-            if (silently || unreachable) && (error as? ClientError)?.unauthorized != true { recordCooldown(error) } else { handleAuthenticatedError(error) }
+            if (silently || unreachable) && (error as? ClientError)?.unauthorized != true { recordCooldown(error) } else { await handleAuthenticatedError(error) }
             throw error
         }
     }
@@ -507,17 +509,8 @@ public final class ClientSession {
             let status = try await api.accountStatus(endpoints, token: session.token)
             guard operation == generation else { return }
             guard status.email == session.email else { throw ClientError.invalidResponse }
+            if !status.isNormal { restrict(status); return }
             accountStatus = status
-            if !status.isNormal {
-                announcementState.configure(site: nil, userID: nil)
-                connection?.disconnect()
-                profile = nil
-                catalog = nil
-                nodesError = nil
-                offlineUntil = nil
-                phase = .restricted
-                return
-            }
             let response = try await api.profileResponse(endpoints, token: session.token, connected: connection?.state == .connected)
             guard operation == generation else { return }
             let value = response.value
@@ -526,7 +519,8 @@ public final class ClientSession {
             offlineUntil = nil
             phase = .signedIn
             await reconcileConnection()
-            if catalog?.revision != value.configRevision || catalog?.updateDue(at: now()) == true {
+            if catalog?.revision != value.configRevision || catalog?.updateDue(at: now()) == true || catalogExpired
+                || catalog?.validUntil.map({ $0.timeIntervalSince(now()) <= 3600 }) == true {
                 await loadNodes()
             } else if runtimeActive, connection?.supportsStandby == true, connection?.state == .disconnected {
                 Task { [weak self] in
@@ -540,7 +534,7 @@ public final class ClientSession {
         } catch {
             guard operation == generation else { return }
             if (error as? ClientError)?.unauthorized != true { panelOffline = true }
-            if silently && panelOffline { recordCooldown(error) } else { handleAuthenticatedError(error) }
+            if silently && panelOffline { recordCooldown(error) } else { await handleAuthenticatedError(error) }
         }
     }
 
@@ -557,35 +551,53 @@ public final class ClientSession {
         let operation = generation
         defer { if operation == generation { nodesLoading = false } }
         do {
-            let response = try await api.nodes(endpoints, token: session.token)
+            // 对应 connection_controller.dart 的 _acceptRemote：结构检查不通过就保留上一份目录与缓存
+            let response = try await api.nodes(endpoints, token: session.token, pinned: Array(nodeSelections.values) + recentNodes)
             guard operation == generation, phase == .signedIn else { return }
             let result = response.value
-            // 对应 connection_controller.dart 的 _acceptRemote：结构检查不通过就保留上一份目录与缓存
-            try result.validate()
             lastConfigAlert = nil
-            let previousRevision = catalog?.revision
+            let previous = (catalog: catalog, selections: nodeSelections, expired: catalogExpired)
+            if catalog?.paging?.stamp != result.paging?.stamp { resetBrowsing() }
             catalog = result
             catalogExpired = false
-            cache?.saveConfig(response.data, account: session.email, binding: api.cacheBinding(endpoints, token: session.token),
-                              sealKey: api.cacheKey(token: session.token), updateIntervalHours: result.updateIntervalHours)
+            func commit() {
+                cache?.saveConfig(response.data, account: session.email, binding: api.cacheBinding(endpoints, token: session.token),
+                                  sealKey: api.cacheKey(token: session.token), updateIntervalHours: result.updateIntervalHours)
+            }
             if offlineUntil != nil {
                 offlineUntil = nil
                 await reconcileConnection()
             }
             nodeSelections = nodeSelections.filter { group, node in result.selectionGroups.contains { $0.id == group && $0.members.contains(node) } }
-            if let previousRevision, previousRevision != result.revision, let connection, connection.state == .connected {
-                var updated = false
-                if let live = try connection.liveProfileOptions(preferences) {
-                    updated = try await connection.updateNodes(makeLease(takeover: true, options: live))
+            if let previousRevision = previous.catalog?.revision, previousRevision != result.revision, let connection, connection.state != .disconnected {
+                // 接管中的内核实际加载成功才替换上一份目录与缓存；正在连接或加载失败时保留旧的，下次刷新再应用
+                do {
+                    guard connection.state == .connected else { throw CancellationError() }
+                    var updated = false
+                    if let live = try connection.liveProfileOptions(preferences) {
+                        updated = try await connection.updateNodes(makeLease(takeover: true, options: live))
+                    }
+                    if !updated { try await applyProxySettings() }
+                } catch {
+                    if operation == generation, catalog?.revision == result.revision {
+                        (catalog, nodeSelections, catalogExpired) = previous
+                    }
+                    throw error
                 }
-                if !updated { try await applyProxySettings() }
-            } else if runtimeActive, connection?.supportsStandby == true, connection?.state == .disconnected {
+                commit()
+                return
+            }
+            commit()
+            if runtimeActive, connection?.supportsStandby == true, connection?.state == .disconnected {
                 Task { [weak self] in
                     guard let self, operation == generation, runtimeActive, connection?.state == .disconnected,
                           catalog?.revision == result.revision else { return }
                     do {
-                        if let previousRevision, previousRevision != result.revision, connection?.controlPlaneReady == true {
-                            try await connection?.returnToStandby(makeLease(takeover: false))
+                        if let previousRevision = previous.catalog?.revision, previousRevision != result.revision, let connection, connection.controlPlaneReady {
+                            // 与已连接时一致：只有节点变化时待机内核只重读节点文件，其余配置有变才重启
+                            if let live = try connection.liveProfileOptions(preferences),
+                               try await connection.updateNodes(makeLease(takeover: false, options: live)) { return }
+                            try await connection.returnToStandby(makeLease(takeover: false))
                         } else {
                             try await ensureControlPlane()
                         }
@@ -599,7 +611,7 @@ public final class ClientSession {
         } catch {
             guard operation == generation else { return }
             if (error as? ClientError)?.unauthorized == true {
-                handleAuthenticatedError(error)
+                await handleAuthenticatedError(error)
             } else {
                 nodesError = errorText(error)
                 if let invalid = error as? ProfileValidationError, invalid.issues.joined(separator: "\n") != lastConfigAlert {
@@ -634,6 +646,12 @@ public final class ClientSession {
         return offlineUntil < expiresAt
     }
 
+    // 与 Flutter、OpenWrt 首页同一阈值：令牌不续期，剩余 7 天以内提示到期时间
+    public func sessionExpiryNotice(now: Date = .now) -> Date? {
+        guard let expiresAt = saved?.expiresAt, expiresAt.timeIntervalSince(now) <= 7 * 86_400 else { return nil }
+        return expiresAt
+    }
+
     private var sessionExpiry: Date? {
         guard let expiresAt = saved?.expiresAt else { return nil }
         return offlineUntil.map { min($0, expiresAt) } ?? expiresAt
@@ -641,7 +659,11 @@ public final class ClientSession {
 
     private func reconcileConnection() async {
         if let owner = connectionOwner { icons.configure(owner: owner) }
-        await connection?.reconcile(owner: connectionOwner, expiresAt: sessionExpiry, authorizationExpiry: authorizationLimitsSession)
+        let expiry = sessionExpiry
+        await connection?.reconcile(owner: connectionOwner, expiresAt: expiry, authorizationExpiry: authorizationLimitsSession)
+        // 扩展、待机内核与 macOS 驱动都按租约里的到期时间自行停止，到期时间变了要把租约重写一遍
+        if let connection, let expiry, connection.controlPlaneReady, [.connected, .disconnected].contains(connection.state),
+           connection.leaseExpiry != expiry { try? await reloadNodes() }
     }
 
     public func selectNode(group: String, node: String) {
@@ -747,9 +769,30 @@ public final class ClientSession {
         guard !catalogExpired, offlineUntil.map({ $0 > now() }) != false else { throw ClientError.input(L10n.t("本地配置授权已到期，请连接面板更新后重试")) }
         var options = try options ?? connection.profileOptions(preferences)
         if !takeover { options.tunEnabled = false }
-        let profile = try catalog.assemble(options: options, selections: nodeSelections)
+        let profile = try catalog.assemble(options: options, selections: nodeSelections, pinned: recentNodes, probe: probeNodes)
         return TunnelLease(owner: owner, cacheKey: Self.accountKey(of: saved), expiresAt: sessionExpiry ?? saved.expiresAt, configuration: profile.data,
                            validationConfiguration: options.input == .proxy ? profile.validationData : nil, logLevel: preferences.logLevel)
+    }
+
+    // 并入后来取到的节点后换上新目录；并入后的这份才是落盘缓存，离线启动时这些节点还在
+    func replaceCatalog(_ merged: (catalog: NodeCatalog, response: Data)) {
+        guard let saved else { return }
+        catalog = merged.catalog
+        cache?.saveConfig(merged.response, account: saved.email, binding: api.cacheBinding(endpoints, token: saved.token),
+                          sealKey: api.cacheKey(token: saved.token), updateIntervalHours: merged.catalog.updateIntervalHours)
+    }
+
+    // 对应 connection_controller.dart 的 _loadNodes / _probe：按当前的固定节点与待测节点重新装配，运行中的内核只重读节点文件，不重启。
+    // 逐次排队：两次更新交错会让先写的节点文件盖掉后写的
+    func reloadNodes() async throws {
+        let previous = nodeReload
+        let task = Task { [weak self] in
+            _ = try? await previous?.value
+            guard let self, let connection, let live = try connection.liveProfileOptions(preferences),
+                  try await connection.updateNodes(makeLease(takeover: connection.state == .connected, options: live)) else { throw TunnelError.control }
+        }
+        nodeReload = task
+        try await task.value
     }
 
     private func connect(reclaimed: Bool) async {
@@ -764,7 +807,9 @@ public final class ClientSession {
         if !offline { await refresh() }
         guard phase == .signedIn, let saved, let owner = connectionOwner else { return }
         guard catalog != nil else { message = nodesError ?? L10n.t("尚未获取面板配置"); return }
-        guard reclaimed || profile?.deviceKickNotice != true else { message = L10n.t("设备下线通知尚未处理，请先查看通知。"); return }
+        guard reclaimed || profile?.deviceKickNotice != true || (panelOffline && profile?.deviceKickReason != "remove") else {
+            message = L10n.t("设备下线通知尚未处理，请先查看通知。"); return
+        }
         guard reclaimed || !needsDeviceSlot else { message = L10n.t("在线客户端名额已满，请选择一台设备下线后连接。"); return }
         let operation = generation
         do {
@@ -921,6 +966,9 @@ public final class ClientSession {
         accountStatus = nil
         catalog = nil
         nodeSelections = [:]
+        recentNodes = []
+        probeNodes = []
+        resetBrowsing()
         nodesError = nil
         nodesLoading = false
         updatedAt = nil
@@ -939,14 +987,33 @@ public final class ClientSession {
         }
     }
 
-    private func handleAuthenticatedError(_ error: any Error) {
-        if (error as? ClientError)?.unauthorized == true {
-            generation += 1
-            busy = false
-            if clearLocal() { message = L10n.t("登录已失效，请重新登录。") }
-        } else {
-            report(error)
+    // 面板对封禁、待删除账户的大多数接口同样回 401：先用同一令牌问账户状态，令牌仍被拒才清会话
+    private func handleAuthenticatedError(_ error: any Error) async {
+        guard (error as? ClientError)?.unauthorized == true else { report(error); return }
+        guard let session = saved else { return }
+        let operation = generation
+        do {
+            let status = try await api.accountStatus(endpoints, token: session.token)
+            guard operation == generation, status.email == session.email, !status.isNormal else { return }
+            restrict(status)
+            return
+        } catch {
+            guard operation == generation, (error as? ClientError)?.unauthorized == true else { return }
         }
+        generation += 1
+        busy = false
+        if clearLocal() { message = L10n.t("登录已失效，请重新登录。") }
+    }
+
+    private func restrict(_ status: AccountStatus) {
+        announcementState.configure(site: nil, userID: nil)
+        connection?.disconnect()
+        profile = nil
+        catalog = nil
+        nodesError = nil
+        offlineUntil = nil
+        accountStatus = status
+        phase = .restricted
     }
 
     private func report(_ error: any Error) {

@@ -2,11 +2,11 @@
 
 import { access, open, unlink, writefile } from 'fs';
 
-import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, PROFILE_FILE, buildOrigins, creds, device,
+import { ACCOUNT_FILE, ANNOUNCE_CACHE, ANNOUNCE_FILE, CONF_DIR, PROFILE_FILE, RENEW_FILE, buildOrigins, creds, device,
 		 ensurePrivateDir, httpRequest, log, originOf, origins, panelDirectHosts, randomHex, readJson, saveCreds, saveOrigins,
 		 STATE_DIR, coreRunning, sessionBinding, sessionKey, sessionValid, settings, sha256File, touchAccountDir, urlencode, userAgent,
 		 writeJson, writePrivateJson } from 'ecycloud.common';
-import { PENDING_FILE, cached } from 'ecycloud.profile';
+import { CATALOG_FILE, CATALOG_INDEX, PENDING_FILE, cached, copyBudget } from 'ecycloud.profile';
 
 const API_PATH = '/api/client/v1';
 
@@ -74,7 +74,7 @@ export function session() {
 };
 
 export function clearCache() {
-	for (let path in [ ACCOUNT_FILE, COOLDOWN_FILE, ANNOUNCE_CACHE, PROFILE_FILE, PENDING_FILE, NODE_USED_FILE ])
+	for (let path in [ ACCOUNT_FILE, COOLDOWN_FILE, ANNOUNCE_CACHE, PROFILE_FILE, PENDING_FILE, CATALOG_FILE, CATALOG_INDEX, NODE_USED_FILE, RENEW_FILE ])
 		if (access(path) && !unlink(path))
 			die('无法清除旧账户缓存');
 };
@@ -247,8 +247,12 @@ export function call(path, opts) {
 		noteCooldown(path, res.retry_after);
 
 	if (res.status == 401 && ret != 2 && !opts?.anonymous && creds().token == token) {
-		log('notice', `session cleared: ${path} HTTP 401`);
-		clearToken();
+		/* 封禁、待删除账号访问放行名单以外的接口同样回 401：用同一令牌查账号状态，它也回 401 才是令牌失效 */
+		if (path == '/user/account-status') {
+			log('notice', `session cleared: ${path} HTTP 401`);
+			clearToken();
+		} else
+			call('/user/account-status');
 	}
 
 	if (ret != 1 || res.status < 200 || res.status >= 300)
@@ -465,43 +469,75 @@ export function refreshAccount(connected, nodeUsed, locale) {
 };
 
 /* 声明 X-ECY-Node-Members 后，各组节点订阅只带成员名单；按 ecy-panel-nodes 还原成完整格式，
-   下游的结构检查、缓存与「只更新节点」判断都与完整格式逐字段相同（与 panel_api_client.dart 同口径） */
-export function withNodePayloads(res) {
-	const providers = res.data?.config?.['proxy-providers'];
-	if (type(providers) != 'object')
+   下游的结构检查、缓存与「只更新节点」判断都与完整格式逐字段相同（与 panel_api_client.dart 同口径）。
+   给了 loaded 就只还原其中的节点，并在 partial 里记下没装全的节点订阅；不改动传入的配置 */
+export function withNodePayloads(res, loaded) {
+	const config = res.data?.config;
+	if (type(config?.['proxy-providers']) != 'object')
 		return res;
 	const invalid = { ok: false, status: 200, msg: '面板配置不规范：\n面板下发的不是一份完整配置' };
+	const providers = { ...config['proxy-providers'] };
 	const nodes = {};
 	const source = providers['ecy-panel-nodes']?.payload;
 	for (let node in (type(source) == 'array' ? source : []))
 		if (type(node?.name) == 'string' && nodes[node.name] == null)
 			nodes[node.name] = node;
+	const partial = {};
 	for (let name in keys(providers)) {
 		const spec = providers[name];
-		if (index(name, 'ecy-panel-') != 0 || type(spec) != 'object' || !('members' in spec))
+		if (index(name, 'ecy-panel-') != 0 || type(spec) != 'object')
 			continue;
-		if (type(spec.members) != 'array' || !length(spec.members) || 'payload' in spec)
+		const listed = 'members' in spec;
+		if (listed && (type(spec.members) != 'array' || !length(spec.members) || 'payload' in spec))
 			return invalid;
-		const payload = [];
-		for (let member in spec.members) {
-			if (type(member) != 'string' || nodes[member] == null)
+		if (!listed && (loaded == null || type(spec.payload) != 'array'))
+			continue;
+		let payload = [];
+		let total = 0;
+		for (let member in (listed ? spec.members : spec.payload)) {
+			const node = listed ? nodes[member] : member;
+			if (listed && (type(member) != 'string' || node == null))
 				return invalid;
-			push(payload, json(sprintf('%J', nodes[member])));
+			if (node?.name == 'ecy-panel-empty')
+				continue;
+			total++;
+			if (loaded == null || loaded[node?.name])
+				push(payload, listed ? json(sprintf('%J', node)) : node);
 		}
+		if (length(payload) < total)
+			partial[name] = true;
+		if (!length(payload))
+			payload = [ { name: 'ecy-panel-empty', type: 'reject' } ];
 		const next = {};
 		for (let key in keys(spec))
-			next[key == 'members' ? 'payload' : key] = key == 'members' ? payload : spec[key];
+			next[key == 'members' ? 'payload' : key] = key in [ 'members', 'payload' ] ? payload : spec[key];
 		providers[name] = next;
 	}
+	const data = { ...res.data, config: { ...config, 'proxy-providers': providers } };
+	if (loaded != null) {
+		data.partial = partial;
+		data.node_labels = {};
+		for (let name, label in (type(res.data.node_labels) == 'object' ? res.data.node_labels : {}))
+			if (loaded[name])
+				data.node_labels[name] = label;
+	}
+	return { ...res, data };
+};
+
+/* X-ECY-Node-Catalog 声明本机内核最多装多少个节点副本：全部节点装不下时面板只下发在用的，其余经 nodes() 取 */
+export function clashProfile(locale) {
+	const res = call('/config/clash', { origin: origins().sub, timeout: 90,
+		headers: [ 'X-ECY-Node-Providers: 1', 'X-ECY-Node-Members: 1', `X-ECY-Node-Catalog: ${copyBudget()}`,
+			`Accept-Language: ${contentLanguage(locale)}` ] });
+	if (res.ok)
+		res.data.update_interval_hours = res.profile_update_interval;
 	return res;
 };
 
-export function clashProfile(locale) {
-	const res = call('/config/clash', { origin: origins().sub, timeout: 90,
-		headers: [ 'X-ECY-Node-Providers: 1', 'X-ECY-Node-Members: 1', `Accept-Language: ${contentLanguage(locale)}` ] });
-	if (res.ok)
-		res.data.update_interval_hours = res.profile_update_interval;
-	return res.ok ? withNodePayloads(res) : res;
+/* query 是 { names } 或 { provider, offset, limit, search }（docs/server-api.md「POST /config/nodes」） */
+export function nodes(query, locale, timeout) {
+	return call('/config/nodes', { origin: origins().sub, method: 'POST', body: query, timeout: timeout ?? 30,
+		headers: [ `Accept-Language: ${contentLanguage(locale)}` ] });
 };
 
 export function touchIdentity(connected) {
@@ -647,32 +683,33 @@ function saveAnnounceState(state) {
 	return writePrivateJson(ANNOUNCE_FILE, next);
 };
 
-function announceView(items, popup, state, extra) {
-	const unread = announceUnreadIndex(items, announceSeen(state));
-
+function announceView(items, popup, state, loaded) {
 	return {
-		ok: extra.ok != false,
-		loaded: extra.loaded == true,
+		ok: true,
+		loaded,
 		items,
 		popup,
 		pending_popup: announcePending(popup, state),
-		has_unread: unread >= 0,
-		open_index: unread >= 0 ? unread : announceLatestIndex(items),
-		error: extra.error ?? '',
-		msg: extra.msg ?? ''
+		has_unread: announceUnreadIndex(items, announceSeen(state)) >= 0,
+		open_index: announceLatestIndex(items)
 	};
 };
 
+/* 公告由后台任务拉取：任务完成时可能已换了账号，缓存只认写入它的会话 */
 function announceCache(locale) {
 	const cached = readJson(ANNOUNCE_CACHE);
-	return (cached?.locale ?? 'zh-CN') == locale ? cached : null;
+	return (cached?.locale ?? 'zh-CN') == locale && cached?.session == creds().session_id ? cached : null;
+};
+
+export function announceLanguage(locale) {
+	const language = locale == null || locale == '' ? 'zh-CN' : locale;
+	return language in [ 'zh-CN', 'zh-TW', 'en-US', 'en' ] ? contentLanguage(language) : null;
 };
 
 export function announcements(path, locale) {
-	let language = locale == null || locale == '' ? 'zh-CN' : locale;
-	if (!(language in [ 'zh-CN', 'zh-TW', 'en-US', 'en' ]))
+	const language = announceLanguage(locale);
+	if (language == null)
 		return { ok: false, msg: '语言不合法' };
-	language = contentLanguage(language);
 	const action = `${path ?? ''}`;
 	let state = readJson(ANNOUNCE_FILE) ?? {};
 	const cache = announceCache(language);
@@ -682,10 +719,7 @@ export function announcements(path, locale) {
 	if (action == 'seen' || action == 'popup' || match(action, /^seen:/)) {
 		if (action == 'seen') {
 			if (!length(cachedItems))
-				return announceView(cachedItems, cachedPopup, state, {
-					ok: true,
-					loaded: cache != null
-				});
+				return announceView(cachedItems, cachedPopup, state, cache != null);
 
 			const seen = {};
 			for (let item in cachedItems)
@@ -706,27 +740,24 @@ export function announcements(path, locale) {
 		}
 
 		saveAnnounceState(state);
-		return announceView(cachedItems, cachedPopup, state, { ok: true, loaded: true });
+		return announceView(cachedItems, cachedPopup, state, true);
 	}
 
-	/* 点铃铛只读缓存；60 秒轮询传 refresh 才打面板。每次都 curl 会卡 1～2 秒。 */
-	if (action != 'refresh' && cache != null)
-		return announceView(cachedItems, cachedPopup, state, { ok: true, loaded: true });
+	return announceView(cachedItems, cachedPopup, state, cache != null);
+};
 
-	const res = call('/announcements', { headers: [ `Accept-Language: ${language}` ] });
+export function fetchAnnouncements(locale) {
+	const language = announceLanguage(locale);
+	if (language == null)
+		return { ok: false, msg: '语言不合法' };
+	const session = creds().session_id;
+
+	/* 与刷新配置共用一个串行的后台队列：面板挂起时不能让排在后面的任务久等 */
+	const res = call('/announcements', { headers: [ `Accept-Language: ${language}` ], timeout: 5 });
 	if (res.status == 429)
-		return announceView(cachedItems, cachedPopup, state, {
-			ok: true,
-			loaded: cache != null
-		});
-
+		return { ok: true };
 	if (!res.ok)
-		return announceView(cachedItems, cachedPopup, state, {
-			ok: false,
-			loaded: cache != null,
-			error: res.msg ?? '',
-			msg: res.msg ?? ''
-		});
+		return { ok: false, msg: res.msg ?? '' };
 
 	const items = [];
 	if (type(res.data?.announcements) == 'array') {
@@ -736,8 +767,9 @@ export function announcements(path, locale) {
 
 	const popup = res.data?.popup ? announceItem(res.data.popup) : null;
 	ensurePrivateDir(STATE_DIR);
-	writeJson(ANNOUNCE_CACHE, { locale: language, items, popup });
+	writeJson(ANNOUNCE_CACHE, { locale: language, session, items, popup });
 
+	const state = readJson(ANNOUNCE_FILE) ?? {};
 	if (type(state.seen_revisions) != 'object') {
 		const maxId = +(state.read_max_id ?? 0);
 		if (maxId > 0) {
@@ -760,5 +792,5 @@ export function announcements(path, locale) {
 		}
 	}
 
-	return announceView(items, popup, state, { ok: true, loaded: true });
+	return { ok: true };
 };

@@ -23,6 +23,35 @@ class AccountStatusPage extends StatefulWidget {
 
 class _AccountStatusPageState extends State<AccountStatusPage> {
   bool _busy = false;
+  late AuthController _auth;
+  Timer? _recheck;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _auth = AppScope.of(context).auth;
+    // 定时封禁到期、管理员解封都不会通知客户端，只能定时查（与 Apple 原生同为 60 秒）
+    _recheck ??= Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => unawaited(_recheckStatus()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _recheck?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _recheckStatus() async {
+    try {
+      await _auth.syncAccountStatus();
+    } on ApiException catch (e) {
+      if (e.unauthorized) {
+        await _auth.logout();
+      }
+    }
+  }
 
   Future<void> _cancelDeletion(AuthController auth) async {
     final bool? confirmed = await showDialog<bool>(

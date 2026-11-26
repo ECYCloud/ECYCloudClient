@@ -53,12 +53,11 @@ class AnnouncementController extends ChangeNotifier {
     if (!_loaded) {
       return false;
     }
-    return unreadFocusIndex != null;
+    return focusUnreadIndex(_items, _seenRevisions()) != null;
   }
 
-  int? get unreadFocusIndex => focusUnreadIndex(_items, _seenRevisions());
-
-  int get openIndex => unreadFocusIndex ?? latestIndex(_items);
+  // 铃铛总是打开最新发布的一条；未读只决定红点
+  int get openIndex => latestIndex(_items);
 
   static Map<String, String> decodeSeen(Object? raw) {
     if (raw is! Map) {

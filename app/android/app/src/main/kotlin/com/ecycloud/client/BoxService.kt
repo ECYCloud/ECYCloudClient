@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -57,9 +59,10 @@ class BoxService : VpnService() {
     }
 
     override fun onRevoke() {
-        BoxState.revoked = true
-        BoxState.error = "VPN 授权已被其它应用接管"
-        note(LEVEL_INFO, "VPN 授权已被其它应用接管，停止内核")
+        BoxState.markStopped(this, BoxState.REVOKED)
+        endTakeover(this)
+        BoxState.error = "VPN 已被系统或其它应用停用"
+        note(LEVEL_INFO, "VPN 已被系统或其它应用停用，停止内核")
         Thread { shutdown() }.start()
     }
 
@@ -90,8 +93,7 @@ class BoxService : VpnService() {
             fail(it.message ?: it.toString())
             return
         }
-        BoxState.revoked = false
-        BoxState.stoppedByUser = false
+        BoxState.clearStopReason(this, key)
         val raw = runCatching { BoxState.configFile(this, key).readText() }.getOrNull()
         if (raw.isNullOrBlank()) {
             fail("没有可用的内核配置")
@@ -124,6 +126,7 @@ class BoxService : VpnService() {
             note(LEVEL_INFO, "内核已启动")
             foreground(R.string.notification_running)
             QuickToggleService.refresh()
+            keepRecoverable(key)
             startResult.offer("")
         } catch (e: Exception) {
             fail(e.message ?: e.toString())
@@ -187,9 +190,27 @@ class BoxService : VpnService() {
     }
 
     private fun stopByUser(reason: String) {
-        BoxState.stoppedByUser = true
+        BoxState.markStopped(this, BoxState.STOPPED_BY_USER)
+        endTakeover(this)
         note(LEVEL_INFO, reason)
         Thread { shutdown() }.start()
+    }
+
+    // 内核进程被杀后系统不重建本服务（Vpn 抢先解绑，把服务记录从进程上摘掉），只能靠仍挂在进程上的
+    // 已启动服务被粘性重建：接管期间让 KernelService 处于启动态，由它在重建后原生拉起隧道
+    private fun keepRecoverable(key: String) {
+        if (BoxState.recoveryAttempts(this) == null) {
+            BoxState.setRecoveryAttempts(this, key, 0)
+        }
+        runCatching { startService(Intent(this, KernelService::class.java)) }.onFailure {
+            note(LEVEL_WARNING, "无法登记内核意外退出后的自恢复：$it")
+        }
+        val startedAt = BoxState.startedAt
+        main.postDelayed({
+            if (BoxState.takeover && BoxState.startedAt == startedAt) {
+                BoxState.setRecoveryAttempts(this, key, 0)
+            }
+        }, NativeRecovery.STABLE_MS)
     }
 
     private fun shutdown() {
@@ -315,6 +336,8 @@ class BoxService : VpnService() {
 
         private val startResult = ArrayBlockingQueue<String>(1)
 
+        private val main = Handler(Looper.getMainLooper())
+
         @Volatile
         private var instance: BoxService? = null
 
@@ -331,6 +354,7 @@ class BoxService : VpnService() {
             val runDir = BoxState.runDir(context, key).also { it.mkdirs() }
             seedGeoData(context, runDir)
             Mihomo.setup(runDir.absolutePath)
+            SystemDns.watch(context.applicationContext)
             BoxState.session = key
             return key
         }
@@ -356,9 +380,12 @@ class BoxService : VpnService() {
         }
 
         fun start(context: Context, raw: String) {
-            val config = BoxState.writeConfig(context, ensureSetup(context), raw)
+            val key = ensureSetup(context)
+            val config = BoxState.writeConfig(context, key, raw)
 
             if (!BoxState.takesOverExit(config)) {
+                BoxState.clearStopReason(context, key)
+                endTakeover(context)
                 standby(config)
                 return
             }
@@ -410,7 +437,14 @@ class BoxService : VpnService() {
             QuickToggleService.refresh()
         }
 
-        fun stop() {
+        // 正常停止（用户断开、退出登录、被撤销、界面转常驻）后不再需要内核进程被杀后的原生自恢复
+        private fun endTakeover(context: Context) {
+            (BoxState.session ?: BoxState.sessionKey(context))?.let { BoxState.clearTakeover(context, it) }
+            context.stopService(Intent(context, KernelService::class.java))
+        }
+
+        fun stop(context: Context) {
+            endTakeover(context)
             val service = instance
             if (service != null) {
                 service.shutdown()

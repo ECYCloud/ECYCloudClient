@@ -361,26 +361,29 @@ class _SparklinePainter extends CustomPainter {
       yCenter: true,
     );
 
-    final DateTime mid = metrics.start.add(
-      Duration(milliseconds: metrics.window.inMilliseconds ~/ 2),
-    );
-    _label(
-      canvas,
-      Format.clock(metrics.start),
-      Offset(plot.left, plot.bottom + 4),
-    );
-    _label(
-      canvas,
-      Format.clock(mid),
-      Offset(plot.center.dx, plot.bottom + 4),
-      align: Alignment.topCenter,
-    );
-    _label(
-      canvas,
-      Format.clock(metrics.now),
-      Offset(plot.right, plot.bottom + 4),
-      align: Alignment.topRight,
-    );
+    // 没有采样时不随时钟重绘，时间轴也就不画，否则停在上次重建的时刻
+    if (points.isNotEmpty) {
+      final DateTime mid = metrics.start.add(
+        Duration(milliseconds: metrics.window.inMilliseconds ~/ 2),
+      );
+      _label(
+        canvas,
+        Format.clock(metrics.start),
+        Offset(plot.left, plot.bottom + 4),
+      );
+      _label(
+        canvas,
+        Format.clock(mid),
+        Offset(plot.center.dx, plot.bottom + 4),
+        align: Alignment.topCenter,
+      );
+      _label(
+        canvas,
+        Format.clock(metrics.now),
+        Offset(plot.right, plot.bottom + 4),
+        align: Alignment.topRight,
+      );
+    }
 
     final Path line = Path();
     if (points.isEmpty) {

@@ -4,7 +4,13 @@ import Foundation
 @usableFromInline enum UserDataDirectory {
     @TaskLocal static var override: URL?
     @usableFromInline static var root: URL? {
-        override ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ECYCloud", isDirectory: true)
+        #if os(tvOS)
+        // tvOS 真机上应用只能写缓存与临时目录，Application Support 不可写（模拟器不限制）
+        let directory = FileManager.SearchPathDirectory.cachesDirectory
+        #else
+        let directory = FileManager.SearchPathDirectory.applicationSupportDirectory
+        #endif
+        return override ?? FileManager.default.urls(for: directory, in: .userDomainMask).first?.appendingPathComponent("ECYCloud", isDirectory: true)
     }
 }
 

@@ -98,6 +98,7 @@ type connectionHistory struct {
 	// 首页上传／下载与 Flutter 一致，只统计走代理的流量
 	proxyUp, proxyDown, rateUp, rateDown int64
 	rank                                 liveRank
+	geoSites                             map[string]string
 }
 
 func (r *liveRank) add(target map[string]int64, key string, bytes int64) {
@@ -137,6 +138,9 @@ func (h *connectionHistory) sample() {
 			RemoteDestination: m.RemoteDst, Upload: info.UploadTotal.Load(), Download: info.DownloadTotal.Load(),
 			Start: info.Start, Chains: chain, Rule: info.Rule, RulePayload: info.RulePayload, Process: process,
 			ProcessPath: m.ProcessPath, Inbound: m.Type.String()}
+		if list, ok := h.geoSites[info.RulePayload]; ok && info.Rule == C.RuleSet.String() {
+			connection.Rule, connection.RulePayload = C.GEOSITE.String(), list
+		}
 		if m.DstIP.IsValid() {
 			connection.IP = m.DstIP.String()
 		}
@@ -320,8 +324,14 @@ func logSecrets(config []byte) (secrets []string) {
 	return secrets
 }
 
-func newLogBuffer(config []byte) *logBuffer {
+func newLogBuffer(config []byte, geoSites map[string]string) *logBuffer {
 	b := &logBuffer{secrets: logSecrets(config)}
+	// 内核的规则命中日志写作 RuleSet(名) 与 (match RuleSet/名 ...)
+	var names []string
+	for name, list := range geoSites {
+		names = append(names, C.RuleSet.String()+"("+name+")", C.GEOSITE.String()+"("+list+")", C.RuleSet.String()+"/"+name, C.GEOSITE.String()+"/"+list)
+	}
+	geoSiteNames := strings.NewReplacer(names...)
 	sub := log.Subscribe()
 	done := make(chan struct{})
 	go func() {
@@ -330,7 +340,7 @@ func newLogBuffer(config []byte) *logBuffer {
 			b.mu.Lock()
 			secrets := b.secrets
 			b.mu.Unlock()
-			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(event.Payload, secrets)}
+			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(geoSiteNames.Replace(event.Payload), secrets)}
 			b.mu.Lock()
 			b.sequence++
 			entry.ID = b.sequence
@@ -429,6 +439,10 @@ func Control(id uint64, data []byte) ([]byte, error) {
 	case "geodata":
 		if request.Scope != "" && request.Scope != "active" && request.Scope != "status" {
 			return nil, ErrConfiguration
+		}
+		// 重新下载会整份解码 GeoSite，堆瞬时涨几十 MiB，包隧道扩展会因此被系统终止
+		if current.device != nil {
+			return nil, ErrGeoDataInTunnel
 		}
 		active := current
 		active.geoMu.Lock()

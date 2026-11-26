@@ -406,6 +406,7 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
                 AuthStage.unknown => _Splash(
                   error: scope.auth.error,
                   onRetry: () => unawaited(scope.auth.restore()),
+                  onLogout: () => unawaited(scope.auth.logout()),
                 ),
                 AuthStage.loggedIn => const Shell(),
                 AuthStage.accountRestricted => const AccountStatusPage(),
@@ -417,10 +418,11 @@ class _EcyCloudAppState extends State<EcyCloudApp> {
 }
 
 class _Splash extends StatelessWidget {
-  const _Splash({this.error, this.onRetry});
+  const _Splash({this.error, this.onRetry, this.onLogout});
 
   final String? error;
   final VoidCallback? onRetry;
+  final VoidCallback? onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -450,6 +452,12 @@ class _Splash extends StatelessWidget {
                     onPressed: onRetry,
                     icon: const Icon(Icons.refresh),
                     label: Text(L10n.t('重试')),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: onLogout,
+                    icon: const Icon(Icons.logout),
+                    label: Text(L10n.t('退出登录')),
                   ),
                 ],
               ],

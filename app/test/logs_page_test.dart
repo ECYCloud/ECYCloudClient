@@ -540,6 +540,8 @@ class _Connection extends ChangeNotifier implements ConnectionController {
   @override
   ConnectionPhase get state => ConnectionPhase.connected;
   @override
+  Listenable get statsUpdates => this;
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

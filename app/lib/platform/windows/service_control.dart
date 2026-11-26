@@ -139,9 +139,13 @@ typedef _CloseHandleNative = Int32 Function(IntPtr);
 typedef _CloseHandleDart = int Function(int);
 
 class _Scm {
+  // GetLastError 须在出错的 API 之前解析好并走 leaf 调用：出错后才首次查找符号，
+  // 错误码会先被 Dart 运行时覆盖，读到的就成了 0
   _Scm()
     : _advapi = DynamicLibrary.open('advapi32.dll'),
-      _kernel32 = DynamicLibrary.open('kernel32.dll');
+      _kernel32 = DynamicLibrary.open('kernel32.dll') {
+    lastError();
+  }
 
   final DynamicLibrary _advapi;
   final DynamicLibrary _kernel32;
@@ -163,7 +167,10 @@ class _Scm {
         'CloseServiceHandle',
       );
   late final int Function() lastError = _kernel32
-      .lookupFunction<Uint32 Function(), int Function()>('GetLastError');
+      .lookupFunction<Uint32 Function(), int Function()>(
+        'GetLastError',
+        isLeaf: true,
+      );
 }
 
 ServiceProbe _probe(String serviceName) {

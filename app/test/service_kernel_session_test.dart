@@ -103,6 +103,32 @@ void main() {
     });
   }
 
+  // 修复前：开机自启、磁贴等原生入口正在拉起隧道时状态是「未运行」，认回直接放弃
+  test('原生入口正在拉起隧道时等它起来再认回', () async {
+    final _Transport transport = _Transport()
+      ..statusReplies.addAll(<Map<String, dynamic>>[
+        <String, dynamic>{'running': false, 'starting': true, 'log_cursor': 0},
+        <String, dynamic>{'running': false, 'starting': true, 'log_cursor': 0},
+      ]);
+    transport.status.complete(_running);
+    transport.config.complete(<String, dynamic>{
+      'content': jsonEncode(<String, dynamic>{
+        'external-controller': '127.0.0.1:4567',
+        'secret': 'native-test-secret',
+      }),
+    });
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+    );
+    addTearDown(kernel.dispose);
+    final ClashApiOptions? live = await kernel.attach().timeout(
+      const Duration(seconds: 5),
+    );
+    expect(live?.port, 4567);
+    expect(live?.secret, 'native-test-secret');
+    expect(kernel.status.state, KernelState.running);
+  });
+
   test('新会话启动后旧轮询错误不能将其标记失败', () async {
     final _Transport transport = _Transport();
     final ServiceKernelController kernel = ServiceKernelController(
@@ -166,6 +192,31 @@ void main() {
     expect(kernel.status.state, before);
     expect(kernel.status.state, isNot(KernelState.failed));
     expect(kernel.status.state, isNot(KernelState.stopped));
+  });
+
+  test('与后台服务失联后停止失败不再推一遍 failed', () async {
+    final _Transport transport = _Transport()..stopFails = true;
+    final ServiceKernelController kernel = ServiceKernelController(
+      transport: transport,
+    );
+    addTearDown(kernel.dispose);
+    final List<KernelState> states = <KernelState>[];
+    final StreamSubscription<KernelStatus> subscription = kernel.statusStream
+        .listen((KernelStatus status) => states.add(status.state));
+    addTearDown(subscription.cancel);
+    await kernel.start(configJson: '{}', clashApi: _options);
+    transport.status.completeError(ServiceException('套接字暂时不可达'));
+    await Future<void>.delayed(const Duration(milliseconds: 3700));
+    expect(kernel.status.state, KernelState.failed);
+
+    await expectLater(kernel.stop(), throwsA(isA<KernelException>()));
+    await Future<void>.delayed(Duration.zero);
+    expect(kernel.status.state, KernelState.failed);
+    expect(
+      states.where((KernelState state) => state == KernelState.failed),
+      hasLength(1),
+      reason: '上层放弃重试后的拆除会调 stop()，再收到 failed 就又进一次重启调度',
+    );
   });
 
   test('停止后迟到的启动响应不能恢复控制面和轮询', () async {
@@ -352,6 +403,7 @@ class _Transport implements ServiceTransport {
   final Completer<void> readStarted = Completer<void>();
   final Completer<void> startRequested = Completer<void>();
   Completer<Map<String, dynamic>>? startWait;
+  final List<Map<String, dynamic>> statusReplies = <Map<String, dynamic>>[];
   int statusCalls = 0;
   int bindChecks = 0;
   bool binding = false;
@@ -396,6 +448,7 @@ class _Transport implements ServiceTransport {
           };
         }
         statusCalls++;
+        if (statusReplies.isNotEmpty) return statusReplies.removeAt(0);
         return status.future;
       case 'kernel.read':
         if (!readStarted.isCompleted) readStarted.complete();

@@ -8,6 +8,7 @@ import CryptoKit
     private let transport: any HTTPTransport
     private var redactor: MacLogRedactor
     private let nodeProviders: [String]
+    private let urlTests: [String]
     private let ruleFiles: [String: String]
     private var logStore: ClientLogStore?
     private var active: [String: [String: Any]] = [:]
@@ -24,6 +25,8 @@ import CryptoKit
     private var memoryTask: Task<Void, Never>?
     private var sampleTask: Task<Void, Never>?
     private var sampling = false
+    private var proxyTypes: [String: String]?
+    private var proxyGroups: Set<String> = []
     private var speedTask: Task<Int64, any Error>?
     private var probes: [String: [String: Any]] = [:]
     private var stopped = false
@@ -40,6 +43,7 @@ import CryptoKit
         redactor = MacLogRedactor(configuration: configuration)
         servers = Self.nodeServers(configuration)
         nodeProviders = (configuration["proxy-providers"] as? [String: Any] ?? [:]).keys.filter { $0.hasPrefix("ecy-panel-") }.sorted()
+        urlTests = (configuration["proxy-groups"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "url-test" }.compactMap { $0["name"] as? String }
         ruleFiles = (configuration["rule-providers"] as? [String: [String: Any]] ?? [:]).compactMapValues { $0["path"] as? String }
         self.logStore = logStore
     }
@@ -49,11 +53,14 @@ import CryptoKit
         return Set(((configuration["proxies"] as? [[String: Any]] ?? []) + payloads).compactMap { ($0["server"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased() })
     }
 
-    // 对应 clash_api_client.dart 的 updateProxyProviders：节点文件已由 helper 落盘，内核按文件重读，不重启进程
-    func updateNodes(_ configuration: [String: Any]) async throws {
+    // 对应 clash_api_client.dart 的 updateProxyProviders：节点文件已由 helper 落盘，内核按文件重读，不重启进程。
+    // 只重读内容有变的节点文件：测试未装入的节点时只有探测节点文件在变，分组用的节点文件及其上的连接不动
+    func updateNodes(_ configuration: [String: Any], previous: Data) async throws {
         redactor = MacLogRedactor(configuration: configuration)
         servers = Self.nodeServers(configuration)
-        for name in nodeProviders {
+        let before = ((try? JSONSerialization.jsonObject(with: previous)) as? [String: Any])?["proxy-providers"] as? [String: Any] ?? [:]
+        let after = configuration["proxy-providers"] as? [String: Any] ?? [:]
+        for name in nodeProviders where (after[name] as? NSDictionary)?.isEqual(before[name]) != true {
             _ = try await api("/providers/proxies/" + encoded(name), method: "PUT", timeout: 120)
         }
     }
@@ -92,6 +99,10 @@ import CryptoKit
         for name in nodeProviders {
             guard (try await api("/providers/proxies/" + encoded(name), timeout: 2)["proxies"] as? [Any])?.isEmpty == false else { throw TunnelError.start }
         }
+        // 节点文件加载前 TUN 劫持的 DNS 等也会读 url-test 并留下这份缓存，只能加载完再清掉；客户端从不固定 url-test 的选中项
+        for name in urlTests {
+            _ = try await api("/proxies/" + encoded(name), method: "DELETE", timeout: 2)
+        }
         _ = try await api("/proxies/ecy-speed", method: "PUT", body: ["name": "DIRECT"], timeout: 2)
         // 转发探测只携带独立测速口令，不能把控制密钥交给代理出站。
         let status = try await MacSocket.forwardProbe(port: probePort, controller: port, credential: speedCredential)
@@ -100,19 +111,23 @@ import CryptoKit
 
     var probePort: Int { mixedPort < 65535 ? mixedPort + 1 : mixedPort - 1 }
     // 控制端口在分配后、内核监听前可能被本机其它进程抢先占住：内核只记一行日志照常运行，
-    // 此后带 secret 的请求都会交给对方，只能以 helper 转交的内核输出为准
+    // 此后带 secret 的请求都会交给对方，只能以 helper 转交的内核输出为准；测速入站被占同样只有一行日志，且与就绪行先后不定
     func controllerBound(_ lines: [String]) throws -> Bool {
+        var bound = false
         for message in lines.map(Self.message) {
-            if message == "RESTful API listening at: 127.0.0.1:\(port)" { return true }
+            if message == "RESTful API listening at: 127.0.0.1:\(port)" { bound = true }
             if message.hasPrefix("External controller listen error") { throw TunnelError.controllerPortInUse(port) }
+            if message.hasPrefix("Listener ecy-speed listen err") { throw TunnelError.speedPortInUse(probePort) }
         }
-        return false
+        return bound
     }
     // 内核只在监听成功时回报混合端口（listener.GetPorts），被其它程序抢先占用时为 0
     func listensOnMixedPort() async throws -> Bool { try await api("/configs", timeout: 3)["mixed-port"] as? Int == mixedPort }
     var speedCredential: String {
         "ecy-speed:" + SHA256.hash(data: Data("ecy-speed\0\(secret)".utf8)).map { String(format: "%02x", $0) }.joined()
     }
+    // 开 TUN 失败时内核只记一行错误并把 tun.enable 抹成 false，启动照常成功，只能读回运行态核对
+    func tunEnabled() async throws -> Bool { (try await api("/configs", timeout: 3)["tun"] as? [String: Any])?["enable"] as? Bool == true }
     func disableTUN() async throws { _ = try await api("/configs", method: "PATCH", body: ["tun": ["enable": false]], timeout: 3) }
     func close() {
         stopped = true
@@ -246,15 +261,32 @@ import CryptoKit
         }
     }
 
-    // 串行执行：两次采样交错会让旧计数覆盖新计数，下一轮再把同一段流量记一遍
-    private func sample() async throws -> ([String: Any], [String: Any]) {
+    // 串行执行：两次采样交错会让旧计数覆盖新计数，下一轮再把同一段流量记一遍。
+    // 内核的出站表随节点数增长，每秒采样只读连接表：出站表只在界面取快照（full）或链路上出现没见过的出站时才取
+    private func sample(full: Bool = false) async throws -> ([String: Any], [String: Any])? {
         while sampling { try await Task.sleep(for: .milliseconds(20)) }
         sampling = true
         defer { sampling = false }
         do {
             let connections = try await api("/connections")
-            let proxyResponse = try await api("/proxies")
-            let providerResponse = try await api("/providers/proxies")
+            let leaves = (connections["connections"] as? [[String: Any]] ?? []).compactMap { ($0["chains"] as? [String])?.first }
+            var listing: ([String: Any], [String: Any])?
+            if full || proxyTypes == nil || leaves.contains(where: { proxyTypes?[$0] == nil }) {
+                let proxyResponse = try await api("/proxies")
+                let providerResponse = try await api("/providers/proxies")
+                let proxies = proxyResponse["proxies"] as? [String: [String: Any]] ?? [:]
+                var types = proxies.mapValues { ($0["type"] as? String ?? "").lowercased() }
+                for provider in (providerResponse["providers"] as? [String: [String: Any]] ?? [:]).values {
+                    for proxy in provider["proxies"] as? [[String: Any]] ?? [] {
+                        if let name = proxy["name"] as? String, types[name] == nil { types[name] = (proxy["type"] as? String ?? "").lowercased() }
+                    }
+                }
+                // 内核里已经没有的出站记成空类型，免得还挂在它上面的连接让每次采样都重取
+                for leaf in leaves where types[leaf] == nil { types[leaf] = "" }
+                proxyTypes = types
+                proxyGroups = Set(proxies.filter { $0.value["all"] != nil }.keys)
+                listing = (proxyResponse, providerResponse)
+            }
             guard !stopped else { throw CancellationError() }
             var next: [String: [String: Any]] = [:]
             for value in connections["connections"] as? [[String: Any]] ?? [] {
@@ -284,17 +316,16 @@ import CryptoKit
             for (id, var value) in active where next[id] == nil {
                 value["closedAt"] = ISO8601DateFormatter().string(from: .now); closed.append(value)
             }
-            accumulate(next, connections: connections["connections"] as? [[String: Any]] ?? [], proxies: proxyResponse["proxies"] as? [String: [String: Any]] ?? [:],
-                       providers: providerResponse["providers"] as? [String: [String: Any]] ?? [:])
+            accumulate(next, connections: connections["connections"] as? [[String: Any]] ?? [])
             active = next
             if closed.count > 1000 { closed.removeFirst(closed.count - 1000) }
-            return (proxyResponse, providerResponse)
+            return listing
         }
     }
 
     private func snapshot(_ command: TunnelCommand) async throws -> [String: Any] {
         guard ["", "all", "active", "closed"].contains(command.scope) else { throw TunnelError.control }
-        let (proxyResponse, providerResponse) = try await sample()
+        guard let (proxyResponse, providerResponse) = try await sample(full: true) else { throw TunnelError.control }
         let configuration = try await api("/configs")
         let query = command.query.trimmingCharacters(in: .whitespacesAndNewlines)
         let current = active.values.sorted {
@@ -334,14 +365,8 @@ import CryptoKit
 
     // 与 Kernel/control.go 的 accumulate 及 connection_controller.dart 的 _accumulateProxyTraffic 同口径：
     // 只计链路落地出站会出网的连接增量；排行增量取走即清空，交给客户端按账户落盘。
-    private func accumulate(_ next: [String: [String: Any]], connections: [[String: Any]], proxies: [String: [String: Any]], providers: [String: [String: Any]]) {
-        var types = proxies.mapValues { ($0["type"] as? String ?? "").lowercased() }
-        for provider in providers.values {
-            for proxy in provider["proxies"] as? [[String: Any]] ?? [] {
-                if let name = proxy["name"] as? String, types[name] == nil { types[name] = (proxy["type"] as? String ?? "").lowercased() }
-            }
-        }
-        let groups = Set(proxies.filter { $0.value["all"] != nil }.keys)
+    private func accumulate(_ next: [String: [String: Any]], connections: [[String: Any]]) {
+        let types = proxyTypes ?? [:], groups = proxyGroups
         let hosts = Dictionary(connections.compactMap { value -> (String, String)? in
             guard let id = value["id"] as? String, let metadata = value["metadata"] as? [String: Any] else { return nil }
             let host = (metadata["host"] as? String ?? "").trimmingCharacters(in: .whitespaces)
@@ -393,9 +418,11 @@ import CryptoKit
         } else if command.scope == "reselect" {
             _ = try await api("/group/" + name + "/delay", query: query, timeout: 8)
         } else {
-            let providers = try await api("/providers/proxies")
-            let nodes = (providers["providers"] as? [String: [String: Any]])?["ecy-panel-nodes"]?["proxies"] as? [[String: Any]] ?? []
-            let path = nodes.contains(where: { $0["name"] as? String == command.node }) ? "/providers/proxies/ecy-panel-nodes/\(name)/healthcheck" : "/proxies/\(name)/delay"
+            let providers = try await api("/providers/proxies")["providers"] as? [String: [String: Any]] ?? [:]
+            let home = [NodeWorkingSet.nodesProvider, NodeWorkingSet.probeProvider].first { provider in
+                (providers[provider]?["proxies"] as? [[String: Any]])?.contains { $0["name"] as? String == command.node } == true
+            }
+            let path = home.map { "/providers/proxies/\($0)/\(name)/healthcheck" } ?? "/proxies/\(name)/delay"
             let result = try await api(path, query: query, timeout: 8)
             guard let value = result["delay"] as? Int, value > 0 else { throw TunnelError.control }
             delay = value

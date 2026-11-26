@@ -13,6 +13,9 @@ class LocalTemplateOptions {
     this.authenticateMixedPort = false,
     this.routeMode = 'rule',
     this.tunInterfaceName = defaultTunInterfaceName,
+    this.tunSetsSystemDns = false,
+    this.strictRouteNeedsTunIPv6 = false,
+    this.lanNamesViaSystemDns = false,
     this.tunStack = 'mixed',
     this.tunMtu = 9000,
     this.tunAddress4 = '172.19.0.1/30',
@@ -35,6 +38,9 @@ class LocalTemplateOptions {
   final bool authenticateMixedPort;
   final String routeMode;
   final String tunInterfaceName;
+  final bool tunSetsSystemDns;
+  final bool strictRouteNeedsTunIPv6;
+  final bool lanNamesViaSystemDns;
   final String tunStack;
   final int tunMtu;
   final String tunAddress4;
@@ -69,8 +75,8 @@ class LocalTemplate {
   final LocalTemplateOptions options;
   final ClashApiOptions clashApi;
 
-  // auto-route 会让 TUN 接管默认路由，本机服务、局域网与组播（局域网联机、
-  // 设备发现）随之被吸进隧道；排除后这些网段仍走物理网卡
+  // auto-route 会让 TUN 接管默认路由，本机、局域网、组播、CGNAT 与保留网段随之被吸进隧道；
+  // 排除后仍走物理网卡。Apple 与 OpenWrt 的排除列表须与这里逐项一致
   static const List<String> excludedRoutes = <String>[
     '127.0.0.0/8',
     '10.0.0.0/8',
@@ -78,7 +84,13 @@ class LocalTemplate {
     '192.168.0.0/16',
     '169.254.0.0/16',
     '224.0.0.0/4',
+    '0.0.0.0/8',
+    '100.64.0.0/10',
+    '192.0.0.0/24',
+    '192.88.99.0/24',
+    '240.0.0.0/4',
     '::1/128',
+    '100::/64',
     'fc00::/7',
     'fe80::/10',
     'ff00::/8',
@@ -129,7 +141,11 @@ class LocalTemplate {
       'allow-private-network': false,
     },
     'tun': tun,
-    'ipv6': options.ipv6Enabled,
+    // 不看 tun.enable：待机内核以关闭的 TUN 启动，连接时才经控制口热打开，TUN 的 IPv6 地址要在启动时就保住；
+    // 给系统的 AAAA 仍由 dns.ipv6 按用户设置决定
+    'ipv6':
+        options.ipv6Enabled ||
+        options.strictRouteNeedsTunIPv6 && options.tunStrictRoute,
     'profile': <String, dynamic>{'store-selected': true, 'store-fake-ip': true},
   };
 
@@ -148,6 +164,7 @@ class LocalTemplate {
     'strict-route': options.tunStrictRoute,
     'mtu': options.tunMtu,
     'dns-hijack': const <String>['any:53'],
+    if (options.tunSetsSystemDns) 'dns-mode': 'hijack',
     'inet4-address': <String>[options.tunAddress4],
     // IPv6 地址必须恒定下发：strict-route 在 TUN 缺少 IPv6 地址时会向 WFP
     // 注册一条全局阻断规则，连 ::1 都不可达

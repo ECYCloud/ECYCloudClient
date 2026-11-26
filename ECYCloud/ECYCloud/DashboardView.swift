@@ -10,8 +10,10 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.productPageActive) private var pageActive
     @State private var snapshot: TunnelSnapshot?
     @State private var samples: [RateSample] = []
+    @State private var history = RateHistory()
     @State private var failure: String?
     @State private var selectedGroup = ""
     @State private var working = false
@@ -38,6 +40,10 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 12) { connectionStatus; connectionActions.frame(maxWidth: .infinity) }
                     }
                 }
+                if let expiry = session.sessionExpiryNotice() {
+                    Text(verbatim: L10n.t("登录将于 {0} 到期，到期后连接会断开，请在此之前退出并重新登录。", [ProductFormat.dateTime(expiry)]))
+                        .font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 24)
+                }
                 if session.preferences.mode == .direct {
                     ProductCard(title: L10n.t("当前节点"), icon: "cell_tower_outlined") { Text(L10n.t("直连")) }
                 } else if let catalog = session.catalog {
@@ -47,12 +53,12 @@ struct DashboardView: View {
                             let group = currentGroup(groups, catalog: catalog)
                             let now = snapshot?.selections[group.id] ?? ""
                             let leaf = resolvedNode(now)
-                            let standbyFailure = state == .disconnected && session.connection?.preparingStandby == false ? session.connection?.message : nil
+                            let standbyFailure = state == .disconnected && session.connection?.preparingStandby == false ? session.connection?.standbyMessage : nil
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(verbatim: leaf.isEmpty ? (ready ? L10n.t("未选择节点") : standbyFailure.map { L10n.t("内核启动失败：{0}", [$0]) } ?? L10n.t("正在准备内核")) : catalog.displayName(leaf))
                                         .font(.system(size: 13, weight: .semibold)).lineLimit(wide ? 1 : 3)
-                                    if let node = catalog.nodes.first(where: { $0.id == leaf }) {
+                                    if let node = catalog.node(leaf) {
                                         HStack(spacing: 4) {
                                             ForEach([node.protocolName, node.network, node.tls, node.udp].filter { !$0.isEmpty }, id: \.self) { ProductTag(text: $0) }
                                         }
@@ -74,7 +80,7 @@ struct DashboardView: View {
                                                 leading: { name in AnyView(ProductGroupIcon(session: session, url: catalog.groupIcons[name], selectable: groups.first { $0.id == name }?.selectable ?? true, size: 16)) }) { catalog.displayName($0) }
                                     .disabled(session.preferences.mode == .global)
                             } right: {
-                                ProductDropdown(label: L10n.t("节点"), values: group.members, selection: Binding(get: { now }, set: { node in
+                                ProductDropdown(label: L10n.t("节点"), values: session.members(of: group), selection: Binding(get: { now }, set: { node in
                                     Task { await perform { try await session.selectActiveNode(group: group.id, node: node) } }
                                 }), trailing: { member in
                                     let delay = session.nodeProbes.result(resolvedNode(member), kind: .delay)
@@ -82,7 +88,7 @@ struct DashboardView: View {
                                         return AnyView(Text(String(delay.delay)).font(.system(size: 11, weight: .semibold)).monospacedDigit().foregroundStyle(ProductProbeBadge.delayColor(delay.delay, scheme: scheme)))
                                     }
                                     return nil
-                                }) { $0.isEmpty ? (ready ? L10n.t("未选择") : L10n.t("内核尚未就绪")) : catalog.displayName($0) }
+                                }) { $0.isEmpty ? (ready ? L10n.t("未选择") : L10n.t("内核尚未就绪")) : session.displayName($0) }
                                     .disabled(!ready || !group.selectable || group.members.isEmpty || working)
                             }
                         }.headerAction {
@@ -196,26 +202,29 @@ struct DashboardView: View {
         } message: {
             Text(verbatim: checkinMessage ?? "")
         }
-        .task(id: "\(ready)|\(connected)|\(scenePhase)") {
-            guard ready else { samples = []; snapshot = nil; failure = nil; return }
-            guard scenePhase == .active else { return }
+        // 与 connection_controller.dart 一致：流量每秒只在接管时取，出站与选中项 5 秒一次；待机且首页不可见时不取
+        .task(id: "\(ready)|\(connected)|\(scenePhase)|\(pageActive)") {
+            guard ready else { samples = []; history.samples = []; snapshot = nil; failure = nil; return }
+            guard scenePhase == .active, connected || pageActive else { return }
             while !Task.isCancelled && ready {
                 do {
                     let value = try await session.tunnelSnapshot()
                     try Task.checkCancellation()
-                    snapshot = value; failure = nil
-                    if connected { samples.append(RateSample(date: .now, upload: value.upload, download: value.download)) }
-                    else { samples = [] }
-                    samples.removeAll { $0.date < .now.addingTimeInterval(-60) }
+                    if connected { history.samples.append(RateSample(date: .now, upload: value.upload, download: value.download)) }
+                    else { history.samples = [] }
+                    history.samples.removeAll { $0.date < .now.addingTimeInterval(-60) }
+                    // 各页常驻在 ZStack 里，写 @State 会让隐藏的首页每秒重算重绘；隐藏时只记走势历史，切回首页再写
+                    if pageActive { snapshot = value; failure = nil; samples = history.samples }
                 } catch is CancellationError { break }
-                catch { failure = (error as? ClientError)?.localizedDescription ?? (error as? TunnelError)?.localizedDescription ?? L10n.t("无法读取实时流量。") }
-                do { try await Task.sleep(for: .seconds(1)) } catch { break }
+                catch { if pageActive { failure = (error as? ClientError)?.localizedDescription ?? (error as? TunnelError)?.localizedDescription ?? L10n.t("无法读取实时流量。") } }
+                do { try await Task.sleep(for: .seconds(connected ? 1 : 5)) } catch { break }
             }
         }
     }
     private var connectionStatus: some View {
         let busy = [.preparing, .connecting, .reconnecting, .disconnecting].contains(state)
         let failed = state == .disconnected && session.connection?.message != nil
+        let stopFailed = state == .disconnecting && session.connection?.message != nil
         let color = connected ? colors.success : busy ? colors.warning : failed ? colors.danger : colors.outline
         let label = connected ? L10n.t("已连接") : state == .disconnecting ? L10n.t("正在断开连接") : busy ? L10n.t("正在连接")
             : failed ? L10n.t("连接失败") : L10n.t("未连接")
@@ -223,7 +232,7 @@ struct DashboardView: View {
             ZStack {
                 Circle().fill(color.opacity(0.12))
                 Circle().strokeBorder(color.opacity(0.22), lineWidth: 1)
-                if busy {
+                if busy && !stopFailed {
                     TimelineView(.animation(paused: reduceMotion)) { context in
                         Circle().trim(from: 0, to: 0.75).stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .rotationEffect(.degrees(reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2 * 360))
@@ -235,11 +244,15 @@ struct DashboardView: View {
             .frame(width: 50, height: 50)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: label).font(.system(size: 17, weight: .semibold))
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(verbatim: connectionDetail(failed: failed, now: context.date))
-                        .font(.system(size: 12)).foregroundStyle(failed || (state == .disconnecting && session.connection?.message != nil) ? colors.danger : colors.secondary)
-                        .lineLimit(2)
+                Group {
+                    if connected && pageActive {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in Text(verbatim: connectionDetail(failed: failed, now: context.date)) }
+                    } else {
+                        Text(verbatim: connectionDetail(failed: failed, now: .now))
+                    }
                 }
+                .font(.system(size: 12)).foregroundStyle(failed || stopFailed ? colors.danger : colors.secondary)
+                .lineLimit(2)
             }
         }
     }
@@ -417,6 +430,7 @@ struct DashboardView: View {
     }
 }
 private struct RateSample { let date: Date; let upload: Int64, download: Int64 }
+private final class RateHistory { var samples: [RateSample] = [] }
 private struct RateGraph: View {
     let samples: [RateSample]
     let upload: Bool

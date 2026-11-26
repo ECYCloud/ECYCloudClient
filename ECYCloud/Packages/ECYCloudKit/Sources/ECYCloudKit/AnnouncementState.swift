@@ -31,9 +31,9 @@ public final class AnnouncementState {
         seen = Dictionary(bundle.announcements.map { (String($0.id), $0.updatedAt) }, uniquingKeysWith: { _, next in next })
         defaults.set(seen, forKey: scope + ".seen")
     }
+    // 铃铛总是打开最新发布的一条；未读只决定红点
     public func openIndex(_ items: [Announcement]) -> Int {
-        items.firstIndex { $0.id != 1 && seen[String($0.id)] != $0.updatedAt }
-            ?? items.firstIndex { $0.id != 1 } ?? 0
+        items.firstIndex { $0.id != 1 } ?? 0
     }
     public func takePopup() -> Announcement? {
         guard scope != nil, let popup = bundle?.popup, dismissed[String(popup.id)] != popup.updatedAt else { return nil }

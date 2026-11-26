@@ -15,7 +15,8 @@
     纯图形，与 Windows / Linux 托盘同一张；Android：按 mipmap 密度输出，
     并生成 Android TV 主屏 banner（`drawable-*/ic_banner.png`，xhdpi 为 320×180）；
     Linux：按 hicolor 档位输出，随 deb 装进 /usr/share/icons。
-    Apple 原生（ECYCloud/）：AppIcon.appiconset 的 macOS 档位与 Flutter macOS 同图，iOS 用主图原样；
+    Apple 原生（ECYCloud/）：AppIcon.appiconset 的 macOS 档位与 Flutter macOS 同图，iOS 用白底画满整块画布、不带透明通道的主图
+    （App Store 拒收带 alpha 的 iOS 图标，圆角由系统遮罩）；
     tvOS 的 TVAppIcon.brandassets 输出纯色背景层、图形前景层与 Top Shelf 横幅（与 Android TV banner 同版式）；
     visionOS 的 VisionAppIcon.solidimagestack 按同一底色与占比输出 1024 px 背景层与前景层。
 #>
@@ -80,11 +81,12 @@ function Save-Banner {
         [int]$BannerWidth,
         [int]$BannerHeight,
         [string]$Path,
-        [string]$Label
+        [string]$Label,
+        [System.Drawing.Imaging.PixelFormat]$Format = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
     )
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
-    $bitmap = New-Object System.Drawing.Bitmap($BannerWidth, $BannerHeight, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bitmap = New-Object System.Drawing.Bitmap($BannerWidth, $BannerHeight, $Format)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
@@ -381,7 +383,15 @@ try {
             Save-MacPng -Image $master -Size $size -Path (Join-Path $dir "app_icon_$size.png")
         }
     }
-    Copy-Item -LiteralPath $Source -Destination (Join-Path $appleIconDir 'app_icon_ios.png') -Force
+    $iosIcon = New-Square -Image $master -Size 1024 `
+        -Background ([System.Drawing.Color]::White) `
+        -Format ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    try {
+        $iosIcon.Save((Join-Path $appleIconDir 'app_icon_ios.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    finally {
+        $iosIcon.Dispose()
+    }
     foreach ($stack in $tvIconStacks) {
         foreach ($size in $stack.Sizes) {
             $name = "$($size[0])x$($size[1]).png"
@@ -399,7 +409,7 @@ try {
         foreach ($size in $shelf.Sizes) {
             Save-Banner -Image $master -BannerWidth $size[0] -BannerHeight $size[1] `
                 -Path (Join-Path $tvIconDir "$($shelf.Set)\top_shelf_$($size[0])x$($size[1]).png") `
-                -Label $bannerLabel
+                -Label $bannerLabel -Format ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
         }
     }
     foreach ($size in $macMenuBarSizes) {
@@ -442,6 +452,6 @@ Write-Host "macOS 分层图标图形已生成：$macGlassDir（1024 px，占比 
 Write-Host "Linux 图标已生成：$linuxIconDir（$($linuxSizes -join '/') px）"
 Write-Host "Android 图标已生成：$androidResDir（$($androidSizes.Values -join '/') px）"
 Write-Host "Android TV banner 已生成：$androidResDir（xhdpi 320x180）"
-Write-Host "Apple 原生图标已生成：$appleIconDir（macOS $($macSizes -join '/') px，iOS 主图）"
+Write-Host "Apple 原生图标已生成：$appleIconDir（macOS $($macSizes -join '/') px，iOS 1024 px 白底不透明）"
 Write-Host "tvOS 图标与 Top Shelf 已生成：$tvIconDir"
 Write-Host "visionOS 分层图标已生成：$visionIconDir"

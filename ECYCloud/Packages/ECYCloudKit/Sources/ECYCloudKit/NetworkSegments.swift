@@ -22,8 +22,9 @@ public struct NetworkRoute: Equatable, Sendable {
 }
 
 public enum NetworkSegments {
-    public static let proxyDefaults = ["127.0.0.1", "localhost", "*.local", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
-    public static let routeDefaults = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8"]
+    public static let proxyDefaults = ["127.0.0.1", "localhost", "*.local", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                                       "*.lan", "*.home.arpa", "*.internal", "*.localdomain"]
+    public static let routeDefaults = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.88.99.0/24", "240.0.0.0/4", "::1/128", "100::/64", "fc00::/7", "fe80::/10", "ff00::/8"]
     public static func split(_ text: String) -> [String] {
         text.components(separatedBy: CharacterSet(charactersIn: ",;\n\r"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }

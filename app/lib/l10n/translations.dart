@@ -62,8 +62,8 @@ const Map<String, String> _zhTW = <String, String>{
   '昨日': '昨日',
   '暂无排行数据': '暫無排行資料',
   '严格路由': '嚴格路由',
-  '阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用':
-      '阻斷繞過 TUN 的 DNS 查詢以防洩漏，代價是打斷本機回送通訊，遊戲與虛擬機器可能無法使用',
+  '阻断绕过 TUN 的 DNS 查询防泄露，代价是直接查询局域网 DNS 的程序（如借宿主机网络上网的虚拟机）可能无法解析域名':
+      '阻斷繞過 TUN 的 DNS 查詢以防洩漏，代價是直接查詢區域網路 DNS 的程式（例如透過主機網路上網的虛擬機器）可能無法解析網域名稱',
   '允许局域网连接': '允許區域網路連線',
   '混合端口监听全部网卡，供同网段其它设备使用': '混合連接埠監聽全部網路介面卡，供同網段其它裝置使用',
   '启用 IPv6': '啟用 IPv6',
@@ -89,19 +89,21 @@ const Map<String, String> _zhTW = <String, String>{
   '更新': '更新',
   '客户端': '用戶端',
   '更新客户端到 {0}': '更新用戶端到 {0}',
-  '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。':
-      '將從 GitHub 下載安裝檔並驗證 SHA-256，隨後啟動安裝程式並彈出系統管理員授權。用戶端會自行結束讓安裝程式取代檔案，期間連線會中斷。',
+  '将从 GitHub 下载安装包并校验 SHA-256，随后打开系统安装程序；首次更新需按提示允许本应用安装未知应用。安装时客户端会退出，期间连接会断开。': '將從 GitHub 下載安裝檔並驗證 SHA-256，隨後開啟系統安裝程式；首次更新需依提示允許本應用程式安裝不明應用程式。安裝時用戶端會結束，期間連線會中斷。',
+  '请允许本应用安装未知应用，返回后再次点击「更新」即可安装，已下载的安装包不会重新下载。':
+      '請允許本應用程式安裝不明應用程式，返回後再次點選「更新」即可安裝，已下載的安裝檔不會重新下載。',
+  '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。': '將從 GitHub 下載安裝檔並驗證 SHA-256，隨後啟動安裝程式並彈出系統管理員授權。用戶端會自行結束讓安裝程式取代檔案，期間連線會中斷。',
   '下载并安装': '下載並安裝',
   'mihomo 内核': 'mihomo 核心',
   '检查内核更新': '檢查核心更新',
   '升级': '升級',
   '内核': '核心',
   '升级内核到 {0}': '升級核心到 {0}',
-  '将从 mihomo 官方发布页下载约 17 MB 并校验 SHA-256，替换时连接会短暂中断，随后自动重连。校验或替换失败会自动回退到当前版本。':
-      '將從 mihomo 官方發佈頁下載約 17 MB 並驗證 SHA-256，取代時連線會短暫中斷，隨後自動重新連線。驗證或取代失敗會自動還原為目前版本。',
+  '将从 mihomo 官方发布页下载约 17 MB 并校验 SHA-256，替换时连接会短暂中断，随后自动重连。校验或替换失败会自动回退到当前版本。': '將從 mihomo 官方發佈頁下載約 17 MB 並驗證 SHA-256，取代時連線會短暫中斷，隨後自動重新連線。驗證或取代失敗會自動還原為目前版本。',
   '面板配置': '面板設定',
   '面板配置不规范': '面板設定格式不正確',
   '配置校验未通过：{0}': '設定驗證失敗：{0}',
+  '内核配置校验失败：{0}': '核心設定驗證失敗：{0}',
   '面板下发的不是一份完整配置': '面板提供的不是一份完整設定',
   '面板未下发任何可用节点': '面板未提供任何可用節點',
   '节点列表格式不对': '節點清單格式不對',
@@ -239,6 +241,7 @@ const Map<String, String> _zhTW = <String, String>{
   '正在校验安装包': '正在驗證安裝檔',
   '正在启动安装程序': '正在啟動安裝程式',
   '已连接 {0}': '已連線 {0}',
+  '登录将于 {0} 到期，到期后连接会断开，请在此之前退出并重新登录。': '登入將於 {0} 到期，到期後連線會中斷，請在此之前登出並重新登入。',
   '正在启动内核，请稍候': '正在啟動核心，請稍候',
   '首次连接需下载分流规则集，可能耗时较久，请勿关闭': '首次連線需下載分流規則集，可能耗時較久，請勿關閉',
   '正在断开连接，请稍候': '正在中斷連線，請稍候',
@@ -255,6 +258,8 @@ const Map<String, String> _zhTW = <String, String>{
   '密码': '密碼',
   '请填写密码': '請填寫密碼',
   '记住账号密码': '記住帳號密碼',
+  '未检测到系统密钥环，无法记住密码；登录状态仍会保留。安装 GNOME Keyring 或 KWallet 后重新打开客户端即可使用。':
+      '未偵測到系統金鑰圈，無法記住密碼；登入狀態仍會保留。安裝 GNOME Keyring 或 KWallet 後重新開啟用戶端即可使用。',
   '密码登录': '密碼登入',
   '邮箱验证码登录': '電子郵件驗證碼登入',
   '忘记密码？': '忘記密碼？',
@@ -574,7 +579,8 @@ const Map<String, String> _zhTW = <String, String>{
   '{0} 个节点{1}': '{0} 個節點{1}',
   '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选':
       '本群組由核心依清單順序選用第一個可用節點，點選節點不改變選取項目；測延遲會更新可用性並讓核心立即重選',
-  '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选': '本群組由核心依延遲自動選擇，點選節點不改變選取項目；測延遲會讓核心立即重選',
+  '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选':
+      '本群組由核心依延遲自動選擇，點選節點不改變選取項目；測延遲會讓核心立即重選',
   '本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去':
       '本群組由核心依延遲自動選擇，目前最佳節點為 {0}；點上方測延遲可讓核心立即切過去',
   '订单号 / 商品名': '訂單號 / 商品名',
@@ -807,6 +813,7 @@ const Map<String, String> _zhTW = <String, String>{
   '共 {0} 行': '共 {0} 行',
   '创建工单': '建立客服單',
   '如需与我们沟通，请点击创建工单按钮。': '如需與我們溝通，請點選建立客服單按鈕。',
+  '请把问题表达清楚：出现时间、设备与客户端版本、节点名称、具体现象和已尝试的操作，最好附上截图或运行日志。信息过少（例如“用不了”“连不上”）可能会被忽略。': '請把問題描述清楚：發生時間、裝置與用戶端版本、節點名稱、具體狀況及已嘗試的操作，最好附上截圖或執行記錄。資訊過少（例如「無法使用」「連不上」）可能會被忽略。',
   '刷新工单': '更新客服單',
   '标题 / 工单号': '標題 / 客服單號',
   '您已被禁止发起或回复工单': '您已被禁止發起或回覆客服單',
@@ -827,6 +834,7 @@ const Map<String, String> _zhTW = <String, String>{
   '您已被禁止回复工单': '您已被禁止回覆客服單',
   '暂无消息': '暫無訊息',
   '暂无运行日志': '暫無執行記錄',
+  '如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。': '如果是回報用戶端問題，請在回覆或送出客服單時點選並勾選執行記錄。',
   '标题': '標題',
   '内容': '內容',
   '图片': '圖片',
@@ -834,8 +842,7 @@ const Map<String, String> _zhTW = <String, String>{
   '运行日志': '執行記錄',
   '提交': '送出',
   '流量记录说明': '流量記錄說明',
-  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。':
-      '如果您手動測試了一些節點的延遲或者您使用了包含自動選擇和故障轉移策略的訂閱，如：Clash / Stash、Surge等自帶分流策略的訂閱連結，以及Quantumult X、Shadowrocket、Loon等帶自動測試的分流規則，會每隔一段時間測試一次延遲（通常是每5分鐘左右），以檢查最低延遲的節點以及節點存活性，這部分測試也會被計入流量，通常每個節點在一小時內自動測試延遲所消耗的流量在1-5KB左右。',
+  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。': '如果您手動測試了一些節點的延遲或者您使用了包含自動選擇和故障轉移策略的訂閱，如：Clash / Stash、Surge等自帶分流策略的訂閱連結，以及Quantumult X、Shadowrocket、Loon等帶自動測試的分流規則，會每隔一段時間測試一次延遲（通常是每5分鐘左右），以檢查最低延遲的節點以及節點存活性，這部分測試也會被計入流量，通常每個節點在一小時內自動測試延遲所消耗的流量在1-5KB左右。',
   '如需关闭自动测试可在本客户端的 ': '如需關閉自動測試可在本用戶端的 ',
   ' 关闭 自动选择 和 故障转移 策略组。': ' 關閉 自動選擇 和 故障轉移 策略群組。',
   '此处只展示最近 {0} 天的每日流量记录。': '此處只展示最近 {0} 天的每日流量記錄。',
@@ -857,8 +864,7 @@ const Map<String, String> _zhTW = <String, String>{
   '搜索节点': '搜尋節點',
   '您可以在这里查看节点的流媒体和各大AI平台解锁情况。': '您可以在這裡檢視節點的串流媒體和各大AI平台解鎖情況。',
   '每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。': '每 {0} 小時更新一次，測試結果僅供參考，請以實際使用情況為準。',
-  '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)':
-      '（YouTube Premium 檢測結果如果顯示：No，可能無法正常使用Google服務，如需使用Google Play、YouTube Music等請切換到其他節點）',
+  '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)': '（YouTube Premium 檢測結果如果顯示：No，可能無法正常使用Google服務，如需使用Google Play、YouTube Music等請切換到其他節點）',
   '暂无解锁检测结果': '暫無解鎖檢測結果',
   '更新时间': '更新時間',
   '最近 {0} 天的在线客户端': '最近 {0} 天的線上用戶端',
@@ -941,6 +947,7 @@ const Map<String, String> _zhTW = <String, String>{
   '原生侧未返回应用数据目录': '原生端未回傳應用程式資料目錄',
   '应用数据目录尚未就绪，AppPaths.bootstrap 未先行完成': '應用程式資料目錄尚未就緒，AppPaths.bootstrap 尚未完成',
   '无法限制应用数据目录权限': '無法限制應用程式資料目錄權限',
+  '无法限制文件权限': '無法限制檔案權限',
   '环境变量 {0} 不存在，无法定位应用数据目录': '缺少環境變數 {0}，無法定位應用程式資料目錄',
   '{0} 平台尚未实现': '尚未支援 {0} 平台',
   '构建缺少站点域名': '此版本缺少網站網域',
@@ -1024,6 +1031,9 @@ const Map<String, String> _zhTW = <String, String>{
   '账号状态已恢复正常。': '帳號狀態已恢復正常。',
   '签到成功': '簽到成功',
   'TUN 模式不可用：{0}': 'TUN 模式無法使用：{0}',
+  'TUN 环境检查失败：{0}': 'TUN 環境檢查失敗：{0}',
+  'TUN 的路由规则反复被其它程序清除': 'TUN 的路由規則反覆被其他程式清除',
+  '内核未能接管 TUN，详见内核日志': '核心未能接管 TUN，詳見核心記錄',
   '与后台服务失联：{0}': '與背景服務失去連線：{0}',
   '未知原因': '未知原因',
   '停止候选内核失败，不能回滚: {0}': '無法停止候選核心，無法還原：{0}',
@@ -1065,6 +1075,7 @@ const Map<String, String> _zhTW = <String, String>{
   '强制结束内核进程 {0} 失败: {1}': '無法強制結束核心處理程序 {0}：{1}',
   '内核进程 {0} 在停止期限内未回收': '核心處理程序 {0} 未在停止期限內結束',
   '写入待校验配置失败: {0}': '無法寫入待驗證的設定：{0}',
+  '配置校验未能完成: {0}': '無法完成設定驗證：{0}',
   '缺少内核 PID': '缺少核心 PID',
   '无效的内核 PID': '無效的核心 PID',
   '连接内核控制台失败: {0}': '無法連線至核心主控台：{0}',
@@ -1184,7 +1195,7 @@ const Map<String, String> _zhTW = <String, String>{
   '系统未提供 VPN 授权界面，此设备无法建立 VPN 连接（{0}）': '系統未提供 VPN 授權畫面，此裝置無法建立 VPN 連線（{0}）',
   '用户未授予 VPN 权限': '使用者未授予 VPN 權限',
   '系统拒绝启动内核（{0}）': '系統拒絕啟動核心（{0}）',
-  'VPN 授权已被其它应用接管': 'VPN 授權已被其他應用程式接管',
+  'VPN 已被系统或其它应用停用': 'VPN 已被系統或其他應用程式停用',
   '已从通知断开连接': '已從通知中斷線',
   '不能读取旧运行目录': '無法讀取舊執行目錄',
   '缺少参数': '缺少參數',
@@ -1193,8 +1204,10 @@ const Map<String, String> _zhTW = <String, String>{
   '打开服务失败（Win32 错误 {0}）': '無法開啟服務（Win32 錯誤 {0}）',
   '查询服务状态失败（Win32 错误 {0}）': '無法查詢服務狀態（Win32 錯誤 {0}）',
   '启动服务失败（Win32 错误 {0}）': '無法啟動服務（Win32 錯誤 {0}）',
-  '当前账户无权启动该服务，请以管理员身份启动 ECYCloudService': '目前帳戶無權啟動此服務，請以系統管理員身分啟動 ECYCloudService',
-  '后台服务未运行，执行 sudo systemctl start ecycloud-helper 或重装客户端': '背景服務未執行，請執行 sudo systemctl start ecycloud-helper 或重新安裝用戶端。',
+  '当前账户无权启动该服务，请以管理员身份启动 ECYCloudService':
+      '目前帳戶無權啟動此服務，請以系統管理員身分啟動 ECYCloudService',
+  '后台服务未运行，执行 sudo systemctl start ecycloud-helper 或重装客户端':
+      '背景服務未執行，請執行 sudo systemctl start ecycloud-helper 或重新安裝用戶端。',
   '后台服务未安装或未运行，请重新运行安装包': '背景服務尚未安裝或未執行，請重新執行安裝程式。',
   '服务处理失败': '服務處理失敗',
   '没有账号？': '沒有帳號？',
@@ -1205,17 +1218,17 @@ const Map<String, String> _zhTW = <String, String>{
   '确认切换到中国？': '確認切換到中國？',
   '切换到海外': '切換到海外',
   '切换到中国': '切換到中國',
-  '选择海外后，中国大陆的网站和 IP 也将经代理节点访问。身处中国大陆时请勿选择，否则国内网站、App 会明显变慢，部分服务可能无法使用。': '選擇海外後，中國大陸的網站和 IP 也將經代理節點存取。身處中國大陸時請勿選擇，否則國內網站、App 會明顯變慢，部分服務可能無法使用。',
-  '选择中国后，中国大陆的网站和 IP 将直接连接，不经过代理节点。身处海外时请勿选择，否则访问中国大陆服务可能受限。': '選擇中國後，中國大陸的網站和 IP 將直接連線，不經過代理節點。身處海外時請勿選擇，否則存取中國大陸服務可能受限。',
+  '选择海外后，中国大陆的网站和 IP 也将经代理节点访问。身处中国大陆时请勿选择，否则国内网站、App 会明显变慢，部分服务可能无法使用。':
+      '選擇海外後，中國大陸的網站和 IP 也將經代理節點存取。身處中國大陸時請勿選擇，否則國內網站、App 會明顯變慢，部分服務可能無法使用。',
+  '选择中国后，中国大陆的网站和 IP 将直接连接，不经过代理节点。身处海外时请勿选择，否则访问中国大陆服务可能受限。':
+      '選擇中國後，中國大陸的網站和 IP 將直接連線，不經過代理節點。身處海外時請勿選擇，否則存取中國大陸服務可能受限。',
   '选择中国时，中国的流量走直连，海外的流量走代理。': '選擇中國時，中國的流量走直連，海外的流量走代理。',
   '选择海外时，所有的流量都走代理（包括中国流量）。': '選擇海外時，所有的流量都走代理（包括中國流量）。',
 };
 
 const Map<String, String> _en = <String, String>{
-  '修改成功，订阅链接与节点密码已重置，旧订阅链接与旧节点密码已失效。官方客户端需使用新密码重新登录；第三方客户端需重新导入最新订阅。':
-      'Updated. Your subscription URL and node password have been reset; the old URL and password are no longer valid. Sign in again with your new password in official apps, and reimport the latest subscription in third-party apps.',
-  '重置成功，订阅链接与节点密码已重置，旧订阅链接与旧节点密码已失效。其他官方客户端需使用新密码重新登录；第三方客户端需重新导入最新订阅。':
-      'Password reset. Your subscription URL and node password have also been reset; the old URL and password are no longer valid. Sign in again with your new password in other official apps, and reimport the latest subscription in third-party apps.',
+  '修改成功，订阅链接与节点密码已重置，旧订阅链接与旧节点密码已失效。官方客户端需使用新密码重新登录；第三方客户端需重新导入最新订阅。': 'Updated. Your subscription URL and node password have been reset; the old URL and password are no longer valid. Sign in again with your new password in official apps, and reimport the latest subscription in third-party apps.',
+  '重置成功，订阅链接与节点密码已重置，旧订阅链接与旧节点密码已失效。其他官方客户端需使用新密码重新登录；第三方客户端需重新导入最新订阅。': 'Password reset. Your subscription URL and node password have also been reset; the old URL and password are no longer valid. Sign in again with your new password in other official apps, and reimport the latest subscription in third-party apps.',
   '修改成功': 'Updated',
   '修改成功，官方客户端将在 60 秒内自动退出登录，请使用新密码重新登录': 'Updated. Official apps will sign out within 60 seconds. Sign in again with your new password.',
   '设置': 'Settings',
@@ -1243,21 +1256,17 @@ const Map<String, String> _en = <String, String>{
   '配置': 'Config',
   '关于': 'About',
   '设置系统代理': 'Set system proxy',
-  '把系统代理指向本机混合端口，只对读取该设置的程序生效，其余程序需要 TUN 模式；退出与崩溃后自动还原':
-      'Point the system proxy to the local mixed port. Only apps that honor this setting are affected; others need TUN. Restored automatically after exit or crash.',
+  '把系统代理指向本机混合端口，只对读取该设置的程序生效，其余程序需要 TUN 模式；退出与崩溃后自动还原': 'Point the system proxy to the local mixed port. Only apps that honor this setting are affected; others need TUN. Restored automatically after exit or crash.',
   '系统代理绕过': 'System proxy bypass',
-  '追加到默认列表，支持通配，例如 192.168.56.* 或 example.com':
-      'Appended to the default list. Wildcards allowed, e.g. 192.168.56.* or example.com',
+  '追加到默认列表，支持通配，例如 192.168.56.* 或 example.com': 'Appended to the default list. Wildcards allowed, e.g. 192.168.56.* or example.com',
   '追加到默认列表，例如 192.168.56.0/24 或 *.local':
       'Appended to the default list, e.g. 192.168.56.0/24 or *.local',
   '默认绕过': 'Default bypass',
   'TUN 模式': 'TUN mode',
-  '接管系统全部流量，需要后台服务与虚拟网卡驱动':
-      'Takes over all system traffic. Requires the background service and virtual NIC driver.',
+  '接管系统全部流量，需要后台服务与虚拟网卡驱动': 'Takes over all system traffic. Requires the background service and virtual NIC driver.',
   'TUN 排除自定义网段': 'TUN excluded networks',
   '排除自定义网段': 'Excluded networks',
-  '仅支持 IPv4/IPv6 CIDR，例如 192.168.56.0/24 或 fd00::/8；局域网与回环已默认排除':
-      'IPv4/IPv6 CIDR only, e.g. 192.168.56.0/24 or fd00::/8. LAN and loopback are already excluded.',
+  '仅支持 IPv4/IPv6 CIDR，例如 192.168.56.0/24 或 fd00::/8；局域网与回环已默认排除': 'IPv4/IPv6 CIDR only, e.g. 192.168.56.0/24 or fd00::/8. LAN and loopback are already excluded.',
   '仅支持 IPv4/IPv6 CIDR': 'IPv4/IPv6 CIDR only',
   '仅支持主机名、IP、CIDR 或通配': 'Hostname, IP, CIDR, or wildcard only',
   '流量排行': 'Traffic ranking',
@@ -1267,8 +1276,7 @@ const Map<String, String> _en = <String, String>{
   '昨日': 'Yesterday',
   '暂无排行数据': 'No ranking data yet',
   '严格路由': 'Strict route',
-  '阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用':
-      'Blocks DNS that bypasses TUN to prevent leaks. This can break local loopback, games, and VMs.',
+  '阻断绕过 TUN 的 DNS 查询防泄露，代价是直接查询局域网 DNS 的程序（如借宿主机网络上网的虚拟机）可能无法解析域名': 'Blocks DNS that bypasses TUN to prevent leaks. Apps that query your local network\'s DNS server directly, such as VMs sharing the host\'s connection, may fail to resolve names.',
   '允许局域网连接': 'Allow LAN',
   '混合端口监听全部网卡，供同网段其它设备使用':
       'The mixed port listens on all interfaces for other devices on the LAN.',
@@ -1281,8 +1289,7 @@ const Map<String, String> _en = <String, String>{
   '启动后自动连接': 'Connect on launch',
   '关闭窗口时最小化到托盘': 'Minimize to tray on close',
   '日志落盘级别': 'Log file level',
-  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入，选 silent 则不写日志文件':
-      'The Logs page always shows all kernel logs. This only sets the file-write threshold: lowering it increases disk writes, and silent writes no log file.',
+  '日志页始终显示内核全部日志；此项决定写进日志文件的门槛，调低会显著增加磁盘写入，选 silent 则不写日志文件': 'The Logs page always shows all kernel logs. This only sets the file-write threshold: lowering it increases disk writes, and silent writes no log file.',
   '查看运行配置': 'View runtime config',
   '只读查看内核落盘的 config.json': 'Read-only view of the kernel config.json',
   '运行配置': 'Runtime config',
@@ -1295,19 +1302,20 @@ const Map<String, String> _en = <String, String>{
   '更新': 'Update',
   '客户端': 'App',
   '更新客户端到 {0}': 'Update app to {0}',
-  '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。':
-      'The installer will be downloaded from GitHub and verified with SHA-256, then launched with an administrator prompt. The app will quit so files can be replaced. Your connection will drop.',
+  '将从 GitHub 下载安装包并校验 SHA-256，随后打开系统安装程序；首次更新需按提示允许本应用安装未知应用。安装时客户端会退出，期间连接会断开。': 'The installer will be downloaded from GitHub and verified with SHA-256, then the system installer will open. The first time, follow the prompt to allow this app to install unknown apps. The client will close during installation, and your connection will be interrupted.',
+  '请允许本应用安装未知应用，返回后再次点击「更新」即可安装，已下载的安装包不会重新下载。': 'Allow this app to install unknown apps, then come back and tap Update again to install. The installer you already downloaded won\'t be downloaded again.',
+  '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。': 'The installer will be downloaded from GitHub and verified with SHA-256, then launched with an administrator prompt. The app will quit so files can be replaced. Your connection will drop.',
   '下载并安装': 'Download and install',
   'mihomo 内核': 'mihomo kernel',
   '检查内核更新': 'Check for kernel updates',
   '升级': 'Upgrade',
   '内核': 'Kernel',
   '升级内核到 {0}': 'Upgrade kernel to {0}',
-  '将从 mihomo 官方发布页下载约 17 MB 并校验 SHA-256，替换时连接会短暂中断，随后自动重连。校验或替换失败会自动回退到当前版本。':
-      'About 17 MB will be downloaded from the official mihomo releases and verified with SHA-256. The connection will drop briefly, then reconnect. A failed verify or replace rolls back automatically.',
+  '将从 mihomo 官方发布页下载约 17 MB 并校验 SHA-256，替换时连接会短暂中断，随后自动重连。校验或替换失败会自动回退到当前版本。': 'About 17 MB will be downloaded from the official mihomo releases and verified with SHA-256. The connection will drop briefly, then reconnect. A failed verify or replace rolls back automatically.',
   '面板配置': 'Panel config',
   '面板配置不规范': 'Clash profile is invalid',
   '配置校验未通过：{0}': 'Profile validation failed: {0}',
+  '内核配置校验失败：{0}': 'Kernel profile validation failed: {0}',
   '面板下发的不是一份完整配置': 'The panel did not send a complete config',
   '面板未下发任何可用节点': 'The panel did not publish any nodes',
   '节点列表格式不对': 'The node list is not in the expected format',
@@ -1355,11 +1363,9 @@ const Map<String, String> _en = <String, String>{
   '更新失败：{0}': 'Failed to update: {0}',
   '更新失败': 'Failed to update',
   '刷新面板配置': 'Refresh panel config',
-  '重新拉取节点与分流规则；节点变更后随账号信息刷新自动更新':
-      'Fetch nodes and routing rules again. Node changes also apply when account info refreshes.',
+  '重新拉取节点与分流规则；节点变更后随账号信息刷新自动更新': 'Fetch nodes and routing rules again. Node changes also apply when account info refreshes.',
   '更新 GeoData': 'Update GeoData',
-  '按面板 geox-url 重新下载地理位置数据库（需内核运行中）':
-      'Re-download geo databases from the panel geox-url. The kernel must be running.',
+  '按面板 geox-url 重新下载地理位置数据库（需内核运行中）': 'Re-download geo databases from the panel geox-url. The kernel must be running.',
   '混合代理端口': 'Mixed proxy port',
   'HTTP 与 SOCKS 共用，修改后重连生效':
       'Shared by HTTP and SOCKS. Reconnect to apply changes.',
@@ -1368,21 +1374,18 @@ const Map<String, String> _en = <String, String>{
   '自定义': 'Custom',
   '尚未添加': 'Nothing added yet',
   '设备已下线': 'Device disconnected',
-  '由于超出在线客户端数量限制，有新客户端请求连接，已将您的设备踢下线。':
-      'A new client connected after the online client limit was reached, so this device was disconnected.',
-  '该设备已被下线。':
-      'This device was disconnected.',
+  '由于超出在线客户端数量限制，有新客户端请求连接，已将您的设备踢下线。': 'A new client connected after the online client limit was reached, so this device was disconnected.',
+  '该设备已被下线。': 'This device was disconnected.',
   '在线客户端数量已达上限': 'Online client limit reached',
-  '在线客户端数量已达上限，是否下线其中一个客户端，以挪出位置？':
-      'The online client limit has been reached. Disconnect one client to make room?',
+  '在线客户端数量已达上限，是否下线其中一个客户端，以挪出位置？': 'The online client limit has been reached. Disconnect one client to make room?',
   '在线客户端数量已达上限，请选择一个要下线的客户端：':
       'The online client limit has been reached. Pick a client to disconnect:',
   '第三方客户端': 'Third-party client',
   '检测到更新': 'Update detected',
   '客户端更新': 'Client update',
-  '安装未完成，当前版本仍为 {0}': 'Installation did not complete. The current version is still {0}.',
-  '强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。':
-      'Please update now. An older app or kernel may be incompatible with the latest panel config and may fail to connect.',
+  '安装未完成，当前版本仍为 {0}':
+      'Installation did not complete. The current version is still {0}.',
+  '强烈建议立即更新。旧版客户端或内核可能与面板下发的最新配置不兼容，继续使用可能导致无法连接或行为异常。': 'Please update now. An older app or kernel may be incompatible with the latest panel config and may fail to connect.',
   '客户端 {0} → {1}': 'App {0} → {1}',
   'mihomo 内核 {0} → {1}': 'mihomo kernel {0} → {1}',
   '正在更新内核…': 'Updating kernel…',
@@ -1441,8 +1444,7 @@ const Map<String, String> _en = <String, String>{
   '登录': 'Sign in',
   '重置密码': 'Reset password',
   '本机版本未知，最新（{0}）': 'Local version unknown, latest ({0})',
-  '发现新版本（{0}），将随新版客户端提供，无需单独更新':
-      'Update available ({0}); ships with the next app release, no separate update needed',
+  '发现新版本（{0}），将随新版客户端提供，无需单独更新': 'Update available ({0}); ships with the next app release, no separate update needed',
   '本机版本未知': 'Local version unknown',
   '当前（{0}）': 'Current ({0})',
   '正在更新（{0}）': 'Updating ({0})',
@@ -1457,9 +1459,9 @@ const Map<String, String> _en = <String, String>{
   '正在校验安装包': 'Verifying installer',
   '正在启动安装程序': 'Starting installer',
   '已连接 {0}': 'Connected {0}',
+  '登录将于 {0} 到期，到期后连接会断开，请在此之前退出并重新登录。': 'Your sign-in expires on {0}. To stay connected, sign out and sign back in before then.',
   '正在启动内核，请稍候': 'Starting the kernel…',
-  '首次连接需下载分流规则集，可能耗时较久，请勿关闭':
-      'The first connection downloads rule sets and may take a while. Do not close the app.',
+  '首次连接需下载分流规则集，可能耗时较久，请勿关闭': 'The first connection downloads rule sets and may take a while. Do not close the app.',
   '正在断开连接，请稍候': 'Disconnecting…',
   '点击右侧按钮开始连接': 'Use the button on the right to connect',
   '请先填写邮箱': 'Enter your email first',
@@ -1475,6 +1477,7 @@ const Map<String, String> _en = <String, String>{
   '密码': 'Password',
   '请填写密码': 'Password is required',
   '记住账号密码': 'Remember email and password',
+  '未检测到系统密钥环，无法记住密码；登录状态仍会保留。安装 GNOME Keyring 或 KWallet 后重新打开客户端即可使用。': "No system keyring was found, so your password can't be saved. You'll still stay signed in. To turn this on, install GNOME Keyring or KWallet and reopen the app.",
   '密码登录': 'Password sign-in',
   '邮箱验证码登录': 'Email code sign-in',
   '忘记密码？': 'Forgot password?',
@@ -1537,8 +1540,7 @@ const Map<String, String> _en = <String, String>{
   '提交删除时间：{0}': 'Requested at: {0}',
   '未知': 'Unknown',
   '预计删除时间：{0}': 'Scheduled deletion: {0}',
-  '状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。':
-      'Your account will be permanently deleted in 30 days. You can cancel the request during this period to restore it.',
+  '状态说明：您的账户将在30天后被彻底删除。在此期间，您可以取消删除请求以恢复账户。': 'Your account will be permanently deleted in 30 days. You can cancel the request during this period to restore it.',
   '取消删除': 'Cancel deletion',
   '你的账户已被封禁': 'Your account is banned',
   '封禁原因：{0}': 'Reason: {0}',
@@ -1581,16 +1583,12 @@ const Map<String, String> _en = <String, String>{
   '已关闭 · {0}': 'Closed · {0}',
   '请先输入邮箱验证码': 'Enter the email code first',
   '确认提交删除请求吗？': 'Submit the deletion request?',
-  '提交后，您的账户将被禁用，并在 30 天后彻底删除。在此期间可取消删除。':
-      'Your account will be disabled and permanently deleted after 30 days. You can cancel during that period.',
+  '提交后，您的账户将被禁用，并在 30 天后彻底删除。在此期间可取消删除。': 'Your account will be disabled and permanently deleted after 30 days. You can cancel during that period.',
   '功能已关闭': 'Feature disabled',
-  '管理员已关闭账号删除功能。如需删除账号，请联系管理员。':
-      'Account deletion is disabled. Contact an administrator if you need it removed.',
+  '管理员已关闭账号删除功能。如需删除账号，请联系管理员。': 'Account deletion is disabled. Contact an administrator if you need it removed.',
   '注意！': 'Warning!',
-  '提交删除账号请求后，您的账户将被禁用，并在 30 天后从系统中彻底删除。在此期间，您可以登录并取消删除请求以恢复账户。':
-      'After you submit this request, the account is disabled and permanently removed in 30 days. You can sign in and cancel the request during that period.',
-  '删除后，账号及相关数据（包括余额、有效套餐等）都将被删除，请谨慎操作！':
-      'The account and related data (including balance and active plans) will be deleted. This cannot be undone.',
+  '提交删除账号请求后，您的账户将被禁用，并在 30 天后从系统中彻底删除。在此期间，您可以登录并取消删除请求以恢复账户。': 'After you submit this request, the account is disabled and permanently removed in 30 days. You can sign in and cancel the request during that period.',
+  '删除后，账号及相关数据（包括余额、有效套餐等）都将被删除，请谨慎操作！': 'The account and related data (including balance and active plans) will be deleted. This cannot be undone.',
   '当然账号删除后如果您还想继续使用本服务，您随时可以回来重新注册账号。':
       'You can register again later if you want to use the service.',
   '输入邮箱验证码以验证身份': 'Enter the email code to verify',
@@ -1602,8 +1600,7 @@ const Map<String, String> _en = <String, String>{
   '操作成功': 'Done',
   '已复制{0}': 'Copied {0}',
   '您确定要开启两步验证吗？': 'Enable two-factor authentication?',
-  '开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。':
-      'You will need a 6-digit authenticator code at every sign-in. Finish the test first.',
+  '开启后每次登录都需要输入验证器上的 6 位验证码。请确认已完成测试并通过验证。': 'You will need a 6-digit authenticator code at every sign-in. Finish the test first.',
   '两步验证密钥已重置': 'Authenticator secret reset',
   '您确定要解除Telegram绑定吗？': 'Unlink Telegram?',
   '注意：您点击 ': 'Note: after you tap ',
@@ -1611,8 +1608,7 @@ const Map<String, String> _en = <String, String>{
       ', this account will be unlinked from the Telegram bot.',
   '解绑之后您就不能通过Telegram Bot使用相关功能了。当然您随时可以回来这个页面重新绑定。':
       'Bot features will stop working until you link again on this page.',
-  '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。':
-      'If you joined the Telegram group or channel, unlinking removes you. Link again to rejoin.',
+  '注意：如果你加入了 Telegram 用户群或频道，解绑后您将被自动移出用户群和频道，重新绑定后可再次申请加入。': 'If you joined the Telegram group or channel, unlinking removes you. Link again to rejoin.',
   '已解绑': 'Unlinked',
   '账户过期': 'Account expiry',
   'VIP过期': 'VIP expiry',
@@ -1641,15 +1637,12 @@ const Map<String, String> _en = <String, String>{
   '新密码': 'New password',
   '确认新密码': 'Confirm new password',
   '修改密码后需重新登录': 'You will need to sign in again after changing the password',
-  '修改密码后将重置订阅链接与节点密码，并需重新登录':
-      'Changing the password will reset your subscription link and node password. You will need to sign in again',
+  '修改密码后将重置订阅链接与节点密码，并需重新登录': 'Changing the password will reset your subscription link and node password. You will need to sign in again',
   '重置密钥': 'Reset secret',
   '请验证登录密码': 'Confirm your password',
-  '此操作属敏感操作，为确认是您本人，请输入当前登录密码。':
-      'This is a sensitive action. Enter your current password to confirm it is you.',
+  '此操作属敏感操作，为确认是您本人，请输入当前登录密码。': 'This is a sensitive action. Enter your current password to confirm it is you.',
   '登录密码': 'Password',
-  '请使用验证器扫描下方二维码。在测试通过前请不要启用。':
-      'Scan the QR code with an authenticator. Do not enable it until the test succeeds.',
+  '请使用验证器扫描下方二维码。在测试通过前请不要启用。': 'Scan the QR code with an authenticator. Do not enable it until the test succeeds.',
   '密钥：{0}': 'Secret: {0}',
   '复制密钥': 'Copy secret',
   '密钥': 'Secret',
@@ -1665,8 +1658,7 @@ const Map<String, String> _en = <String, String>{
   '解绑后将被移出 Telegram 用户群/频道。':
       'Unlinking also removes you from the Telegram group/channel.',
   '解除绑定': 'Unlink',
-  '绑定后可通过 Telegram Bot 签到、查询等。绑定码约 10 分钟有效。':
-      'After linking you can check in and query via the bot. The code expires in about 10 minutes.',
+  '绑定后可通过 Telegram Bot 签到、查询等。绑定码约 10 分钟有效。': 'After linking you can check in and query via the bot. The code expires in about 10 minutes.',
   '绑定码：{0}': 'Link code: {0}',
   '绑定码': 'Link code',
   '复制绑定码': 'Copy link code',
@@ -1722,8 +1714,7 @@ const Map<String, String> _en = <String, String>{
       ', the invite link is reset immediately. This cannot be undone.',
   '重置后旧的邀请链接将失效，新的邀请链接将立即生效。':
       'The old link stops working and the new one takes effect immediately.',
-  '通过旧邀请链接注册的被邀请者，返利奖励仍有效，不会因邀请链接变更而受影响。':
-      'Referral rewards for people who already signed up with the old link stay valid.',
+  '通过旧邀请链接注册的被邀请者，返利奖励仍有效，不会因邀请链接变更而受影响。': 'Referral rewards for people who already signed up with the old link stay valid.',
   '重置后请您将新的邀请链接发送给被邀请者。':
       'Send the new invite link to people you want to invite.',
   '已重置您的邀请链接，复制您的邀请链接发送给其他人！': 'Invite link reset. Copy it and share it.',
@@ -1776,8 +1767,7 @@ const Map<String, String> _en = <String, String>{
   '已保存的账户': 'Saved accounts',
   '保存此收款账户': 'Save this payout account',
   '申请': 'Submit',
-  '最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。':
-      'Website sign-ins in the last {0} days. Confirm they are yours; change your password if anything looks wrong.',
+  '最近 {0} 天网站登录记录，请确认均为本人 IP，异常请及时修改登录密码。': 'Website sign-ins in the last {0} days. Confirm they are yours; change your password if anything looks wrong.',
   '登录IP': 'IP',
   '归属地': 'Location',
   'IP / 归属地': 'IP / location',
@@ -1803,12 +1793,9 @@ const Map<String, String> _en = <String, String>{
   '手动': 'Manual',
   '自动': 'Auto',
   '{0} 个节点{1}': '{0} nodes{1}',
-  '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选':
-      'The kernel uses the first available node in list order. Tapping a node does not change the selection; a delay test refreshes availability and reselects immediately.',
-  '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选':
-      'The kernel picks by latency. Tapping a node does not change the selection; a delay test reselects immediately.',
-  '本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去':
-      'The kernel picks by latency. Current best: {0}. Test delay above to switch now.',
+  '本组由内核按列表顺序选用第一个可用节点，点击节点不改变选中项；测延迟会刷新可用性并让内核立即重选': 'The kernel uses the first available node in list order. Tapping a node does not change the selection; a delay test refreshes availability and reselects immediately.',
+  '本组由内核按延迟自动选择，点击节点不改变选中项；测延迟会让内核立即重选': 'The kernel picks by latency. Tapping a node does not change the selection; a delay test reselects immediately.',
+  '本组由内核按延迟自动选择，当前最优为 {0}；点上方测延迟可让内核立即切过去': 'The kernel picks by latency. Current best: {0}. Test delay above to switch now.',
   '订单号 / 商品名': 'Order ID / product',
   '商品名称': 'Product',
   '购买价格': 'Price',
@@ -1894,16 +1881,14 @@ const Map<String, String> _en = <String, String>{
   '发送重置邮件': 'Send reset email',
   '已有重置 token？': 'Already have a token?',
   '分流规则': 'Routing rules',
-  '暂无分流规则。连接一次后，规则会下载到运行目录。':
-      'No routing rules yet. They download to the run directory after you connect once.',
+  '暂无分流规则。连接一次后，规则会下载到运行目录。': 'No routing rules yet. They download to the run directory after you connect once.',
   '您在24小时内已购买过套餐了，请在 {0} 后再购买新套餐。':
       'You already bought a plan in the last 24 hours. Buy another after {0}.',
   '流量包订单确认': 'Confirm traffic pack',
   '流量包仅限在当前套餐效期内使用': 'Traffic packs are valid only during the current plan',
   '卡密商品订单确认': 'Confirm card key product order',
   '支付成功，订单已到账。': 'Payment successful. The order is ready.',
-  '商品未能交付，款项已转入余额。':
-      'We could not deliver this item, so your payment was added to your balance.',
+  '商品未能交付，款项已转入余额。': 'We could not deliver this item, so your payment was added to your balance.',
   '{0}年': '{0}y',
   '{0}个月': '{0}mo',
   '{0}小时': '{0}h',
@@ -1919,12 +1904,10 @@ const Map<String, String> _en = <String, String>{
   '提交工单': 'open a ticket',
   ' 发送需求。请说明你的使用场景/需求，需要定制的地区，是否要优化线路等。':
       ' with your use case, regions, and whether you need a tuned route.',
-  '旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。':
-      'Buying a new plan before the old one expires is treated as a switch; the price difference is calculated automatically.',
+  '旧套餐未过期购买新套餐视为更换套餐，会自动计算所需差价。': 'Buying a new plan before the old one expires is treated as a switch; the price difference is calculated automatically.',
   '流量不够用可以购买流量包，可和套餐流量叠加。':
       'Buy a traffic pack if you need more. It stacks with plan traffic.',
-  '购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。':
-      'Buying or renewing a plan resets account traffic, including traffic packs.',
+  '购买新套餐或续费时会重置您的账户流量，也包括流量包内的流量。': 'Buying or renewing a plan resets account traffic, including traffic packs.',
   '套餐内流量、流量包仅限在当前套餐有效期内使用，过期即失效。':
       'Plan traffic and traffic packs expire with the current plan.',
   '自动续费可在 ': 'Auto-renew can be turned off in ',
@@ -1998,8 +1981,7 @@ const Map<String, String> _en = <String, String>{
   '当前余额：¥ {0}，余额不足，请选择在线支付':
       'Balance: CNY {0}. Not enough; choose an online method',
   '长时间未收到支付结果，可稍后在购买记录中确认。': 'No payment result yet. Check Purchases later.',
-  '已在系统浏览器中打开支付页面，完成支付后订单会自动到账。':
-      'The payment page opened in your browser. The order is fulfilled after you pay.',
+  '已在系统浏览器中打开支付页面，完成支付后订单会自动到账。': 'The payment page opened in your browser. The order is fulfilled after you pay.',
   '复制卡密': 'Copy card key',
   '已复制卡密': 'Card key copied',
   '总金额：{0} 元（{1}：{2} 元）': 'Total: CNY {0} ({1}: CNY {2})',
@@ -2028,8 +2010,7 @@ const Map<String, String> _en = <String, String>{
   '暂无可自定义的策略组': 'No customizable groups',
   '保存分组配置': 'Save group settings',
   '自定义策略组': 'Custom groups',
-  '仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 {0} 个。':
-      'Select groups only. You can reference core groups and built-in outbounds below. Icon can be a custom URL. Up to {0}.',
+  '仅支持手动选择（select）。下方可引用核心策略组与内置出站；图标可填自定义 URL。最多 {0} 个。': 'Select groups only. You can reference core groups and built-in outbounds below. Icon can be a custom URL. Up to {0}.',
   '尚未添加自定义策略组': 'No custom groups yet',
   '策略组名称': 'Group name',
   '图标 URL（可选）': 'Icon URL (optional)',
@@ -2047,8 +2028,7 @@ const Map<String, String> _en = <String, String>{
       'One per line: TYPE,value,POLICY. Up to {0}.',
   '保存配置策略': 'Save config',
   '远程规则集': 'Remote rule sets',
-  '填写规则集 URL 并选择策略。需同时在上方设置自定义分流规则。最多 {0} 个。':
-      'Enter a rule-set URL and policy. Also add a custom rule above. Up to {0}.',
+  '填写规则集 URL 并选择策略。需同时在上方设置自定义分流规则。最多 {0} 个。': 'Enter a rule-set URL and policy. Also add a custom rule above. Up to {0}.',
   '尚未添加远程规则集': 'No remote rule sets yet',
   '规则集 URL': 'Rule-set URL',
   '策略': 'Policy',
@@ -2059,6 +2039,7 @@ const Map<String, String> _en = <String, String>{
   '共 {0} 行': 'Lines: {0}',
   '创建工单': 'New ticket',
   '如需与我们沟通，请点击创建工单按钮。': 'To contact us, tap New ticket.',
+  '请把问题表达清楚：出现时间、设备与客户端版本、节点名称、具体现象和已尝试的操作，最好附上截图或运行日志。信息过少（例如“用不了”“连不上”）可能会被忽略。': 'Describe the problem clearly: when it started, your device and client version, the node name, what happens, and what you have already tried. Screenshots or a runtime log help. Tickets with too little information (such as "doesn\'t work" or "can\'t connect") may be ignored.',
   '刷新工单': 'Refresh tickets',
   '标题 / 工单号': 'Title / ticket ID',
   '您已被禁止发起或回复工单': 'You are blocked from opening or replying to tickets',
@@ -2079,6 +2060,7 @@ const Map<String, String> _en = <String, String>{
   '您已被禁止回复工单': 'You are blocked from replying',
   '暂无消息': 'No messages',
   '暂无运行日志': 'No runtime log',
+  '如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。': 'If you are reporting a problem with the client, select Runtime log before you submit or reply.',
   '标题': 'Title',
   '内容': 'Content',
   '图片': 'Images',
@@ -2086,13 +2068,11 @@ const Map<String, String> _en = <String, String>{
   '运行日志': 'Runtime log',
   '提交': 'Submit',
   '流量记录说明': 'About traffic logs',
-  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。':
-      'Manual delay tests and clients with auto-select / fallback (Clash / Stash, Surge, Quantumult X, Shadowrocket, Loon, and similar) probe nodes every few minutes (often about every 5 minutes). Those probes count as traffic, usually about 1–5 KB per node per hour.',
+  '如果您手动测试了一些节点的延迟或者您使用了包含自动选择和故障转移策略的订阅，如：Clash / Stash、Surge等自带分流策略的订阅链接，以及Quantumult X、Shadowrocket、Loon等带自动测试的分流规则，会每隔一段时间测试一次延迟(通常是每5分钟左右)，以检查最低延迟的节点以及节点存活性，这部分测试也会被计入流量，通常每个节点在一小时内自动测试延迟所消耗的流量在1-5KB左右。': 'Manual delay tests and clients with auto-select / fallback (Clash / Stash, Surge, Quantumult X, Shadowrocket, Loon, and similar) probe nodes every few minutes (often about every 5 minutes). Those probes count as traffic, usually about 1–5 KB per node per hour.',
   '如需关闭自动测试可在本客户端的 ': 'To turn off auto tests, in this client’s ',
   ' 关闭 自动选择 和 故障转移 策略组。': ' turn off the Auto Select and Fallback groups.',
   '此处只展示最近 {0} 天的每日流量记录。': 'Only the last {0} days of daily traffic are shown.',
-  '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。':
-      'Today is live. Older days are daily totals. Tap a date for per-node details.',
+  '当天的流量数据为实时统计，历史数据为每日汇总记录。点击日期可查看节点使用详情。': 'Today is live. Older days are daily totals. Tap a date for per-node details.',
   '我没有使用某些节点，为什么这些节点也会消耗流量？': 'Why do unused nodes still consume traffic?',
   '查看说明': 'Learn more',
   '日期': 'Date',
@@ -2111,13 +2091,11 @@ const Map<String, String> _en = <String, String>{
       'Streaming and AI unlock results for each node.',
   '每 {0} 小时更新一次，测试结果仅供参考，请以实际使用情况为准。':
       'Updated every {0} hours. Results are indicative; real use may differ.',
-  '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)':
-      '(If YouTube Premium shows No, Google services may not work. Switch nodes for Google Play or YouTube Music.)',
+  '(YouTube Premium 检测结果如果显示：No，可能无法正常使用Google服务，如需使用Google Play、YouTube Music等请切换到其他节点)': '(If YouTube Premium shows No, Google services may not work. Switch nodes for Google Play or YouTube Music.)',
   '暂无解锁检测结果': 'No unlock results',
   '更新时间': 'Updated',
   '最近 {0} 天的在线客户端': 'Online clients in the last {0} days',
-  '请确认均为本人 IP，如有异常请及时修改密码。':
-      'Confirm these IPs are yours. Change your password if anything looks wrong.',
+  '请确认均为本人 IP，如有异常请及时修改密码。': 'Confirm these IPs are yours. Change your password if anything looks wrong.',
   '最后使用时间': 'Last used',
   '在线设备': 'Online device',
   '客户端版本': 'Client version',
@@ -2125,8 +2103,7 @@ const Map<String, String> _en = <String, String>{
   '下线': 'Take offline',
   '不支持': 'Not supported',
   '确认将该设备下线？': 'Disconnect this device?',
-  '将通知 {0} 上的客户端下线。':
-      'The client on {0} will be told to disconnect.',
+  '将通知 {0} 上的客户端下线。': 'The client on {0} will be told to disconnect.',
   '最近 {0} 天没有在线客户端记录': 'No online clients in the last {0} days',
   '暂无公告': 'No announcements',
   '暂时无法获取公告，请稍后重试': 'Unable to load announcements. Try again later.',
@@ -2203,6 +2180,7 @@ const Map<String, String> _en = <String, String>{
   '原生侧未返回应用数据目录': 'The platform did not return the app data directory.',
   '应用数据目录尚未就绪，AppPaths.bootstrap 未先行完成': 'The app data directory is not ready. AppPaths.bootstrap has not completed.',
   '无法限制应用数据目录权限': 'Could not restrict access to the app data directory.',
+  '无法限制文件权限': 'Could not restrict access to the file.',
   '环境变量 {0} 不存在，无法定位应用数据目录': 'Environment variable {0} is missing. Could not locate the app data directory.',
   '{0} 平台尚未实现': 'The {0} platform is not supported yet.',
   '构建缺少站点域名': 'This build is missing the site domain.',
@@ -2229,8 +2207,7 @@ const Map<String, String> _en = <String, String>{
       'The installer exceeds the size listed in the release. Update stopped.',
   '安装包下载不完整，已中止更新': 'The installer download is incomplete. Update stopped.',
   '安装包校验失败，已删除': 'Installer verification failed. The file was deleted.',
-  '安装包签名与当前客户端的开发者不一致，已中止更新':
-      'The installer is not signed by the developer of this client. Update stopped.',
+  '安装包签名与当前客户端的开发者不一致，已中止更新': 'The installer is not signed by the developer of this client. Update stopped.',
   '无法保护凭据': 'Could not protect your credentials.',
   '无法读取凭据': 'Could not read your credentials.',
   '无法清除凭据': 'Could not clear your credentials.',
@@ -2267,8 +2244,7 @@ const Map<String, String> _en = <String, String>{
       'The background service is not installed. Run the installer again.',
   '当前账户无权访问后台服务，请以管理员身份运行一次客户端': 'This account cannot access the background service. Run the client once as an administrator.',
   '后台服务{0}，无法连接': 'Background service status: {0}. Unable to connect.',
-  '后台服务{0}，无法连接：{1}':
-      'Background service status: {0}. Unable to connect: {1}',
+  '后台服务{0}，无法连接：{1}': 'Background service status: {0}. Unable to connect: {1}',
   '{0}（Win32 错误 {1}）': '{0} (Win32 error {1})',
   '连接已取消': 'Connection canceled.',
   '内核控制面在 {0} 秒内未就绪':
@@ -2297,9 +2273,14 @@ const Map<String, String> _en = <String, String>{
   '账号状态已恢复正常。': 'Your account has been restored.',
   '签到成功': 'Check-in successful.',
   'TUN 模式不可用：{0}': 'TUN mode is unavailable: {0}',
+  'TUN 环境检查失败：{0}': 'Could not check the TUN environment: {0}',
+  'TUN 的路由规则反复被其它程序清除': 'Another program keeps removing the TUN routing rules.',
+  '内核未能接管 TUN，详见内核日志':
+      "The kernel couldn't take over TUN. See the kernel log for details.",
   '与后台服务失联：{0}': 'Lost connection to the background service: {0}',
   '未知原因': 'Unknown reason',
-  '停止候选内核失败，不能回滚: {0}': 'Could not stop the candidate kernel; rollback is unavailable: {0}',
+  '停止候选内核失败，不能回滚: {0}':
+      'Could not stop the candidate kernel; rollback is unavailable: {0}',
   '缺少配置内容': 'Profile content is missing.',
   '缺少路径': 'Path is missing.',
   '非法端口 {0}': 'Invalid port: {0}',
@@ -2308,9 +2289,12 @@ const Map<String, String> _en = <String, String>{
   '后台服务正在停止': 'The background service is stopping.',
   '另一系统账号正在使用客户端，请先退出该账号的客户端': 'Another system account is using the client. Close that account\'s client first.',
   '监听 GUI 进程失败: {0}': 'Could not monitor the GUI process: {0}',
-  '停止旧内核失败，不能释放会话: {0}': 'Could not stop the previous kernel; the session cannot be released: {0}',
-  '旧内核尚未退出，不能释放会话': 'The previous kernel is still running. The session cannot be released.',
-  '还原系统代理失败，不能释放会话: {0}': 'Could not restore the system proxy; the session cannot be released: {0}',
+  '停止旧内核失败，不能释放会话: {0}':
+      'Could not stop the previous kernel; the session cannot be released: {0}',
+  '旧内核尚未退出，不能释放会话':
+      'The previous kernel is still running. The session cannot be released.',
+  '还原系统代理失败，不能释放会话: {0}':
+      'Could not restore the system proxy; the session cannot be released: {0}',
   '清理旧运行数据失败，不能释放会话: {0}': 'Could not clear the previous runtime data; the session cannot be released: {0}',
   '缓存身份格式错误': 'Invalid cache identity format.',
   '请求过大': 'The request is too large.',
@@ -2336,15 +2320,18 @@ const Map<String, String> _en = <String, String>{
   '接管内核错误输出失败: {0}': 'Could not capture kernel error output: {0}',
   '启动内核失败: {0}': 'Could not start the kernel: {0}',
   '强制结束内核进程 {0} 失败: {1}': 'Could not force kernel process {0} to stop: {1}',
-  '内核进程 {0} 在停止期限内未回收': 'Kernel process {0} did not exit within the stop timeout.',
+  '内核进程 {0} 在停止期限内未回收':
+      'Kernel process {0} did not exit within the stop timeout.',
   '写入待校验配置失败: {0}': 'Could not write the profile for validation: {0}',
+  '配置校验未能完成: {0}': 'Could not finish validating the profile: {0}',
   '缺少内核 PID': 'Kernel PID is missing.',
   '无效的内核 PID': 'Invalid kernel PID.',
   '连接内核控制台失败: {0}': 'Could not connect to the kernel console: {0}',
   '设置停止信号处理器失败: {0}': 'Could not set the stop signal handler: {0}',
   '发送内核停止信号失败: {0}': 'Could not send the kernel stop signal: {0}',
   '等待停止信号分发超时': 'Timed out waiting for the stop signal to be delivered.',
-  '打开用户 Internet 设置失败: {0}': 'Could not open the user\'s Internet settings: {0}',
+  '打开用户 Internet 设置失败: {0}':
+      'Could not open the user\'s Internet settings: {0}',
   '写入 ProxyEnable 失败: {0}': 'Could not write ProxyEnable: {0}',
   '写入 ProxyServer 失败: {0}': 'Could not write ProxyServer: {0}',
   '写入 ProxyOverride 失败: {0}': 'Could not write ProxyOverride: {0}',
@@ -2379,20 +2366,23 @@ const Map<String, String> _en = <String, String>{
   '已有一个升级任务在进行中': 'An upgrade is already in progress.',
   '准备升级目录失败: {0}': 'Could not prepare the upgrade directory: {0}',
   '新内核无法运行，已放弃升级': 'The new kernel could not run. Upgrade canceled.',
-  '停止旧内核失败，已放弃升级: {0}': 'Could not stop the previous kernel. Upgrade canceled: {0}',
+  '停止旧内核失败，已放弃升级: {0}':
+      'Could not stop the previous kernel. Upgrade canceled: {0}',
   '无法配置 HTTP 传输': 'Could not configure HTTP transport.',
   '非法代理端口 {0}': 'Invalid proxy port: {0}',
   '查询发布信息失败: {0}': 'Could not fetch release information: {0}',
   '查询发布信息失败: HTTP {0}': 'Could not fetch release information: HTTP {0}',
   '解析发布信息失败: {0}': 'Could not parse release information: {0}',
   '上游未给出 {0} 的 SHA-256，拒绝安装未经校验的内核': 'Upstream did not provide a SHA-256 checksum for {0}. Unverified kernels cannot be installed.',
-  '下载地址 {0} 不在官方发布路径下': 'Download URL {0} is outside the official release path.',
+  '下载地址 {0} 不在官方发布路径下':
+      'Download URL {0} is outside the official release path.',
   '该版本没有提供 {0}': 'This release does not include {0}.',
   '下载内核失败: {0}': 'Could not download the kernel: {0}',
   '下载内核失败: HTTP {0}': 'Could not download the kernel: HTTP {0}',
   '创建临时文件失败: {0}': 'Could not create a temporary file: {0}',
   '写入下载内容失败: {0}': 'Could not write the downloaded content: {0}',
-  '发布包超过 {0} MiB，拒绝安装': 'The release package exceeds {0} MiB and cannot be installed.',
+  '发布包超过 {0} MiB，拒绝安装':
+      'The release package exceeds {0} MiB and cannot be installed.',
   '校验失败：期望 {0}，实际 {1}': 'Verification failed: expected {0}, got {1}',
   '发布包无法解压: {0}': 'Could not extract the release package: {0}',
   '发布包中没有 {0}': 'The release package does not contain {0}.',
@@ -2400,13 +2390,16 @@ const Map<String, String> _en = <String, String>{
   '展开 {0} 失败: {1}': 'Could not extract {0}: {1}',
   '存在尚未提交的旧内核备份，拒绝覆盖升级': 'An uncommitted backup of the previous kernel exists. Upgrade stopped to avoid overwriting it.',
   '检查旧内核备份失败: {0}': 'Could not check the previous kernel backup: {0}',
-  '现有内核不是普通文件，拒绝替换': 'The current kernel is not a regular file and cannot be replaced.',
+  '现有内核不是普通文件，拒绝替换':
+      'The current kernel is not a regular file and cannot be replaced.',
   '移走旧的 {0} 失败: {1}': 'Could not move the previous {0}: {1}',
   '检查现有内核失败: {0}': 'Could not check the current kernel: {0}',
   '回滚 {0} 失败: {1}': 'Could not roll back {0}: {1}',
   '清理旧内核备份失败: {0}': 'Could not clear the previous kernel backup: {0}',
-  '旧内核备份不是普通文件，拒绝回滚': 'The previous kernel backup is not a regular file. Rollback stopped.',
-  '候选内核不是普通文件，拒绝回滚': 'The candidate kernel is not a regular file. Rollback stopped.',
+  '旧内核备份不是普通文件，拒绝回滚':
+      'The previous kernel backup is not a regular file. Rollback stopped.',
+  '候选内核不是普通文件，拒绝回滚':
+      'The candidate kernel is not a regular file. Rollback stopped.',
   '删除候选内核失败: {0}': 'Could not delete the candidate kernel: {0}',
   '检查候选内核失败: {0}': 'Could not check the candidate kernel: {0}',
   '恢复旧内核失败: {0}': 'Could not restore the previous kernel: {0}',
@@ -2425,7 +2418,8 @@ const Map<String, String> _en = <String, String>{
       'The background service has been updated. Please reopen the client.',
   '进程 {0} 的启动信息不完整': 'Process {0} has incomplete startup information.',
   '进程 {0} 没有可执行文件路径': 'Process {0} has no executable path.',
-  '内核专用账户 {0} 不可用，请重新安装后台服务': 'Kernel account {0} is unavailable. Reinstall the background service.',
+  '内核专用账户 {0} 不可用，请重新安装后台服务':
+      'Kernel account {0} is unavailable. Reinstall the background service.',
   '还原 {0} 的代理例外失败: {1}': 'Could not restore proxy exceptions for {0}: {1}',
   '还原 {0} 的 {1} 失败: {2}': 'Could not restore {0}\'s {1}: {2}',
   '代理快照没有记录任何网络服务': 'The proxy snapshot contains no network services.',
@@ -2433,8 +2427,10 @@ const Map<String, String> _en = <String, String>{
   '系统里没有已启用的网络服务': 'No enabled network services were found.',
   'networksetup {0} 失败: {1}': 'The networksetup command {0} failed: {1}',
   'Linux 的系统代理由客户端自行设置': 'The client manages the system proxy on Linux.',
-  '内核专用账户不可用，请重新安装后台服务': 'The kernel account is unavailable. Reinstall the background service.',
-  '目录 {0} 的类型或属主不可信，拒绝使用': 'The type or owner of directory {0} is not trusted. It cannot be used.',
+  '内核专用账户不可用，请重新安装后台服务':
+      'The kernel account is unavailable. Reinstall the background service.',
+  '目录 {0} 的类型或属主不可信，拒绝使用':
+      'The type or owner of directory {0} is not trusted. It cannot be used.',
   '文件 {0} 的类型或链接数不可信': 'The type or link count of file {0} is not trusted.',
   '进程 {0} 不可达: {1}': 'Could not reach process {0}: {1}',
   '清理升级目录失败: {0}': 'Could not clear the upgrade directory: {0}',
@@ -2458,18 +2454,21 @@ const Map<String, String> _en = <String, String>{
   '不能删除旧账户配置': "Could not delete the previous account's configuration.",
   '旧内核进程尚未退出': 'The previous kernel process is still running.',
   '此设备不支持 VPN（{0}）': 'This device does not support VPN ({0}).',
-  '需要授予 VPN 权限，请打开应用后重试': 'VPN permission is required. Open the app and try again.',
+  '需要授予 VPN 权限，请打开应用后重试':
+      'VPN permission is required. Open the app and try again.',
   '系统未提供 VPN 授权界面，此设备无法建立 VPN 连接（{0}）': 'The system has no VPN permission dialog. This device cannot establish a VPN connection ({0}).',
   '用户未授予 VPN 权限': 'VPN permission was not granted.',
   '系统拒绝启动内核（{0}）': 'The system refused to start the kernel ({0}).',
-  'VPN 授权已被其它应用接管': 'Another app has taken over VPN access.',
+  'VPN 已被系统或其它应用停用': 'VPN was turned off by the system or another app.',
   '已从通知断开连接': 'Disconnected from the notification.',
   '不能读取旧运行目录': 'Could not read the previous runtime directory.',
   '缺少参数': 'Missing parameters.',
   '无法创建指针图像': 'Could not create the pointer image.',
-  '无法连接服务控制管理器（Win32 错误 {0}）': 'Could not connect to the Service Control Manager (Win32 error {0}).',
+  '无法连接服务控制管理器（Win32 错误 {0}）':
+      'Could not connect to the Service Control Manager (Win32 error {0}).',
   '打开服务失败（Win32 错误 {0}）': 'Could not open the service (Win32 error {0}).',
-  '查询服务状态失败（Win32 错误 {0}）': 'Could not query the service status (Win32 error {0}).',
+  '查询服务状态失败（Win32 错误 {0}）':
+      'Could not query the service status (Win32 error {0}).',
   '启动服务失败（Win32 错误 {0}）': 'Could not start the service (Win32 error {0}).',
   '当前账户无权启动该服务，请以管理员身份启动 ECYCloudService': 'This account cannot start the service. Start ECYCloudService as an administrator.',
   '后台服务未运行，执行 sudo systemctl start ecycloud-helper 或重装客户端': 'The background service is not running. Run sudo systemctl start ecycloud-helper or reinstall the client.',

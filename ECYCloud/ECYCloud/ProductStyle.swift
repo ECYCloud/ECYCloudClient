@@ -179,6 +179,7 @@ extension View {
 
 extension EnvironmentValues {
     @Entry var productVerticalBarTop: CGFloat? = nil
+    @Entry var productPageActive = true
 }
 
 #if os(iOS)
@@ -1257,6 +1258,12 @@ enum ProductFormat {
         if let date = formatter.date(from: value) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+    // 与 Flutter 的 Format.date + Format.clock 同一写法
+    static func dateTime(_ value: Date) -> String {
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: value)
     }
     static func bytes(_ value: Int64) -> String {
         var amount = abs(Double(value))

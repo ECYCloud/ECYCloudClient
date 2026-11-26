@@ -74,6 +74,23 @@ void main() {
     );
   });
 
+  test('接管系统 DNS 的平台标记原样传进模板参数', () {
+    const AppSettings settings = AppSettings.defaults();
+    for (final bool value in <bool>[true, false]) {
+      expect(
+        settings
+            .toTemplateOptions(
+              tunInterfaceName: '',
+              tunSetsSystemDns: value,
+              takeover: true,
+              supportsSystemProxy: true,
+            )
+            .tunSetsSystemDns,
+        value,
+      );
+    }
+  });
+
   test('语言变更不重启内核，缺省为空表示尚未选定', () {
     expect(defaults.locale, isEmpty);
     expect(defaults.affectsKernel(defaults.copyWith(locale: 'en-US')), isFalse);

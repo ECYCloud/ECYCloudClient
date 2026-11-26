@@ -19,7 +19,7 @@ import (
 
 const (
 	internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
-	proxyBypass         = "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*;<local>"
+	proxyBypass         = "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*;<local>;*.local;*.lan;*.home.arpa;*.internal;*.localdomain"
 
 	internetOptionRefresh         = 37
 	internetOptionSettingsChanged = 39
@@ -46,7 +46,7 @@ type deferredRestore struct {
 }
 
 func (d *deferredRestore) Error() string {
-	return fmt.Sprintf("系统账号 %s 的注册表未加载，系统代理待其下次连接再还原", d.snapshot.UserSID)
+	return fmt.Sprintf("系统账号 %s 的注册表未加载，系统代理待其登录后再还原", d.snapshot.UserSID)
 }
 
 // 服务以 LocalSystem 运行，HKCU 是 SYSTEM 自己的 hive，必须按 SID 定位用户 hive
@@ -129,8 +129,8 @@ func (p *proxyManager) restore(sid string) error {
 	return restoreSnapshot(snapshotPath(sid))
 }
 
-// 内核停下时把所有账号残留的快照都试着还原；对应账号未登录时延到下次
-func (p *proxyManager) restoreAll() error {
+// 把各账号残留的快照都试着还原，keep 账号的除外；对应账号未登录时延到其登录后
+func (p *proxyManager) restoreAll(keep string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	paths, err := filepath.Glob(filepath.Join(runRoot(), "proxy-snapshot*.json"))
@@ -139,6 +139,9 @@ func (p *proxyManager) restoreAll() error {
 	}
 	var failures []error
 	for _, path := range paths {
+		if keep != "" && path == snapshotPath(keep) {
+			continue
+		}
 		failures = append(failures, restoreSnapshot(path))
 	}
 	return errors.Join(failures...)

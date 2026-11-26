@@ -66,7 +66,7 @@ import Foundation
             remove("config.json")
             return Restored(profile: value, catalog: nil, validUntil: nil)
         }
-        guard var catalog: NodeCatalog = try? PanelAPI.decode(response) else {
+        guard var catalog = try? NodeCatalog(response: response) else {
             return Restored(profile: value, catalog: nil, validUntil: nil)
         }
         catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(config.updateIntervalHours.map(String.init))

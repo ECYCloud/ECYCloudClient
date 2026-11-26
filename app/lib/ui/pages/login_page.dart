@@ -121,6 +121,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _entering = false;
   bool _emailCodeMode = false;
   bool _remember = false;
+  bool _secretStoreAvailable = true;
   RememberedLogin? _restored;
   int _sendCooldown = 0;
   Timer? _cooldownTimer;
@@ -151,9 +152,18 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) {
       return;
     }
+    final AppScope scope = AppScope.of(context);
+    final bool available = await scope.platform.secretStoreAvailable();
+    if (!mounted) {
+      return;
+    }
+    if (!available) {
+      setState(() => _secretStoreAvailable = false);
+      return;
+    }
     RememberedLogin? saved;
     try {
-      saved = await AppScope.of(context).auth.loadRememberedLogin();
+      saved = await scope.auth.loadRememberedLogin();
     } on Object catch (e) {
       _showRememberError(e);
       return;
@@ -488,11 +498,15 @@ class _LoginPageState extends State<LoginPage> {
                             materialTapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,
                             mouseCursor: SystemMouseCursors.basic,
-                            onChanged: (bool? value) =>
-                                _setRemember(auth, value ?? false),
+                            onChanged: _secretStoreAvailable
+                                ? (bool? value) =>
+                                      _setRemember(auth, value ?? false)
+                                : null,
                           ),
                           InkWell(
-                            onTap: () => _setRemember(auth, !_remember),
+                            onTap: _secretStoreAvailable
+                                ? () => _setRemember(auth, !_remember)
+                                : null,
                             child: Text(L10n.t('记住账号密码')),
                           ),
                         ],
@@ -503,6 +517,12 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ],
                 ),
+                if (!_secretStoreAvailable && !_emailCodeMode)
+                  FieldSubtext(
+                    L10n.t(
+                      '未检测到系统密钥环，无法记住密码；登录状态仍会保留。安装 GNOME Keyring 或 KWallet 后重新打开客户端即可使用。',
+                    ),
+                  ),
                 if (auth.error != null &&
                     auth.stage != AuthStage.needsTwoFactor) ...<Widget>[
                   const SizedBox(height: 8),

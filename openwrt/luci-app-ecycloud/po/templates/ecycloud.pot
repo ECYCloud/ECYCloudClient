@@ -91,6 +91,9 @@ msgstr ""
 msgid "No changes to save"
 msgstr ""
 
+msgid "Only nodes loaded into the kernel are listed here. Search to find the others."
+msgstr ""
+
 msgid "Reset"
 msgstr ""
 
@@ -418,7 +421,7 @@ msgstr ""
 msgid "Notice"
 msgstr ""
 
-msgid "Remember email"
+msgid "Remember email and password"
 msgstr ""
 
 msgid "Sign in with your %s account to load available nodes"
@@ -1054,6 +1057,9 @@ msgstr ""
 msgid "The profile failed kernel validation: {message}"
 msgstr ""
 
+msgid "The kernel could not finish checking the profile: {message}"
+msgstr ""
+
 msgid "{message}; could not restore the previous profile"
 msgstr ""
 
@@ -1070,9 +1076,6 @@ msgid "Account switching is in progress. Try again shortly."
 msgstr ""
 
 msgid "Offline profile authorization is invalid. Refresh the profile."
-msgstr ""
-
-msgid "The system clock is behind the time the panel issued the profile. The connection will retry automatically after the clock syncs."
 msgstr ""
 
 msgid "Could not stage the validated profile. Try again."
@@ -1136,6 +1139,9 @@ msgid "Could not commit the loaded profile. Refresh the profile."
 msgstr ""
 
 msgid "Offline profile authorization has expired. Refresh the profile."
+msgstr ""
+
+msgid "Offline profile authorization has expired. The connection will resume automatically after the panel renews it."
 msgstr ""
 
 msgid "The kernel is not responding. Network recovery failed; retrying."
@@ -1396,5 +1402,23 @@ msgstr ""
 msgid "Not enough storage: %d MiB free on the router, but at least %d MiB is needed to start. Free up space or expand storage, then try again."
 msgstr ""
 
+msgid "The mihomo kernel was not found. Install mihomo-meta on the router, then try again."
+msgstr ""
+
 msgid "Couldn't save the setting. The router's storage may be full."
+msgstr ""
+
+msgid "Load more"
+msgstr ""
+
+msgid "The panel's nodes have changed. Try again."
+msgstr ""
+
+msgid "Could not save the node catalog"
+msgstr ""
+
+msgid "Could not save the loaded nodes"
+msgstr ""
+
+msgid "Your sign-in expires on %s. To stay connected, sign out and sign back in before then."
 msgstr ""

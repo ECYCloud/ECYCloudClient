@@ -226,8 +226,12 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 		return s.kernel.status(req.LogCursor), nil
 
 	case "kernel.check":
-		if err := s.kernel.check(req.Config); err != nil {
-			return map[string]any{"valid": false, "error": err.Error()}, nil
+		reason, err := s.kernel.check(req.Config)
+		if err != nil {
+			return nil, err
+		}
+		if reason != "" {
+			return map[string]any{"valid": false, "error": reason}, nil
 		}
 		return map[string]any{"valid": true}, nil
 
@@ -373,7 +377,7 @@ func validSessionKey(key string) bool {
 
 func (s *server) releaseKernel() error {
 	// 先还原：停内核失败就返回的话，系统代理会一直指向失效端口
-	if err := s.proxy.restoreAll(); err != nil {
+	if err := s.proxy.restoreAll(""); err != nil {
 		logf("还原系统代理失败，快照保留待下次还原: %v", err)
 	}
 	if err := s.kernel.stop(); err != nil {
@@ -472,6 +476,20 @@ func collectGarbage(base string) {
 	}
 	if err := os.Remove(filepath.Join(filepath.Dir(base), ".cache-owner")); err != nil && !os.IsNotExist(err) {
 		logf("删除旧版缓存归属文件失败: %v", err)
+	}
+}
+
+// 开机时账号还没登录、注册表未加载的快照等到登录后再还原；正在用客户端的账号由其 GUI 自己管
+func (s *server) restoreDeferredProxies() {
+	defer guard("登录后还原系统代理")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing {
+		return
+	}
+	if err := s.proxy.restoreAll(s.owner); err != nil {
+		logf("登录后还原系统代理失败，快照保留待下次还原: %v", err)
 	}
 }
 

@@ -298,8 +298,12 @@ func (s *server) dispatch(req request, pid int, user string) (any, error) {
 		return s.kernel.status(req.LogCursor), nil
 
 	case "kernel.check":
-		if err := s.kernel.check(req.Config); err != nil {
-			return map[string]any{"valid": false, "error": err.Error()}, nil
+		reason, err := s.kernel.check(req.Config)
+		if err != nil {
+			return nil, err
+		}
+		if reason != "" {
+			return map[string]any{"valid": false, "error": reason}, nil
 		}
 		return map[string]any{"valid": true}, nil
 

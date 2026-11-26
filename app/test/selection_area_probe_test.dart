@@ -50,6 +50,8 @@ class _Auth extends ChangeNotifier implements AuthController {
   @override
   String? get accountKey => null;
   @override
+  DateTime? get sessionExpiresAt => null;
+  @override
   VoidCallback? onDeviceKickNotice;
   @override
   Future<void> refreshProfile() async {}

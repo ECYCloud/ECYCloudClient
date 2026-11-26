@@ -24,6 +24,9 @@ class ServiceKernelController implements KernelController {
   static const Duration _pollInterval = Duration(seconds: 1);
   static const Duration _controlPlaneTimeout = Duration(seconds: 60);
 
+  // 与 Android BoxService 等待内核启动的 START_TIMEOUT_SECONDS 一致
+  static const Duration _nativeStartTimeout = Duration(seconds: 180);
+
   /// 内核是独立进程，特权侧被强杀或重启期间它照旧转发流量（macOS 上 launchd 还会按
   /// KeepAlive 立刻把 helper 拉回来）。因此「问不到状态」不等于「内核退出」，
   /// 连续问不到这么多次才算真失联。
@@ -187,11 +190,21 @@ class ServiceKernelController implements KernelController {
   Future<ClashApiOptions?> attach() async {
     _stopPolling();
     final int generation = _generation;
-    final Map<String, dynamic> result;
+    Map<String, dynamic> result;
     try {
       result = await _service.request('kernel.status', <String, dynamic>{
         'log_cursor': _logCursor,
       });
+      // 开机自启、磁贴等原生入口正在拉起隧道：此时放弃认回，界面会另起常驻内核把它顶掉，或一直显示未连接
+      final DateTime deadline = DateTime.now().add(_nativeStartTimeout);
+      while (result['starting'] == true &&
+          generation == _generation &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        result = await _service.request('kernel.status', <String, dynamic>{
+          'log_cursor': _logCursor,
+        });
+      }
     } on ServiceException catch (e) {
       if (generation != _generation) {
         return null;
@@ -354,8 +367,9 @@ class ServiceKernelController implements KernelController {
         return;
       }
       Logger.instance.warn(_source, '停止内核失败: $e');
-      // 不能推 failed：那是内核崩溃的信号，会触发自动重启
-      _update(before);
+      // 只还原记录、不推给监听方：failed 是内核崩溃的信号，停之前已是 failed（与后台服务失联）时
+      // 再推一遍，上层放弃重试后的拆除会被当成又一次崩溃而无限重入
+      _status = before;
       throw KernelException('停止内核失败：$e');
     }
 

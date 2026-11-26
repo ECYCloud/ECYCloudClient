@@ -25,6 +25,10 @@ var proxyBypass = []string{
 	"172.16.0.0/12",
 	"192.168.0.0/16",
 	"169.254.0.0/16",
+	"*.lan",
+	"*.home.arpa",
+	"*.internal",
+	"*.localdomain",
 }
 
 var managedProxies = []struct {
@@ -69,16 +73,21 @@ func (p *proxyManager) set(port int, clientPID int, bypass []string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// 已有快照说明上一次还没还原，保留最早的原值，不要用被自己改过的值覆盖
-	if _, err := loadSnapshot(); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		snapshot, err := captureSnapshot(services, clientPID)
+	// 已记录的服务保留最早的原值，不要用被自己改过的值覆盖；连接后新出现的服务须在改写前补记，否则断开时漏还原
+	snapshot, err := loadSnapshot()
+	if errors.Is(err, os.ErrNotExist) {
+		snapshot, err = proxySnapshot{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	if fresh := unrecordedServices(snapshot, services); len(fresh) > 0 {
+		added, err := captureSnapshot(fresh, clientPID)
 		if err != nil {
 			return err
 		}
-		if err := saveSnapshot(snapshot); err != nil {
+		added.Services = append(snapshot.Services, added.Services...)
+		if err := saveSnapshot(added); err != nil {
 			return err
 		}
 	}
@@ -95,6 +104,20 @@ func (p *proxyManager) set(port int, clientPID int, bypass []string) error {
 		}
 	}
 	return nil
+}
+
+func unrecordedServices(snapshot proxySnapshot, services []string) []string {
+	recorded := make(map[string]bool, len(snapshot.Services))
+	for _, service := range snapshot.Services {
+		recorded[service.Name] = true
+	}
+	var fresh []string
+	for _, service := range services {
+		if !recorded[service] {
+			fresh = append(fresh, service)
+		}
+	}
+	return fresh
 }
 
 func effectiveBypass(items []string) []string {

@@ -2,6 +2,8 @@
 'require view';
 'require form';
 'require rpc';
+'require uci';
+'require ui';
 'require tools.widgets as widgets';
 'require ecycloud.api as api';
 
@@ -220,6 +222,10 @@ return view.extend({
 			}).then(function() {
 				return confirmApply(deadline);
 			}).then(function() {
+				// 保存时顶栏按待提交改动计数，应用后要按当前状态刷新，否则一直显示旧数字
+				return uci.changes();
+			}).then(function(pending) {
+				ui.changes.renderChangeIndicator(pending);
 				api.notify({ ok: true, msg: _('Applied') });
 			});
 		});

@@ -146,7 +146,8 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
                     .setData(Uri.parse("package:${context.packageName}")),
             )
-            return false
+            // Dart 侧据此提示用户授权后再点更新，而不是报「已取消更新」
+            error(INSTALL_PERMISSION_REQUIRED)
         }
 
         val uri = FileProvider.getUriForFile(
@@ -247,6 +248,7 @@ class PlatformBridge(private val context: Context, messenger: BinaryMessenger) :
         }
 
     companion object {
+        private const val INSTALL_PERMISSION_REQUIRED = "install_permission_required"
         private const val rememberedKeyAlias = "ecycloud_remembered_login"
     }
 }

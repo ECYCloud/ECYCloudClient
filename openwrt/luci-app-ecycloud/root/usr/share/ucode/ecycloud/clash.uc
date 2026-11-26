@@ -100,6 +100,20 @@ export function proxies() {
 	return snapshot;
 };
 
+/* 节点文件加载前，转给内核的 DNS 等经分组出站的流量也会读 url-test 并留下这份缓存，只能加载完再清掉；
+   插件从不固定 url-test 的选中项，清除只让内核按已加载的成员重选 */
+export function resetUrlTests() {
+	const config = readJson(`${settings().runDir}/config.json`);
+	for (let group in (config?.['proxy-groups'] ?? [])) {
+		if (group?.type != 'url-test' || !length(group.name))
+			continue;
+		const res = request(`/proxies/${urlencode(group.name)}`, { method: 'DELETE', timeout: 3 });
+		if (!res.ok)
+			return res;
+	}
+	return { ok: true };
+};
+
 export function proxy(name) {
 	return request(`/proxies/${urlencode(name)}`);
 };
@@ -185,6 +199,11 @@ export function setMode(mode) {
 
 export function setTunEnabled(enabled) {
 	return request('/configs', { method: 'PATCH', body: { tun: { enable: enabled } }, timeout: 5 });
+};
+
+/* 内核建不出 TUN（设备名被占、没有 /dev/net/tun）时只记一行 error，PATCH 照样成功，运行态 tun.enable 被改回 false */
+export function tunEnabled() {
+	return request('/configs', { timeout: 5 }).data?.tun?.enable == true;
 };
 
 export function updateRuleProvider(name) {

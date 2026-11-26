@@ -250,6 +250,24 @@ delete testState.httpStatus;
 if (length(ARGV[0])) {
 	const rpc = loadfile(ARGV[0], { raw_mode: true })()['luci.ecycloud'];
 	testState.files[CRED_FILE] = sprintf('%J', accountA);
+	const remembered = '/etc/ecycloud/remembered-login.json';
+	const loginWith = (password, remember) => {
+		delete testState.files[CRED_FILE];
+		return rpc.login.call({ args: { email: ' a@test ', password, code: '', remember } });
+	};
+	testState.response = { ret: 1, data: { token: 'token-normal', expires_at: '', user: { email: 'a@test' } } };
+	check(loginWith('pw-remembered', true).ok, '勾选记住时密码登录必须成功');
+	check(json(testState.files[remembered] ?? 'null')?.email == 'a@test' && json(testState.files[remembered]).password == 'pw-remembered',
+		'勾选记住且登录成功后，路由器上必须保存这一对邮箱与密码');
+	const shown = rpc.remembered.call({ args: {} });
+	check(shown.email == 'a@test' && shown.password == 'pw-remembered', '读取接口必须返回记住的邮箱与密码');
+	check(loginWith('pw-plain', false).ok && !exists(testState.files, remembered), '未勾选记住的密码登录成功后必须清掉记住的账号密码');
+	testState.files[remembered] = sprintf('%J', { email: 'a@test', password: 'pw-old' });
+	testState.response = { ret: 0, msg: '密码错误' };
+	check(!loginWith('pw-wrong', true).ok && json(testState.files[remembered]).password == 'pw-old', '登录失败不得覆盖或保存记住的账号密码');
+	check(rpc.forget_remembered.call({ args: {} }).ok && !exists(testState.files, remembered), '取消记住必须删除路由器上的文件');
+	check(rpc.remembered.call({ args: {} }).password == '', '没有记住的账号时不得返回密码');
+	testState.files[CRED_FILE] = sprintf('%J', accountA);
 	const labelProfile = (nodes, groups) => {
 		testState.files[PROFILE_FILE] = sprintf('%J', {
 			account: accountA.email, node_labels: nodes, group_labels: groups ?? {}, binding: sessionBinding(),

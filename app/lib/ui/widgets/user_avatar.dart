@@ -334,7 +334,7 @@ Future<void> _logout(BuildContext context, AuthController auth) async {
       actions: <Widget>[
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: Text(L10n.t('退出')),
+          child: Text(L10n.t('退出登录')),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),

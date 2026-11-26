@@ -13,6 +13,71 @@ Widget _wrap(Widget child, {Alignment alignment = Alignment.center}) {
 }
 
 void main() {
+  // 修复前：两千个选项全部构建，打开菜单的那一帧与展开期间的每次刷新都要重排全部选项
+  testWidgets('选项很多时只构建可见的几项，展开即定位到选中项并把焦点放进去', (WidgetTester tester) async {
+    int? picked;
+    await tester.pumpWidget(
+      _wrap(
+        OptionDropdown<int>(
+          value: 1500,
+          options: <int, String>{
+            for (int id = 0; id < 2000; id++) id: '选项 $id',
+          },
+          onChanged: (int next) => picked = next,
+        ),
+      ),
+    );
+    await tester.tap(find.text('选项 1500'));
+    await tester.pumpAndSettle();
+
+    expect(tester.widgetList(find.byType(MenuItemButton)).length, lessThan(40));
+    final Finder selected = find.widgetWithText(MenuItemButton, '选项 1500');
+    expect(selected, findsOneWidget);
+    expect(
+      find.descendant(
+        of: selected,
+        matching: find.byElementPredicate(
+          (Element element) =>
+              element.widget is Focus &&
+              (element.widget as Focus).focusNode ==
+                  FocusManager.instance.primaryFocus,
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('选项 1500'), findsOneWidget);
+    expect(tester.widgetList(find.byType(MenuItemButton)).length, lessThan(40));
+    await tester.tap(find.text('选项 1512'));
+    await tester.pumpAndSettle();
+    expect(picked, 1512);
+    expect(find.byType(MenuItemButton), findsNothing);
+
+    // 再次展开仍从选中项开始，不停在上次滚到的位置
+    await tester.tap(find.text('选项 1500'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(MenuItemButton, '选项 1500'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('选项不多时仍一次构建全部选项', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        OptionDropdown<int>(
+          value: 0,
+          options: <int, String>{for (int id = 0; id < 64; id++) id: '选项 $id'},
+          onChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('选项 0'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MenuItemButton), findsNWidgets(64));
+    expect(find.byType(ListView), findsNothing);
+  });
+
   testWidgets('菜单展开在胶囊下方，不遮住收起态', (WidgetTester tester) async {
     String? picked;
 

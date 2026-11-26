@@ -93,6 +93,9 @@ msgstr "已是最新"
 msgid "No changes to save"
 msgstr "没有需要保存的改动"
 
+msgid "Only nodes loaded into the kernel are listed here. Search to find the others."
+msgstr "这里只列出已装入内核的节点，其余节点可通过搜索找到。"
+
 msgid "Reset"
 msgstr "复位"
 
@@ -420,8 +423,8 @@ msgstr "我知道了"
 msgid "Notice"
 msgstr "提示"
 
-msgid "Remember email"
-msgstr "记住邮箱"
+msgid "Remember email and password"
+msgstr "记住账号密码"
 
 msgid "Sign in with your %s account to load available nodes"
 msgstr "使用 %s 账号登录，登录后自动获取可用节点"
@@ -1056,6 +1059,9 @@ msgstr "Nikki 源未给出 mihomo-meta 版本"
 msgid "The profile failed kernel validation: {message}"
 msgstr "配置未通过内核校验：{message}"
 
+msgid "The kernel could not finish checking the profile: {message}"
+msgstr "配置校验未能完成：{message}"
+
 msgid "{message}; could not restore the previous profile"
 msgstr "{message}；恢复旧配置失败"
 
@@ -1073,9 +1079,6 @@ msgstr "账户正在切换，请稍后重试"
 
 msgid "Offline profile authorization is invalid. Refresh the profile."
 msgstr "配置离线授权无效，请刷新配置"
-
-msgid "The system clock is behind the time the panel issued the profile. The connection will retry automatically after the clock syncs."
-msgstr "系统时间早于面板签发配置的时间，校时后将自动重试"
 
 msgid "Could not stage the validated profile. Try again."
 msgstr "无法暂存已校验配置，请重试"
@@ -1139,6 +1142,9 @@ msgstr "无法提交已加载配置，请刷新配置"
 
 msgid "Offline profile authorization has expired. Refresh the profile."
 msgstr "配置离线授权已到期，请刷新配置"
+
+msgid "Offline profile authorization has expired. The connection will resume automatically after the panel renews it."
+msgstr "配置离线授权已到期，面板续期后将自动恢复连接"
 
 msgid "The kernel is not responding. Network recovery failed; retrying."
 msgstr "内核未响应，网络设置恢复失败，将继续重试"
@@ -1398,5 +1404,23 @@ msgstr "授予访问 ECY Cloud 客户端的权限"
 msgid "Not enough storage: %d MiB free on the router, but at least %d MiB is needed to start. Free up space or expand storage, then try again."
 msgstr "存储空间不足：路由器剩余 %d MiB，启动至少需要 %d MiB，请清理存储或扩容后重试"
 
+msgid "The mihomo kernel was not found. Install mihomo-meta on the router, then try again."
+msgstr "未找到 mihomo 内核，请在路由器上安装 mihomo-meta 后重试"
+
 msgid "Couldn't save the setting. The router's storage may be full."
 msgstr "设置保存失败，路由器存储空间可能已满"
+
+msgid "Load more"
+msgstr "加载更多"
+
+msgid "The panel's nodes have changed. Try again."
+msgstr "面板节点已变化，请重试"
+
+msgid "Could not save the node catalog"
+msgstr "无法保存节点目录"
+
+msgid "Could not save the loaded nodes"
+msgstr "无法保存已装入的节点"
+
+msgid "Your sign-in expires on %s. To stay connected, sign out and sign back in before then."
+msgstr "登录将于 %s 到期，到期后连接会断开，请在此之前退出并重新登录。"

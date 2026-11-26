@@ -15,6 +15,8 @@
 		EC200000000000000000006D /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; };
 		EC200000000000000000006E /* ECYCloudTunnel.appex in Embed VPN Extension */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000065 /* ECYCloudTunnel.appex */; platformFilters = (ios, xros, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		EC20000000000000000000CF /* Tunnel/PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */; };
+		ECB100000000000000000002 /* Tunnel/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = ECB100000000000000000001 /* Tunnel/PrivacyInfo.xcprivacy */; };
+		ECB100000000000000000003 /* Tunnel/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = ECB100000000000000000001 /* Tunnel/PrivacyInfo.xcprivacy */; };
 		EC20000000000000000000D0 /* ECYCloudKit in Frameworks */ = {isa = PBXBuildFile; productRef = EC1000000000000000000002 /* ECYCloudKit */; };
 		EC20000000000000000000D1 /* AppleKernel.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = EC2000000000000000000002 /* AppleKernel.xcframework */; };
 		EC20000000000000000000D2 /* ECYCloudTVTunnel.appex in Embed VPN Extension */ = {isa = PBXBuildFile; fileRef = EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -70,6 +72,7 @@
 		59F9AD7C10EF468C8CD09563 /* ECYCloudTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ECYCloudTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC1000000000000000000004 /* ../config/panel.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ../config/panel.json; sourceTree = "<group>"; };
 		EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tunnel/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		ECB100000000000000000001 /* Tunnel/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Tunnel/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		EC2000000000000000000002 /* AppleKernel.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = AppleKernel.xcframework; sourceTree = ECY_KERNEL_FRAMEWORK_DIR; };
 		EC2000000000000000000065 /* ECYCloudTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = ECYCloudTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC20000000000000000000C9 /* ECYCloudTVTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = ECYCloudTVTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -130,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				EC2000000000000000000001 /* Tunnel/PacketTunnelProvider.swift */,
+				ECB100000000000000000001 /* Tunnel/PrivacyInfo.xcprivacy */,
 				EC2000000000000000000002 /* AppleKernel.xcframework */,
 				ECA300000000000000000001 /* geoip.metadb */,
 				ECA300000000000000000002 /* GeoSite.dat */,
@@ -183,6 +187,7 @@
 			buildPhases = (
 				EC2000000000000000000067 /* Sources */,
 				EC2000000000000000000068 /* Frameworks */,
+				ECB100000000000000000004 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -200,6 +205,7 @@
 			buildPhases = (
 				EC20000000000000000000CB /* Sources */,
 				EC20000000000000000000CC /* Frameworks */,
+				ECB100000000000000000005 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -301,6 +307,18 @@
 				ECA300000000000000000006 /* GeoSite.dat in Resources */,
 			);
 		};
+		ECB100000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				ECB100000000000000000002 /* Tunnel/PrivacyInfo.xcprivacy in Resources */,
+			);
+		};
+		ECB100000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				ECB100000000000000000003 /* Tunnel/PrivacyInfo.xcprivacy in Resources */,
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -383,6 +401,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_KERNEL_FRAMEWORK_DIR = "$(SRCROOT)/../build";
@@ -480,7 +499,6 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=xrsimulator*]" = ECYCloud/Mobile.entitlements;
 				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_DISPLAY_VERSION = "$(MARKETING_VERSION)";
 				ENABLE_APP_SANDBOX = YES;
@@ -505,7 +523,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -545,7 +563,6 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=xrsimulator*]" = ECYCloud/Mobile.entitlements;
 				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_DISPLAY_VERSION = "$(MARKETING_VERSION)";
 				ENABLE_APP_SANDBOX = YES;
@@ -570,7 +587,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -604,7 +621,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ECYCloud/Mobile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud";
@@ -612,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -643,7 +659,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ECYCloud/Mobile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ECY Cloud";
@@ -651,7 +666,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -681,7 +696,6 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_APP_GROUP = group.com.ecycloud.client;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -693,7 +707,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -723,7 +737,6 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_APP_GROUP = group.com.ecycloud.client;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -735,7 +748,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -765,7 +778,6 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_APP_GROUP = group.com.ecycloud.client.tv;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -777,7 +789,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -807,7 +819,6 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Tunnel/Tunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 2Z8BTF3PLR;
 				ECY_APP_GROUP = group.com.ecycloud.client.tv;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -819,7 +830,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.11;
+				MARKETING_VERSION = 0.1.12;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",

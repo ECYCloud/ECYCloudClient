@@ -26,9 +26,46 @@ struct SettingsParityTests {
         #expect(NetworkRoute("0.0.0.0/0")?.subnetMask == "0.0.0.0")
         #expect(NetworkRoute("203.0.113.1/32")?.subnetMask == "255.255.255.255")
         for value in ["127.0.0.1", "2001:db8::1", "*.local", "example.test", "192.168.*", "203.0.113.0/24"] { #expect(NetworkSegments.validProxyBypass(value)) }
+        // 只有路由器 DNS 认识的局域网名字默认不进代理，与 Flutter 三个桌面端一致
+        for value in ["*.local", "*.lan", "*.home.arpa", "*.internal", "*.localdomain"] {
+            #expect(NetworkSegments.proxyDefaults.contains(value) && NetworkSegments.validProxyBypass(value))
+        }
         for value in ["https://example.test", "x\ny", "../secret", "a", "999.999.999.999/32", "::1/129", "127.0.0.1/33"] {
             #expect(throws: Error.self) { try NetworkSegments.parse(value, routes: true) }
         }
+    }
+    // 与 OpenWrt TPROXY 保留网段同一份；包隧道按这份列表写排除路由，新增网段不能盖住隧道自身地址、内置 DNS 与 fake-ip 网段
+    @Test func defaultExcludedRoutesAreReservedAndKeepTunnelTrafficInside() throws {
+        #expect(NetworkSegments.routeDefaults == ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4",
+                                                  "0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.88.99.0/24", "240.0.0.0/4",
+                                                  "::1/128", "100::/64", "fc00::/7", "fe80::/10", "ff00::/8"])
+        func bits(_ text: String) -> [UInt8] {
+            var v4 = in_addr(), v6 = in6_addr()
+            if inet_pton(AF_INET, text, &v4) == 1 { return withUnsafeBytes(of: &v4) { Array($0) } }
+            _ = inet_pton(AF_INET6, text, &v6)
+            return withUnsafeBytes(of: &v6) { Array($0) }
+        }
+        func covers(_ route: NetworkRoute, _ address: String) -> Bool {
+            let network = bits(route.address), target = bits(address)
+            guard network.count == target.count else { return false }
+            return (0..<route.prefix).allSatisfy { bit in (network[bit / 8] ^ target[bit / 8]) & (0x80 >> UInt8(bit % 8)) == 0 }
+        }
+        let routes = try NetworkSegments.routeDefaults.map { try #require(NetworkRoute($0)) }
+        for route in routes {
+            let network = bits(route.address)
+            #expect((route.prefix..<(network.count * 8)).allSatisfy { bit in network[bit / 8] & (0x80 >> UInt8(bit % 8)) == 0 }, "\(route.address)/\(route.prefix) 不是网络地址")
+        }
+        #expect(["0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.88.99.0/24", "240.0.0.0/4"].map { NetworkRoute($0)!.subnetMask }
+                == ["255.0.0.0", "255.192.0.0", "255.255.255.0", "255.255.255.0", "240.0.0.0"])
+        // 内置 DNS 只被既有的 172.16.0.0/12 覆盖，由包隧道额外包含的 172.19.0.2/32 主机路由压过
+        #expect(routes.filter { covers($0, "172.19.0.2") }.map(\.address) == ["172.16.0.0"])
+        for address in ["198.18.0.1", "198.19.255.254", "223.5.5.5", "1.1.1.1", "8.8.8.8", "2001:4860:4860::8888"] {
+            #expect(!routes.contains { covers($0, address) }, "\(address) 被默认排除")
+        }
+        let options = ProfileOptions.packetFlow
+        let remote = Data(#"{"proxies":[{"name":"node-1","type":"socks5","server":"192.0.2.1","port":1080}],"proxy-groups":[{"name":"选择","type":"select","proxies":["node-1"]}],"rules":["MATCH,选择"]}"#.utf8)
+        let assembled = try JSONSerialization.jsonObject(with: ProfileAssembler.assemble(remote, options: options).data) as! [String: Any]
+        #expect((assembled["tun"] as? [String: Any])?["route-exclude-address"] as? [String] == NetworkSegments.routeDefaults)
     }
     @Test func languagesAndInterpolationMatchFlutterContract() {
         #expect(AppLanguage.resolve(nil, device: "zh-Hant-HK") == .zhTW)

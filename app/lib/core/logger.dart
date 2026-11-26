@@ -27,9 +27,13 @@ class LogEntry {
   final String source;
   final String message;
 
+  // 落盘一条一行：续行没有时间戳，服务端会据此判定不是官方日志而拒收
   @override
   String toString() =>
-      '${time.toIso8601String()} [${level.label}] [$source] $message';
+      '${time.toIso8601String()} [${level.label}] [$source] '
+      '${message.replaceAll(_lineBreak, r'\n')}';
+
+  static final RegExp _lineBreak = RegExp(r'\r\n?|\n');
 }
 
 class Logger {

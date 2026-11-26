@@ -8,6 +8,9 @@ saved_auto_connect=1
 prepared=-1
 instances=''
 prepare_status=0
+uci_status=0
+reverted=0
+saved_cache=0
 
 config_load() { :; }
 config_get_bool() {
@@ -17,6 +20,7 @@ config_get_bool() {
 	esac
 }
 uci() {
+	[ "$uci_status" = 0 ] || return "$uci_status"
 	case "$*" in
 		'-q set ecycloud.config.enabled=1') saved_enabled=1 ;;
 		'-q set ecycloud.config.enabled=0') saved_enabled=0 ;;
@@ -32,6 +36,8 @@ boot() { start; }
 has_session() { [ "$logged_in" = 1 ]; }
 ctl() {
 	case "$1" in
+		revert) reverted=1 ;;
+		save-cache) saved_cache=1 ;;
 		prepare) prepared=$saved_enabled; return "$prepare_status" ;;
 		kernel) printf '/usr/libexec/mihomo\n' ;;
 		rundir) printf '/etc/ecycloud/run/fixture-session\n' ;;
@@ -77,4 +83,15 @@ prepare_status=2
 instances=''
 start_service
 [ "$instances" = ' retry' ] || { echo '临时网络失败必须登记重试任务'; exit 1; }
-echo 'OpenWrt init 稳定性回归通过：自动连接、手动断开、未登录、校验失败及任务隔离。'
+uci_status=1
+reverted=0
+prepared=-1
+if boot; then
+	echo '改不了 UCI 时开机不能继续启动'
+	exit 1
+fi
+[ "$reverted" = 1 ] && [ "$prepared" = -1 ] || { echo '开机改不了 UCI（配置损坏、闪存写满）时也必须先撤掉断电残留的透明代理规则'; exit 1; }
+saved_cache=0
+service_stopped
+[ "$saved_cache" = 1 ] || { echo 'procd 结束内核后必须把 tmpfs 里的 Fake-IP 缓存写回闪存'; exit 1; }
+echo 'OpenWrt init 稳定性回归通过：自动连接、手动断开、未登录、校验失败、开机先撤规则及任务隔离。'

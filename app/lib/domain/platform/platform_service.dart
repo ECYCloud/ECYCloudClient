@@ -162,6 +162,9 @@ class PlatformServiceException implements Exception {
   String toString() => L10n.message(message);
 }
 
+// Android 未授权「安装未知应用」时先送用户去授权页：这不是失败，授权后再点更新即可安装已下载的包
+class InstallPermissionRequired implements Exception {}
+
 abstract class PlatformService {
   String get platformId;
 
@@ -186,6 +189,21 @@ abstract class PlatformService {
   // 见到别的名字会打一行告警再自己改掉，因此 macOS 返回空串走 CalculateInterfaceName
   String get tunInterfaceName;
 
+  // 内核 TUN 的 dns-mode 留空时 Windows、Linux 开自动路由默认 hijack，darwin 默认 disabled：
+  // 系统解析直接发给局域网 DNS、不经内核。为真时显式 hijack，把 TUN 地址登记为系统首选解析器，
+  // 内核退出即自动撤销（sing-tun 用临时动态配置）。Android 的 DNS 由 VpnService 下发
+  bool get tunSetsSystemDns;
+
+  // Windows 的严格路由见 TUN 没有 IPv6 地址就在 WFP 封掉全部 IPv6 连接（sing-tun 的 tun_windows.go），连 ::1 都不通；
+  // 而内核在顶层 ipv6 为假时会清空 tun.inet6-address（config.go 的 parseIPV6），所以严格路由开着时顶层 ipv6 必须为真
+  bool get strictRouteNeedsTunIPv6;
+
+  // TUN 接管 DNS 后 nas.lan 这类只有路由器认识的名字进了内核、经代理查不到；为真时给这些后缀指定 system
+  // 并排除出 fake-ip。Windows 的 system 只取有网关的网卡 DNS，Android（cmfa）只认 Kotlin 经 SetSystemDNS
+  // 交进来的底层网络 DNS，TUN 自己的 DNS 地址内核已拉黑（listener/sing_tun/server.go），都不会绕回内核。
+  // Linux 有 resolved 时 system 会经 127.0.0.53 绕回内核，由 helper 按有无 resolved 处理；macOS 由 helper 登记专用解析器
+  bool get lanNamesViaSystemDns;
+
   Future<void> initialize();
 
   Future<void> setSystemProxy({
@@ -196,6 +214,9 @@ abstract class PlatformService {
   Future<void> restoreSystemProxy();
 
   Future<SystemProxyState> systemProxyState();
+
+  // null 表示读不到或看不懂，调用方不得据此动作
+  Future<bool?> tunRoutesIntact({required int? tableIndex});
 
   Future<bool> launchAtLoginEnabled();
 
@@ -231,6 +252,9 @@ abstract class PlatformService {
   Future<String?> unprotectSecret(String name, String blob);
 
   Future<void> deleteSecret(String name);
+
+  // false 只在 Linux 没有 Secret Service 时出现：记住的密码不能保存，登录令牌改存仅本人可读的凭据文件
+  Future<bool> secretStoreAvailable();
 
   Future<void> copySecret(String text);
 

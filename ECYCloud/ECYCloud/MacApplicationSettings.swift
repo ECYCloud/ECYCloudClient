@@ -21,6 +21,11 @@ import ECYCloudKit
     var session: ClientSession?
     private var terminating = false
     private var replied = false
+    // 窗口标签栏的「+」会让 SwiftUI 再开一个主窗口。不要实现 applicationShouldHandleReopen：SwiftUI 默认已复用或恢复最小化的主窗口，
+    // 只在没有窗口时新开；代理接管后没有窗口时不会再新开
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         !(session?.preferences.closeToTray ?? true)
     }
@@ -48,7 +53,16 @@ struct MacTrayView: View {
     let session: ClientSession?
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Button(L10n.t("打开客户端")) { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
+        Button(L10n.t("打开客户端")) {
+            NSApp.unhide(nil)
+            if let window = MacMainWindow.existing("main", in: NSApp.windows) {
+                window.deminiaturize(nil)
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                openWindow(id: "main")
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
         if let session, session.phase == .signedIn {
             Button(session.connection?.state == .connected ? L10n.t("断开连接") : L10n.connectAction) {
                 Task {

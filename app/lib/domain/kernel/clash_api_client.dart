@@ -188,6 +188,18 @@ class ClashApiClient {
     return !loaded.contains(false);
   }
 
+  // 节点文件加载前，TUN 劫持的 DNS 等经分组出站的流量也会读 url-test 并留下这份缓存，只能加载完再清掉；
+  // 客户端从不固定 url-test 的选中项，清除只让内核按已加载的成员重选
+  Future<void> resetUrlTests(Iterable<String> groups) async {
+    for (final String group in groups) {
+      final String path = '/proxies/${Uri.encodeComponent(group)}';
+      final http.Response response = await _request('DELETE', path);
+      if (response.statusCode != 204) {
+        throw ClashApiException('$path 请求失败（HTTP ${response.statusCode}）');
+      }
+    }
+  }
+
   Future<(List<ProxyGroup>, List<ProxyNode>)> fetchProxies() async {
     if (!await _panelNodesLoaded()) {
       throw ClashApiException('节点文件尚未加载完成');

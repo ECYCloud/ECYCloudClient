@@ -206,6 +206,12 @@ class _Platform implements PlatformService {
   @override
   String get tunInterfaceName => 'ECYCloud';
   @override
+  bool get tunSetsSystemDns => false;
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+  @override
+  bool get lanNamesViaSystemDns => false;
+  @override
   bool get supportsSystemProxy => false;
   @override
   bool get supportsTray => false;

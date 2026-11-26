@@ -123,7 +123,10 @@ String _transact(String pipeName, String serviceName, String requestLine) {
   final int Function(int) closeHandle = kernel32
       .lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
   final int Function() getLastError = kernel32
-      .lookupFunction<Uint32 Function(), int Function()>('GetLastError');
+      .lookupFunction<Uint32 Function(), int Function()>(
+        'GetLastError',
+        isLeaf: true,
+      );
   final int Function(Pointer<Utf16>, int) waitNamedPipe = kernel32
       .lookupFunction<
         Int32 Function(Pointer<Utf16>, Uint32),

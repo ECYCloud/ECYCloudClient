@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,6 +37,10 @@ const (
 
 // mihomo MMDB() 认 Country.mmdb / geoip.db / geoip.metadb，GeoSite 认 GeoSite.dat
 var geoDataFileNames = []string{"geoip.metadb", "GeoSite.dat"}
+
+// TUN 接管系统 DNS 后仍交回系统原有 DNS 的局域网后缀：这些名字只有路由器 DNS 认识，内核经代理去查只会得到 NXDOMAIN。
+// 与 network_bypass.dart 的 _lanHostSuffixes 一致；.local 走 mDNS，不经单播 DNS
+var lanDomains = []string{"lan", "home.arpa", "internal", "localdomain"}
 
 func prepareRunRoot() error {
 	if err := ensureRestrictedDir(runRoot()); err != nil {
@@ -88,6 +93,9 @@ func newKernelManager() *kernelManager {
 func (k *kernelManager) write(config string) error {
 	config, err := sanitizeKernelConfig(config)
 	if err != nil {
+		return err
+	}
+	if config, err = withSystemLanDNS(config); err != nil {
 		return err
 	}
 	if err := prepareRunDir(); err != nil {
@@ -604,6 +612,7 @@ func (k *kernelManager) start(config string) error {
 	go k.pump(stderr, &pumps)
 
 	done := k.done
+	watchTunDNS(config, done)
 	go func() {
 		defer guard("等待内核退出")
 		defer close(done)
@@ -715,18 +724,18 @@ func (k *kernelManager) status(cursor int) kernelStatus {
 	return status
 }
 
-func (k *kernelManager) check(config string) error {
+func (k *kernelManager) check(config string) (string, error) {
 	config, err := sanitizeKernelConfig(config)
 	if err != nil {
-		return err
+		return err.Error(), nil
 	}
 	if err := prepareRunDir(); err != nil {
-		return err
+		return "", err
 	}
 
 	path := filepath.Join(runDir(), "config.check.json")
 	if err := writeKernelFile(path, strings.NewReader(config)); err != nil {
-		return fmt.Errorf("写入待校验配置失败: %w", err)
+		return "", fmt.Errorf("写入待校验配置失败: %w", err)
 	}
 	defer os.Remove(path)
 
@@ -735,16 +744,26 @@ func (k *kernelManager) check(config string) error {
 
 	cmd := exec.CommandContext(ctx, kernelPath(), "-t", "-f", path, "-d", runDir())
 	if err := applyKernelCredential(cmd); err != nil {
-		return err
+		return "", err
 	}
 	out, err := cmd.CombinedOutput()
+	return kernelCheckResult(ctx, out, err)
+}
+
+// 只有内核自己跑完并报出错误才算配置不合法；超时、被信号结束、起不来必须走 error：
+// GUI 把 valid=false 当成配置不合法、不再自动重试
+func kernelCheckResult(ctx context.Context, out []byte, err error) (string, error) {
 	if err == nil {
-		return nil
+		return "", nil
 	}
-	if message := kernelCheckFailure(string(out)); message != "" {
-		return fmt.Errorf("%s", message)
+	var exit *exec.ExitError
+	if reason := kernelCheckFailure(string(out)); reason != "" && ctx.Err() == nil && errors.As(err, &exit) && exit.Exited() {
+		return reason, nil
 	}
-	return err
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return "", fmt.Errorf("配置校验未能完成: %w", err)
 }
 
 // mihomo 校验失败时真正原因在最后一条 level=error，末行只是 “test failed”
@@ -756,10 +775,7 @@ func kernelCheckFailure(out string) string {
 			reason = message
 		}
 	}
-	if reason != "" {
-		return reason
-	}
-	return strings.TrimSpace(out)
+	return reason
 }
 
 // 内核日志是 logrus 的 key=value 文本：time="..." level=error msg="..."

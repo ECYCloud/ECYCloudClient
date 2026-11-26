@@ -44,3 +44,17 @@ func TestValidProxySnapshotIsKept(t *testing.T) {
 		t.Fatal("有效快照不能被删除")
 	}
 }
+
+func TestProxySetRecordsServicesAddedAfterSnapshot(t *testing.T) {
+	snapshot := proxySnapshot{Services: []serviceSnapshot{{Name: "Wi-Fi"}}}
+	fresh := unrecordedServices(snapshot, []string{"Wi-Fi", "USB 10/100/1000 LAN"})
+	if len(fresh) != 1 || fresh[0] != "USB 10/100/1000 LAN" {
+		t.Fatalf("连接后新出现的网络服务必须先补记原值: %v", fresh)
+	}
+	if fresh := unrecordedServices(proxySnapshot{}, []string{"Wi-Fi"}); len(fresh) != 1 {
+		t.Fatalf("没有快照时全部服务都要记录: %v", fresh)
+	}
+	if fresh := unrecordedServices(snapshot, []string{"Wi-Fi"}); len(fresh) != 0 {
+		t.Fatalf("已记录的服务不能用被改过的值覆盖: %v", fresh)
+	}
+}

@@ -242,6 +242,94 @@ void main() {
       greaterThanOrEqualTo(0),
     );
   }, skip: executable == null ? '设置 ECYCLOUD_MIHOMO 指向官方内核后运行' : false);
+
+  test('真实内核节点文件加载前读过 url-test，加载后须清缓存才选回节点', () async {
+    final Directory run = await Directory.systemTemp.createTemp(
+      'ecy-urltest-core-',
+    );
+    addTearDown(() => run.delete(recursive: true));
+    Future<int> port() async {
+      final ServerSocket socket = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      final int value = socket.port;
+      await socket.close();
+      return value;
+    }
+
+    const String provider = 'ecy-panel-nodes';
+    void writeNodes(String name) {
+      final File next = File('${run.path}/nodes.next');
+      next.writeAsStringSync(
+        jsonEncode(<String, Object>{
+          'proxies': <Object>[
+            <String, String>{'name': name, 'type': 'direct'},
+          ],
+        }),
+      );
+      next.renameSync('${run.path}/$provider.json');
+    }
+
+    final ClashApiOptions options = ClashApiOptions(
+      port: await port(),
+      secret: 'isolated-test',
+    );
+    final ClashApiClient api = ClashApiClient(options);
+    addTearDown(api.close);
+    writeNodes('ecy-panel-empty');
+    final File config = File('${run.path}/config.json')
+      ..writeAsStringSync(
+        jsonEncode(<String, Object>{
+          'mixed-port': await port(),
+          'allow-lan': false,
+          'log-level': 'warning',
+          'external-controller': '127.0.0.1:${options.port}',
+          'secret': options.secret,
+          'proxies': <Object>[],
+          'proxy-providers': <String, Object>{
+            provider: <String, Object>{
+              'type': 'file',
+              'path': '$provider.json',
+            },
+          },
+          'proxy-groups': <Object>[
+            <String, Object>{
+              'name': '自动选择',
+              'type': 'url-test',
+              'use': <String>[provider],
+              'url': 'http://127.0.0.1:1/',
+              'exclude-filter': '^ecy-panel-empty\$',
+              'empty-fallback': 'REJECT',
+            },
+          ],
+          'rules': <String>['MATCH,自动选择'],
+        }),
+      );
+    final Process core = await Process.start(executable!, <String>[
+      '-d',
+      run.path,
+      '-f',
+      config.path,
+    ]);
+    core.stdout.drain<void>();
+    core.stderr.drain<void>();
+    addTearDown(() async {
+      core.kill();
+      await core.exitCode.timeout(const Duration(seconds: 5));
+    });
+    await api.waitReady(timeout: const Duration(seconds: 10));
+    Future<String> now() async => (await api.fetchProxies()).$1
+        .firstWhere((ProxyGroup group) => group.name == '自动选择')
+        .now;
+
+    expect(await now(), 'REJECT');
+    writeNodes('node-1');
+    await api.updateProxyProviders(<String>[provider]);
+    expect(await now(), 'REJECT');
+    await api.resetUrlTests(<String>['自动选择']);
+    expect(await now(), 'node-1');
+  }, skip: executable == null ? '设置 ECYCLOUD_MIHOMO 指向官方内核后运行' : false);
 }
 
 class _Reader {

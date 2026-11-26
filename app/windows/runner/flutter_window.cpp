@@ -125,6 +125,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (message == WM_FONTCHANGE) {
       flutter_controller_->engine()->ReloadSystemFonts();
     }
+
+    // 界面空闲时引擎不出帧，显示前或被遮挡时丢掉的画面不会自己补上，会一直白到鼠标移入
+    if ((message == WM_SHOWWINDOW && wparam) ||
+        (message == WM_SIZE && wparam == SIZE_RESTORED) ||
+        (message == WM_ACTIVATE && LOWORD(wparam) != WA_INACTIVE)) {
+      flutter_controller_->ForceRedraw();
+    }
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

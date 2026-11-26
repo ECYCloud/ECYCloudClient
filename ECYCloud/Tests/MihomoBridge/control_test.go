@@ -272,6 +272,16 @@ func TestStopDoesNotWaitForGeoDataDownload(t *testing.T) {
 	}
 }
 
+// 包隧道实例跑在系统 VPN 扩展里：重新下载会整份解码 GeoSite，堆瞬时涨到扩展被系统终止，只有待机内核受理
+func TestPacketTunnelRefusesGeoDataUpdate(t *testing.T) {
+	id := startPacketCore(t, packetProfile(9))
+	for _, command := range []string{`{"action":"geodata"}`, `{"action":"geodata","scope":"status"}`} {
+		if _, err := kernel.Control(id, []byte(command)); err != kernel.ErrGeoDataInTunnel {
+			t.Fatalf("%s: %v", command, err)
+		}
+	}
+}
+
 type syntheticTracker struct {
 	C.Connection
 	id   string
@@ -723,6 +733,8 @@ func TestUpdateNodesReloadsPanelNodesWithoutRestart(t *testing.T) {
 	if err := os.Chmod(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
+	probe := "ecy-panel-" + strings.Repeat("ab", 32)
+	probed := []any{map[string]any{"name": "ecy-panel-empty", "type": "reject"}}
 	build := func(names ...string) []byte {
 		nodes := []any{}
 		for _, name := range names {
@@ -730,7 +742,10 @@ func TestUpdateNodesReloadsPanelNodesWithoutRestart(t *testing.T) {
 		}
 		profile := packetProfile(9)
 		profile["proxies"] = []any{}
-		profile["proxy-providers"] = map[string]any{"ecy-panel-nodes": map[string]any{"type": "file", "path": "ecy-panel-nodes.json", "payload": nodes}}
+		profile["proxy-providers"] = map[string]any{
+			"ecy-panel-nodes": map[string]any{"type": "file", "path": "ecy-panel-nodes.json", "payload": nodes},
+			probe:             map[string]any{"type": "file", "path": probe + ".json", "payload": probed},
+		}
 		profile["proxy-groups"] = []any{map[string]any{"name": "select", "type": "select", "proxies": []string{"REJECT"}, "use": []string{"ecy-panel-nodes"}}}
 		data, err := json.Marshal(profile)
 		if err != nil {
@@ -778,6 +793,27 @@ func TestUpdateNodesReloadsPanelNodesWithoutRestart(t *testing.T) {
 	}
 	if got := members(); !strings.Contains(got, "node-a") || !strings.Contains(got, "node-c") || strings.Contains(got, "node-b") {
 		t.Fatalf("updated members: %s", got)
+	}
+	// 测试未装入的节点只改探测节点文件：内容没变的节点文件不重写，内核也就不会换掉其中的出站
+	if _, err := os.Stat(filepath.Join(directory, probe+".json")); !os.IsNotExist(err) {
+		t.Fatalf("unchanged probe file was written: %v", err)
+	}
+	before, err := os.Stat(filepath.Join(directory, "ecy-panel-nodes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probed = []any{map[string]any{"name": "node-x", "type": "socks5", "server": "127.0.0.1", "port": 9}}
+	if err := kernel.UpdateNodes(id, build("node-a", "node-c")); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.Stat(filepath.Join(directory, "ecy-panel-nodes.json")); err != nil || !os.SameFile(before, after) {
+		t.Fatalf("unchanged node file was rewritten: %v", err)
+	}
+	if _, err := kernel.Control(id, []byte(`{"action":"probe","node":"node-x","scope":"delay"}`)); err != nil {
+		t.Fatalf("probe node was not loaded: %v", err)
+	}
+	if got := members(); strings.Contains(got, "node-x") {
+		t.Fatalf("probe node joined a group: %s", got)
 	}
 	if _, err := kernel.Start(build("node-a"), directory, 0, "", "", ""); err != kernel.ErrBusy {
 		t.Fatalf("kernel was restarted: %v", err)

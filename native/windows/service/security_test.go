@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 func TestPanelProviderFilesRejectUnsafePaths(t *testing.T) {
@@ -563,6 +564,49 @@ func TestProxySnapshotsArePerSystemAccount(t *testing.T) {
 	}
 	if !strings.HasSuffix(other, "proxy-snapshot-S-1-5-21-1-1-1-1002.json") {
 		t.Fatalf("快照文件名必须带 SID: %s", other)
+	}
+}
+
+func TestLogonRestoresDeferredProxiesExceptActiveOwner(t *testing.T) {
+	t.Setenv("ProgramData", t.TempDir())
+	if err := os.MkdirAll(runRoot(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := user.User.Sid.String()
+	key, err := openInternetSettings(current, registry.QUERY_VALUE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(captureSnapshot(key, current, os.Getpid()))
+	key.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotPath(current), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offline := snapshotPath("S-1-5-21-0-0-0-1001")
+	if err := os.WriteFile(offline, []byte(`{"user_sid":"S-1-5-21-0-0-0-1001"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newServer()
+	s.owner = current
+	s.restoreDeferredProxies()
+	if _, err := os.Stat(snapshotPath(current)); err != nil {
+		t.Fatalf("正在使用客户端的账号的快照不能被登录通知还原: %v", err)
+	}
+	s.owner = ""
+	s.restoreDeferredProxies()
+	if _, err := os.Stat(snapshotPath(current)); !os.IsNotExist(err) {
+		t.Fatalf("已登录账号的残留快照应在登录通知后还原: %v", err)
+	}
+	if _, err := os.Stat(offline); err != nil {
+		t.Fatalf("注册表未加载的账号快照必须保留到其登录: %v", err)
 	}
 }
 

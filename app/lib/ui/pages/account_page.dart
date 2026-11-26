@@ -379,42 +379,48 @@ class _UserCard extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Divider(height: 1),
           ),
-          InfoRow(
-            label: L10n.t('余额'),
-            value: L10n.t('¥ {0}', <Object>[user.money.toStringAsFixed(2)]),
-          ),
-          InfoRow(
-            label: L10n.t('注册时间'),
-            value: user.regDate.isEmpty ? '—' : user.regDate,
-          ),
-          InfoRow(
-            label: L10n.t('套餐'),
-            value:
-                plan?.name ??
-                (user.userClass > 0 ? 'VIP ${user.userClass}' : L10n.t('免费用户')),
-          ),
-          if (plan != null) ...<Widget>[
-            InfoRow(label: L10n.t('到期'), value: plan.expireAt),
-            InfoRow(
-              label: L10n.t('剩余天数'),
-              value: L10n.t('{0} 天', <Object>[plan.remainingDays]),
-            ),
-            InfoRow(
-              label: L10n.t('自动续费'),
-              value: plan.autoRenew ? plan.renewAt : '-',
-            ),
-          ],
-          InfoRow(
-            label: L10n.t('限速'),
-            value: user.speedLimitMbps <= 0
-                ? L10n.t('不限速')
-                : '${user.speedLimitMbps.toStringAsFixed(0)} Mbps',
-          ),
-          InfoRow(
-            label: L10n.t('在线客户端'),
-            value: user.connectorLimit <= 0
-                ? L10n.t('{0} / 无限制', <Object>[user.onlineDeviceCount])
-                : '${user.onlineDeviceCount} / ${user.connectorLimit}',
+          _InfoGrid(
+            children: <Widget>[
+              InfoRow(
+                label: L10n.t('余额'),
+                value: L10n.t('¥ {0}', <Object>[user.money.toStringAsFixed(2)]),
+              ),
+              InfoRow(
+                label: L10n.t('注册时间'),
+                value: user.regDate.isEmpty ? '—' : user.regDate,
+              ),
+              InfoRow(
+                label: L10n.t('套餐'),
+                value:
+                    plan?.name ??
+                    (user.userClass > 0
+                        ? 'VIP ${user.userClass}'
+                        : L10n.t('免费用户')),
+              ),
+              if (plan != null) ...<Widget>[
+                InfoRow(label: L10n.t('到期'), value: plan.expireAt),
+                InfoRow(
+                  label: L10n.t('剩余天数'),
+                  value: L10n.t('{0} 天', <Object>[plan.remainingDays]),
+                ),
+                InfoRow(
+                  label: L10n.t('自动续费'),
+                  value: plan.autoRenew ? plan.renewAt : '-',
+                ),
+              ],
+              InfoRow(
+                label: L10n.t('限速'),
+                value: user.speedLimitMbps <= 0
+                    ? L10n.t('不限速')
+                    : '${user.speedLimitMbps.toStringAsFixed(0)} Mbps',
+              ),
+              InfoRow(
+                label: L10n.t('在线客户端'),
+                value: user.connectorLimit <= 0
+                    ? L10n.t('{0} / 无限制', <Object>[user.onlineDeviceCount])
+                    : '${user.onlineDeviceCount} / ${user.connectorLimit}',
+              ),
+            ],
           ),
           if (plan != null &&
               (plan.canToggleAutoRenew ||
@@ -447,6 +453,44 @@ class _UserCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _InfoGrid extends StatelessWidget {
+  const _InfoGrid({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final int columns = (constraints.maxWidth / 320).floor().clamp(1, 3);
+        if (columns == 1) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          );
+        }
+        return Column(
+          children: <Widget>[
+            for (int start = 0; start < children.length; start += columns)
+              Row(
+                children: <Widget>[
+                  for (int column = 0; column < columns; column++) ...<Widget>[
+                    if (column > 0) const SizedBox(width: 32),
+                    Expanded(
+                      child: start + column < children.length
+                          ? children[start + column]
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
+          ],
+        );
+      },
     );
   }
 }

@@ -2,7 +2,8 @@
 
 import { testState } from 'fs';
 import { API_FILE, CRED_FILE, PROFILE_FILE, readJson, saveOrigins, sessionBinding, sessionValid, settings } from 'ecycloud.common';
-import { NODE_PROVIDER, SPEED_GROUP, assemble, canUpdateNodes, inspect, kernelConfig, membersOf, nodesOf, runtimeConfig, write, writeNodeProviders } from 'ecycloud.profile';
+import { CATALOG_FILE, CATALOG_INDEX, NODE_PROVIDER, SPEED_GROUP, assemble, canUpdateNodes, catalog, inspect, kernelConfig, membersOf, nodesOf, runtimeConfig, storeCatalog, workingSet, write,
+		 writeNodeProviders } from 'ecycloud.profile';
 import { withNodePayloads } from 'ecycloud.panel';
 import { delayBatch, proxies } from 'ecycloud.clash';
 import { update } from 'ecycloud.service';
@@ -51,6 +52,70 @@ const quoted = copy(initial);
 quoted['proxy-providers'][NODE_PROVIDER].payload[0].name = '节点`一(测试)';
 check(membersOf(quoted, { proxies: [ '节点`一(测试)', 'DIRECT' ], use: [],
 	filter: '^节点\\x60一\\(测试\\)$`^DIRECT$' })[0] == '节点`一(测试)', '有序筛选必须保留反引号和正则特殊字符名称');
+
+/* 面板的实际形态：总节点文件、只带成员名单的共用节点文件、空分组的占位、指向单个节点的规则分组 */
+const tailProvider = 'ecy-panel-' + join('', map([ 1, 2, 3, 4 ], () => 'fedcba9876543210'));
+const emptyProvider = 'ecy-panel-' + join('', map([ 1, 2, 3, 4 ], () => '00000000ffffffff'));
+function bulk(count, groups) {
+	const providers = {};
+	providers[NODE_PROVIDER] = { type: 'file', path: `${NODE_PROVIDER}.json`, payload: [] };
+	providers[tailProvider] = { type: 'file', path: `${tailProvider}.json`, members: [] };
+	providers[emptyProvider] = { type: 'file', path: `${emptyProvider}.json`, payload: [ { name: 'ecy-panel-empty', type: 'reject' } ] };
+	const labels = {};
+	for (let id = 1; id <= count; id++) {
+		push(providers[NODE_PROVIDER].payload, { name: `node-${id}`, type: 'ss', server: '192.0.2.1', port: 8000 + id, cipher: 'aes-128-gcm', password: 'fixture' });
+		labels[`node-${id}`] = `夹具 ${id}`;
+		if (id > count / 2)
+			push(providers[tailProvider].members, `node-${id}`);
+	}
+	const list = [
+		{ name: 'all', type: 'select', proxies: [ 'DIRECT' ], use: [ NODE_PROVIDER ], 'default-selected': `node-${count - 1}` },
+		{ name: 'tail', type: 'url-test', proxies: [], use: [ tailProvider ], 'exclude-filter': '^ecy-panel-empty$', 'empty-fallback': 'REJECT' },
+		{ name: 'empty', type: 'select', proxies: [ 'DIRECT' ], use: [ emptyProvider ], 'exclude-filter': '^ecy-panel-empty$' },
+		{ name: 'ecy-panel-target-x', type: 'select', hidden: true, use: [ NODE_PROVIDER ], filter: `^node\\-${count - 3}$` }
+	];
+	for (let i = 0; i < (groups ?? 0); i++)
+		push(list, { name: `extra-${i}`, type: 'select', proxies: [ 'DIRECT' ], use: [ NODE_PROVIDER ] });
+	return { config: { proxies: [], 'proxy-providers': providers, 'proxy-groups': list, rules: [ 'DOMAIN,pinned.test,ecy-panel-target-x', 'MATCH,all' ] },
+		node_labels: labels, revision: 'fixture-revision' };
+};
+const copiesOf = loaded => length(keys(loaded)) + length(filter(keys(loaded), name => +substr(name, 5) > 500));
+check(workingSet(bulk(40).config, [], 60) == null, '节点副本没超过上限时必须全部装入');
+const catalogFixture = bulk(1000);
+const inUse = workingSet(catalogFixture.config, [ 'node-777', '不是节点' ], 100);
+check(inUse != null && copiesOf(inUse) >= 100 && copiesOf(inUse) <= 101, '超过上限时装入的节点副本数必须停在上限');
+check(inUse['node-777'] && inUse['node-999'] && inUse['node-997'] && inUse['node-501'] && !inUse['不是节点'],
+	'用户选过的、分组默认选中的、规则直接指向的节点必须装入，且每个有成员的节点文件至少留一个');
+check(sprintf('%J', inUse) == sprintf('%J', workingSet(catalogFixture.config, [ 'node-777', '不是节点' ], 100)), '同一份配置与固定项的选取结果必须一致');
+const crowdedPage = workingSet(bulk(2000, 20).config, []);
+check(crowdedPage != null && length(keys(crowdedPage)) > 1000 && length(keys(crowdedPage)) < 1300,
+	'副本数没超但节点页应答会超过 ubus 上限时，也必须按应答体积裁剪');
+testState.files['/proc/meminfo'] = 'MemTotal:          96000 kB\nMemFree:           1000 kB\n';
+const lowMemory = workingSet(catalogFixture.config, []);
+check(lowMemory != null && copiesOf(lowMemory) >= 500 && copiesOf(lowMemory) <= 501, '内存小的路由器必须按总内存降低装入上限');
+delete testState.files['/proc/meminfo'];
+const catalogText = sprintf('%J', catalogFixture);
+const working = withNodePayloads({ ok: true, data: catalogFixture }, inUse);
+const namesIn = name => map(working.data.config['proxy-providers'][name].payload, node => node.name);
+check(working.ok && sprintf('%J', catalogFixture) == catalogText, '按在用节点还原时不能改动传入的整份目录');
+check(join(',', namesIn(NODE_PROVIDER)) == join(',', filter(map(catalogFixture.config['proxy-providers'][NODE_PROVIDER].payload, node => node.name), name => inUse[name])),
+	'总节点文件只留在用的节点，顺序与面板一致');
+check(namesIn(tailProvider)[0] == 'node-501' && !length(filter(namesIn(tailProvider), name => !inUse[name])) &&
+	join(',', namesIn(emptyProvider)) == 'ecy-panel-empty', '各节点文件只留在用的成员，空分组保留占位');
+check(working.data.partial[NODE_PROVIDER] == true && working.data.partial[tailProvider] == true && working.data.partial[emptyProvider] == null,
+	'没装全的节点文件必须记入 partial，空分组不算');
+check(length(keys(working.data.node_labels)) == length(keys(inUse)) && working.data.node_labels['node-777'] == '夹具 777',
+	'显示名只保留在用节点的');
+check(inspect(working.data.config).ok, '只装在用节点的配置必须通过结构检查');
+check(storeCatalog(catalogFixture, inUse) && readJson(CATALOG_FILE).config['proxy-providers'][tailProvider].members[0] == 'node-501',
+	'整份节点目录必须按面板下发的成员名单格式另存');
+const holder = { account: 'router@test', revision: 'fixture-revision', partial: working.data.partial };
+check(catalog(holder, true).members[tailProvider][0] == 'node-501' && catalog(holder, true).labels['node-1000'] == '夹具 1000' &&
+	length(catalog(holder).config['proxy-providers'][NODE_PROVIDER].payload) == 1000, '目录索引与整份目录必须可按当前缓存取回');
+check(catalog({ ...holder, revision: 'other' }) == null && catalog({ ...holder, account: 'other@test' }, true) == null && catalog({ ...holder, partial: null }) == null,
+	'目录与缓存不是同一账户、同一版配置，或缓存已全部装入时不能使用目录');
+check(storeCatalog(catalogFixture, null) && testState.files[CATALOG_FILE] == null && testState.files[CATALOG_INDEX] == null,
+	'全部装入时必须删除节点目录');
 const speed = assemble(initial, settings(), readJson(API_FILE));
 check(speed.ok && speed.config['proxy-groups'][-1].name == SPEED_GROUP &&
 	speed.config['proxy-groups'][-1].use[0] == NODE_PROVIDER, '测速组必须复用节点订阅');
@@ -223,7 +288,8 @@ for (let failure in [ 'validation', 'write', 'provider' ]) {
 		`节点更新失败必须恢复旧文件与缓存：${failure}`);
 	check(readJson(`${runDir}/config.json`)['proxy-providers'][NODE_PROVIDER].payload[0].port == 10002,
 		`节点更新失败必须恢复旧运行配置：${failure}`);
-	check(testState.files[`${runDir}/kernel.json`] == sprintf('%J', kernelConfig(readJson(`${runDir}/config.json`))),
+	const restored = readJson(`${runDir}/config.json`);
+	check(testState.files[`${runDir}/kernel.json`] == sprintf('%J', { ...kernelConfig(restored), tun: { ...restored.tun, enable: false } }),
 		`节点更新失败时内核配置必须随运行配置一起恢复：${failure}`);
 	uninterrupted();
 	validationFailed = false; testState.commandStatus = 0; testState.onWrite = null;

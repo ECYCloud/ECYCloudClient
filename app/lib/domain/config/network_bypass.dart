@@ -30,6 +30,8 @@ const List<String> _windowsSystemProxyBypass = <String>[
   '192.168.*',
   '169.254.*',
   '<local>',
+  '*.local',
+  ..._lanHostSuffixes,
 ];
 
 const List<String> _macosSystemProxyBypass = <String>[
@@ -40,6 +42,7 @@ const List<String> _macosSystemProxyBypass = <String>[
   '172.16.0.0/12',
   '192.168.0.0/16',
   '169.254.0.0/16',
+  ..._lanHostSuffixes,
 ];
 
 const List<String> _linuxSystemProxyBypass = <String>[
@@ -52,6 +55,16 @@ const List<String> _linuxSystemProxyBypass = <String>[
   '::1',
   'fc00::/7',
   'fe80::/10',
+  '*.local',
+  ..._lanHostSuffixes,
+];
+
+// 只有路由器 DNS 认识的局域网名字：走代理会被送到远端解析而失败。与 helper 的 lanDomains 一致
+const List<String> _lanHostSuffixes = <String>[
+  '*.lan',
+  '*.home.arpa',
+  '*.internal',
+  '*.localdomain',
 ];
 
 List<String> appendUnique(List<String> base, List<String> extra) {

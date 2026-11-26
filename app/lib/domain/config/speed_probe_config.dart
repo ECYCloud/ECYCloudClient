@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'node_working_set.dart';
+
 class SpeedProbeConfig {
   static const String listenerName = 'ecy-speed';
   static const String groupName = 'ecy-speed';
@@ -32,7 +34,13 @@ class SpeedProbeConfig {
         ],
         if (config['proxy-providers'] is Map &&
             (config['proxy-providers'] as Map).containsKey('ecy-panel-nodes'))
-          'use': <String>['ecy-panel-nodes'],
+          'use': <String>[
+            'ecy-panel-nodes',
+            if ((config['proxy-providers'] as Map).containsKey(
+              NodeWorkingSet.probeProvider,
+            ))
+              NodeWorkingSet.probeProvider,
+          ],
       },
     ];
     final List<String> parts = credential(secret).split(':');

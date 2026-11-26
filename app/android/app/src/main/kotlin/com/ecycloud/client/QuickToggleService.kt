@@ -55,8 +55,8 @@ class QuickToggleService : TileService() {
         }
         // TileService 回调里 stop 会阻塞，挪到后台；磁贴由 shutdown() 回刷
         Thread {
-            BoxState.stoppedByUser = true
-            BoxService.stop()
+            BoxState.markStopped(this, BoxState.STOPPED_BY_USER)
+            BoxService.stop(this)
         }.start()
     }
 

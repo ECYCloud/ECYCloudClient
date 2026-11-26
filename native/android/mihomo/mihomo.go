@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -249,6 +250,28 @@ func stopLocked() {
 // 由 build-libmihomo.sh 用 ldflags 打进 constant.Version，须与 kernel.lock.json 一致
 func Version() string {
 	return C.Version
+}
+
+// nameserver-policy 里的 system 在 cmfa 构建下只认这里交进来的地址（dns/patch_android.go）。Kotlin 侧盯住能上网的
+// 非 VPN 网络，换网时重设，内核不必重载；TUN 自己的 DNS 地址内核已拉黑，不会绕回
+func SetSystemDNS(servers string) {
+	updateSystemDNS(systemDNSServers(servers))
+}
+
+// Android 的 InetAddress.getHostAddress 给链路本地 IPv6 带 %网卡 作用域，netip 原样保留
+func systemDNSServers(servers string) []string {
+	var list []string
+	for _, field := range strings.Fields(servers) {
+		addr, err := netip.ParseAddr(field)
+		if err != nil {
+			continue
+		}
+		server := net.JoinHostPort(addr.String(), "53")
+		if !slices.Contains(list, server) {
+			list = append(list, server)
+		}
+	}
+	return list
 }
 
 // route-exclude-address 落不到内核；excludeRoute 要 API 33，minSdk 24 覆盖不到，一律走补集

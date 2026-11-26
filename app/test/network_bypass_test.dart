@@ -9,6 +9,25 @@ void main() {
     expect(defaultSystemProxyBypass('linux'), contains('127.0.0.0/8'));
   });
 
+  test('三个桌面端默认都绕过只有路由器 DNS 认识的局域网名字', () {
+    const List<String> suffixes = <String>[
+      '*.local',
+      '*.lan',
+      '*.home.arpa',
+      '*.internal',
+      '*.localdomain',
+    ];
+    for (final String platform in <String>['windows', 'macos', 'linux']) {
+      final List<String> defaults = defaultSystemProxyBypass(platform);
+      expect(defaults, containsAll(suffixes));
+      expect(defaults.toSet(), hasLength(defaults.length));
+      expect(
+        suffixes.every((String item) => isSystemProxyBypass(platform, item)),
+        isTrue,
+      );
+    }
+  });
+
   test('自定义绕过追加到默认列表且去重', () {
     final List<String> resolved = resolvedSystemProxyBypass('windows', <String>[
       'example.com',

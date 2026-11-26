@@ -23,7 +23,7 @@ void main() {
     expect(item.updatedAt, '2026-08-01 00:00:00');
   });
 
-  test('点铃铛落到最新发布的未读，而不是列表第一项', () {
+  test('最新一条已读、旧公告未读时红点仍亮，铃铛打开最新发布的一条', () {
     final List<Announcement> items = <Announcement>[
       _item(id: 1, date: '2020-01-01 00:00:00'),
       _item(id: 3, date: '2026-08-20 00:00:00'),
@@ -39,6 +39,7 @@ void main() {
     };
 
     expect(AnnouncementController.focusUnreadIndex(items, seen), 2);
+    expect(AnnouncementController.latestIndex(items), 1);
     expect(
       AnnouncementController.focusUnreadIndex(items, <String, String>{}),
       1,

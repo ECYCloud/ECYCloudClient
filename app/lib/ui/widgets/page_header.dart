@@ -34,6 +34,61 @@ class ShellChrome extends InheritedWidget {
       active != old.active || bar != old.bar;
 }
 
+// 桌面端 IndexedStack 里看不见的页面仍在树上、照样排版：只在当前页订阅，切回来时随依赖变化重建一次
+class ShellListenableBuilder extends StatefulWidget {
+  const ShellListenableBuilder({
+    super.key,
+    required this.listenable,
+    required this.builder,
+    this.child,
+  });
+
+  final Listenable listenable;
+  final TransitionBuilder builder;
+  final Widget? child;
+
+  @override
+  State<ShellListenableBuilder> createState() => _ShellListenableBuilderState();
+}
+
+class _ShellListenableBuilderState extends State<ShellListenableBuilder> {
+  Listenable? _listening;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _listen();
+  }
+
+  @override
+  void didUpdateWidget(ShellListenableBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _listen();
+  }
+
+  @override
+  void dispose() {
+    _listening?.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _listen() {
+    final Listenable? next = ShellChrome.maybeOf(context)?.active == false
+        ? null
+        : widget.listenable;
+    if (identical(next, _listening)) {
+      return;
+    }
+    _listening?.removeListener(_changed);
+    _listening = next?..addListener(_changed);
+  }
+
+  void _changed() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, widget.child);
+}
+
 class PageHeader extends StatelessWidget {
   const PageHeader({
     super.key,

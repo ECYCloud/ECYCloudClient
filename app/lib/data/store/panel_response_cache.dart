@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import '../../core/app_paths.dart';
 import '../../core/logger.dart';
+import '../../domain/config/node_catalog.dart';
 import '../api/panel_api_client.dart';
 import '../models/user_profile.dart';
 import 'cache_seal.dart';
@@ -72,20 +73,29 @@ class PanelResponseCache {
     }
     final String sealed;
     try {
+      // 加解密是纯 Dart 实现，耗时随明文体积增长，又在界面线程上做；节点条目高度重复，先压缩再加密
       sealed = CacheSeal.seal(
         sealKey,
-        jsonEncode(<String, dynamic>{
-          'revision': remote.revision,
-          'flag_regex': remote.flagRegex,
-          'group_icons': remote.groupIcons,
-          'node_labels': remote.nodeLabels,
-          'group_labels': remote.groupLabels,
-          'config': remote.config,
-          'offline_issued_at': remote.offlineIssuedAt?.millisecondsSinceEpoch,
-          'offline_until': remote.offlineUntil?.millisecondsSinceEpoch,
-          'cache_binding': remote.cacheBinding,
-          'update_interval_hours': remote.updateInterval?.inHours,
-        }),
+        base64Encode(
+          gzip.encode(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'revision': remote.revision,
+                'flag_regex': remote.flagRegex,
+                'group_icons': remote.groupIcons,
+                'node_labels': remote.nodeLabels,
+                'group_labels': remote.groupLabels,
+                'config': remote.config,
+                'offline_issued_at':
+                    remote.offlineIssuedAt?.millisecondsSinceEpoch,
+                'offline_until': remote.offlineUntil?.millisecondsSinceEpoch,
+                'cache_binding': remote.cacheBinding,
+                'update_interval_hours': remote.updateInterval?.inHours,
+                'catalog': remote.catalog?.toJson(),
+              }),
+            ),
+          ),
+        ),
         key,
       );
     } on Object catch (e) {
@@ -125,7 +135,12 @@ class PanelResponseCache {
     }
     final Object? decoded;
     try {
-      decoded = jsonDecode(opened);
+      // 改为压缩之前写下的缓存是 JSON 原文
+      decoded = jsonDecode(
+        opened.startsWith('{')
+            ? opened
+            : utf8.decode(gzip.decode(base64Decode(opened))),
+      );
     } on FormatException {
       return null;
     }
@@ -172,6 +187,7 @@ class PanelResponseCache {
         updateInterval: RemoteProfile.parseUpdateInterval(
           data['update_interval_hours']?.toString(),
         ),
+        catalog: NodeCatalog.fromJson(data['catalog']),
       );
     } on Object {
       return null;

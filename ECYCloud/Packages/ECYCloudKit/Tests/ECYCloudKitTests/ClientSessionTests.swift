@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Observation
 import Security
 import Testing
 @testable import ECYCloudKit
@@ -208,6 +209,16 @@ struct ClientSessionTests {
         #expect(await transport.recorded().count == 4)
     }
 
+    @Test func macUserAgentNamesSwiftImplementation() async {
+        let transport = FakeTransport([reply("/auth/options", Fixture.options), reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let mac = DeviceInfo(id: "synthetic-device", name: "测试设备", model: "Mac（Swift）", os: "macOS 14.0", platform: "macOS", version: "0.1.12")
+        let session = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: mac, transport: transport), vault: MemoryVault())
+        await session.start()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        let agents = await transport.recorded().compactMap { $0.value(forHTTPHeaderField: "User-Agent") }
+        #expect(!agents.isEmpty && agents.allSatisfy { $0 == "ECYCloud/0.1.12 (macOS; Swift)" })
+    }
+
     @Test func loginUsesExistingContractAndRealNodePayload() async throws {
         let transport = FakeTransport([reply("/auth/options", Fixture.options), reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
         let vault = MemoryVault()
@@ -339,6 +350,46 @@ struct ClientSessionTests {
         let session = makeSession(transport, vault: vault)
         await session.restore()
         #expect(session.phase == .signedOut && vault.value == nil && !session.busy)
+    }
+
+    // 面板对封禁账户的非放行接口也回 401：先问账户状态，封禁就进受限页而不是退回登录页
+    @Test func unauthorizedPollForBannedAccountEntersRestrictedInsteadOfSigningOut() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+                                       failure("/announcements", status: 401), reply("/user/account-status", Fixture.status(0))])
+        let vault = MemoryVault()
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        #expect(session.phase == .signedIn)
+        await #expect(throws: ClientError.self) { _ = try await session.announcements(silently: true) }
+        #expect(session.phase == .restricted && session.accountStatus?.isNormal == false && vault.value != nil && session.message == nil)
+    }
+
+    @Test func unauthorizedPollSignsOutOnlyWhenTokenIsRejected() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+                                       failure("/announcements", status: 401), reply("/user/account-status", Fixture.status()),
+                                       failure("/announcements", status: 401), failure("/user/account-status", status: 401)])
+        let vault = MemoryVault()
+        let session = makeSession(transport, vault: vault)
+        await session.restore()
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        _ = try? await session.announcements(silently: true)
+        #expect(session.phase == .signedIn && vault.value != nil)
+        _ = try? await session.announcements(silently: true)
+        #expect(session.phase == .signedOut && vault.value == nil && session.message == L10n.t("登录已失效，请重新登录。"))
+    }
+
+    @Test func sessionExpiryNoticeOnlyWithinSevenDays() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let session = makeSession(transport)
+        await session.restore()
+        #expect(session.sessionExpiryNotice() == nil)
+        await session.login(email: "member@example.test", password: "synthetic-password")
+        let expiry = try #require(ISO8601DateFormatter().date(from: "2099-01-01T00:00:00Z"))
+        #expect(session.sessionExpiryNotice(now: expiry.addingTimeInterval(-2 * 86_400)) == expiry)
+        #expect(session.sessionExpiryNotice(now: expiry.addingTimeInterval(-7 * 86_400)) == expiry)
+        #expect(session.sessionExpiryNotice(now: expiry.addingTimeInterval(-8 * 86_400)) == nil)
+        #expect(session.sessionExpiryNotice() == nil)
     }
 
     @Test func expiredSessionNeverSendsToken() async {
@@ -678,14 +729,13 @@ struct ClientSessionTests {
     @Test func invalidOrMissingUpdateIntervalFallsBackToDefault() throws {
         for raw in [nil, "", "0", "-1", "8761", "abc", "1.5", "24h"] { #expect(NodeCatalog.updateIntervalHours(raw) == nil) }
         #expect(NodeCatalog.updateIntervalHours("1") == 1 && NodeCatalog.updateIntervalHours(" 12 ") == 12 && NodeCatalog.updateIntervalHours("8760") == 8760)
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        var catalog = try decoder.decode(NodeCatalog.self, from: Data(Fixture.catalog.utf8))
+        var catalog = try NodeCatalog(JSONSerialization.jsonObject(with: Data(Fixture.catalog.utf8)) as! [String: Any])
         let issued = Date(timeIntervalSince1970: TimeInterval(Fixture.fetchedAt))
         catalog.updateIntervalHours = NodeCatalog.updateIntervalHours("0")
         #expect(!catalog.updateDue(at: issued.addingTimeInterval(24 * 3600 - 1)) && catalog.updateDue(at: issued.addingTimeInterval(24 * 3600)))
         catalog.updateIntervalHours = 2
         #expect(catalog.updateDue(at: issued.addingTimeInterval(2 * 3600)))
-        let legacy = try decoder.decode(NodeCatalog.self, from: Data(#"{"revision":"r","config":{"proxies":[]},"node_labels":{}}"#.utf8))
+        let legacy = try NodeCatalog(["revision": "r", "config": ["proxies": [Any]()], "node_labels": [String: String]()])
         #expect(legacy.updateDue(at: issued))
     }
 
@@ -812,9 +862,7 @@ struct ParsingTests {
     }
 
     private func decode(_ json: String) throws -> NodeCatalog {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(NodeCatalog.self, from: Data(json.utf8))
+        try NodeCatalog(JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])
     }
 
     @Test func supportsLegacyNodesAndEmptyPHPMaps() throws {
@@ -1279,6 +1327,28 @@ struct NodeProbeTests {
         #expect(value.nodeProbes.values.isEmpty)
     }
 
+    @Test func changedRevisionOnlyUpdatesStandbyNodes() async throws {
+        let catalog = #"{"revision":"revision-1","config":{"proxies":[{"name":"node-12","type":"socks5","server":"127.0.0.1","port":9}],"proxy-groups":[{"name":"select","type":"select","proxies":["node-12"]}],"rules":["MATCH,select"]},"node_labels":{"node-12":"测试节点"}}"#
+        let transport = FakeTransport([
+            reply("/auth/login", Fixture.login), reply("/config/clash", catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile.replacingOccurrences(of: "revision-1", with: "revision-2")),
+            reply("/config/clash", catalog.replacingOccurrences(of: "revision-1", with: "revision-2"))
+        ])
+        let driver = RecordingTunnelDriver(); driver.supportsStandby = true; driver.updatesNodes = true
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        try await value.ensureControlPlane()
+        await value.refresh()
+        while driver.nodeUpdates.isEmpty { await Task.yield() }
+        #expect(driver.nodeUpdates.count == 1 && driver.standbyStarts.count == 1 && driver.stopCount == 0)
+        #expect(value.connection?.controlPlaneReady == true && value.connection?.state == .disconnected)
+        let config = try #require(JSONSerialization.jsonObject(with: driver.nodeUpdates[0].configuration) as? [String: Any])
+        #expect((config["tun"] as? [String: Any])?["enable"] as? Bool == false)
+        value.connection?.disconnect()
+    }
+
     @Test func unchangedRevisionRefreshStillRestoresStandby() async throws {
         let catalog = #"{"revision":"revision-1","config":{"proxies":[{"name":"node-12","type":"socks5","server":"127.0.0.1","port":9}],"proxy-groups":[{"name":"select","type":"select","proxies":["node-12"]}],"rules":["MATCH,select"]},"node_labels":{"node-12":"测试节点"},"offline_authorization":{"issued_at":\#(Fixture.fetchedAt)}}"#
         let transport = FakeTransport([
@@ -1324,6 +1394,63 @@ struct NodeProbeTests {
         driver.statusChanged?(.connected)
         return value
     }
+    // 新配置要等运行中的内核实际加载成功才替换上一份目录与缓存：热更新失败保留旧的，下次刷新重试
+    @Test func failedHotUpdateKeepsPreviousCatalogAndRetries() async throws {
+        let next = Fixture.catalog.replacingOccurrences(of: "revision-1", with: "revision-2")
+        let changed = Fixture.profile.replacingOccurrences(of: "revision-1", with: "revision-2")
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", changed), reply("/config/clash", next),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", changed), reply("/config/clash", next)])
+        let driver = RecordingTunnelDriver(); driver.updatesNodes = true; driver.nodeUpdateFailure = .control
+        let value = await session(transport, driver: driver)
+        await value.refresh()
+        #expect(value.catalog?.revision == "revision-1" && value.nodesError != nil && driver.starts.isEmpty)
+        driver.nodeUpdateFailure = nil
+        await value.refresh()
+        #expect(value.catalog?.revision == "revision-2" && !driver.nodeUpdates.isEmpty && driver.starts.isEmpty)
+    }
+
+    @Test func revisionArrivingWhileConnectingIsAppliedOnceConnected() async throws {
+        let next = Fixture.catalog.replacingOccurrences(of: "revision-1", with: "revision-2")
+        let changed = Fixture.profile.replacingOccurrences(of: "revision-1", with: "revision-2")
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", changed), reply("/config/clash", next),
+            reply("/user/account-status", Fixture.status()), reply("/user/profile", changed), reply("/config/clash", next)])
+        let driver = RecordingTunnelDriver(); driver.updatesNodes = true
+        let value = ClientSession(endpoints: Fixture.endpoints, api: PanelAPI(device: Fixture.device, transport: transport),
+                                  vault: MemoryVault(), connection: ConnectionController(driver: driver), nodeProbes: NodeProbeState(defaults: nil))
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        await value.connect()
+        #expect(value.connection?.state == .connecting && driver.starts.count == 1)
+        await value.refresh()
+        #expect(value.catalog?.revision == "revision-1")
+        driver.statusChanged?(.connected)
+        await value.refresh()
+        #expect(value.catalog?.revision == "revision-2" && driver.nodeUpdates.last.map { $0.owner == driver.starts[0].owner } == true && driver.starts.count == 1)
+    }
+
+    @Test func acknowledgingKickWaitsForBackgroundRefresh() async throws {
+        let kicked = Fixture.profile.replacingOccurrences(of: #""plan":null"#, with: #""plan":null,"device_kick_notice":true,"device_kick_reason":"limit""#)
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
+            reply("/user/account-status", Fixture.status(), paused: true), reply("/user/profile", kicked),
+            reply("/user/device-kick-ack", "{}"), reply("/user/account-status", Fixture.status()), reply("/user/profile", Fixture.profile)])
+        let value = makeSession(transport)
+        await value.restore()
+        await value.login(email: "member@example.test", password: "synthetic-password")
+        #expect(value.phase == .signedIn)
+        let refresh = Task { await value.refresh(silently: true) }
+        await transport.waitUntilPaused()
+        let acknowledge = Task { try await value.acknowledgeDeviceKick() }
+        try await Task.sleep(for: .milliseconds(150))
+        await transport.resume()
+        await refresh.value
+        try await acknowledge.value
+        #expect(value.profile?.deviceKickNotice != true)
+        #expect(await transport.recorded().contains { $0.url?.path == "/api/client/v1/user/device-kick-ack" })
+    }
+
     @Test func deniedQuotaNeverStartsProbe() async throws {
         let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
             reply("/user/speed-test", #"{"allowed":[],"denied":[{"proxy_name":"node-12","msg":"合成额度已用完"}]}"#)])
@@ -1398,7 +1525,7 @@ struct NodeProbeTests {
     }
     @Test func groupSpeedReservesOneBatchAndSkipsDeniedAndNonOfficialMembers() async throws {
         let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog),
-            reply("/user/speed-test", #"{"allowed":["node-12"],"denied":[{"proxy_name":"node-13","msg":"额度已用完"}]}"#),
+            reply("/user/speed-test", #"{"allowed":["node-12"],"denied":[{"proxy_name":"node-13","msg":"额度已用完","reset_at":4102444800}]}"#),
             reply("/user/speed-test", #"{"allowed":["node-12"],"denied":[]}"#)])
         let driver = RecordingTunnelDriver()
         driver.controlResponses = [Data(#"{"running":false,"failed":false,"delay":0,"speed":900000}"#.utf8)]
@@ -1471,6 +1598,44 @@ struct NodeProbeTests {
         await #expect(throws: ClientError.input("测速失败")) { try await value.measureNode("node-12", kind: .speed) }
         #expect(value.nodeProbes.canTestSpeed("node-12"))
         #expect(await transport.recorded().count == 3)
+    }
+    // 节点副本超过内核装载上限时内核里只有一部分节点：选用没装入的节点先让内核重读节点文件再选，
+    // 测试没装入的节点只改探测节点文件；两者都不重启内核
+    @Test func nodesMissingFromTheKernelLoadBeforeSelectionAndProbing() async throws {
+        let count = NodeWorkingSet.copyBudget + 100
+        let nodes = (1...count).map { #"{"name":"node-\#($0)","type":"ss"}"# }.joined(separator: ",")
+        let catalog = #"{"revision":"big","config":{"proxies":[],"proxy-providers":{"ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[\#(nodes)]}},"proxy-groups":[{"name":"主节点","type":"select","use":["ecy-panel-nodes"]}],"rules":["MATCH,主节点"]},"node_labels":{},"offline_authorization":{"issued_at":\#(Fixture.fetchedAt)}}"#
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", catalog)])
+        let driver = RecordingTunnelDriver(); driver.updatesNodes = true
+        let value = await session(transport, driver: driver)
+        let snapshot = Data(#"{"upload":0,"download":0,"uploadTotal":0,"downloadTotal":0,"connections":[],"total":0,"page":1,"selections":{},"groups":[{"id":"主节点","members":["node-1"],"type":"select"},{"id":"GLOBAL","members":["node-1","node-\#(count)","node-\#(count - 1)"],"type":"select"}],"memory":0,"active":0,"closed":0,"mode":"rule"}"#.utf8)
+        func payload(_ provider: String) throws -> [String] {
+            let config = try JSONSerialization.jsonObject(with: #require(driver.nodeUpdates.last).configuration) as! [String: Any]
+            return ((config["proxy-providers"] as! [String: [String: Any]])[provider]!["payload"] as! [[String: Any]]).map { $0["name"] as! String }
+        }
+        #expect(value.catalog?.partial == true && value.catalog?.groups.first?.members.count == count)
+        driver.controlResponses = [snapshot]
+        try await value.selectActiveNode(group: "主节点", node: "node-\(count)")
+        #expect(driver.commands.map(\.action) == [.snapshot, .select] && driver.nodeUpdates.count == 1 && driver.starts.isEmpty)
+        let loaded = try payload("ecy-panel-nodes"), idle = try payload(NodeWorkingSet.probeProvider)
+        #expect(loaded.contains("node-\(count)") && value.recentNodes == ["node-\(count)"])
+        #expect(!loaded.contains("node-\(count - 1)") && idle == ["ecy-panel-empty"])
+        driver.commands = []
+        driver.controlResponses = [snapshot, Data(#"{"running":false,"failed":false,"delay":42,"speed":0}"#.utf8)]
+        #expect(try await value.measureNode("node-\(count - 1)", kind: .delay).delay == 42)
+        #expect(driver.commands.map(\.action) == [.snapshot, .probe] && driver.nodeUpdates.count == 2 && driver.starts.isEmpty)
+        let probed = try payload(NodeWorkingSet.probeProvider), kept = try payload("ecy-panel-nodes")
+        #expect(probed == ["node-\(count - 1)"] && kept == loaded)
+        driver.commands = []
+        driver.controlResponses = [snapshot, Data(#"{"ok":true}"#.utf8), snapshot, Data(#"{"running":false,"failed":false,"delay":7,"speed":0}"#.utf8)]
+        try await value.selectActiveNode(group: "主节点", node: "node-1")
+        _ = try await value.measureNode("node-1", kind: .delay)
+        #expect(driver.commands.map(\.action) == [.snapshot, .select, .snapshot, .probe] && driver.nodeUpdates.count == 2)
+        // 内核没能装入时撤回：留在名单里的话之后每次装配都带着它
+        driver.updatesNodes = false
+        driver.controlResponses = [snapshot]
+        await #expect(throws: TunnelError.control) { try await value.selectActiveNode(group: "主节点", node: "node-\(count - 2)") }
+        #expect(value.recentNodes == ["node-\(count)"])
     }
     @Test func selectingNodeGoesStraightToKernelAndLargeRepliesAreAccepted() async throws {
         let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
@@ -1595,6 +1760,25 @@ struct NodeProbeTests {
         await #expect(throws: TunnelError.control) { try await value.tunnelSnapshot() }
         await #expect(throws: TunnelError.control) { try await value.tunnelLogs() }
         #expect(value.message == nil && value.nodeProbes.result("node-12", kind: .delay)?.failed == true)
+    }
+
+    // 首页与节点页轮询快照：延迟没变就不写入探测状态，否则每次轮询都让读延迟的全部视图重算
+    @Test func unchangedSnapshotDelaysDoNotNotifyObservers() async throws {
+        let transport = FakeTransport([reply("/auth/login", Fixture.login), reply("/config/clash", Fixture.catalog)])
+        let driver = RecordingTunnelDriver()
+        let value = await session(transport, driver: driver)
+        func snapshot(_ delay: Int) -> Data {
+            Data(#"{"upload":0,"download":0,"uploadTotal":0,"downloadTotal":0,"connections":[],"total":0,"page":1,"selections":{},"groups":[],"delays":{"node-12":\#(delay)},"memory":0,"active":0,"closed":0,"mode":"rule"}"#.utf8)
+        }
+        driver.controlResponses = [snapshot(80), snapshot(80), snapshot(95)]
+        _ = try await value.tunnelSnapshot()
+        #expect(value.nodeProbes.result("node-12", kind: .delay)?.delay == 80)
+        nonisolated(unsafe) var notified = false
+        withObservationTracking { _ = value.nodeProbes.result("node-12", kind: .delay) } onChange: { notified = true }
+        _ = try await value.tunnelSnapshot()
+        #expect(!notified)
+        _ = try await value.tunnelSnapshot()
+        #expect(notified && value.nodeProbes.result("node-12", kind: .delay)?.delay == 95)
     }
 }
 
@@ -1947,22 +2131,25 @@ extension BusinessModelTests {
             .init(url: "https://files.example.test/l.log", originalName: "l.log", kind: "file")])
         #expect(content == #"a<br>b<p><img src="https://files.example.test/p.png" alt="p&quot;.png"></p><p><video src="https://files.example.test/v.mp4" controls></video></p><p><a href="https://files.example.test/l.log">l.log</a></p>"#)
     }
-    @Test func nodeMemberListsRestoreFullProviderPayloads() throws {
+    // 各组节点文件只带成员名单时目录按面板下发的形态保留，装配时才按 ecy-panel-nodes 还原成完整节点
+    @Test func nodeMemberListsAssembleIntoFullProviderPayloads() throws {
         let group = "ecy-panel-" + String(repeating: "a", count: 64)
         func envelope(_ provider: String) -> Data {
-            Data(#"{"ret":1,"data":{"revision":"r","config":{"proxy-providers":{"ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-1","type":"vless","port":443},{"name":"node-2","type":"vless","port":8443}]},"\#(group)":\#(provider)}}}}"#.utf8)
+            Data(#"{"ret":1,"data":{"revision":"r","node_labels":{},"config":{"proxies":[],"proxy-providers":{"ecy-panel-nodes":{"type":"file","path":"ecy-panel-nodes.json","payload":[{"name":"node-1","type":"vless","port":443},{"name":"node-2","type":"vless","port":8443}]},"\#(group)":\#(provider)},"proxy-groups":[{"name":"g","type":"select","use":["\#(group)"]}],"rules":["MATCH,g"]}}}"#.utf8)
         }
-        func providers(_ data: Data) throws -> NSDictionary {
-            let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-            return ((root["data"] as! [String: Any])["config"] as! [String: Any])["proxy-providers"] as! NSDictionary
+        func assembled(_ data: Data) throws -> NSDictionary {
+            let catalog = try NodeCatalog(response: data)
+            #expect(catalog.groups.first?.members == ["node-2", "node-1"])
+            let config = try JSONSerialization.jsonObject(with: catalog.assemble(options: .packetFlow).data) as! [String: Any]
+            return (config["proxy-providers"] as! [String: Any])[group] as! NSDictionary
         }
-        let full = envelope(#"{"type":"file","path":"x.json","payload":[{"name":"node-2","type":"vless","port":8443},{"name":"node-1","type":"vless","port":443}]}"#)
-        let compact = envelope(#"{"type":"file","path":"x.json","members":["node-2","node-1"]}"#)
-        #expect(try providers(PanelAPI.withNodePayloads(compact)) == providers(full))
-        #expect(try PanelAPI.withNodePayloads(full) == full)
-        for invalid in [#"{"type":"file","path":"x.json","members":["node-9"]}"#, #"{"type":"file","path":"x.json","members":[]}"#,
-                        #"{"type":"file","path":"x.json","members":["node-1"],"payload":[{"name":"node-1"}]}"#] {
-            #expect(throws: ClientError.self) { try PanelAPI.withNodePayloads(envelope(invalid)) }
+        let full = envelope(#"{"type":"file","path":"\#(group).json","payload":[{"name":"node-2","type":"vless","port":8443},{"name":"node-1","type":"vless","port":443}]}"#)
+        let compact = envelope(#"{"type":"file","path":"\#(group).json","members":["node-2","node-1"]}"#)
+        #expect(try assembled(compact) == assembled(full))
+        #expect(try assembled(compact)["members"] == nil)
+        for invalid in [#"{"type":"file","path":"\#(group).json","members":["node-9"]}"#, #"{"type":"file","path":"\#(group).json","members":[]}"#,
+                        #"{"type":"file","path":"\#(group).json","members":["node-1"],"payload":[{"name":"node-1","type":"vless"}]}"#] {
+            #expect(throws: ProfileValidationError.self) { try NodeCatalog(response: envelope(invalid)).validate() }
         }
     }
     @Test func ticketMessageNameFallsBackWhenMissing() throws {
@@ -1970,7 +2157,7 @@ extension BusinessModelTests {
         let messages = try decoder.decode([TicketDetail.Message].self, from: Data(#"[{"id":1,"is_admin":true,"user_name":" ","content":"","datetime":""},{"id":2,"is_admin":false,"content":"","datetime":""}]"#.utf8))
         #expect(messages.map(\.userName) == [L10n.t("管理员"), L10n.t("我")])
     }
-    @MainActor @Test func announcementBrowserOpensNewestUnreadThenNewest() {
+    @MainActor @Test func announcementBrowserAlwaysOpensNewest() {
         let suite = "announcement-open-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!; defer { defaults.removePersistentDomain(forName: suite) }
         let state = AnnouncementState(defaults: defaults)
@@ -1981,7 +2168,8 @@ extension BusinessModelTests {
         state.accept(AnnouncementBundle(announcements: items, popup: nil))
         #expect(state.openIndex(items) == 1)
         state.markSeen(items[1])
-        #expect(state.openIndex(items) == 2)
+        #expect(state.hasUnread)
+        #expect(state.openIndex(items) == 1)
         state.markAllSeen()
         #expect(state.openIndex(items) == 1)
         #expect(state.openIndex([items[0]]) == 0)

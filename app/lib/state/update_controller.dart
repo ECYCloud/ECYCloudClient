@@ -471,6 +471,8 @@ class UpdateController extends ChangeNotifier {
 
       Logger.instance.info(_source, '安装器已启动，客户端退出让位');
       exit(0);
+    } on InstallPermissionRequired {
+      _appError = L10n.t('请允许本应用安装未知应用，返回后再次点击「更新」即可安装，已下载的安装包不会重新下载。');
     } on Object catch (e) {
       _appError = L10n.t('更新失败：{0}', <Object>['$e']);
       Logger.instance.error(_source, '安装客户端更新失败', e);
@@ -493,6 +495,13 @@ class UpdateController extends ChangeNotifier {
     final File file = File(
       '${AppPaths.updates.path}${Platform.pathSeparator}${_localName(asset.name)}',
     );
+    // 上次已下载完整的同一安装包（如 Android 先去授权安装未知应用）直接复用，仍按发布信息重新校验
+    if (await file.exists() && await file.length() == asset.size) {
+      if (await _verify(file, asset)) {
+        return file;
+      }
+      await file.delete();
+    }
     final File partial = File('${file.path}.part');
     final http.Client client = _httpClient();
     final Completer<void> abort = Completer<void>();
@@ -547,12 +556,7 @@ class UpdateController extends ChangeNotifier {
       if (received != asset.size) {
         throw GithubReleaseException('安装包下载不完整，已中止更新');
       }
-      _appStage = L10n.t('正在校验安装包');
-      _appPercent = 0;
-      notifyListeners();
-      final String actual = (await sha256.bind(partial.openRead()).first)
-          .toString();
-      if (actual != asset.sha256.toLowerCase()) {
+      if (!await _verify(partial, asset)) {
         throw GithubReleaseException('安装包校验失败，已删除');
       }
       return await partial.rename(file.path);
@@ -563,6 +567,14 @@ class UpdateController extends ChangeNotifier {
         await partial.delete();
       }
     }
+  }
+
+  Future<bool> _verify(File file, GithubAsset asset) async {
+    _appStage = L10n.t('正在校验安装包');
+    _appPercent = 0;
+    notifyListeners();
+    final String actual = (await sha256.bind(file.openRead()).first).toString();
+    return actual == asset.sha256.toLowerCase();
   }
 
   // 资产名来自 GitHub 应答，直接拼进路径就等于让对方决定写到哪；

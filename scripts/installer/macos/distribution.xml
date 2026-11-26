@@ -17,4 +17,10 @@
         <pkg-ref id="com.ecycloud.client"/>
     </choice>
     <pkg-ref id="com.ecycloud.client" version="APP_VERSION" onConclusion="none">component.pkg</pkg-ref>
+    <!-- 覆盖安装后仍在运行的旧进程磁盘映像已变，helper 的代码签名校验会一直拒绝它（OSStatus -67034）；命令行 installer 不受此约束 -->
+    <pkg-ref id="com.ecycloud.client">
+        <must-close>
+            <app id="com.ecycloud.client"/>
+        </must-close>
+    </pkg-ref>
 </installer-gui-script>

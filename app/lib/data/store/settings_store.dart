@@ -119,6 +119,9 @@ class AppSettings {
   /// takeover 为假时内核常驻但不接管出口：关掉 TUN，只留控制面与 mixed 口
   LocalTemplateOptions toTemplateOptions({
     required String tunInterfaceName,
+    bool tunSetsSystemDns = false,
+    bool strictRouteNeedsTunIPv6 = false,
+    bool lanNamesViaSystemDns = false,
     required bool takeover,
     required bool supportsSystemProxy,
     List<String> extraTunExcludeAddresses = const <String>[],
@@ -133,6 +136,9 @@ class AppSettings {
     authenticateMixedPort: !supportsSystemProxy && !allowLan,
     routeMode: routeMode,
     tunInterfaceName: tunInterfaceName,
+    tunSetsSystemDns: tunSetsSystemDns,
+    strictRouteNeedsTunIPv6: strictRouteNeedsTunIPv6,
+    lanNamesViaSystemDns: lanNamesViaSystemDns,
     tunExcludeAddresses: appendUnique(
       tunExcludeAddresses,
       extraTunExcludeAddresses,

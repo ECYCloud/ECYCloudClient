@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -79,12 +80,16 @@ func (w *winService) Execute(_ []string, requests <-chan svc.ChangeRequest, chan
 	go srv.serve(listener)
 
 	logf("服务已启动，版本 %s", serviceVersion)
-	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown | svc.AcceptSessionChange}
 
 	for req := range requests {
 		switch req.Cmd {
 		case svc.Interrogate:
 			changes <- req.CurrentStatus
+		case svc.SessionChange:
+			if req.EventType == windows.WTS_SESSION_LOGON {
+				go srv.restoreDeferredProxies()
+			}
 		case svc.Stop, svc.Shutdown:
 			changes <- svc.Status{State: svc.StopPending}
 			listener.Close()

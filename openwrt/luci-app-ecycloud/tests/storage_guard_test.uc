@@ -2,7 +2,7 @@
 
 import { testState } from 'fs';
 import { CONF_DIR, CRED_FILE, STATE_FILE, commitConfig, ensureConfig, readJson } from 'ecycloud.common';
-import { prepare } from 'ecycloud.service';
+import { block, prepare } from 'ecycloud.service';
 import { cursor } from 'uci';
 
 let assertions = 0;
@@ -40,6 +40,9 @@ testState.config = { run_dir: '/etc/ecycloud/run/fixture-session', enabled: '1' 
 testState.files[CRED_FILE] = sprintf('%J', { email: 'fixture@test', token: 'synthetic-token', session_id: 'fixture-session',
 	account_key: 'fixture-session', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z' });
 free(CONF_DIR, 10 * 1024);
+check(!prepare(false) && readJson(STATE_FILE)?.error == '未找到 mihomo 内核，请在路由器上安装 mihomo-meta 后重试',
+	'没装内核时必须直接提示安装内核，不能报成配置校验失败');
+testState.files['/usr/libexec/mihomo'] = '';
 check(!prepare(false), '缺 geodata 且剩余不足 24 MiB 时不得启动');
 const failed = readJson(STATE_FILE);
 check(failed?.stage == 'failed' && failed?.error == '存储空间不足：路由器剩余 10 MiB，启动至少需要 24 MiB，请清理存储或扩容后重试',
@@ -50,6 +53,16 @@ testState.files['/etc/ecycloud/run/fixture-session/GeoSite.dat'] = 'x';
 free(CONF_DIR, 2 * 1024);
 check(!prepare(false) && readJson(STATE_FILE)?.error == '存储空间不足：路由器剩余 2 MiB，启动至少需要 4 MiB，请清理存储或扩容后重试',
 	'已有 geodata 时只要求运行余量');
+
+const RENEWING = `${CONF_DIR}/renewing.json`;
+free(CONF_DIR, 4);
+block('fixture-expired', true);
+check(testState.files[RENEWING] == null, '闪存剩余不足时不得写续期状态，避免把文件写成空的');
+free(CONF_DIR, 1024);
+block('fixture-expired', true);
+check(readJson(RENEWING)?.reason == 'fixture-expired' && testState.writes[RENEWING] == null &&
+	length(filter(keys(testState.writes), path => index(path, `${RENEWING}.`) == 0 && match(path, /\.tmp$/))) == 1 &&
+	!length(filter(keys(testState.files), path => index(path, `${RENEWING}.`) == 0)), '空间充足时续期状态经临时文件改名原子写入');
 
 if (length(ARGV[0])) {
 	const rpc = loadfile(ARGV[0], { raw_mode: true })()['luci.ecycloud'];

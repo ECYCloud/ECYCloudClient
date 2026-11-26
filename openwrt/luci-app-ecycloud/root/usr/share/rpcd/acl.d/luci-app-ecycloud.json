@@ -9,7 +9,7 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.ecycloud": [ "login", "send_login_verify", "login_code", "logout", "start", "stop", "update", "select", "reselect", "mode", "set", "delay", "test_group", "speed_test", "test_group_speed", "refresh_account", "checkin", "online_devices", "devices", "device_reclaim", "device_kick_ack", "kick_device", "ensure_kernel", "close_connection" ]
+				"luci.ecycloud": [ "login", "remembered", "forget_remembered", "send_login_verify", "login_code", "logout", "start", "stop", "update", "select", "search_nodes", "reselect", "mode", "set", "delay", "test_group", "speed_test", "test_group_speed", "refresh_account", "checkin", "online_devices", "devices", "device_reclaim", "device_kick_ack", "kick_device", "ensure_kernel", "close_connection" ]
 			},
 			"uci": [ "ecycloud" ]
 		}

@@ -12,6 +12,8 @@ extension TunnelLease {
             config["proxy-groups"] = (config["proxy-groups"] as? [[String: Any]])?.map { $0.filter { $0.key != "default-selected" } }
             // 默认选中项会连带改 store-selected；只更新节点时内核不重读这一项
             config["profile"] = (config["profile"] as? [String: Any])?.filter { $0.key != "store-selected" }
+            // 运行中切换模式只改内核状态，运行配置里仍是启动时的值；重读节点文件不涉及它
+            config["mode"] = nil
             return try? JSONSerialization.data(withJSONObject: config, options: [.sortedKeys])
         }
         guard owner == running.owner, cacheKey == running.cacheKey, let before = signature(running.configuration) else { return false }
@@ -79,8 +81,11 @@ public enum ProfileAssembler {
         return config
     }
 
-    public static func assemble(_ remote: Data, options: ProfileOptions, selections: [String: String] = [:]) throws -> AssembledProfile {
+    public static func assemble(_ remote: Data, options: ProfileOptions, selections: [String: String] = [:],
+                                pinned: [String] = [], probe: [String] = []) throws -> AssembledProfile {
         var config = try validate(remote)
+        // 校验、落盘、启动与热载用的都是裁剪后的同一份：完整目录交给内核，手机与特权侧的上限都装不下
+        config = NodeWorkingSet.restrict(config, loaded: NodeWorkingSet.select(config, pinned: pinned + selections.values), probe: probe)
         let probePort = options.mixedPort < 65535 ? options.mixedPort + 1 : options.mixedPort - 1
         let packetFlow = options.input == .packetFlow
         let validProxy = (1024...65535).contains(options.mixedPort) && (1024...65535).contains(options.controllerPort)
@@ -119,10 +124,15 @@ public enum ProfileAssembler {
         config["profile"] = ["store-selected": !packetFlow, "store-fake-ip": !packetFlow]
         var excluded = NetworkSegments.routeDefaults
         for route in options.excludedRoutes where !excluded.contains(route) { excluded.append(route) }
-        config["tun"] = ["enable": !packetFlow && options.tunEnabled, "stack": options.tunStack, "device": options.tunDevice,
-                         "auto-route": !packetFlow, "auto-detect-interface": options.autoDetectInterface, "strict-route": options.strictRoute,
-                         "mtu": options.mtu, "dns-hijack": packetFlow ? [String]() : ["any:53"], "inet4-address": [options.ipv4Address],
-                         "inet6-address": [options.ipv6Address], "route-exclude-address": excluded]
+        var tun: [String: Any] = ["enable": !packetFlow && options.tunEnabled, "stack": options.tunStack, "device": options.tunDevice,
+                                  "auto-route": !packetFlow, "auto-detect-interface": options.autoDetectInterface, "strict-route": options.strictRoute,
+                                  "mtu": options.mtu, "dns-hijack": packetFlow ? [String]() : ["any:53"], "inet4-address": [options.ipv4Address],
+                                  "inet6-address": [options.ipv6Address], "route-exclude-address": excluded]
+        #if os(macOS)
+        // 内核在 darwin 上 dns-mode 留空即 disabled，系统解析直接发给局域网 DNS、不经内核；hijack 把 TUN 地址登记为系统首选解析器，内核退出即自动撤销
+        if !packetFlow { tun["dns-mode"] = "hijack" }
+        #endif
+        config["tun"] = tun
         if var ntp = config["ntp"] as? [String: Any], ntp["write-to-system"] != nil { ntp["write-to-system"] = false; config["ntp"] = ntp }
         var dns = config["dns"] as! [String: Any]
         dns["listen"] = ""; dns["ipv6"] = options.ipv6; config["dns"] = dns
@@ -142,7 +152,7 @@ public enum ProfileAssembler {
         if !packetFlow {
         let proxies = config["proxies"] as? [[String: Any]] ?? []
         var probe: [String: Any] = ["name": "ecy-speed", "type": "select", "hidden": true, "proxies": ["DIRECT"] + proxies.compactMap { $0["name"] as? String }]
-        if providers["ecy-panel-nodes"] != nil { probe["use"] = ["ecy-panel-nodes"] }
+        if providers[NodeWorkingSet.nodesProvider] != nil { probe["use"] = [NodeWorkingSet.nodesProvider, NodeWorkingSet.probeProvider] }
         groups.append(probe); config["proxy-groups"] = groups
         let digest = SHA256.hash(data: Data("ecy-speed\0\(options.secret)".utf8)).map { String(format: "%02x", $0) }.joined()
         config["listeners"] = [["name": "ecy-speed", "type": "mixed", "listen": "127.0.0.1", "port": probePort,
@@ -153,11 +163,12 @@ public enum ProfileAssembler {
             config["interface-name"] = ""
             config["routing-mark"] = 0
             config["geo-auto-update"] = false
-            config["proxy-providers"] = providers.mapValues { value in
+            // 面板节点文件保持 file：内核只有按文件重读才能不重启就换节点（Kernel/engine.go 的 UpdateNodes），文件还没写出时它用 payload
+            config["proxy-providers"] = Dictionary(uniqueKeysWithValues: providers.map { name, value in
                 var next = value
-                if value["type"] as? String == "file", value["payload"] is [Any] { next["type"] = "inline" }
-                return next
-            }
+                if !name.hasPrefix("ecy-panel-"), value["type"] as? String == "file", value["payload"] is [Any] { next["type"] = "inline" }
+                return (name, next)
+            })
         }
         var validation = config
         if config["proxy-providers"] != nil {
@@ -233,7 +244,11 @@ public enum ProfileAssembler {
                 if !paths.allSatisfy({ ($0 as? String).map(safeProviderPath) ?? false }) { issue(L10n.t("规则或节点保存路径必须位于运行目录内，且不能覆盖客户端文件")) }
                 if section == "proxy-providers", name.hasPrefix("ecy-panel-") {
                     let validName = name == "ecy-panel-nodes" || name.range(of: #"^ecy-panel-[a-f0-9]{64}$"#, options: .regularExpression) != nil
-                    if !validName || type != "file" || value["path"] as? String != "\(name).json" || (value["payload"] as? [Any])?.isEmpty != false { issue(L10n.t("面板节点提供器不完整")) }
+                    // 只带成员名单的节点文件，名单里的节点都要在 ecy-panel-nodes 里
+                    let members = value["members"] as? [String]
+                    let complete = value["members"] == nil ? (value["payload"] as? [Any])?.isEmpty == false
+                        : value["payload"] == nil && members?.isEmpty == false && members!.allSatisfy(names.contains)
+                    if !validName || type != "file" || value["path"] as? String != "\(name).json" || !complete { issue(L10n.t("面板节点提供器不完整")) }
                 }
                 if type == "http", !urls.contains(where: { ($0 as? String)?.isEmpty == false }) { issue(L10n.t("在线规则或节点提供器缺少地址")) }
                 else if !urls.allSatisfy(httpsURL) { issue(L10n.t("规则或节点提供器的下载地址必须使用 https")) }
@@ -281,32 +296,5 @@ public enum ProfileAssembler {
         if value is NSNull { return true }
         guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return false }
         return text.isEmpty || text.hasPrefix("https://")
-    }
-}
-
-// 配置中的 mihomo 字段保持原样，包括带连字符和下划线的键。
-indirect enum ProfileValue: Codable {
-    case object([String: ProfileValue]), array([ProfileValue]), string(String), integer(Int64), number(Double), bool(Bool), null
-    init(from decoder: any Decoder) throws {
-        let value = try decoder.singleValueContainer()
-        if value.decodeNil() { self = .null }
-        else if let next = try? value.decode(Bool.self) { self = .bool(next) }
-        else if let next = try? value.decode(Int64.self) { self = .integer(next) }
-        else if let next = try? value.decode(Double.self) { self = .number(next) }
-        else if let next = try? value.decode(String.self) { self = .string(next) }
-        else if let next = try? value.decode([ProfileValue].self) { self = .array(next) }
-        else { self = .object(try value.decode([String: ProfileValue].self)) }
-    }
-    func encode(to encoder: any Encoder) throws {
-        var value = encoder.singleValueContainer()
-        switch self {
-        case .object(let next): try value.encode(next)
-        case .array(let next): try value.encode(next)
-        case .string(let next): try value.encode(next)
-        case .integer(let next): try value.encode(next)
-        case .number(let next): try value.encode(next)
-        case .bool(let next): try value.encode(next)
-        case .null: try value.encodeNil()
-        }
     }
 }

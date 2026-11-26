@@ -2,7 +2,7 @@
 
 import { testState } from 'fs';
 import { ANNOUNCE_CACHE, CRED_FILE, PROFILE_FILE } from 'ecycloud.common';
-import { announcements, clashProfile, refreshAccount, touchIdentity } from 'ecycloud.panel';
+import { announcements, clashProfile, fetchAnnouncements, refreshAccount, touchIdentity } from 'ecycloud.panel';
 import { store } from 'ecycloud.profile';
 
 function check(ok, message) {
@@ -15,8 +15,9 @@ testState.files[CRED_FILE] = sprintf('%J', {
 	token: 'fixture-token', session_id: 'fixture-session', account_key: 'fixture-session', email: 'fixture@test', device_id: 'fixture', expires_at: '2030-01-01T00:00:00Z'
 });
 testState.response = { ret: 1, data: { announcements: [ { id: 2, title: 'fixture-en', date: '2026-01-01', content: '<p>fixture</p>' } ] } };
-let res = announcements('refresh', 'en-US');
-check(res.ok, '英文公告读取失败');
+check(fetchAnnouncements('en-US').ok, '英文公告拉取失败');
+let res = announcements('', 'en-US');
+check(res.ok && res.loaded && res.items[0].title == 'fixture-en', '英文公告读取失败');
 let saved = json(testState.files[ANNOUNCE_CACHE]);
 check(saved.locale == 'en-US' && saved.items[0].title == 'fixture-en', '缓存必须记录语言');
 let found = false;
@@ -27,16 +28,24 @@ check(found, '公告请求必须携带语言');
 
 testState.response.data.announcements[0].title = 'fixture-tw';
 res = announcements('', 'zh-TW');
+check(res.ok && !res.loaded && !length(res.items), '切换语言不能使用旧语言缓存');
+check(fetchAnnouncements('zh-TW').ok, '繁体公告拉取失败');
 saved = json(testState.files[ANNOUNCE_CACHE]);
-check(res.ok && saved.locale == 'zh-TW' && saved.items[0].title == 'fixture-tw', '切换语言不能使用旧语言缓存');
+check(saved.locale == 'zh-TW' && saved.items[0].title == 'fixture-tw' && announcements('', 'zh-TW').items[0].title == 'fixture-tw',
+	'切换语言后必须按新语言拉取并缓存');
 testState.response.data.announcements = [
 	{ id: 5, title: 'newest', date: '2026-08-20 00:00:00', updated_at: '2026-08-21 00:00:00', content: '' },
 	{ id: 2, title: 'oldest', date: '2026-01-01 00:00:00', updated_at: '2026-11-01 00:00:00', content: '' }
 ];
-res = announcements('refresh', 'en-US');
+check(fetchAnnouncements('en-US').ok, '公告拉取失败');
+res = announcements('', 'en-US');
 check(res.open_index == 0, '译文较新的旧公告不能抢走最新发布公告的位置');
-check(!announcements('refresh', 'en-US\r\nX-Injected: 1').ok, '必须拒绝语言头注入');
-check(!announcements('refresh', [ 'en-US' ]).ok, '必须拒绝数组语言');
+res = announcements('seen:5', 'en-US');
+check(res.has_unread && res.open_index == 0, '最新一条已读、旧公告未读时铃铛仍须打开最新发布的一条');
+check(!announcements('', 'en-US\r\nX-Injected: 1').ok && !fetchAnnouncements('en-US\r\nX-Injected: 1').ok, '必须拒绝语言头注入');
+check(!announcements('', [ 'en-US' ]).ok && !fetchAnnouncements([ 'en-US' ]).ok, '必须拒绝数组语言');
+testState.files[CRED_FILE] = sprintf('%J', { ...json(testState.files[CRED_FILE]), session_id: 'next-session' });
+check(!announcements('', 'en-US').loaded, '换了会话后不能读到上一个会话后台拉取的公告缓存');
 global.system = command => { push(testState.commands, command); return 0; };
 const remote = { locale: 'en-US', revision: 'fixture-revision', config: {},
 	group_labels: { '主节点': 'Main nodes' },

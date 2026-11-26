@@ -41,6 +41,7 @@ func requireRoot(action func() error) error {
 }
 
 func run() error {
+	releaseTunDNS()
 	srv := newServer()
 	if err := srv.initialize(); err != nil {
 		return err
@@ -60,6 +61,7 @@ func run() error {
 
 	listener.Close()
 	srv.shutdown()
+	releaseTunDNS()
 	logf("后台服务已停止")
 	return nil
 }

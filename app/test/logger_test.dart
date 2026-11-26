@@ -26,6 +26,24 @@ void main() {
     expect(written, isNot(contains('old-private')));
   });
 
+  test('多行消息落盘只占一行，内存里保留原文', () async {
+    AppPaths.useSession('c' * 64);
+    addTearDown(() => AppPaths.useSession(''));
+    Logger.instance.warn('mihomo', '启动失败：\n  line 12\r\n  line 30');
+    await Logger.instance.flush();
+    final List<String> lines = AppPaths.logs
+        .listSync()
+        .whereType<File>()
+        .expand((File file) => file.readAsLinesSync())
+        .toList();
+    expect(lines, hasLength(1));
+    expect(
+      lines.single,
+      endsWith(r'[warning] [mihomo] 启动失败：\n  line 12\n  line 30'),
+    );
+    expect(Logger.instance.entries.last.message, contains('\n  line 12'));
+  });
+
   test('内核进程输出按 logrus 的 level= 归类', () {
     expect(
       Logger.kernelLevel(

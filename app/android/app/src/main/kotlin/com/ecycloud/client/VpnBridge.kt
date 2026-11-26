@@ -29,7 +29,9 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 emptyMap<String, Any>()
             }
             "kernel.check" -> Bridge.run(result) {
-                KernelClient.call { it.check(call.argument<String>("config")) }.toMap()
+                KernelClient.send(call.argument<String>("config").orEmpty()) { remote, config ->
+                    remote.check(config)
+                }.toMap()
             }
             "kernel.write" -> Bridge.run(result) {
                 val config = call.argument<String>("config").orEmpty()
@@ -40,7 +42,9 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 emptyMap<String, Any>()
             }
             "kernel.reload" -> Bridge.run(result) {
-                KernelClient.call { it.reload(call.argument<String>("config")) }
+                KernelClient.send(call.argument<String>("config").orEmpty()) { remote, config ->
+                    remote.reload(config)
+                }
                 emptyMap<String, Any>()
             }
             "kernel.read" -> Bridge.run(result) {
@@ -55,7 +59,7 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
                 val config = call.argument<String>("config").orEmpty()
                 val startKernel = {
                     Bridge.run(result) {
-                        KernelClient.call { it.start(config) }
+                        KernelClient.send(config) { remote, source -> remote.start(source) }
                         emptyMap<String, Any>()
                     }
                 }
@@ -111,10 +115,12 @@ class VpnBridge(private val activity: MainActivity, messenger: BinaryMessenger) 
 
     // 内核进程不在时如实报「没在跑」：抛异常会让 Dart 侧把轮询本身当成与后台失联，
     // 转而停掉轮询，之后即使内核被系统重建也无人接管
-    // 内核进程崩溃后会被绑定立刻拉起，新进程里没有旧进程的错误，原因只在崩溃文件里
+    // 内核进程崩溃后会被绑定立刻拉起，新进程里没有旧进程的错误，原因只在崩溃文件里。
+    // 停止原因同理只在文件里，内核进程正被回收或重建时也要带上，否则会被当成崩溃自动重连
     private fun status(cursor: Int): Map<String, Any?> {
         val status = KernelClient.poll { it.status(cursor) }?.toMap()
-            ?: mapOf("running" to false, "log_cursor" to cursor)
+            ?: (mapOf("running" to false, "log_cursor" to cursor) +
+                listOfNotNull(BoxState.stopReason(activity)?.let { it to true }))
         return if (status["running"] == true || status["error"] != null) {
             status
         } else {

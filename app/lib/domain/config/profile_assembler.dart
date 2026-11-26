@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../l10n/l10n.dart';
 
 import 'local_template.dart';
+import 'network_bypass.dart';
 import 'profile_inspector.dart';
 import 'speed_probe_config.dart';
 
@@ -202,6 +203,7 @@ class ProfileAssembler {
         ...dns.cast<String, dynamic>(),
         'listen': '',
         'ipv6': template.options.ipv6Enabled,
+        if (template.options.lanNamesViaSystemDns) ...lanNamesViaSystem(dns),
       };
     }
 
@@ -244,6 +246,42 @@ class ProfileAssembler {
       config,
       const JsonEncoder.withIndent('  ').convert(config),
     );
+  }
+
+  // 与 network_bypass.dart 的 _lanHostSuffixes、helper 的 lanDomains 一致
+  static const List<String> lanDnsSuffixes = <String>[
+    'lan',
+    'home.arpa',
+    'internal',
+    'localdomain',
+  ];
+
+  // 面板已给的后缀不覆盖、按原顺序追加；fake-ip-filter 只在黑名单模式下追加，否则应用拿到的仍是假地址
+  static Map<String, dynamic> lanNamesViaSystem(Map<dynamic, dynamic> dns) {
+    final Object? policy = dns['nameserver-policy'];
+    if (policy != null && policy is! Map) {
+      return const <String, dynamic>{};
+    }
+    final Map<String, dynamic> policies = <String, dynamic>{
+      ...?(policy as Map<dynamic, dynamic>?)?.cast<String, dynamic>(),
+    };
+    for (final String suffix in lanDnsSuffixes) {
+      policies.putIfAbsent('+.$suffix', () => 'system');
+    }
+    final Object? mode = dns['fake-ip-filter-mode'];
+    final Object? filter = dns['fake-ip-filter'];
+    final bool editFilter =
+        (mode == null || mode == 'blacklist') &&
+        (filter == null ||
+            (filter is List && filter.every((e) => e is String)));
+    return <String, dynamic>{
+      'nameserver-policy': policies,
+      if (editFilter)
+        'fake-ip-filter': appendUnique(
+          <String>[...?(filter as List<dynamic>?)?.cast<String>()],
+          <String>[for (final String suffix in lanDnsSuffixes) '+.$suffix'],
+        ),
+    };
   }
 
   // 海外：面板的 GEOSITE,CN / GEOIP,CN 直连规则改走 MATCH 的出站。Apple 与 OpenWrt 同一判定

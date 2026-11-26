@@ -99,6 +99,10 @@ const profile = assemble(remote, settings(), { port: 19090, secret: 'synthetic-s
 check(profile.ok, `TUN 配置装配必须成功：${profile.error}`);
 for (let net in nets)
 	check(!(net in profile.config.tun['route-exclude-address']), `TUN 不得让整个局域网绕过面板地址 ${net}`);
+check(join(', ', slice(profile.config.tun['route-exclude-address'], 0, 16)) ==
+	'127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 0.0.0.0/8, 100.64.0.0/10, ' +
+	'192.0.0.0/24, 192.88.99.0/24, 240.0.0.0/4, ::1/128, 100::/64, fc00::/7, fe80::/10, ff00::/8',
+	'TUN 排除网段必须与 TPROXY 保留网段一致，并按三端统一的顺序排列');
 check(profile.config.rules[0] == remote.rules[0], '面板直连不得改写业务分流规则');
 testState.commands = [];
 check(apply(settings()).ok, 'TUN 接管必须成功');

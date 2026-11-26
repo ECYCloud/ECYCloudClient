@@ -447,6 +447,33 @@ void main() {
     expect(tun['route-exclude-address'], contains('::1/128'));
   });
 
+  test('TUN 内置排除网段与三端统一列表逐项一致', () {
+    final Map<String, dynamic> tun =
+        assembler
+                .assemble(remote: remoteProfile(), template: template())
+                .config['tun']
+            as Map<String, dynamic>;
+
+    expect(tun['route-exclude-address'], <String>[
+      '127.0.0.0/8',
+      '10.0.0.0/8',
+      '172.16.0.0/12',
+      '192.168.0.0/16',
+      '169.254.0.0/16',
+      '224.0.0.0/4',
+      '0.0.0.0/8',
+      '100.64.0.0/10',
+      '192.0.0.0/24',
+      '192.88.99.0/24',
+      '240.0.0.0/4',
+      '::1/128',
+      '100::/64',
+      'fc00::/7',
+      'fe80::/10',
+      'ff00::/8',
+    ]);
+  });
+
   test('自定义 TUN 排除网段追加到内置列表', () {
     final LocalTemplate custom = LocalTemplate(
       const LocalTemplateOptions(
@@ -474,6 +501,144 @@ void main() {
       excluded.where((Object? item) => item == '10.0.0.0/8'),
       hasLength(1),
     );
+  });
+
+  test('只有要求接管系统 DNS 的平台（macOS）才下发 dns-mode', () {
+    Map<String, dynamic> tun({required bool setsSystemDns}) =>
+        assembler
+                .assemble(
+                  remote: remoteProfile(),
+                  template: LocalTemplate(
+                    LocalTemplateOptions(
+                      tunEnabled: true,
+                      tunStrictRoute: false,
+                      mixedPort: 12334,
+                      allowLan: false,
+                      ipv6Enabled: true,
+                      logLevel: 'warning',
+                      tunSetsSystemDns: setsSystemDns,
+                    ),
+                    const ClashApiOptions(port: 19090, secret: 'secret'),
+                  ),
+                )
+                .config['tun']
+            as Map<String, dynamic>;
+
+    expect(tun(setsSystemDns: true)['dns-mode'], 'hijack');
+    expect(tun(setsSystemDns: false).containsKey('dns-mode'), isFalse);
+  });
+
+  test('Windows 开严格路由时顶层 ipv6 为真以保住 TUN 的 IPv6 地址，给系统的 AAAA 仍按用户设置', () {
+    Map<String, dynamic> config({
+      required bool needsTunIPv6,
+      required bool strictRoute,
+      bool tunEnabled = true,
+    }) => assembler
+        .assemble(
+          remote: remoteProfile(),
+          template: LocalTemplate(
+            LocalTemplateOptions(
+              tunEnabled: tunEnabled,
+              tunStrictRoute: strictRoute,
+              mixedPort: 12334,
+              allowLan: false,
+              ipv6Enabled: false,
+              logLevel: 'warning',
+              strictRouteNeedsTunIPv6: needsTunIPv6,
+            ),
+            const ClashApiOptions(port: 19090, secret: 'secret'),
+          ),
+        )
+        .config;
+
+    final Map<String, dynamic> windows = config(
+      needsTunIPv6: true,
+      strictRoute: true,
+    );
+    expect(windows['ipv6'], isTrue);
+    expect((windows['dns'] as Map<String, dynamic>)['ipv6'], isFalse);
+    // 待机内核以关闭的 TUN 启动，连接时才热打开，地址要在启动时就保住
+    expect(
+      config(needsTunIPv6: true, strictRoute: true, tunEnabled: false)['ipv6'],
+      isTrue,
+    );
+    expect(config(needsTunIPv6: true, strictRoute: false)['ipv6'], isFalse);
+    expect(config(needsTunIPv6: false, strictRoute: true)['ipv6'], isFalse);
+  });
+
+  test('Windows、Android 把局域网后缀交给系统 DNS 并排除出 fake-ip，面板已给的不覆盖', () {
+    Map<String, dynamic> dns(
+      bool viaSystem, {
+      Map<String, dynamic> panel = const <String, dynamic>{},
+    }) =>
+        assembler
+                .assemble(
+                  remote: <String, dynamic>{
+                    ...remoteProfile(),
+                    'dns': <String, dynamic>{
+                      ...(remoteProfile()['dns'] as Map<String, dynamic>),
+                      ...panel,
+                    },
+                  },
+                  template: LocalTemplate(
+                    LocalTemplateOptions(
+                      tunEnabled: true,
+                      tunStrictRoute: true,
+                      mixedPort: 12334,
+                      allowLan: false,
+                      ipv6Enabled: false,
+                      logLevel: 'warning',
+                      lanNamesViaSystemDns: viaSystem,
+                    ),
+                    const ClashApiOptions(port: 19090, secret: 'secret'),
+                  ),
+                )
+                .config['dns']
+            as Map<String, dynamic>;
+
+    final Map<String, dynamic> panel = <String, dynamic>{
+      'fake-ip-filter': <String>['*.lan', '*.local'],
+      'nameserver-policy': <String, dynamic>{
+        'geosite:cn': <String>['https://223.5.5.5/dns-query'],
+        '+.internal': '10.0.0.53',
+      },
+    };
+    final Map<String, dynamic> windows = dns(true, panel: panel);
+    expect(
+      (windows['nameserver-policy'] as Map<String, dynamic>).keys.toList(),
+      <String>[
+        'geosite:cn',
+        '+.internal',
+        '+.lan',
+        '+.home.arpa',
+        '+.localdomain',
+      ],
+    );
+    expect(windows['nameserver-policy']['+.lan'], 'system');
+    expect(windows['nameserver-policy']['+.internal'], '10.0.0.53');
+    expect(windows['fake-ip-filter'], <String>[
+      '*.lan',
+      '*.local',
+      '+.lan',
+      '+.home.arpa',
+      '+.internal',
+      '+.localdomain',
+    ]);
+
+    // 白名单模式下追加过滤项会反过来让这些名字拿假地址，只加解析策略
+    final Map<String, dynamic> whitelist = dns(
+      true,
+      panel: <String, dynamic>{
+        'fake-ip-filter-mode': 'whitelist',
+        'fake-ip-filter': <String>['+.example.com'],
+      },
+    );
+    expect(whitelist['fake-ip-filter'], <String>['+.example.com']);
+    expect(whitelist['nameserver-policy']['+.lan'], 'system');
+
+    final Map<String, dynamic> other = dns(false, panel: panel);
+    expect(other['nameserver-policy'], panel['nameserver-policy']);
+    expect(other['fake-ip-filter'], panel['fake-ip-filter']);
   });
 
   test('关闭 TUN 只改 enable，不删整段', () {

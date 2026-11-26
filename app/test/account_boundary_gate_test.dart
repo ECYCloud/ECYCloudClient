@@ -17,6 +17,7 @@ import 'package:ecycloud_client/state/auth_controller.dart';
 import 'package:ecycloud_client/state/connection_controller.dart';
 import 'package:ecycloud_client/state/update_controller.dart';
 import 'package:ecycloud_client/ui/app_scope.dart';
+import 'package:ecycloud_client/ui/pages/account_status_page.dart';
 import 'package:ecycloud_client/ui/pages/edit_account_page.dart';
 import 'package:ecycloud_client/ui/pages/login_page.dart';
 import 'package:ecycloud_client/ui/pages/reset_password_page.dart';
@@ -115,6 +116,63 @@ void main() {
     addTearDown(auth.dispose);
     return auth;
   }
+
+  Future<void> showRestricted(WidgetTester tester, AuthController auth) =>
+      tester.pumpWidget(
+        AppScope(
+          auth: auth,
+          connection: _Connection(),
+          announcements: _Announcements(),
+          update: _Update(),
+          platform: _Platform(),
+          settingsStore: _Settings(),
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const AccountStatusPage(),
+          ),
+        ),
+      );
+
+  // 修复前：受限页既不轮询也没有刷新入口，解封后要重启应用
+  testWidgets('受限页每 60 秒复查账户状态，面板不可达时保持，恢复正常后回到已登录，离开页面即停止', (
+    WidgetTester tester,
+  ) async {
+    final _RecoveringClient api = _RecoveringClient();
+    final AuthController auth = resetAuth(api);
+    await auth.login(email: 'restricted@example.test', password: 'test');
+    expect(auth.stage, AuthStage.accountRestricted);
+    await showRestricted(tester, auth);
+
+    api.statusError = ApiException('offline', connectFailed: true);
+    await tester.pump(const Duration(seconds: 61));
+    expect(api.statusCalls, 1);
+    expect(auth.stage, AuthStage.accountRestricted);
+    expect(auth.api, same(api));
+
+    api.statusError = null;
+    api.statusEnable = 1;
+    await tester.pump(const Duration(seconds: 60));
+    await tester.pump();
+    expect(api.statusCalls, 2);
+    expect(auth.stage, AuthStage.loggedIn);
+    expect(auth.accountStatus, isNull);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 180));
+    expect(api.statusCalls, 2);
+  });
+
+  testWidgets('受限页复查时令牌被拒（401）按会话失效退出登录', (WidgetTester tester) async {
+    final _RecoveringClient api = _RecoveringClient();
+    final AuthController auth = resetAuth(api);
+    await auth.login(email: 'restricted@example.test', password: 'test');
+    await showRestricted(tester, auth);
+    api.statusError = ApiException('登录已失效', statusCode: 401);
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pump();
+    expect(auth.stage, AuthStage.loggedOut);
+    expect(auth.api, isNull);
+  });
 
   test('密码已改但不签发令牌：显示成功提示，确认后留在登录流程', () async {
     final _ResetRefusedClient api = _ResetRefusedClient(
@@ -725,6 +783,24 @@ class _RestrictedClient extends PanelApiClient {
   void close() {}
 }
 
+class _RecoveringClient extends _RestrictedClient {
+  _RecoveringClient() : super(0);
+  int statusEnable = 0;
+  int statusCalls = 0;
+  ApiException? statusError;
+
+  @override
+  Future<AccountStatus> fetchAccountStatus() async {
+    statusCalls++;
+    final ApiException? error = statusError;
+    if (error != null) throw error;
+    return AccountStatus.fromJson(<String, dynamic>{
+      'enable': statusEnable,
+      'email': 'restricted@example.test',
+    });
+  }
+}
+
 class _PasswordSessionClient extends _RestrictedClient {
   _PasswordSessionClient(super.enable);
   bool revoked = false;
@@ -1063,6 +1139,8 @@ class _Platform implements PlatformService {
       protected;
   @override
   Future<void> deleteSecret(String name) async {}
+  @override
+  Future<bool> secretStoreAvailable() async => true;
   @override
   Future<void> setImeEnabled({required bool enabled}) async {}
   @override

@@ -61,7 +61,7 @@ struct ClientSettingsView: View {
                         Divider()
                         settingToggle(L10n.t("TUN 模式"), detail: L10n.t("接管系统全部流量，需要后台服务与虚拟网卡驱动"), value: $preferences.tunEnabled, edit: true, tunOnly: true)
                         Divider()
-                        settingToggle(L10n.t("严格路由"), detail: L10n.t("阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用"), value: $preferences.strictRoute, tunOnly: true).disabled(!preferences.tunEnabled)
+                        settingToggle(L10n.t("严格路由"), detail: L10n.t("阻断绕过 TUN 的 DNS 查询防泄露，代价是直接查询局域网 DNS 的程序（如借宿主机网络上网的虚拟机）可能无法解析域名"), value: $preferences.strictRoute, tunOnly: true).disabled(!preferences.tunEnabled)
                         Divider()
                         settingToggle(L10n.t("允许局域网连接"), detail: L10n.t("混合端口监听全部网卡，供同网段其它设备使用"), value: $preferences.allowLAN)
                         #else

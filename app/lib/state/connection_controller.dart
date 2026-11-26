@@ -21,6 +21,8 @@ import '../data/store/speed_test_quota_store.dart';
 import '../data/store/traffic_rank_store.dart';
 import '../domain/config/local_template.dart';
 import '../domain/config/network_bypass.dart';
+import '../domain/config/node_catalog.dart';
+import '../domain/config/node_working_set.dart';
 import '../domain/config/profile_assembler.dart';
 import '../domain/config/profile_inspector.dart';
 import '../domain/config/speed_probe_config.dart';
@@ -52,6 +54,30 @@ enum ConnectionPhase {
   connected,
   disconnecting,
   failed,
+}
+
+typedef _Catalog = ({
+  Map<String, dynamic> source,
+  Map<String, Map<String, dynamic>> configs,
+  List<ProxyNode> nodes,
+  Map<String, List<String>> members,
+  // 分页模式下各分组所用节点文件的目录条目，以及成员里不归目录管的个数（DIRECT、其它分组、模板里写死的节点）
+  Map<String, CatalogProvider> files,
+  Map<String, int> extras,
+});
+
+class _NodePaging {
+  _NodePaging(this.offset, this.more);
+
+  int offset;
+  bool more;
+  bool loading = false;
+  String? error;
+  String query = '';
+  String? queued;
+  int searchOffset = 0;
+  bool searchMore = false;
+  final Set<String> hits = <String>{};
 }
 
 class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
@@ -169,6 +195,29 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   List<ProxyGroup> _groups = const <ProxyGroup>[];
   List<ProxyNode> _nodes = const <ProxyNode>[];
+  // 面板节点超过内核装载上限时实际装入内核的那部分；null 表示全部装入
+  Set<String>? _loadedNodes;
+  // 用户选过的节点，最近的在前：超出上限时优先留在内核里
+  final List<String> _recentNodes = <String>[];
+  static const int _recentNodeLimit = 200;
+  static const int _probeBatch = 64;
+  _Catalog? _catalog;
+  // 分页模式下翻页、搜索取到的节点：只供界面列出，用到时才并入面板配置；最近取到的排在后面
+  final Map<String, CatalogNode> _browsed = <String, CatalogNode>{};
+  static const int _browsedLimit = 2000;
+  static const int _nodePageSize = 100;
+  static const int _nodeNamesLimit = 500;
+  final Map<String, _NodePaging> _paging = <String, _NodePaging>{};
+  Map<String, dynamic>? _listed;
+  Map<String, dynamic>? _listedSource;
+  // _acceptRemote 刚让内核校验过的那份面板配置及当时的接管状态、设置：紧接着的热载或启动装配的是同一份，
+  // 再校验一遍只是把等待翻倍（5000 个节点副本校验一次约 10 秒）
+  ({Map<String, dynamic> remote, bool takeover, AppSettings settings})?
+  _validated;
+  // 内核用手上这份面板配置没能启动：下次连接先向面板核对，不再因为缓存「离线可用」就原样重试
+  bool _remoteFailed = false;
+  // 探测节点文件里的节点：未装入的节点测延迟、测速时临时放这里，不动分组用的节点文件
+  List<Object?> _probeNodes = const <Object?>[];
   final Map<String, int> _delays = <String, int>{};
   final Set<String> _testing = <String>{};
   final Set<String> _testingGroups = <String>{};
@@ -183,6 +232,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   DateTime? _trafficSampledAt;
   bool _pollingStats = false;
   final List<TrafficSample> _trafficHistory = <TrafficSample>[];
+  final ValueNotifier<int> _statsUpdates = ValueNotifier<int>(0);
   KernelStats _stats = KernelStats.empty;
   List<Map<String, dynamic>> _connections = const <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> _closedConnections =
@@ -195,6 +245,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   bool _takeover = false;
   bool _background = false;
   int _restartAttempt = 0;
+  bool _tunRouteRepairing = false;
+  int _tunRouteRepairs = 0;
   Timer? _autoConnectTimer;
   int _autoConnectAttempt = 0;
   bool _profileRefreshInFlight = false;
@@ -318,6 +370,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Future<String> upgradeKernel(String version) async {
     final int generation = _generation;
     final bool wasConnected = _state == ConnectionPhase.connected;
+    final bool wasRunning = _clash != null;
     _userStopped = true;
     _restartTimer?.cancel();
     _restartTimer = null;
@@ -331,7 +384,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       installed = true;
       return result;
     } finally {
-      if (wasConnected && generation == _generation) {
+      if (wasRunning && generation == _generation) {
         _userStopped = false;
         if (installed) {
           _restartAttempt = 0;
@@ -446,6 +499,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     return fastest;
   }
 
+  // 每秒的流量与连接快照单独通知：整页的监听者不必跟着每秒重建
+  Listenable get statsUpdates => _statsUpdates;
+
   TrafficSample get traffic => _traffic;
 
   TrafficSample get trafficTotal => _trafficTotal;
@@ -526,6 +582,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       _groupIcons = const <String, String>{};
       _groups = const <ProxyGroup>[];
       _nodes = const <ProxyNode>[];
+      _loadedNodes = null;
+      _recentNodes.clear();
+      _probeNodes = const <Object?>[];
+      _forgetBrowsed();
+      _validated = null;
+      _remoteFailed = false;
       _indexProxyExtra();
     }
     api?.fallbackProxyPort = _state == ConnectionPhase.connected
@@ -891,9 +953,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     final int generation = ++_generation;
+    final bool wasTakeover = _takeover;
     _takeover = takeover;
     _userStopped = false;
     _restartAttempt = 0;
+    _tunRouteRepairs = 0;
     _persistRestart = false;
     _kernelDiedDuringConnect = false;
     _restartTimer?.cancel();
@@ -973,12 +1037,17 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       if (generation != _generation) {
         return;
       }
+      if (e is! ApiException) {
+        _remoteFailed = true;
+      }
       final String reason = _kernelDiedDuringConnect
           ? L10n.t('内核启动失败，请重试')
           : e.toString();
+      Object? stopError;
       try {
         await _teardown();
       } on Object catch (stop) {
+        stopError = stop;
         Logger.instance.warn(_source, '连接失败后停止内核失败: $stop');
       }
       if (generation != _generation) {
@@ -999,6 +1068,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         } else {
           _fail(reason);
         }
+      } else if (wasTakeover && stopError != null) {
+        // 断开时内核没能停掉：TUN 与内核都还在接管流量，不能显示成已断开
+        _fail(stopError.toString());
       } else {
         Logger.instance.warn(_source, '内核常驻启动失败：$reason');
         _standbyError = reason;
@@ -1025,7 +1097,12 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (clash == null) {
       throw StateError(L10n.t('内核未就绪'));
     }
-    await clash.setTunEnabled(_takeover && _settings.tunEnabled);
+    final bool tunEnabled = _takeover && _settings.tunEnabled;
+    await clash.setTunEnabled(tunEnabled);
+    if (generation != _generation) {
+      return;
+    }
+    await _ensureTunApplied(clash, tunEnabled);
     if (generation != _generation) {
       return;
     }
@@ -1093,7 +1170,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   // 内核的 PATCH / PUT /configs 能热改端口、TUN、IPv6、日志级别，但客户端每次都是
   // 拿面板配置加本地模板整份重装：走重启这一条路，落盘的那份配置始终等于运行中的
   // 状态，界面之外读回控制面端口与 secret 时才不会读到已被增量改掉的旧值
-  Future<void> _restartKernel(String stage) async {
+  Future<void> _restartKernel(String stage, {bool validated = false}) async {
     final int generation = ++_generation;
     _restartTimer?.cancel();
     _restartTimer = null;
@@ -1113,7 +1190,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       await _rebuildProfile();
-      await _launchKernel(generation);
+      await _launchKernel(generation, validated: validated);
     } on Object catch (e) {
       if (generation != _generation || _userStopped) {
         return;
@@ -1265,12 +1342,17 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final ClashApiClient clash = _clash!;
     final String? previous = groupByName(group)?.now;
 
+    await _loadNodes(<String>[member]);
+    if (!identical(clash, _clash)) {
+      return;
+    }
     await clash.selectProxy(group, member);
     if (!identical(clash, _clash)) {
       return;
     }
     _rememberSelector(group, member);
     await _refreshProxies();
+    await _persistRunningProfile();
 
     // 换下来的那个出站上还挂着存量连接，断掉它们后续请求才走新选中项。只断经过它的，
     // 别的分组不受牵连；放后台做，界面不等这一轮
@@ -1404,6 +1486,25 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       _settingsStore.save(_settings);
     }
     notifyListeners();
+    if (clash != null) {
+      await _persistRunningProfile();
+    }
+  }
+
+  // 开机自启、始终开启的 VPN 与磁贴由原生侧按落盘配置拉起内核，运行中换的节点与模式不写回就会退回连接时的值
+  Future<void> _persistRunningProfile() async {
+    final int generation = _generation;
+    try {
+      await _rebuildProfile(
+        reuseControlPlane: true,
+        refreshDirectAddresses: false,
+      );
+      if (generation == _generation && _clash != null) {
+        await _kernel.persistConfig(_profile!.json);
+      }
+    } on Object catch (e) {
+      Logger.instance.warn(_source, '写回当前节点与模式失败: $e');
+    }
   }
 
   // 分组成员本身也可能是分组（面板下发的「主节点」「自动选择」就是）。延迟、探测进度、
@@ -1427,9 +1528,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> testDelay(String name) async {
-    final PanelApiClient? api = _api;
-    if (await _ensureControlPlane() && identical(api, _api)) {
-      await _testNodes(<String>[resolveNode(name)]);
+    final _TestRun? run = await _openTestRun();
+    if (run != null) {
+      await _testNodes(run, <String>[resolveNode(name)]);
     }
   }
 
@@ -1441,34 +1542,40 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     return _clash != null;
   }
 
+  Future<_TestRun?> _openTestRun() async {
+    final PanelApiClient? api = _api;
+    if (!await _ensureControlPlane() || !identical(api, _api)) {
+      return null;
+    }
+    return _TestRun(this, _clash!, api);
+  }
+
+  List<String> _leavesOf(ProxyGroup group) =>
+      <String>{for (final String member in group.members) resolveNode(member)}
+          .toList(growable: false);
+
   // 不用 /group/{name}/delay：一批才返回、urltest 会忽略 url/timeout，
   // 且静默跳过距上次不足 interval 的成员，失败与跳过都表现为缺项。
   Future<void> testGroup(String group) async {
-    final PanelApiClient? api = _api;
-    if (!await _ensureControlPlane() || !identical(api, _api)) {
+    if (!_testingGroups.add(group)) {
       return;
     }
-
-    final ProxyGroup? target = groupByName(group);
-    if (target == null || !_testingGroups.add(group)) {
-      return;
-    }
-    final ClashApiClient? clash = _clash;
     notifyListeners();
-
+    _TestRun? run;
     try {
-      await _testNodes(
-        <String>{
-          for (final String member in target.members) resolveNode(member),
-        }.toList(growable: false),
-      );
+      run = await _openTestRun();
+      final ProxyGroup? target = groupByName(group);
+      if (run == null || target == null) {
+        return;
+      }
+      await _testNodes(run, _leavesOf(target));
 
       // selector 组的选中项归用户；urltest 组要让内核按新延迟立刻重选
-      if (identical(clash, _clash) && !target.selectable) {
+      if (run.isCurrent && !target.selectable) {
         await _reselect(group);
       }
     } finally {
-      if (identical(clash, _clash)) {
+      if (run == null || run.isCurrent) {
         _testingGroups.remove(group);
         notifyListeners();
       }
@@ -1490,101 +1597,144 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // 内核对整组是并发 10 分批测的，客户端逐个打也按同一量级并发，
-  // 再高就会互相抢带宽、把延迟测虚高
+  // 再高就会互相抢带宽、把延迟测虚高；多个分组同时测也共用这一个上限
   static const int _testConcurrency = 8;
+  int _delaySlotsInUse = 0;
+  final List<Completer<void>> _delaySlotWaiters = <Completer<void>>[];
 
-  Future<void> _testNodes(List<String> names) async {
-    final ClashApiClient? clash = _clash;
-    final PanelApiClient? api = _api;
-    if (clash == null) {
+  Future<void> _acquireDelaySlot() async {
+    if (_delaySlotsInUse < _testConcurrency) {
+      _delaySlotsInUse++;
       return;
     }
-    bool isCurrent() => identical(clash, _clash) && identical(api, _api);
+    final Completer<void> waiter = Completer<void>();
+    _delaySlotWaiters.add(waiter);
+    await waiter.future;
+  }
 
+  void _releaseDelaySlot() {
+    if (_delaySlotWaiters.isEmpty) {
+      _delaySlotsInUse--;
+    } else {
+      _delaySlotWaiters.removeAt(0).complete();
+    }
+  }
+
+  Future<void> _testNodes(_TestRun run, List<String> names) async {
+    final List<String> unloaded = _unloadedOf(names);
+    final Set<String> deferred = unloaded.toSet();
+    if (unloaded.isNotEmpty) {
+      // 一次并入，免得每批探测各落一次盘
+      _adoptBrowsed(unloaded);
+    }
+    bool used = await _testLoaded(run, <String>[
+      for (final String name in names)
+        if (!deferred.contains(name)) name,
+    ]);
+    for (int start = 0; start < unloaded.length; start += _probeBatch) {
+      if (!run.isCurrent) {
+        return;
+      }
+      final List<String> batch = unloaded.sublist(
+        start,
+        min(start + _probeBatch, unloaded.length),
+      );
+      if (await _probe(batch)) {
+        used |= await _testLoaded(run, batch);
+      } else if (run.isCurrent) {
+        for (final String name in batch) {
+          _delays.remove(name);
+          _unreachable.add(name);
+        }
+        notifyListeners();
+      }
+    }
+    if (run.isCurrent && used) {
+      unawaited(run.api?.reportNodeUsed());
+    }
+  }
+
+  Future<bool> _testLoaded(_TestRun run, List<String> names) async {
     final List<String> pending = names
         .where((String name) => name.isNotEmpty && _testing.add(name))
         .toList(growable: false);
     if (pending.isEmpty) {
-      return;
+      return false;
     }
     notifyListeners();
-
-    final Iterator<String> queue = pending.iterator;
     bool used = false;
 
-    Future<void> worker() async {
-      while (isCurrent() && queue.moveNext()) {
-        final String name = queue.current;
-        try {
-          final int delay = await clash.testDelay(name);
-          if (!isCurrent()) {
-            return;
-          }
-          _delays[name] = delay;
-          _unreachable.remove(name);
-          if (delay > 0) {
-            used = true;
-          }
-        } on Object {
-          if (!isCurrent()) {
-            return;
-          }
+    Future<void> test(String name) async {
+      await _acquireDelaySlot();
+      try {
+        if (!run.isCurrent) {
+          return;
+        }
+        final int delay = await run.clash.testDelay(name);
+        if (!run.isCurrent) {
+          return;
+        }
+        _delays[name] = delay;
+        _unreachable.remove(name);
+        used |= delay > 0;
+      } on Object {
+        if (run.isCurrent) {
           _delays.remove(name);
           _unreachable.add(name);
-        } finally {
-          if (isCurrent()) {
-            _testing.remove(name);
-            notifyListeners();
-          }
+        }
+      } finally {
+        _releaseDelaySlot();
+        if (run.isCurrent) {
+          _testing.remove(name);
+          notifyListeners();
         }
       }
     }
 
-    await Future.wait(<Future<void>>[
-      for (int i = 0; i < min(_testConcurrency, pending.length); i++) worker(),
-    ]);
-    if (isCurrent() && used && api != null) {
-      unawaited(api.reportNodeUsed());
-    }
+    await Future.wait(pending.map(test));
+    return used;
   }
 
   Future<String?> testSpeed(String name) async {
-    final PanelApiClient? api = _api;
-    if (!await _ensureControlPlane() || !identical(api, _api)) {
+    final _TestRun? run = await _openTestRun();
+    if (run == null) {
       return L10n.t('内核未就绪，无法测速');
     }
     final String leaf = resolveNode(name);
     if (NodeLabels.officialId(leaf) == null) {
       return L10n.t('不是可测速的官方节点');
     }
-    return _testSpeeds(<String>[leaf]);
+    return _testSpeeds(run, <String>[leaf]);
   }
 
   Future<String?> testGroupSpeed(String group) async {
-    final PanelApiClient? api = _api;
-    if (!await _ensureControlPlane() || !identical(api, _api)) {
-      return L10n.t('内核未就绪，无法测速');
-    }
-    final ProxyGroup? target = groupByName(group);
-    if (target == null || !_testingSpeedGroups.add(group)) {
+    if (!_testingSpeedGroups.add(group)) {
       return null;
     }
-    final ClashApiClient? clash = _clash;
     notifyListeners();
+    _TestRun? run;
     try {
-      final List<String> leaves = <String>{
-        for (final String member in target.members) resolveNode(member),
-      }.where((String name) => NodeLabels.officialId(name) != null).toList();
-      return await _testSpeeds(leaves);
+      run = await _openTestRun();
+      if (run == null) {
+        return L10n.t('内核未就绪，无法测速');
+      }
+      final ProxyGroup? target = groupByName(group);
+      if (target == null) {
+        return null;
+      }
+      return await _testSpeeds(run, <String>[
+        for (final String leaf in _leavesOf(target))
+          if (NodeLabels.officialId(leaf) != null) leaf,
+      ]);
     } finally {
-      if (identical(clash, _clash)) {
+      if (run == null || run.isCurrent) {
         _testingSpeedGroups.remove(group);
         notifyListeners();
       }
     }
   }
 
-  Future<String?> _testSpeeds(List<String> names) async {
+  Future<String?> _testSpeeds(_TestRun run, List<String> names) async {
     final List<String> queued = <String>[
       for (final String name in names)
         if (name.isNotEmpty && _testingSpeeds.add(name)) name,
@@ -1592,219 +1742,222 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (queued.isEmpty) {
       return null;
     }
-    for (final String name in queued) {
-      _speedFailed.remove(name);
-    }
+    _speedFailed.removeAll(queued);
     notifyListeners();
-    final ClashApiClient? clash = _clash;
     final Future<void> earlier = _speedLane;
     final Completer<void> gate = Completer<void>();
     _speedLane = gate.future;
     await earlier;
     try {
-      return await _measureSpeeds(queued);
+      return run.isCurrent ? await _measureSpeeds(run, queued) : null;
     } finally {
       gate.complete();
-      if (identical(clash, _clash)) {
+      if (run.isCurrent) {
         _testingSpeeds.removeAll(queued);
         notifyListeners();
       }
     }
   }
 
-  Future<String?> _measureSpeeds(List<String> names) async {
-    final ClashApiClient? clash = _clash;
-    final PanelApiClient? api = _api;
-    if (clash == null) {
-      return L10n.t('内核未就绪，无法测速');
-    }
-    bool isCurrent() => identical(clash, _clash) && identical(api, _api);
+  // 面板单次请求最多处理这么多个节点（UserSpeedTestLog::MAX_BATCH），超出的既不放行也不拒绝
+  static const int _speedReserveBatch = 256;
 
-    final List<String> pending = names
-        .where((String name) => name.isNotEmpty)
-        .toList(growable: false);
-    _testingSpeeds.addAll(pending);
-    if (pending.isEmpty) {
+  Future<String?> _measureSpeeds(_TestRun run, List<String> names) async {
+    final bool unlimited = _profileOf?.call()?.speedTestUnlimited ?? false;
+    final List<String> candidates = <String>[
+      for (final String name in names)
+        if (unlimited || _speedQuota.canTest(name)) name,
+    ];
+    final int localBlocked = names.length - candidates.length;
+    if (localBlocked > 0) {
+      _testingSpeeds.removeAll(names.toSet().difference(candidates.toSet()));
+      notifyListeners();
+    }
+    if (candidates.isEmpty) {
+      return L10n.t('该节点 1 小时内测速已达 5 次，请稍后再试');
+    }
+
+    final PanelApiClient? api = run.api;
+    if (api == null) {
+      return L10n.t('无法连接面板，测速未开始');
+    }
+    final List<String> allowed = <String>[];
+    final List<SpeedTestDenied> denied = <SpeedTestDenied>[];
+    try {
+      await run.clash.waitReady(
+        proxyPort: SpeedProbeConfig.portOf(_settings.mixedPort),
+        isCancelled: () => !run.isCurrent,
+      );
+      for (
+        int start = 0;
+        start < candidates.length;
+        start += _speedReserveBatch
+      ) {
+        if (!run.isCurrent) {
+          return null;
+        }
+        final SpeedTestReserveResult reserved = await api.reserveSpeedTest(
+          candidates.sublist(
+            start,
+            min(start + _speedReserveBatch, candidates.length),
+          ),
+        );
+        allowed.addAll(reserved.allowed);
+        denied.addAll(reserved.denied);
+      }
+    } on ClashApiException catch (e) {
+      if (!run.isCurrent) {
+        return null;
+      }
+      Logger.instance.warn(_source, '测速入口未就绪: $e');
+      return L10n.t('内核未就绪，无法测速');
+    } on ApiException catch (e) {
+      if (!run.isCurrent) {
+        return null;
+      }
+      if (e.unauthorized) {
+        await _rejectSession(api);
+      }
+      return e.message;
+    }
+    if (!run.isCurrent) {
       return null;
+    }
+
+    // 面板只对次数用尽的拒绝给出 reset_at；无权测试、非官方节点不算次数用尽
+    int quotaBlocked = localBlocked;
+    String? refusal;
+    for (final SpeedTestDenied item in denied) {
+      if (item.resetAt == null) {
+        refusal ??= item.message;
+      } else {
+        quotaBlocked++;
+        if (!unlimited) {
+          _speedQuota.markExhausted(item.proxyName, item.resetAt!);
+        }
+      }
+      _testingSpeeds.remove(item.proxyName);
+    }
+    if (denied.isNotEmpty) {
+      notifyListeners();
+    }
+    if (allowed.isEmpty) {
+      return denied.isNotEmpty
+          ? denied.first.message
+          : L10n.t('该节点 1 小时内测速已达 5 次，请稍后再试');
+    }
+    final String? notice = quotaBlocked > 0
+        ? L10n.t('已跳过 {0} 个达到测速次数上限的节点', <Object>[quotaBlocked])
+        : refusal;
+
+    bool used = false;
+    for (final String name in allowed) {
+      if (!run.isCurrent) {
+        return null;
+      }
+      try {
+        await _measureSpeed(run, name, unlimited);
+        if (!run.isCurrent) {
+          return null;
+        }
+        used = true;
+      } on ApiException catch (e) {
+        if (run.isCurrent) {
+          await _rejectSession(api);
+        }
+        return e.message;
+      } on Object catch (e) {
+        if (!run.isCurrent) {
+          return null;
+        }
+        Logger.instance.warn(_source, '节点 $name 测速失败: $e');
+        _speeds.remove(name);
+        _speedFailed.add(name);
+      } finally {
+        if (run.isCurrent) {
+          await run.clash.closeConnectionsVia(<String>{
+            SpeedProbeConfig.groupName,
+          });
+        }
+        if (run.isCurrent) {
+          _testingSpeeds.remove(name);
+          notifyListeners();
+        }
+      }
+    }
+
+    if (used) {
+      unawaited(api.reportNodeUsed());
+    }
+    return notice;
+  }
+
+  // 会话失效抛 ApiException；其余失败（含面板拒收结果）抛给调用方记为「失败」
+  Future<void> _measureSpeed(_TestRun run, String name, bool unlimited) async {
+    if (_unloadedOf(<String>[name]).isNotEmpty &&
+        !await _probe(<String>[name])) {
+      throw NodeSpeedTestException(L10n.t('失败'));
+    }
+    if (!run.isCurrent) {
+      return;
+    }
+    await run.clash.selectProxy(SpeedProbeConfig.groupName, name);
+    if (!run.isCurrent) {
+      return;
+    }
+    _speeds.remove(name);
+    notifyListeners();
+    final int speed = await _speedTester.download(
+      proxyPort: SpeedProbeConfig.portOf(_settings.mixedPort),
+      credential: SpeedProbeConfig.credential(run.clash.options.secret),
+      onPeak: (int bps) {
+        if (!run.isCurrent || bps <= (_speeds[name] ?? 0)) {
+          return;
+        }
+        _speeds[name] = bps;
+        notifyListeners();
+      },
+    );
+    if (!run.isCurrent) {
+      return;
+    }
+    if (speed <= 0) {
+      throw NodeSpeedTestException(L10n.t('失败'));
+    }
+    _speeds[name] = speed;
+    if (!unlimited) {
+      _speedQuota.record(name);
     }
     notifyListeners();
 
-    final bool unlimited = _profileOf?.call()?.speedTestUnlimited ?? false;
-    final List<String> localBlocked = <String>[
-      for (final String name in pending)
-        if (!unlimited && !_speedQuota.canTest(name)) name,
-    ];
-    final List<String> toReserve = <String>[
-      for (final String name in pending)
-        if (unlimited || _speedQuota.canTest(name)) name,
-    ];
-    if (localBlocked.isNotEmpty) {
-      _testingSpeeds.removeAll(localBlocked);
-      notifyListeners();
-    }
-
     try {
-      SpeedTestReserveResult reserved;
-      if (toReserve.isEmpty) {
-        reserved = const SpeedTestReserveResult(
-          allowed: <String>[],
-          denied: <SpeedTestDenied>[],
+      final SpeedTestReserveResult reported = await run.api!.reportSpeedTest(
+        <({String proxyName, int bytesPerSecond})>[
+          (proxyName: name, bytesPerSecond: speed),
+        ],
+      );
+      if (!run.isCurrent ||
+          reported.denied.isEmpty ||
+          reported.allowed.isNotEmpty) {
+        return;
+      }
+      final SpeedTestDenied refused = reported.denied.first;
+      if (!unlimited) {
+        _speedQuota.markExhausted(
+          name,
+          refused.resetAt ?? DateTime.now().add(SpeedTestQuotaStore.window),
         );
-      } else {
-        if (api == null) {
-          return L10n.t('无法连接面板，测速未开始');
-        }
-        try {
-          await clash.waitReady(
-            proxyPort: SpeedProbeConfig.portOf(_settings.mixedPort),
-            isCancelled: () => !isCurrent(),
-          );
-          if (!isCurrent()) {
-            return null;
-          }
-          reserved = await api.reserveSpeedTest(toReserve);
-        } on ClashApiException catch (e) {
-          if (!isCurrent()) {
-            return null;
-          }
-          Logger.instance.warn(_source, '测速入口未就绪: $e');
-          return L10n.t('内核未就绪，无法测速');
-        } on ApiException catch (e) {
-          if (!isCurrent()) {
-            return null;
-          }
-          if (e.unauthorized) {
-            await _rejectSession(api);
-          }
-          return e.message;
-        }
       }
-
-      if (!isCurrent()) {
-        return null;
+      throw NodeSpeedTestException(refused.message);
+    } on ApiException catch (e) {
+      if (!run.isCurrent) {
+        return;
       }
-      for (final SpeedTestDenied item in reserved.denied) {
-        if (!unlimited && item.resetAt != null) {
-          _speedQuota.markExhausted(item.proxyName, item.resetAt!);
-        }
-        _testingSpeeds.remove(item.proxyName);
+      if (e.unauthorized) {
+        rethrow;
       }
-      if (reserved.denied.isNotEmpty) {
-        notifyListeners();
-      }
-
-      final List<String> allowed = reserved.allowed;
-
-      String? notice;
-      final int skipped = localBlocked.length + reserved.denied.length;
-      if (allowed.isEmpty) {
-        if (reserved.denied.isNotEmpty) {
-          return reserved.denied.first.message;
-        }
-        if (localBlocked.isNotEmpty) {
-          return L10n.t('该节点 1 小时内测速已达 5 次，请稍后再试');
-        }
-        return null;
-      }
-      if (skipped > 0) {
-        notice = L10n.t('已跳过 {0} 个达到测速次数上限的节点', <Object>[skipped]);
-      }
-
-      bool used = false;
-      for (final String name in allowed) {
-        try {
-          if (!isCurrent()) {
-            return null;
-          }
-          await clash.selectProxy(SpeedProbeConfig.groupName, name);
-          if (!isCurrent()) {
-            return null;
-          }
-          final int speed = await _speedTester.download(
-            proxyPort: SpeedProbeConfig.portOf(_settings.mixedPort),
-            credential: SpeedProbeConfig.credential(clash.options.secret),
-            onPeak: (int bps) {
-              if (!isCurrent() || bps <= (_speeds[name] ?? 0)) {
-                return;
-              }
-              _speeds[name] = bps;
-              _speedFailed.remove(name);
-              notifyListeners();
-            },
-          );
-          if (!isCurrent()) {
-            return null;
-          }
-          if (speed <= 0) {
-            throw NodeSpeedTestException(L10n.t('失败'));
-          }
-          _speeds[name] = speed;
-          _speedFailed.remove(name);
-          if (!unlimited) {
-            _speedQuota.record(name);
-          }
-          notifyListeners();
-          if (api != null) {
-            try {
-              final SpeedTestReserveResult reported = await api.reportSpeedTest(
-                <({String proxyName, int bytesPerSecond})>[
-                  (proxyName: name, bytesPerSecond: speed),
-                ],
-              );
-              if (!isCurrent()) {
-                return null;
-              }
-              if (reported.denied.isNotEmpty && reported.allowed.isEmpty) {
-                if (!unlimited) {
-                  _speedQuota.markExhausted(
-                    name,
-                    reported.denied.first.resetAt ??
-                        DateTime.now().add(SpeedTestQuotaStore.window),
-                  );
-                }
-                throw NodeSpeedTestException(reported.denied.first.message);
-              }
-            } on ApiException catch (e) {
-              if (!isCurrent()) {
-                return null;
-              }
-              if (e.unauthorized) {
-                await _rejectSession(api);
-                return e.message;
-              }
-              Logger.instance.warn(_source, '节点 $name 测速结果未写入面板: $e');
-            }
-          }
-          used = true;
-        } on Object catch (e) {
-          if (!isCurrent()) {
-            return null;
-          }
-          Logger.instance.warn(_source, '节点 $name 测速失败: $e');
-          _speeds.remove(name);
-          _speedFailed.add(name);
-        } finally {
-          if (isCurrent()) {
-            await clash.closeConnectionsVia(<String>{
-              SpeedProbeConfig.groupName,
-            });
-          }
-          if (isCurrent()) {
-            _testingSpeeds.remove(name);
-            notifyListeners();
-          }
-        }
-      }
-
-      if (used && api != null) {
-        unawaited(api.reportNodeUsed());
-      }
-      return notice;
-    } finally {
-      if (isCurrent()) {
-        _testingSpeeds.removeAll(pending);
-        notifyListeners();
-      }
+      Logger.instance.warn(_source, '节点 $name 测速结果未写入面板: $e');
+      return;
     }
   }
 
@@ -1812,7 +1965,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (!identical(api, _api)) {
       return;
     }
-    if (_canUseOffline(api)) {
+    if (_canUseOffline(api) && !_remoteFailed) {
       return;
     }
     if (_remote != null &&
@@ -1897,9 +2050,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       final AppLanguage language = L10n.current;
-      final RemoteProfile remote = await api.fetchClashProfile(
-        fallbackProxyPort: fallbackProxyPort,
-      );
+      final RemoteProfile remote = await _fetchProfile(api, fallbackProxyPort);
       if (identical(api, _api)) {
         if (language != L10n.current) {
           await _fetchRemoteConfigOnce(api);
@@ -1940,8 +2091,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       }
       try {
         final AppLanguage language = L10n.current;
-        final RemoteProfile remote = await api.fetchClashProfile(
-          fallbackProxyPort: fallbackProxyPort,
+        final RemoteProfile remote = await _fetchProfile(
+          api,
+          fallbackProxyPort,
         );
         if (identical(api, _api)) {
           if (language != L10n.current) {
@@ -1967,6 +2119,42 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         rethrow;
       }
     }
+  }
+
+  // 分页模式下面板只带了在用的节点：用户选过的若不在里面，按名取回并入，否则内核起来后这些选择落空
+  Future<RemoteProfile> _fetchProfile(
+    PanelApiClient api,
+    int? fallbackProxyPort,
+  ) async {
+    final RemoteProfile remote = await api.fetchClashProfile(
+      fallbackProxyPort: fallbackProxyPort,
+    );
+    final NodeCatalog? catalog = remote.catalog;
+    if (catalog == null) {
+      return remote;
+    }
+    final List<String> missing =
+        <String>{
+              ..._recentNodes,
+              ...?_selectorSnapshot?.values,
+              ...?_loadSelectorSnapshot()?.values,
+            }
+            .where(
+              (String name) =>
+                  NodeLabels.officialId(name) != null &&
+                  !catalog.ranks.containsKey(name),
+            )
+            .take(_nodeNamesLimit)
+            .toList();
+    if (missing.isEmpty) {
+      return remote;
+    }
+    final NodePage page = await api.fetchNodes(
+      names: missing,
+      fallbackProxyPort: fallbackProxyPort,
+    );
+    // 两次请求之间面板的节点变了，序号对不上：这一轮不并入，配置戳随之变化，下一次刷新再补
+    return page.stamp == catalog.stamp ? remote.withNodes(page.nodes) : remote;
   }
 
   Future<bool> _remoteRevisionUnchanged(
@@ -1995,8 +2183,17 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _applyRemoteProfile(RemoteProfile remote, {required bool persist}) {
+    final NodeCatalog? catalog = remote.catalog;
+    if (catalog?.stamp != _remoteProfile?.catalog?.stamp) {
+      _forgetBrowsed();
+    } else if (catalog != null) {
+      _browsed.removeWhere((String name, _) => catalog.ranks.containsKey(name));
+    }
     _remoteProfile = remote;
     _remotePending = persist;
+    if (persist) {
+      _remoteFailed = false;
+    }
     _configRevision = remote.revision;
     _remote = remote.config;
     _indexProxyExtra();
@@ -2008,6 +2205,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       remote.nodeLabels,
       remote.groupLabels,
     );
+    NodeLabels.addNodeLabels(<String, String>{
+      for (final CatalogNode node in _browsed.values) node.name: node.label,
+    });
     unawaited(_warmNodeRegions(remote));
     // 这里不装配：装配会换掉控制面端口/secret，旧内核仍在跑时改掉这些字段
     // 没有意义，还会干扰并发重启。需要配置的一方自行 _rebuildProfile()
@@ -2091,31 +2291,61 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (until == null || api == null) {
       return;
     }
-    final Duration delay = until.difference(DateTime.now());
-    _authorizationTimer = Timer(
-      delay.isNegative ? Duration.zero : delay,
-      () async {
+    Future<void> expire() async {
+      if (!identical(api, _api)) {
+        return;
+      }
+      // 面板续期可能就在到期前一刻，每分钟的同步还没赶上：先在线取一次配置，仍无授权才停
+      if (!_canUseOffline(api)) {
+        if (_profileRefreshInFlight) {
+          _authorizationTimer = Timer(const Duration(seconds: 1), expire);
+          return;
+        }
+        await refreshProfileFromPanel(refreshRules: false);
         if (!identical(api, _api)) {
           return;
         }
-        // Timer 按时长触发、判断按墙钟：墙钟回拨后还没到期，要重新计时，否则不会再自动停用
-        if (_canUseOffline(api)) {
-          _armAuthorizationExpiry();
-          return;
-        }
-        final Future<void> stopping = shutdown();
-        final int generation = _generation;
-        await stopping;
-        if (identical(api, _api) && generation == _generation) {
-          _fail(L10n.t('本地配置授权已到期，请连接面板更新后重试'));
-        }
-      },
+      }
+      // Timer 按时长触发、判断按墙钟：墙钟回拨后还没到期，要重新计时，否则不会再自动停用
+      if (_canUseOffline(api)) {
+        _armAuthorizationExpiry();
+        return;
+      }
+      final Future<void> stopping = shutdown();
+      final int generation = _generation;
+      await stopping;
+      if (identical(api, _api) && generation == _generation) {
+        _fail(L10n.t('本地配置授权已到期，请连接面板更新后重试'));
+      }
+    }
+
+    final Duration delay = until.difference(DateTime.now());
+    _authorizationTimer = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      expire,
     );
   }
 
   Future<void> _rejectSession(PanelApiClient api) async {
     if (!identical(api, _api)) {
       return;
+    }
+    // 封禁、待删除账户访问放行名单外的接口同样回 401：先用同一令牌查账户状态，只有它也回 401 才清会话
+    final Future<void> Function()? verify = onPanelSync;
+    if (verify != null) {
+      try {
+        await verify();
+        return;
+      } on ApiException catch (e) {
+        if (!e.unauthorized) {
+          return;
+        }
+      } on Object {
+        return;
+      }
+      if (!identical(api, _api)) {
+        return;
+      }
     }
     final Future<void> Function()? reject = onSessionRejected;
     if (reject != null) {
@@ -2219,11 +2449,16 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       ...?_loadSelectorSnapshot(),
     };
     _selectorSnapshot = selectorDefaults.isEmpty ? null : selectorDefaults;
+    final Set<String>? loaded = _workingSet(remote, selectorDefaults.values);
+    _loadedNodes = loaded;
     _profile = const ProfileAssembler().assemble(
-      remote: remote,
+      remote: NodeWorkingSet.restrict(remote, loaded, _probeNodes),
       template: LocalTemplate(
         _settings.toTemplateOptions(
           tunInterfaceName: _platform.tunInterfaceName,
+          tunSetsSystemDns: _platform.tunSetsSystemDns,
+          strictRouteNeedsTunIPv6: _platform.strictRouteNeedsTunIPv6,
+          lanNamesViaSystemDns: _platform.lanNamesViaSystemDns,
           takeover: _takeover,
           supportsSystemProxy: _platform.supportsSystemProxy,
           extraTunExcludeAddresses: api?.configDirectCidrs ?? const <String>[],
@@ -2237,16 +2472,16 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _providerTotal = _profile!.remoteProviderCount;
   }
 
-  Future<void> _launchKernel(int generation) async {
+  Future<void> _launchKernel(int generation, {bool validated = false}) async {
     _launching = true;
     try {
-      await _launchKernelOnce(generation);
+      await _launchKernelOnce(generation, validated);
     } finally {
       _launching = false;
     }
   }
 
-  Future<void> _launchKernelOnce(int generation) async {
+  Future<void> _launchKernelOnce(int generation, bool validated) async {
     final AssembledProfile? profile = _profile;
     final ClashApiOptions? clashApi = _clashApiOptions;
     if (profile == null || clashApi == null) {
@@ -2258,7 +2493,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     AppPaths.touchSession();
-    final String? invalid = await _kernel.validate(profile.validationJson);
+    final String? invalid = _takeValidated() || validated
+        ? null
+        : await _kernel.validate(profile.validationJson);
     if (invalid != null) {
       final KernelException error = KernelException('配置校验未通过：$invalid');
       _emitConfigAlert(error);
@@ -2280,10 +2517,11 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
       rethrow;
+    } finally {
+      // 重启不再先停内核，轮询会一直开着：旧内核在这之前退出报的 failed 说的是上一个
+      // 进程，带进下面的 waitReady 会让刚拉起来的这个被当场判死；start 自身失败时原因已在异常里
+      _kernelDiedDuringConnect = false;
     }
-    // 重启不再先停内核，轮询会一直开着：旧内核在这之前退出报的 failed 说的是上一个
-    // 进程，带进下面的 waitReady 会让刚拉起来的这个被当场判死
-    _kernelDiedDuringConnect = false;
 
     final ClashApiClient clash;
     final ClashApiClient? existing = _clash;
@@ -2330,10 +2568,14 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _clash = clash;
 
+    await clash.resetUrlTests(_urlTestGroupNames());
     await _refreshProxies(notify: false);
     await _restoreSelectorSnapshot();
     _captureSelectorSnapshot();
-    _routeMode = (await clash.fetchRuntime()).mode;
+    _routeMode = (await _ensureTunApplied(
+      clash,
+      (profile.config['tun'] as Map)['enable'] == true,
+    )).mode;
 
     if (generation != _generation) {
       await _abandonLaunch(clash);
@@ -2357,12 +2599,26 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     _connectedAt = _takeover ? (_connectedAt ?? DateTime.now()) : null;
     _commitRemote();
+    _remoteFailed = false;
     _restartAttempt = 0;
     _persistRestart = false;
     _setState(
       _takeover ? ConnectionPhase.connected : ConnectionPhase.disconnected,
       error: null,
     );
+  }
+
+  // 开 TUN 失败时内核只记一行错误并把 tun.enable 抹成 false，装配与 PATCH 照常成功，只能读回运行态核对
+  Future<({String mode, bool tunEnabled, int mixedPort})> _ensureTunApplied(
+    ClashApiClient clash,
+    bool expected,
+  ) async {
+    final ({String mode, bool tunEnabled, int mixedPort}) runtime = await clash
+        .fetchRuntime();
+    if (runtime.tunEnabled != expected) {
+      throw ClashApiException('内核未能接管 TUN，详见内核日志');
+    }
+    return runtime;
   }
 
   Future<void> _abandonLaunch(
@@ -2384,7 +2640,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       await _platform.restoreSystemProxy();
-    } on PlatformServiceException catch (e) {
+    } on Exception catch (e) {
       Logger.instance.error(_source, '还原系统代理失败', e);
     }
   }
@@ -2409,13 +2665,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
             _settings.systemProxyBypass,
           ),
         );
-      } on PlatformServiceException catch (e) {
+      } on Exception catch (e) {
         Logger.instance.warn(_source, '系统代理设置失败，连接照常，可手动设置代理: $e');
       }
     } else {
       try {
         await _platform.restoreSystemProxy();
-      } on PlatformServiceException catch (e) {
+      } on Exception catch (e) {
         Logger.instance.warn(_source, '还原系统代理失败: $e');
       }
     }
@@ -2426,19 +2682,103 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       _settings.systemProxyEnabled &&
       _platform.supportsSystemProxy;
 
+  bool get _tunRouteGuardActive =>
+      _state == ConnectionPhase.connected && _takeover && _settings.tunEnabled;
+
   void _syncSysProxyGuard() {
-    if (_sysProxyGuardActive && _sysProxyGuardTimer != null) {
+    final bool active = _sysProxyGuardActive || _tunRouteGuardActive;
+    if (active && _sysProxyGuardTimer != null) {
       return;
     }
     _sysProxyGuardTimer?.cancel();
     _sysProxyGuardTimer = null;
-    if (!_sysProxyGuardActive) {
+    if (!active) {
       return;
     }
     _sysProxyGuardTimer = Timer.periodic(
       _sysProxyGuardInterval,
-      (_) => unawaited(_guardSysProxy()),
+      (_) => unawaited(runGuards()),
     );
+  }
+
+  @visibleForTesting
+  Future<void> runGuards() async {
+    await _guardSysProxy();
+    await _guardTunRoutes();
+  }
+
+  // 外部（如 systemd-networkd 重配网卡）清掉 TUN 的策略路由后内核不会补回，此时显示已连接、流量却不进 TUN
+  Future<void> _guardTunRoutes() async {
+    final ClashApiClient? clash = _clash;
+    if (!_tunRouteGuardActive ||
+        clash == null ||
+        _launching ||
+        _restartTimer != null ||
+        _tunRouteRepairing) {
+      return;
+    }
+    final int generation = _generation;
+    final bool? intact = await _tunRoutesIntact();
+    if (intact == true) {
+      _tunRouteRepairs = 0;
+    }
+    if (intact != false ||
+        generation != _generation ||
+        !identical(clash, _clash) ||
+        !_tunRouteGuardActive) {
+      return;
+    }
+    if (_tunRouteRepairs > 0) {
+      _escalateTunRouteRepair(L10n.t('TUN 的路由规则反复被其它程序清除'));
+      return;
+    }
+    _tunRouteRepairs = 1;
+    _tunRouteRepairing = true;
+    Logger.instance.warn(_source, 'TUN 的策略路由规则已被外部清除，正在关闭再重新开启 TUN');
+    try {
+      await clash.setTunEnabled(false);
+      if (generation != _generation) {
+        return;
+      }
+      await clash.setTunEnabled(true);
+      if (generation != _generation) {
+        return;
+      }
+      await _ensureTunApplied(clash, true);
+      if (generation == _generation && await _tunRoutesIntact() == false) {
+        throw ClashApiException('内核未能接管 TUN，详见内核日志');
+      }
+    } on Object catch (e) {
+      if (generation == _generation && !_userStopped) {
+        _escalateTunRouteRepair(e.toString());
+      }
+    } finally {
+      _tunRouteRepairing = false;
+    }
+  }
+
+  // 重启内核总能成功、重启退避随之清零，靠它收不了手，只能在这里记着已经升级过几步
+  void _escalateTunRouteRepair(String reason) {
+    if (_tunRouteRepairs >= 2) {
+      _fail(reason);
+      unawaited(_teardown());
+      return;
+    }
+    _tunRouteRepairs = 2;
+    _scheduleRestart(reason);
+  }
+
+  Future<bool?> _tunRoutesIntact() async {
+    final Object? tun = _profile?.config['tun'];
+    final Object? table = tun is Map ? tun['iproute2-table-index'] : null;
+    try {
+      return await _platform.tunRoutesIntact(
+        tableIndex: table is int && table > 0 ? table : null,
+      );
+    } on Object catch (e) {
+      Logger.instance.debug(_source, 'TUN 策略路由检查失败: $e');
+      return null;
+    }
   }
 
   Future<void> _guardSysProxy() async {
@@ -2554,7 +2894,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       }
       _stats = result.$1;
       _applyConnections(result.$2);
-      notifyListeners();
+      _statsUpdates.value++;
     } on Object catch (e) {
       Logger.instance.debug(_source, '刷新内核状态失败: $e');
     } finally {
@@ -2729,7 +3069,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _pollProxies() async {
     try {
-      await _refreshProxies();
+      if (await _refreshProxies(notify: false)) {
+        notifyListeners();
+      }
     } on Object catch (e) {
       Logger.instance.debug(_source, '刷新出站列表失败: $e');
     }
@@ -2978,7 +3320,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     }
     final AssembledProfile profile = _profile!;
 
-    final String? invalid = await _kernel.validate(profile.validationJson);
+    final String? invalid = _takeValidated()
+        ? null
+        : await _kernel.validate(profile.validationJson);
     if (generation != _generation) {
       return;
     }
@@ -2990,7 +3334,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
 
     // 官方内核全量热载会重置 fake-IP 分配位置，须正常退出保存后再启动。
     if (!nodesOnly && (!canHotReload || profile.usesFakeIp)) {
-      await _restartKernel(L10n.t('面板配置有变更，正在重启内核'));
+      await _restartKernel(L10n.t('面板配置有变更，正在重启内核'), validated: true);
       return;
     }
 
@@ -3020,6 +3364,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         await _restartKernel(L10n.t('面板配置有变更，正在重启内核'));
         return;
       }
+      await _clash!.resetUrlTests(_urlTestGroupNames());
     }
 
     await _refreshProxies(notify: false);
@@ -3038,31 +3383,483 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         : const <String>[];
   }
 
-  Future<void> _refreshProxies({bool notify = true}) async {
+  List<String> _urlTestGroupNames() {
+    final Object? groups = _profile?.config['proxy-groups'];
+    return groups is List
+        ? <String>[
+            for (final Object? group in groups)
+              if (group is Map &&
+                  group['type'] == 'url-test' &&
+                  group['name'] is String)
+                group['name'] as String,
+          ]
+        : const <String>[];
+  }
+
+  Future<bool> _refreshProxies({bool notify = true}) async {
     final ClashApiClient? clash = _clash;
     if (clash == null) {
-      return;
+      return false;
     }
     clash.panelProviders = _panelProviderNames();
 
     final (List<ProxyGroup>, List<ProxyNode>) result = await clash
         .fetchProxies();
     if (!identical(clash, _clash)) {
-      return;
+      return false;
     }
+    final List<ProxyGroup> groups = _groups;
+    final List<ProxyNode> nodes = _nodes;
     _groups = _inProfileOrder(result.$1);
     _nodes = result.$2;
+    _mergeCatalog();
+    bool changed = !_sameGroups(groups, _groups) || !_sameNodes(nodes, _nodes);
 
     // 内核有新延迟才覆盖。0 不删：断开后内核重载历史是空的，
     // 删掉会把用户刚测的延迟和网速一起从界面抹掉。
     for (final ProxyNode node in _nodes) {
       if (node.delay > 0) {
+        changed |= _delays[node.name] != node.delay;
         _delays[node.name] = node.delay;
-        _unreachable.remove(node.name);
+        changed |= _unreachable.remove(node.name);
       }
     }
     if (notify) {
       notifyListeners();
+    }
+    return changed;
+  }
+
+  static bool _sameGroups(List<ProxyGroup> a, List<ProxyGroup> b) =>
+      a.length == b.length &&
+      Iterable<int>.generate(a.length).every(
+        (int i) =>
+            a[i].name == b[i].name &&
+            a[i].type == b[i].type &&
+            a[i].now == b[i].now &&
+            listEquals(a[i].members, b[i].members),
+      );
+
+  static bool _sameNodes(List<ProxyNode> a, List<ProxyNode> b) =>
+      a.length == b.length &&
+      Iterable<int>.generate(a.length).every(
+        (int i) =>
+            a[i].name == b[i].name &&
+            a[i].type == b[i].type &&
+            a[i].delay == b[i].delay &&
+            a[i].udp == b[i].udp &&
+            a[i].xudp == b[i].xudp,
+      );
+
+  // 只装了一部分节点时，内核给出的分组成员与节点表都不全：成员以面板配置为准，内核里没有的节点补成未测状态。
+  // 装了哪些以内核实际报告的为准，不沿用上次装配算出的结果：界面重启后接管仍在运行的内核时没有装配这一步
+  void _mergeCatalog() {
+    final Map<String, dynamic>? remote = _listedRemote;
+    if (remote == null) {
+      return;
+    }
+    final _Catalog catalog = _catalogOf(remote);
+    final Set<String> present = <String>{
+      for (final ProxyNode node in _nodes) node.name,
+    };
+    if (catalog.configs.keys.every(present.contains)) {
+      _loadedNodes = null;
+      return;
+    }
+    _loadedNodes = <String>{
+      for (final String name in catalog.configs.keys)
+        if (present.contains(name)) name,
+    };
+    _groups = <ProxyGroup>[
+      for (final ProxyGroup group in _groups)
+        catalog.members[group.name] == null
+            ? group
+            : ProxyGroup(
+                name: group.name,
+                type: group.type,
+                now: group.now,
+                members: catalog.members[group.name]!,
+              ),
+    ];
+    _nodes = <ProxyNode>[
+      ..._nodes,
+      for (final ProxyNode node in catalog.nodes)
+        if (!present.contains(node.name)) node,
+    ];
+  }
+
+  // 面板配置并上浏览缓存里的节点：界面按它列成员、认未装入的节点；装配与落盘只用 _remote
+  Map<String, dynamic>? get _listedRemote {
+    final Map<String, dynamic>? remote = _remote;
+    final NodeCatalog? catalog = _remoteProfile?.catalog;
+    if (remote == null || catalog == null || _browsed.isEmpty) {
+      return remote;
+    }
+    if (!identical(_listedSource, remote)) {
+      _listed = null;
+      _listedSource = remote;
+    }
+    return _listed ??= catalog.merge(remote, _browsed.values).config;
+  }
+
+  void _forgetBrowsed() {
+    _browsed.clear();
+    _paging.clear();
+    _listed = null;
+  }
+
+  void _addBrowsed(List<CatalogNode> nodes) {
+    final NodeCatalog? catalog = _remoteProfile?.catalog;
+    if (catalog == null) {
+      return;
+    }
+    final Map<String, String> labels = <String, String>{};
+    for (final CatalogNode node in nodes) {
+      if (catalog.ranks.containsKey(node.name)) {
+        continue;
+      }
+      _browsed.remove(node.name);
+      _browsed[node.name] = node;
+      labels[node.name] = node.label;
+    }
+    while (_browsed.length > _browsedLimit) {
+      _browsed.remove(_browsed.keys.first);
+    }
+    if (labels.isEmpty) {
+      return;
+    }
+    _listed = null;
+    NodeLabels.addNodeLabels(labels);
+    unawaited(
+      NodeLabels.warmRegions(labels.keys).then((_) => notifyListeners()),
+    );
+    _indexProxyExtra();
+  }
+
+  // 用到的节点若只在浏览缓存里，先并入面板配置：装配、落盘缓存与离线启动都只读面板配置
+  void _adoptBrowsed(Iterable<String> names) {
+    final RemoteProfile? profile = _remoteProfile;
+    final List<CatalogNode> nodes = <CatalogNode>[
+      for (final String name in names) ?_browsed[name],
+    ];
+    if (profile == null || nodes.isEmpty) {
+      return;
+    }
+    for (final CatalogNode node in nodes) {
+      _browsed.remove(node.name);
+    }
+    _setRemoteNodes(profile.withNodes(nodes));
+  }
+
+  void _setRemoteNodes(RemoteProfile profile) {
+    _remoteProfile = profile;
+    _remote = profile.config;
+    _validated = null;
+    _indexProxyExtra();
+    // 还没随内核启动落过盘的配置由 _commitRemote 一并保存
+    if (!_remotePending && _accountKey.isNotEmpty) {
+      _panelCache.saveRemote(_accountKey, profile, _api?.cacheKey);
+    }
+  }
+
+  CatalogProvider? _catalogProviderOf(String group) {
+    final Map<String, dynamic>? remote = _listedRemote;
+    return remote == null ? null : _catalogOf(remote).files[group];
+  }
+
+  /// 分组在面板上的成员总数；没有节点目录或该组已带全时就是当前列出的个数
+  int memberTotalOf(ProxyGroup group) {
+    final Map<String, dynamic>? remote = _listedRemote;
+    final _Catalog? catalog = remote == null ? null : _catalogOf(remote);
+    final CatalogProvider? file = catalog?.files[group.name];
+    return file == null
+        ? group.members.length
+        : file.total + (catalog!.extras[group.name] ?? 0);
+  }
+
+  bool hasMoreNodes(String group, {String query = ''}) {
+    final CatalogProvider? file = _catalogProviderOf(group);
+    if (file == null) {
+      return false;
+    }
+    final _NodePaging? paging = _paging[file.key];
+    if (query.isNotEmpty) {
+      return paging != null && paging.query == query && paging.searchMore;
+    }
+    return paging?.more ?? file.head < file.total;
+  }
+
+  bool loadingNodes(String group) =>
+      _paging[_catalogProviderOf(group)?.key]?.loading ?? false;
+
+  String? nodesErrorOf(String group) =>
+      _paging[_catalogProviderOf(group)?.key]?.error;
+
+  /// 面板按 [query] 搜到的节点：显示名是译名时本地按名称过滤会漏掉按原名命中的
+  bool nodeMatched(String group, String member, String query) {
+    final _NodePaging? paging = _paging[_catalogProviderOf(group)?.key];
+    return paging != null &&
+        paging.query == query &&
+        paging.hits.contains(member);
+  }
+
+  /// 向面板取该分组的下一页成员；[query] 非空时取名称含它的成员。取到的节点进浏览缓存
+  Future<void> loadMoreNodes(String group, {String query = ''}) async {
+    final PanelApiClient? api = _api;
+    final NodeCatalog? catalog = _remoteProfile?.catalog;
+    final CatalogProvider? file = _catalogProviderOf(group);
+    if (api == null || catalog == null || file == null) {
+      return;
+    }
+    final _NodePaging paging = _paging.putIfAbsent(
+      file.key,
+      () => _NodePaging(file.head, file.head < file.total),
+    );
+    final bool searching = query.isNotEmpty;
+    if (paging.loading) {
+      if (searching) {
+        paging.queued = query;
+      }
+      return;
+    }
+    if (searching && paging.query != query) {
+      paging
+        ..query = query
+        ..searchOffset = 0
+        ..searchMore = true
+        ..hits.clear();
+    }
+    if (!(searching ? paging.searchMore : paging.more)) {
+      return;
+    }
+    paging
+      ..loading = true
+      ..error = null;
+    notifyListeners();
+    try {
+      final NodePage page = await api.fetchNodes(
+        provider: file.key,
+        offset: searching ? paging.searchOffset : paging.offset,
+        limit: _nodePageSize,
+        search: query,
+        fallbackProxyPort: _state == ConnectionPhase.connected
+            ? _settings.mixedPort
+            : null,
+      );
+      if (!identical(api, _api) || !identical(_paging[file.key], paging)) {
+        return;
+      }
+      if (page.stamp != catalog.stamp) {
+        // 面板的节点或模板已变，这一页对不上手里的目录
+        _forgetBrowsed();
+        unawaited(refreshProfileFromPanel(force: true));
+      } else {
+        if (searching) {
+          paging
+            ..searchOffset += _nodePageSize
+            ..searchMore = page.more
+            ..hits.addAll(page.nodes.map((CatalogNode node) => node.name));
+        } else {
+          paging
+            ..offset += _nodePageSize
+            ..more = page.more;
+        }
+        _addBrowsed(page.nodes);
+      }
+      if (_clash != null) {
+        await _refreshProxies(notify: false);
+      } else {
+        _applyProfileProxies();
+      }
+    } on ApiException catch (e) {
+      if (!identical(api, _api)) {
+        return;
+      }
+      paging.error = e.message;
+      if (e.unauthorized) {
+        await _rejectSession(api);
+      }
+    } on Object catch (e) {
+      Logger.instance.debug(_source, '刷新出站列表失败: $e');
+    } finally {
+      paging.loading = false;
+      if (identical(api, _api)) {
+        notifyListeners();
+        final String? queued = paging.queued;
+        paging.queued = null;
+        if (queued != null && identical(_paging[file.key], paging)) {
+          unawaited(loadMoreNodes(group, query: queued));
+        }
+      }
+    }
+  }
+
+  // 面板配置里各分组的完整成员与全部节点。节点很多时每轮刷新重算太慢，按配置对象缓存
+  _Catalog _catalogOf(Map<String, dynamic> remote) {
+    final _Catalog? cached = _catalog;
+    if (cached != null && identical(cached.source, remote)) {
+      return cached;
+    }
+    final List<Map<String, dynamic>> proxies = AssembledProfile.nodesOf(remote);
+    final Object? groups = remote['proxy-groups'];
+    final NodeCatalog? paged = _remoteProfile?.catalog;
+    final Map<String, List<String>> members = <String, List<String>>{
+      if (groups is List)
+        for (final Object? group in groups)
+          if (group is Map<String, dynamic> && group['name'] is String)
+            group['name'] as String: _membersByNodeName(
+              AssembledProfile.membersOf(remote, group),
+            ),
+    };
+    final Map<String, CatalogProvider> files = <String, CatalogProvider>{
+      if (groups is List && paged != null)
+        for (final Object? group in groups)
+          if (group is Map<String, dynamic> &&
+              group['name'] is String &&
+              group['use'] is List)
+            for (final Object? file in group['use'] as List)
+              if (paged.providers[file] case final CatalogProvider entry)
+                group['name'] as String: entry,
+    };
+    return _catalog = (
+      source: remote,
+      configs: <String, Map<String, dynamic>>{
+        for (final Map<String, dynamic> proxy in proxies)
+          if (proxy['name'] is String) proxy['name'] as String: proxy,
+      },
+      nodes: <ProxyNode>[
+        for (final Map<String, dynamic> proxy in proxies)
+          if (proxy['name'] is String)
+            ProxyNode(
+              name: proxy['name'] as String,
+              type: _displayType(proxy['type'] as String? ?? ''),
+              delay: 0,
+            ),
+      ],
+      members: members,
+      files: files,
+      extras: <String, int>{
+        for (final String group in files.keys)
+          group: members[group]!
+              .where(
+                (String member) =>
+                    !paged!.ranks.containsKey(member) &&
+                    !_browsed.containsKey(member),
+              )
+              .length,
+      },
+    );
+  }
+
+  // 交给内核的只有在用的节点：校验、落盘、启动都用同一份，整份节点目录不离开界面进程
+  Set<String>? _workingSet(
+    Map<String, dynamic> remote,
+    Iterable<String> selected,
+  ) => NodeWorkingSet.select(
+    remote,
+    pinned: <String>[..._recentNodes, ...selected],
+  );
+
+  List<String> _unloadedOf(Iterable<String> names) {
+    final Set<String>? loaded = _loadedNodes;
+    final Map<String, dynamic>? remote = _listedRemote;
+    if (remote == null || (loaded == null && _browsed.isEmpty)) {
+      return const <String>[];
+    }
+    final Map<String, Map<String, dynamic>> configs = _catalogOf(remote)
+        .configs;
+    // 已知节点全部装入时（loaded 为 null），浏览缓存里的仍是未装入
+    return <String>[
+      for (final String name in names)
+        if (configs.containsKey(name) &&
+            !(loaded?.contains(name) ?? !_browsed.containsKey(name)))
+          name,
+    ];
+  }
+
+  // 把选中的未装入节点装进内核：沿用「只更新节点」的做法，重写节点文件后让内核按文件重载，不重启内核
+  Future<void> _loadNodes(List<String> names) async {
+    final ClashApiClient? clash = _clash;
+    final List<String> unloaded = _unloadedOf(names);
+    final RemoteProfile? adopted = _remoteProfile;
+    if ((_loadedNodes == null && unloaded.isEmpty) ||
+        clash == null ||
+        _remote == null) {
+      return;
+    }
+    _adoptBrowsed(unloaded);
+    final Map<String, Map<String, dynamic>> configs = _catalogOf(_listedRemote!)
+        .configs;
+    final List<String> nodes = <String>[
+      for (final String name in names)
+        if (configs.containsKey(name)) name,
+    ];
+    final List<String> previous = List<String>.of(_recentNodes);
+    _recentNodes
+      ..removeWhere(nodes.contains)
+      ..insertAll(0, nodes);
+    if (_recentNodes.length > _recentNodeLimit) {
+      _recentNodes.removeRange(_recentNodeLimit, _recentNodes.length);
+    }
+    if (unloaded.isEmpty) {
+      return;
+    }
+    _validated = null;
+    try {
+      await _rebuildProfile(
+        reuseControlPlane: true,
+        refreshDirectAddresses: false,
+      );
+      await _kernel.persistConfig(_profile!.json);
+      if (identical(clash, _clash)) {
+        await clash.updateProxyProviders(_panelProviderNames());
+      }
+    } on Object {
+      // 内核拒收的节点不能留在装入名单里：之后每次装配都会带上它，重启内核时整份配置校验不过
+      _recentNodes
+        ..clear()
+        ..addAll(previous);
+      if (adopted != null && !identical(adopted, _remoteProfile)) {
+        _setRemoteNodes(adopted);
+      }
+      if (identical(clash, _clash)) {
+        await _rebuildProfile(
+          reuseControlPlane: true,
+          refreshDirectAddresses: false,
+        );
+        await _kernel.persistConfig(_profile!.json);
+      }
+      rethrow;
+    }
+  }
+
+  // 未装入的节点临时放进探测节点文件再测：只重载这一个文件，分组用的节点文件及其上的连接不受影响
+  Future<bool> _probe(List<String> names) async {
+    final ClashApiClient? clash = _clash;
+    if (clash == null || _remote == null || _launching) {
+      return false;
+    }
+    _adoptBrowsed(names);
+    final Map<String, Map<String, dynamic>> configs = _catalogOf(_listedRemote!)
+        .configs;
+    try {
+      _probeNodes = <Object?>[
+        for (final String name in names)
+          if (configs.containsKey(name)) configs[name],
+      ];
+      await _rebuildProfile(
+        reuseControlPlane: true,
+        refreshDirectAddresses: false,
+      );
+      await _kernel.persistConfig(_profile!.json);
+      if (!identical(clash, _clash)) {
+        return false;
+      }
+      await clash.updateProxyProviders(<String>[NodeWorkingSet.probeProvider]);
+      return identical(clash, _clash);
+    } on Object catch (e) {
+      Logger.instance.warn(_source, '装入待测节点失败: $e');
+      return false;
     }
   }
 
@@ -3153,9 +3950,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     final Map<String, bool> udps = <String, bool>{};
     final Map<String, String> tlsTypes = <String, String>{};
     final Set<String> servers = <String>{};
-    final Object? proxies = _remote == null
+    final Map<String, dynamic>? remote = _listedRemote;
+    final Object? proxies = remote == null
         ? null
-        : AssembledProfile.nodesOf(_remote!);
+        : AssembledProfile.nodesOf(remote);
     if (proxies is List) {
       for (final Object? proxy in proxies) {
         if (proxy is! Map<String, dynamic>) {
@@ -3209,9 +4007,10 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _applyProfileProxies() {
-    _nodes = _remote != null
+    final Map<String, dynamic>? remote = _listedRemote;
+    _nodes = remote != null
         ? <ProxyNode>[
-            for (final Object? proxy in AssembledProfile.nodesOf(_remote!))
+            for (final Object? proxy in AssembledProfile.nodesOf(remote))
               if (proxy is Map<String, dynamic> &&
                   (proxy['name'] as String? ?? '').isNotEmpty)
                 ProxyNode(
@@ -3222,9 +4021,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
           ]
         : const <ProxyNode>[];
 
-    _groups = _remote?['proxy-groups'] is List
+    _groups = remote?['proxy-groups'] is List
         ? <ProxyGroup>[
-            for (final Object? group in _remote!['proxy-groups'] as List)
+            for (final Object? group in remote!['proxy-groups'] as List)
               if (group is Map<String, dynamic> &&
                   group['hidden'] != true &&
                   (group['name'] as String? ?? '').isNotEmpty)
@@ -3236,7 +4035,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
                   // 把每个分组都显示成同一个节点，而这与实际选中项无关。
                   now: '',
                   members: _membersByNodeName(
-                    AssembledProfile.membersOf(_remote!, group),
+                    AssembledProfile.membersOf(remote, group),
                   ),
                 ),
           ]
@@ -3469,13 +4268,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         Logger.instance.error(_source, '还原系统代理失败', e);
       }
     }
+    if (!restarting || !_takeover) {
+      _connectedAt = null;
+    }
     if (stopError != null) {
       throw stopError;
     }
 
-    if (!restarting || !_takeover) {
-      _connectedAt = null;
-    }
     _traffic = const TrafficSample(0, 0);
     _trafficTotal = const TrafficSample(0, 0);
     _trafficSampledAt = null;
@@ -3577,13 +4376,27 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     if (!identical(api, _api)) {
       return;
     }
+    // 与随后热载、启动用的装配条件一致，校验过的才是内核实际要加载的那份
+    final bool takeover = _takeover;
+    final AppSettings settings = _settings;
     final AssembledProfile candidate = const ProfileAssembler().assemble(
-      remote: remote.config,
+      remote: NodeWorkingSet.restrict(
+        remote.config,
+        _workingSet(remote.config, <String>[
+          ...?_selectorSnapshot?.values,
+          ...?_loadSelectorSnapshot()?.values,
+        ]),
+        _probeNodes,
+      ),
       template: LocalTemplate(
         _settings.toTemplateOptions(
           tunInterfaceName: _platform.tunInterfaceName,
-          takeover: false,
+          tunSetsSystemDns: _platform.tunSetsSystemDns,
+          strictRouteNeedsTunIPv6: _platform.strictRouteNeedsTunIPv6,
+          lanNamesViaSystemDns: _platform.lanNamesViaSystemDns,
+          takeover: takeover,
           supportsSystemProxy: _platform.supportsSystemProxy,
+          extraTunExcludeAddresses: api.configDirectCidrs,
         ),
         _clashApiOptions ??
             ClashApiOptions(port: _settings.mixedPort, secret: _randomSecret()),
@@ -3594,10 +4407,28 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     if (invalid != null) {
-      throw ProfileFormatException(<String>['内核配置校验失败：$invalid']);
+      throw ProfileFormatException(<String>[
+        L10n.t('内核配置校验失败：{0}', <Object>[invalid]),
+      ]);
     }
     _clearFormatError();
     _applyRemoteProfile(remote, persist: persist);
+    _validated = (
+      remote: remote.config,
+      takeover: takeover,
+      settings: settings,
+    );
+  }
+
+  // 只认紧接着的那一次：之后的启动仍各自校验
+  bool _takeValidated() {
+    final ({Map<String, dynamic> remote, bool takeover, AppSettings settings})?
+    validated = _validated;
+    _validated = null;
+    return validated != null &&
+        identical(validated.remote, _remote) &&
+        validated.takeover == _takeover &&
+        identical(validated.settings, _settings);
   }
 
   static Future<int> _pickFreePort() async {
@@ -3807,10 +4638,23 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _proxyRefreshTimer?.cancel();
     _sysProxyGuardTimer?.cancel();
     _statsTimer?.cancel();
+    _statsUpdates.dispose();
     _trafficRank.flush();
     _clash?.close();
     _clash = null;
     unawaited(_kernel.dispose());
     super.dispose();
   }
+}
+
+// 一次测试只属于发起时的内核与账户：任一换掉后，排队和在途的步骤不再继续，也不写结果
+class _TestRun {
+  _TestRun(this._owner, this.clash, this.api);
+
+  final ConnectionController _owner;
+  final ClashApiClient clash;
+  final PanelApiClient? api;
+
+  bool get isCurrent =>
+      identical(clash, _owner._clash) && identical(api, _owner._api);
 }

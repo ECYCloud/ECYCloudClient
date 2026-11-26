@@ -7,6 +7,7 @@ struct TicketAttachmentPicker: View {
     @Binding var attachments: [TicketAttachment]
     @Binding var uploading: Bool
     @Binding var message: String?
+    @Binding var attachLog: Bool
     @State private var choosing: [UTType]?
     @Environment(\.colorScheme) private var scheme
     private static let allowed = TicketUpload.extensions.compactMap { UTType(filenameExtension: $0) }
@@ -18,7 +19,7 @@ struct TicketAttachmentPicker: View {
                 pickButton(L10n.t("图片"), icon: "image_outlined") { choosing = Self.allowed.filter { $0.conforms(to: .image) } }
                 pickButton(L10n.t("视频"), icon: "videocam_outlined") { choosing = Self.allowed.filter { $0.conforms(to: .audiovisualContent) } }
                 #endif
-                pickButton(L10n.t("运行日志"), icon: "bug_report_outlined") { Task { await uploadRuntimeLog() } }
+                pickButton(L10n.t("运行日志"), icon: attachLog ? "check_circle_outline" : "bug_report_outlined") { attachLog.toggle() }
                 if uploading { ProgressView().controlSize(.small).frame(width: 18, height: 18) }
             }
             #if os(tvOS)
@@ -52,12 +53,14 @@ struct TicketAttachmentPicker: View {
         Button(action: action) { Label { Text(title) } icon: { ProductGlyph(name: icon, size: 16) } }
             .buttonStyle(ProductButtonStyle()).disabled(uploading || attachments.count >= 20)
     }
-    private func uploadRuntimeLog() async {
-        guard let url = session.latestRuntimeLog else { message = L10n.t("暂无运行日志"); return }
-        await upload(url)
+    func uploadRuntimeLog() async -> Bool {
+        guard let url = session.latestRuntimeLog else { attachLog = false; message = L10n.t("暂无运行日志"); return false }
+        guard await upload(url) else { return false }
+        attachLog = false
+        return true
     }
-    private func upload(_ url: URL) async {
-        guard !uploading else { return }
+    @discardableResult private func upload(_ url: URL) async -> Bool {
+        guard !uploading else { return false }
         uploading = true
         defer { uploading = false }
         let access = url.startAccessingSecurityScopedResource()
@@ -79,7 +82,9 @@ struct TicketAttachmentPicker: View {
             }.value
             let attachment = try await session.uploadTicketAttachment(data: data, name: name)
             attachments.append(attachment)
+            return true
         } catch is CancellationError { }
         catch { message = (error as? ClientError)?.localizedDescription ?? L10n.t("附件上传失败，请重试。") }
+        return false
     }
 }

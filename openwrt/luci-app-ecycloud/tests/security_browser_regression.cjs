@@ -313,12 +313,15 @@ const attacks = [
             window.view = { extend: value => value };
             window.ui = { createHandlerFn: (self, fn) => fn.bind(self) };
             let submitted;
+            let forgotten = 0;
             window.api = {
                 input: attrs => E('input', attrs),
                 pressable: (className, attrs, children) => E('button', { class: className, ...attrs }, children),
                 notify: () => {},
-                login: async (email, password) => {
-                    submitted = { email, password };
+                remembered: async () => ({ ok: true, email: 'audit@example.test', password: 'remembered-test-password' }),
+                forgetRemembered: async () => { forgotten++; return { ok: true }; },
+                login: async (email, password, code, remember) => {
+                    submitted = { email, password, remember };
                     return { ok: true };
                 },
             };
@@ -330,25 +333,44 @@ const attacks = [
             screen.refresh = async () => {};
             const login = screen.renderLogin({ site: 'https://panel.test' });
             document.body.appendChild(login);
+            const legacy = localStorage.getItem('ecycloud-remember');
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const email = login.querySelector('input[autocomplete=username]');
             const password = login.querySelector('input[type=password]');
-            const previous = password.value;
-            const migrated = JSON.parse(localStorage.getItem('ecycloud-remember'));
+            const remember = login.querySelector('.ecycloud-login-remember');
+            const restored = { email: email.value, password: password.value, checked: remember.getAttribute('aria-pressed') };
+            email.value = 'other@example.test';
+            email.dispatchEvent(new Event('input'));
+            const otherPassword = password.value;
+            email.value = 'audit@example.test';
             password.value = 'new-test-password';
             login.querySelector('.ecycloud-login-submit').click();
             await new Promise(resolve => setTimeout(resolve, 0));
-            const saved = JSON.parse(localStorage.getItem('ecycloud-remember'));
-            login.querySelector('.ecycloud-login-remember').click();
-            return { previous, migrated, saved, submitted,
-                cleared: localStorage.getItem('ecycloud-remember') };
+            const rememberedSubmit = submitted;
+            remember.click();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            login.querySelector('.ecycloud-login-submit').click();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            return { legacy, restored, otherPassword, rememberedSubmit, forgotten, plainSubmit: submitted,
+                browserStore: localStorage.getItem('ecycloud-remember') };
         }, overview);
-        assert.equal(credentials.previous, '');
-        assert.deepEqual(credentials.migrated, { email: 'audit@example.test' });
-        assert.deepEqual(credentials.saved, { email: 'audit@example.test' });
-        assert.deepEqual(credentials.submitted, {
-            email: 'audit@example.test', password: 'new-test-password',
+        assert.equal(credentials.legacy, null, '旧版存在浏览器里的记住记录必须清除');
+        assert.deepEqual(credentials.restored, {
+            email: 'audit@example.test', password: 'remembered-test-password', checked: 'true',
         });
-        assert.equal(credentials.cleared, null);
-        console.log('OpenWrt 登录安全回归通过：旧密码清理、登录传参、仅保存邮箱及取消记住。');
+        assert.equal(credentials.otherPassword, '', '改成别的邮箱后，回填的密码必须清掉');
+        assert.deepEqual(credentials.rememberedSubmit, {
+            email: 'audit@example.test', password: 'new-test-password', remember: true,
+        });
+        assert.equal(credentials.forgotten, 1, '取消勾选必须立即清除路由器上记住的账号密码');
+        assert.equal(credentials.plainSubmit.remember, false);
+        assert.equal(credentials.browserStore, null, '浏览器里不得再保存记住的账号密码');
+        const acl = JSON.parse(fs.readFileSync(path.join(__dirname,
+            '../root/usr/share/rpcd/acl.d/luci-app-ecycloud.json'), 'utf8'))['luci-app-ecycloud'];
+        for (const method of [ 'remembered', 'forget_remembered' ])
+            assert.ok(acl.write.ubus['luci.ecycloud'].includes(method) && !acl.read.ubus['luci.ecycloud'].includes(method),
+                `${method} 会返回或清除密码，只能放在写权限里`);
+        console.log('OpenWrt 登录安全回归通过：记住账号密码存路由器、浏览器不留存、换邮箱清密码、取消记住即清除。');
         const resourceDir = path.join(__dirname, '../htdocs/luci-static/resources/view/ecycloud');
         const style = fs.readFileSync(path.join(resourceDir, 'style.css'), 'utf8');
         const translations = JSON.parse(fs.readFileSync(path.join(resourceDir, 'i18n.zh-cn.json'), 'utf8'));
@@ -406,8 +428,12 @@ const attacks = [
         assert.equal(await tooltip.textContent(), '统计数据仅储存于本地，只保留最近两天的数据，只统计当前设备的流量使用，不同设备之间的流量数据不同步。');
         const buttonBox = await info.boundingBox();
         const tipBox = await tooltip.boundingBox();
-        assert.ok(tipBox.x >= buttonBox.x + buttonBox.width && tipBox.x + tipBox.width <= 1000,
-            '桌面提示文字必须位于标题旁图标右侧，且不能超出视口');
+        // 2026-11-18 起与客户端 Material Tooltip 的默认定位一致：水平以图标中心居中、距视口两侧至少 10px，顶边在图标中心下方 24px
+        const placedLikeClient = (tip, button, viewport) =>
+            Math.abs(tip.x - Math.min(Math.max(button.x + button.width / 2 - tip.width / 2, 10), viewport - tip.width - 10)) < 0.5 &&
+            Math.abs(tip.y - (button.y + button.height / 2 + 24)) < 0.5 && tip.x >= 10 && tip.x + tip.width <= viewport - 10;
+        assert.ok(placedLikeClient(tipBox, buttonBox, 1000),
+            '桌面提示文字必须在图标正下方居中，贴近视口边缘时向内收，且不能超出视口：' + JSON.stringify({ buttonBox, tipBox }));
         const light = await tooltip.evaluate(node => getComputedStyle(node).backgroundColor);
         const actionButtons = '.ecycloud-btn, .ecycloud-modal-ok, .ecycloud-modal-cancel, .ecycloud-jump, .cbi-page-actions .cbi-button, .ecycloud-dyn-add';
         const sizes = await page.locator(actionButtons).evaluateAll(buttons => buttons.map(button => ({ label: button.textContent || button.getAttribute('aria-label'), height: button.getBoundingClientRect().height })));
@@ -425,13 +451,16 @@ const attacks = [
             const bounds = button.getBoundingClientRect();
             const icon = getComputedStyle(button, '::before');
             return { gap: bounds.left + parseFloat(icon.marginLeft) - label.right,
-                topDelta: bounds.y + parseFloat(icon.marginTop) - label.y,
+                topDelta: bounds.y + parseFloat(icon.marginTop) - label.y, labelHeight: label.height,
                 centerDx: parseFloat(icon.marginLeft) + parseFloat(icon.width) / 2 - bounds.width / 2,
                 centerDy: parseFloat(icon.marginTop) + parseFloat(icon.height) / 2 - bounds.height / 2,
                 width: icon.width, height: icon.height };
         });
-        assert.ok(placement.gap > 0 && placement.gap <= 12 && Math.abs(placement.topDelta) <= 3,
-            '感叹号顶边必须对齐流量排行文字顶边');
+        // 图标与文字在同一行里垂直居中后上移 2px（与客户端同值）。文字行高随系统字体变化，不能拿固定像素比顶边：
+        // 18px 的字 Windows 默认字体行高 24px、macOS 为 25px，顶边差分别是 3px 与 3.5px
+        assert.ok(placement.gap > 0 && placement.gap <= 12 &&
+            Math.abs(placement.topDelta - ((placement.labelHeight - parseFloat(placement.height)) / 2 - 2)) <= 1,
+            '感叹号必须紧挨流量排行文字，与文字垂直居中后上移 2px：' + JSON.stringify(placement));
         assert.ok(Math.abs(placement.centerDx) < 0.1 && Math.abs(placement.centerDy) < 0.1,
             '感叹号必须位于悬停背景正中心');
         assert.equal(placement.width, '14px');
@@ -458,8 +487,8 @@ const attacks = [
         await info.hover();
         const compactBox = await tooltip.boundingBox();
         const compactButton = await info.boundingBox();
-        assert.ok(compactBox.x >= compactButton.x + compactButton.width && compactBox.x + compactBox.width <= 1000,
-            '侧栏压缩内容宽度时，右侧提示也不能超出视口');
+        assert.ok(placedLikeClient(compactBox, compactButton, 1000) && compactBox.x > tipBox.x,
+            '侧栏压缩内容宽度时，提示跟着图标右移，仍在图标下方居中且不超出视口：' + JSON.stringify({ compactButton, compactBox }));
         const touchContext = await browser.newContext({ viewport: { width: 390, height: 600 }, isMobile: true, hasTouch: true });
         const touchPage = await touchContext.newPage();
         await prepareRank(touchPage, 'dark');
@@ -473,7 +502,7 @@ const attacks = [
         await touchInfo.tap();
         assert.equal(await touchTip.isVisible(), true);
         const touchBox = await touchTip.boundingBox();
-        assert.ok(touchBox.x >= 0 && touchBox.x + touchBox.width <= 390, '移动端提示不能超出视口');
+        assert.ok(placedLikeClient(touchBox, await touchInfo.boundingBox(), 390), '移动端提示同样在图标下方，距视口两侧至少 10px');
         assert.notEqual(await touchTip.evaluate(node => getComputedStyle(node).backgroundColor), light,
             '深色模式提示必须使用深色背景');
         await touchTip.tap({ position: { x: 20, y: 10 } });

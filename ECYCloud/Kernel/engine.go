@@ -2,10 +2,12 @@ package kernel
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -13,9 +15,11 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
+	"github.com/metacubex/mihomo/common/pool"
 	C "github.com/metacubex/mihomo/constant"
 	P "github.com/metacubex/mihomo/constant/provider"
 	"github.com/metacubex/mihomo/hub/executor"
@@ -25,17 +29,23 @@ import (
 	"github.com/metacubex/mihomo/tunnel"
 	"github.com/metacubex/mihomo/tunnel/statistic"
 	tun "github.com/metacubex/sing-tun"
+	M "github.com/metacubex/sing/common/metadata"
 )
 
 const MaximumConfigBytes = 8 * 1024 * 1024
 const MaximumPacketBytes = 65535
+
+// 调整前先用 Tests/MihomoBridge/memory_test.go 重新量测
+const MaximumTunnelConnections = 2048
 
 var ErrConfiguration = errors.New("内核配置无效或包含扩展不支持的监听器")
 var ErrNoNodes = errors.New("面板未下发任何可用节点")
 var ErrStopped = errors.New("连接已停止")
 var ErrPacket = errors.New("数据包格式无效")
 var ErrBusy = errors.New("内核正在运行")
-var ErrQueueFull = errors.New("数据包队列已满")
+var ErrGeoDataInTunnel = errors.New("包隧道运行中不能更新 GeoData")
+var errConnectionLimit = errors.New("并发连接数已达上限")
+var errMemoryTight = errors.New("内存余量不足，暂不接受新连接")
 
 // mihomo has process-wide state; each app or extension process owns one engine.
 var lifecycle sync.Mutex
@@ -55,12 +65,33 @@ type instance struct {
 	context      context.Context
 	probes       map[string]*liveProbe
 	probeWorkers sync.WaitGroup
+	memoryDone   chan struct{}
 	directory    string
 	rules        map[string]string
+	nodeFiles    map[string][sha256.Size]byte
 	geoMu        sync.Mutex
 	geoRunning   bool
 	geoFailed    bool
 }
+
+// mihomo 的 HandleTCPConn 在连接结束前不返回；返回错误时协议栈重置这条新连接
+type connectionLimit struct {
+	tun.Handler
+	active atomic.Int32
+	memory *memoryGuard
+}
+
+func (l *connectionLimit) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
+	defer l.active.Add(-1)
+	if l.active.Add(1) > MaximumTunnelConnections {
+		return errConnectionLimit
+	}
+	if !l.memory.admit() {
+		return errMemoryTight
+	}
+	return l.Handler.NewConnection(ctx, conn, metadata)
+}
+
 type packetDevice struct {
 	input, output chan []byte
 	done          chan struct{}
@@ -73,20 +104,25 @@ func (p *packetDevice) Read(b []byte) (int, error) {
 	case <-p.done:
 		return 0, io.EOF
 	case data := <-p.input:
+		defer pool.Put(data)
 		if len(data) > len(b) {
 			return 0, io.ErrShortBuffer
 		}
 		return copy(b, data), nil
 	}
 }
+
 func (p *packetDevice) Write(b []byte) (int, error) {
 	if len(b) > MaximumPacketBytes {
 		return 0, ErrPacket
 	}
+	data := pool.Get(len(b))
+	copy(data, b)
 	select {
 	case <-p.done:
+		_ = pool.Put(data)
 		return 0, io.ErrClosedPipe
-	case p.output <- append([]byte(nil), b...):
+	case p.output <- data:
 		return len(b), nil
 	}
 }
@@ -145,7 +181,14 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 	C.SetHomeDir(directory)
 	debug.SetGCPercent(20)
 	debug.SetMemoryLimit(35 * 1024 * 1024)
-	cfg, err := executor.ParseWithBytes(data)
+	// 待机实例可就地更新 GeoData，改写成规则集后更新就不再生效
+	profile, geoSites := data, map[string]string(nil)
+	if !standby {
+		// 同一扩展进程里重启时，上一实例释放的内存还没还给系统，转换前先归还
+		debug.FreeOSMemory()
+		profile, geoSites = convertGeoSite(data, directory)
+	}
+	cfg, err := executor.ParseWithBytes(profile)
 	if err != nil {
 		return 0, ErrConfiguration
 	}
@@ -170,7 +213,9 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 	ctx, cancel := context.WithCancel(context.Background())
 	var p *packetDevice
 	var stack tun.Stack
+	var memory *memoryGuard
 	if !standby {
+		memory = &memoryGuard{}
 		handler, err := sing.NewListenerHandler(sing.ListenerConfig{Tunnel: tunnel.Tunnel, Type: C.TUN, UDPTimeout: time.Minute})
 		if err != nil {
 			cancel()
@@ -178,7 +223,7 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 		}
 		p = &packetDevice{input: make(chan []byte, 32), output: make(chan []byte, 32), done: make(chan struct{}), mtu: mtu}
 		h := &singtun.ListenerHandler{ListenerHandler: handler, DnsAddrPorts: []netip.AddrPort{dns}, Inet4Address: []netip.Prefix{v4}, Inet6Address: v6, DisableICMPForwarding: true}
-		stack, err = tun.NewStack("mips", tun.StackOptions{Context: ctx, Tun: p, TunOptions: tun.Options{MTU: uint32(mtu), Inet4Address: []netip.Prefix{v4}, Inet6Address: v6}, UDPTimeout: time.Minute, ICMPTimeout: time.Second, Handler: h, Logger: log.SingLogger})
+		stack, err = tun.NewStack("mips", tun.StackOptions{Context: ctx, Tun: p, TunOptions: tun.Options{MTU: uint32(mtu), Inet4Address: []netip.Prefix{v4}, Inet6Address: v6}, UDPTimeout: time.Minute, ICMPTimeout: time.Second, Handler: &connectionLimit{Handler: h, memory: memory}, Logger: log.SingLogger})
 		if err == nil {
 			err = stack.Start()
 		}
@@ -193,7 +238,17 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 	}
 	nextID++
 	currentMu.Lock()
-	current = &instance{id: nextID, device: p, stack: stack, cancel: cancel, logs: newLogBuffer(data), context: ctx, probes: map[string]*liveProbe{}, directory: directory, rules: rulePaths(data)}
+	current = &instance{id: nextID, device: p, stack: stack, cancel: cancel, logs: newLogBuffer(data, geoSites), history: connectionHistory{geoSites: geoSites}, context: ctx, probes: map[string]*liveProbe{}, directory: directory, rules: rulePaths(data), nodeFiles: map[string][sha256.Size]byte{}}
+	if files, _, err := panelNodeFiles(data); err == nil {
+		for name, body := range files {
+			current.nodeFiles[name] = sha256.Sum256(body)
+		}
+	}
+	// 守护协程会写日志，停止时须等它退出，否则与下一次启动改日志级别竞争（mihomo log 包未加锁）
+	if memory != nil {
+		current.memoryDone = make(chan struct{})
+		go func(done chan struct{}) { defer close(done); memory.run(ctx) }(current.memoryDone)
+	}
 	currentMu.Unlock()
 	id := nextID
 	go func() {
@@ -212,11 +267,52 @@ func Start(data []byte, directory string, mtu int, ipv4, ipv6, dnsAddress string
 			}
 		}
 	}()
+	// 启动时用过的临时内存释放后仍计入扩展占用，后台归还慢
+	if !standby {
+		debug.FreeOSMemory()
+	}
 	cleanup = false
 	return nextID, nil
 }
 
 var panelProvider = regexp.MustCompile(`^ecy-panel-(nodes|[a-f0-9]{64})$`)
+
+// 各面板节点文件应有的内容与其中的节点名
+func panelNodeFiles(data []byte) (map[string][]byte, map[string][]string, error) {
+	var config struct {
+		Providers map[string]struct {
+			Type    string
+			Path    string
+			Payload []json.RawMessage
+		} `json:"proxy-providers"`
+	}
+	if json.Unmarshal(data, &config) != nil {
+		return nil, nil, ErrConfiguration
+	}
+	files := map[string][]byte{}
+	names := map[string][]string{}
+	for name, item := range config.Providers {
+		if !strings.HasPrefix(name, "ecy-panel-") {
+			continue
+		}
+		if !panelProvider.MatchString(name) || item.Type != "file" || item.Path != name+".json" || len(item.Payload) == 0 {
+			return nil, nil, ErrConfiguration
+		}
+		body, err := json.Marshal(map[string]any{"proxies": item.Payload})
+		if err != nil {
+			return nil, nil, ErrConfiguration
+		}
+		files[name] = body
+		for _, raw := range item.Payload {
+			var node struct{ Name string }
+			if json.Unmarshal(raw, &node) != nil || node.Name == "" {
+				return nil, nil, ErrConfiguration
+			}
+			names[name] = append(names[name], node.Name)
+		}
+	}
+	return files, names, nil
+}
 
 // UpdateNodes 只重写面板节点文件并让内核重读，不重建内核，已有连接不断开。
 // 调用方须先确认其余配置与运行中的一致（TunnelLease.differsOnlyInNodes）。
@@ -232,45 +328,24 @@ func UpdateNodes(id uint64, data []byte) error {
 	if err := checkProfile(data); err != nil {
 		return err
 	}
-	var config struct {
-		Providers map[string]struct {
-			Type    string
-			Path    string
-			Payload []json.RawMessage
-		} `json:"proxy-providers"`
-	}
-	if json.Unmarshal(data, &config) != nil {
+	files, names, err := panelNodeFiles(data)
+	if err != nil || files["ecy-panel-nodes"] == nil {
 		return ErrConfiguration
 	}
 	running := tunnel.Providers()
-	files := map[string][]byte{}
-	names := map[string][]string{}
-	for name, item := range config.Providers {
-		if !strings.HasPrefix(name, "ecy-panel-") {
-			continue
-		}
-		if !panelProvider.MatchString(name) || item.Type != "file" || item.Path != name+".json" || len(item.Payload) == 0 || running[name] == nil {
-			return ErrConfiguration
-		}
-		body, err := json.Marshal(map[string]any{"proxies": item.Payload})
-		if err != nil {
-			return ErrConfiguration
-		}
-		files[name] = body
-		for _, raw := range item.Payload {
-			var node struct{ Name string }
-			if json.Unmarshal(raw, &node) != nil || node.Name == "" {
-				return ErrConfiguration
-			}
-			names[name] = append(names[name], node.Name)
-		}
-	}
-	if files["ecy-panel-nodes"] == nil {
-		return ErrConfiguration
-	}
+	sums := map[string][sha256.Size]byte{}
 	for name, body := range files {
+		if running[name] == nil {
+			return ErrConfiguration
+		}
+		// 内容没变的节点文件不重写：内核重读时会换掉其中全部出站，测试未装入的节点只该动探测节点文件
+		if sum := sha256.Sum256(body); sum != current.nodeFiles[name] {
+			sums[name] = sum
+		}
+	}
+	for name := range sums {
 		target := filepath.Join(current.directory, name+".json")
-		if err := os.WriteFile(target+".tmp", body, 0600); err != nil {
+		if err := os.WriteFile(target+".tmp", files[name], 0600); err != nil {
 			return ErrConfiguration
 		}
 		if err := os.Rename(target+".tmp", target); err != nil {
@@ -291,7 +366,7 @@ func UpdateNodes(id uint64, data []byte) error {
 		return true
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for name := range files {
+	for name, sum := range sums {
 		for !loaded(name) {
 			if time.Now().After(deadline) {
 				if err := running[name].Update(); err != nil || !loaded(name) {
@@ -301,6 +376,7 @@ func UpdateNodes(id uint64, data []byte) error {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
+		current.nodeFiles[name] = sum
 	}
 	current.logs.mu.Lock()
 	current.logs.secrets = logSecrets(data)
@@ -321,6 +397,9 @@ func Stop(id uint64) {
 	currentMu.Unlock()
 	old.logs.stop()
 	old.cancel()
+	if old.memoryDone != nil {
+		<-old.memoryDone
+	}
 	// GeoData 更新不接受取消，单个文件最长下载 90 秒：先停止受理新连接，等待期间持续关闭已有连接，让它随下载失败退出
 	tunnel.OnSuspend()
 	workers := make(chan struct{})
@@ -386,13 +465,14 @@ func Submit(id uint64, packet []byte) error {
 		return ErrStopped
 	default:
 	}
+	data := pool.Get(len(packet))
+	copy(data, packet)
 	select {
 	case <-p.done:
+		_ = pool.Put(data)
 		return ErrStopped
-	case p.input <- append([]byte(nil), packet...):
+	case p.input <- data:
 		return nil
-	default:
-		return ErrQueueFull
 	}
 }
 func Read(id uint64, buffer []byte, timeout time.Duration) (int, error) {
@@ -403,18 +483,28 @@ func Read(id uint64, buffer []byte, timeout time.Duration) (int, error) {
 	if len(buffer) < MaximumPacketBytes {
 		return 0, io.ErrShortBuffer
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	deliver := func(data []byte) (int, error) {
+		n := copy(buffer, data)
+		_ = pool.Put(data)
+		return n, nil
+	}
 	select {
 	case <-p.done:
 		return 0, ErrStopped
 	default:
 	}
 	select {
+	case data := <-p.output:
+		return deliver(data)
+	default:
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
 	case <-p.done:
 		return 0, ErrStopped
 	case data := <-p.output:
-		return copy(buffer, data), nil
+		return deliver(data)
 	case <-timer.C:
 		return 0, nil
 	}

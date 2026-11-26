@@ -60,6 +60,9 @@ extension ClientSession {
     }
     public func updateGeoData() async throws {
         guard phase == .signedIn, let connection else { throw TunnelError.control }
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        guard connection.state == .disconnected else { throw ClientError.input(L10n.t("请先断开连接，再更新 GeoData")) }
+        #endif
         struct Progress: Decodable { let running: Bool?; let failed: Bool? }
         var progress = try JSONDecoder().decode(Progress.self, from: await connection.request(.init(.geodata)))
         while progress.running == true {

@@ -675,6 +675,15 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
         response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
       }
     }
+  } else if (g_strcmp0(method, "secret.available") == 0) {
+    // 查一个从不写入的条目：没有 Secret Service 时报错，有则返回空且不会弹解锁框
+    g_autoptr(GError) probe_error = nullptr;
+    gchar* probe = secret_password_lookup_sync(&kRememberedSchema, nullptr,
+                                               &probe_error, "account", "",
+                                               nullptr);
+    secret_password_free(probe);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(
+        fl_value_new_bool(probe_error == nullptr)));
   } else if (g_strcmp0(method, "cursor.create") == 0) {
     if (create_named_cursor(self, arguments)) {
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));

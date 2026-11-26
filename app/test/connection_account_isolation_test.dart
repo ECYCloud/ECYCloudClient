@@ -146,9 +146,9 @@ void main() {
       }
     }
 
-    connection.addListener(firstListener);
+    connection.statsUpdates.addListener(firstListener);
     final Completer<void> sampled = Completer<void>();
-    connection.addListener(() {
+    connection.statsUpdates.addListener(() {
       final List<TrafficRankRow> hosts = connection.trafficRankHosts(
         TrafficRankDay.today,
       );
@@ -162,7 +162,7 @@ void main() {
     });
     await connection.adoptRunningKernel();
     await firstSample.future.timeout(const Duration(seconds: 4));
-    connection.removeListener(firstListener);
+    connection.statsUpdates.removeListener(firstListener);
     final _Client client = _Client('batch');
     client.reply.complete(client.profile);
     addTearDown(client.close);
@@ -191,9 +191,9 @@ void main() {
       }
     }
 
-    connection.addListener(backgroundListener);
+    connection.statsUpdates.addListener(backgroundListener);
     await backgroundSample.future.timeout(const Duration(seconds: 4));
-    connection.removeListener(backgroundListener);
+    connection.statsUpdates.removeListener(backgroundListener);
     final int latest = connection
         .trafficRankGroups(TrafficRankDay.today)
         .single
@@ -209,10 +209,10 @@ void main() {
       }
     }
 
-    connection.addListener(unknownListener);
+    connection.statsUpdates.addListener(unknownListener);
     connection.didChangeAppLifecycleState(AppLifecycleState.resumed);
     await unknownSample.future.timeout(const Duration(seconds: 4));
-    connection.removeListener(unknownListener);
+    connection.statsUpdates.removeListener(unknownListener);
     expect(connection.trafficTotal.down, total);
     expect(connection.traffic.down, 0);
     connection.attachApi(client, accountKey: 'batch@test');
@@ -228,10 +228,10 @@ void main() {
       }
     }
 
-    connection.addListener(baselineListener);
+    connection.statsUpdates.addListener(baselineListener);
     await connection.adoptRunningKernel();
     await baseline.future.timeout(const Duration(seconds: 4));
-    connection.removeListener(baselineListener);
+    connection.statsUpdates.removeListener(baselineListener);
     expect(
       connection.trafficRankGroups(TrafficRankDay.today).single.bytes,
       latest,
@@ -301,11 +301,11 @@ void main() {
         }
       }
 
-      connection.addListener(listener);
+      connection.statsUpdates.addListener(listener);
       try {
         await sampled.future.timeout(const Duration(seconds: 4));
       } finally {
-        connection.removeListener(listener);
+        connection.statsUpdates.removeListener(listener);
       }
     }
 
@@ -816,6 +816,12 @@ class _Platform implements PlatformService {
   bool get supportsLaunchAtLogin => false;
   @override
   String get tunInterfaceName => 'ECYCloud';
+  @override
+  bool get tunSetsSystemDns => false;
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+  @override
+  bool get lanNamesViaSystemDns => false;
   @override
   bool get supportsSystemProxy => false;
   @override

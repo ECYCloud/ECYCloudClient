@@ -50,7 +50,7 @@ async function main() {
     assert.ok(!('network' in reply.nodes['node-10']) && reply.nodes['node-2'].network == 'ws' &&
         Object.keys(reply.nodes).length == 6, '夹具必须是每个节点只出现一次、默认值省略的新格式');
     const defaults = source.slice(source.indexOf('var memberDefaults = {'), source.indexOf('var groupsRequest'));
-    const method = source.slice(source.indexOf('\tgroups: function() {'), source.indexOf('\n\tlogs: declare('));
+    const method = source.slice(source.indexOf('\tgroups: function(search) {'), source.indexOf('\n\tlogs: declare('));
     const api = vm.runInNewContext(defaults + 'var groupsRequest = 0, groupsResponse = 0, groupsData;' +
         'var groupTests = { testing: new Map(), speed_testing: new Map() }; ({' + method + '})', { groupsRpc: async () => compact() });
     const restored = JSON.parse(JSON.stringify(await api.groups()));
@@ -90,7 +90,7 @@ async function main() {
         for (const sort of ['name', 'latency', 'speed']) {
             for (const query of ['', '日本']) {
                 const nodes = loadView('nodes');
-                Object.assign(nodes, { open: {}, sort: {}, searchOpen: {}, query: {}, searchText: {} });
+                Object.assign(nodes, { open: {}, sort: {}, searchOpen: {}, query: {}, searchText: {}, listed: {}, listing: {} });
                 for (const group of data.groups) {
                     Object.assign(nodes.open, { [group.name]: true });
                     Object.assign(nodes.sort, { [group.name]: sort });

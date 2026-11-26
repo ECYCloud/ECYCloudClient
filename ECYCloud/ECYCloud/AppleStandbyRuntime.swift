@@ -16,7 +16,7 @@ actor AppleStandbyRuntime: StandbyRuntime {
         guard identifier == 0, lease.expiresAt > .now,
               !lease.configuration.isEmpty, lease.configuration.count <= 8 * 1024 * 1024 else { throw TunnelError.configuration }
         try Task.checkCancellation()
-        let path = try TunnelFiles.runDirectory(group: group, lease: lease)
+        let path = try TunnelFiles.runDirectory(group: group, lease: lease, standby: true)
         directory = path; self.lease = lease
         // 空地址与 MTU 0 明确表示仅启用控制面，不创建包设备或系统路由。
         identifier = lease.configuration.withUnsafeBytes {
@@ -41,6 +41,13 @@ actor AppleStandbyRuntime: StandbyRuntime {
             try? FileManager.default.removeItem(at: directory)
         }
         directory = nil; lease = nil
+    }
+
+    func updateNodes(_ next: TunnelLease) -> Bool {
+        guard identifier != 0, lease != nil, next.expiresAt > .now,
+              next.configuration.withUnsafeBytes({ ECYUpdateNodes(identifier, UnsafeMutableRawPointer(mutating: $0.baseAddress), Int32($0.count)) }) == 0 else { return false }
+        lease = next; expiresAt = next.expiresAt
+        return true
     }
 
     func request(_ command: TunnelCommand) throws -> Data {

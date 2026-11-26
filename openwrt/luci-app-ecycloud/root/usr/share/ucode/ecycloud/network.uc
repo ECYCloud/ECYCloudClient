@@ -56,7 +56,7 @@ function deviceSet(devices) {
 	return `{ ${join(', ', map(devices, d => `"${d}"`))} }`;
 };
 
-function ruleset(cfg, devices) {
+function ruleset(cfg, devices, fake) {
 	const lines = [
 		`table inet ${NFT_TABLE}`,
 		`flush table inet ${NFT_TABLE}`,
@@ -93,6 +93,8 @@ function ruleset(cfg, devices) {
 
 	if (cfg.routerProxy)
 		push(lines, `\t\tmeta mark ${TPROXY_MARK} jump ecycloud_tproxy`);
+	if (fake)
+		push(lines, `\t\tiifname ${deviceSet(fake.devices)} ip daddr ${fake.net} jump ecycloud_tproxy`);
 
 	push(lines,
 		`\t\tiifname ${deviceSet(devices)} jump ecycloud_tproxy`,
@@ -147,7 +149,7 @@ function routing(cfg, add) {
 	return true;
 };
 
-function panelRouting(cfg) {
+function panelRouting(cfg, fake) {
 	for (let v6 in [ false, true ]) {
 		const ip = v6 ? 'ip -6' : 'ip';
 		if (system(`${ip} rule flush pref ${PANEL_RULE_INDEX} 2>/dev/null`) != 0)
@@ -156,6 +158,9 @@ function panelRouting(cfg) {
 			if (system(`${ip} rule add pref ${PANEL_RULE_INDEX} iif lo to ${net} lookup main`) != 0)
 				return false;
 	}
+	for (let device in (fake?.devices ?? []))
+		if (system(`ip rule add pref ${PANEL_RULE_INDEX} iif ${device} to ${fake.net} lookup ${TUN_ROUTE_TABLE}`) != 0)
+			return false;
 	return true;
 };
 
@@ -201,12 +206,10 @@ function applyDnsmasq(cfg, section, dir) {
 };
 
 function revertDnsmasq(path) {
-	if (!length(path))
+	if (!length(path) || !access(path))
 		return true;
 
-	if (access(path) && !unlink(path))
-		return false;
-	return system('/etc/init.d/dnsmasq restart >/dev/null 2>&1') == 0;
+	return unlink(path) && system('/etc/init.d/dnsmasq restart >/dev/null 2>&1') == 0;
 };
 
 function query(command) {
@@ -294,8 +297,17 @@ export function applied() {
 	return readJson(NETWORK_FILE);
 };
 
+/* network restart 会清空全部策略路由规则，lo 重启还会带走 1936 表里的本地路由，规则只在接管时下一次 */
 export function intact(record) {
-	return record?.router_dns != true || length(routerDnsPids()) > 0;
+	if (record?.router_dns == true && !length(routerDnsPids()))
+		return false;
+	if (record?.mode == 'tun')
+		return index(query('ip rule show 2>/dev/null').text, `\n${TUN_RULE_INDEX}:`) >= 0;
+	for (let ip in (record?.ipv6 ? [ 'ip', 'ip -6' ] : [ 'ip' ]))
+		if (index(query(`${ip} rule show 2>/dev/null`).text, sprintf('fwmark 0x%x lookup %d', TPROXY_MARK, ROUTE_TABLE)) < 0 ||
+		    !match(query(`${ip} route show table ${ROUTE_TABLE} 2>/dev/null`).text, /^local default dev lo /))
+			return false;
+	return true;
 };
 
 function withNetworkLock(action) {
@@ -376,6 +388,35 @@ export function revert() {
 	return withNetworkLock(revertNetwork);
 };
 
+function uciTrue(value) {
+	return value in [ '1', 'yes', 'on', 'true', 'enabled' ];
+};
+
+/* 未列入「LAN 接口」的内网段（访客网络等）与 LAN 共用主 dnsmasq，同样拿到 Fake-IP，这些地址只有内核能处理。
+   只接管防火墙里没开 masq、也不是默认路由出口的区域设备：WAN 侧进来的包命中就等于让上级网络借道；判定不出的接口一律不接管 */
+function fakeTargets(cfg, lan) {
+	const dns = readJson(`${cfg.runDir}/config.json`)?.dns;
+	const net = dns?.['fake-ip-range'];
+	if (dns?.enable != true || lc(dns['enhanced-mode'] ?? '') != 'fake-ip' || !isIpNet(net) || index(net, '/') < 0 || index(net, ':') >= 0)
+		return null;
+	const uci = cursor();
+	const uplinks = {};
+	for (let ip in [ 'ip', 'ip -6' ])
+		for (let line in split(query(`${ip} route show default 2>/dev/null`).text, '\n'))
+			uplinks[match(line, / dev ([^ ]+)/)?.[1] ?? ''] = true;
+	const devices = [];
+	uci.foreach('firewall', 'zone', zone => {
+		if (uciTrue(zone.masq) || uciTrue(zone.masq6))
+			return;
+		for (let name in uciList(zone.network))
+			push(devices, uci.get('network', name, 'device') ?? uci.get('network', name, 'ifname'));
+		for (let device in uciList(zone.device))
+			push(devices, device);
+	});
+	const guests = uniq(filter(devices, device => type(device) == 'string' && match(device, /^[A-Za-z0-9_.-]{1,15}$/) && !uplinks[device] && !(device in lan)));
+	return length(guests) ? { net, devices: guests } : null;
+};
+
 function applyNetwork(cfg) {
 	if (!settings().enabled)
 		return { ok: false, error: '连接已关闭，取消网络接管' };
@@ -393,20 +434,22 @@ function applyNetwork(cfg) {
 	if (cfg.dnsHijack && !length(dir))
 		return { ok: false, error: 'dnsmasq 配置目录不可用，DNS 未接入内核' };
 	const record = { active: false, dnsmasq: cfg.dnsHijack ? `${dir}/ecycloud.conf` : null,
-		router_dns: cfg.dnsHijack && !cfg.routerProxy };
+		router_dns: cfg.dnsHijack && !cfg.routerProxy, mode: cfg.mode, ipv6: cfg.ipv6 };
 	if (!writeJson(NETWORK_FILE, record))
 		return { ok: false, error: '无法保存网络恢复记录' };
 
+	const fake = fakeTargets(cfg, devices);
 	try {
 		if (cfg.mode == 'tproxy') {
 			ensureDir(`${NFT_DIR}/ruleset-post`);
-			if (writefile(RULESET_FILE, ruleset(cfg, devices)) == null)
+			if (writefile(RULESET_FILE, ruleset(cfg, devices, fake)) == null)
 				die(`无法写入 ${RULESET_FILE}`);
 		} else {
 			ensureDir(`${NFT_DIR}/chain-pre/forward`);
 			const accept = [
 				`\t\tiifname "${cfg.tunDevice}" oifname ${deviceSet(devices)} accept comment "!ecycloud: tun ingress"`,
 				`\t\tiifname ${deviceSet(devices)} oifname "${cfg.tunDevice}" accept comment "!ecycloud: tun egress"`,
+				...(fake ? [ `\t\tiifname ${deviceSet(fake.devices)} oifname "${cfg.tunDevice}" ip daddr ${fake.net} accept comment "!ecycloud: fake-ip"` ] : []),
 				''
 			];
 			if (writefile(FORWARD_FILE, join('\n', accept)) == null)
@@ -434,7 +477,7 @@ function applyNetwork(cfg) {
 		    system('fw4 reload >/dev/null 2>&1') != 0)
 			die('防火墙规则校验或加载失败，规则未生效');
 
-		if (!(cfg.mode == 'tproxy' ? routing(cfg, true) : panelRouting(cfg)))
+		if (!(cfg.mode == 'tproxy' ? routing(cfg, true) : panelRouting(cfg, fake)))
 			die('策略路由设置失败');
 
 		if (record.router_dns && !startRouterDns(cfg, section))

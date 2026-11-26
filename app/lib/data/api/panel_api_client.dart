@@ -9,6 +9,8 @@ import 'package:http/io_client.dart';
 import 'package:crypto/crypto.dart';
 
 import '../../core/logger.dart';
+import '../../domain/config/node_catalog.dart';
+import '../../domain/config/node_working_set.dart';
 import '../../l10n/l10n.dart';
 import '../models/account.dart';
 import '../models/announcement.dart';
@@ -51,10 +53,40 @@ class RemoteProfile {
     this.offlineUntil,
     this.cacheBinding = '',
     this.updateInterval,
+    this.catalog,
   });
 
   final Map<String, dynamic> config;
   final String revision;
+
+  /// 非空表示 config 只带了一部分节点，其余经 PanelApiClient.fetchNodes 取
+  final NodeCatalog? catalog;
+
+  RemoteProfile withNodes(Iterable<CatalogNode> nodes) {
+    final NodeCatalog? catalog = this.catalog;
+    if (catalog == null) {
+      return this;
+    }
+    final ({Map<String, dynamic> config, NodeCatalog catalog}) merged = catalog
+        .merge(config, nodes);
+    return RemoteProfile(
+      config: merged.config,
+      revision: revision,
+      groupIcons: groupIcons,
+      nodeLabels: <String, String>{
+        ...nodeLabels,
+        for (final CatalogNode node in nodes) node.name: node.label,
+      },
+      flagRegex: flagRegex,
+      groupLabels: groupLabels,
+      offlineIssuedAt: offlineIssuedAt,
+      offlineUntil: offlineUntil,
+      cacheBinding: cacheBinding,
+      updateInterval: updateInterval,
+      catalog: merged.catalog,
+    );
+  }
+
   final DateTime? offlineIssuedAt;
   final DateTime? offlineUntil;
   final String cacheBinding;
@@ -375,12 +407,13 @@ class PanelApiClient {
   static String _uaVersion(String version) =>
       version.startsWith('Pre ') ? 'Pre${version.substring(4)}' : version;
 
-  // UA 展示用大写；platformId / 登录体仍用小写，避免打乱服务端匹配
+  // UA 展示用大写；platformId / 登录体仍用小写，避免打乱服务端匹配。
+  // macOS 另有 Swift 原生客户端，分号后标明实现
   static String _uaPlatform(String platform) => switch (platform) {
     'android' => 'Android',
     'windows' => 'Windows',
     'linux' => 'Linux',
-    'macos' => 'macOS',
+    'macos' => 'macOS; Flutter',
     _ => platform,
   };
 
@@ -1154,6 +1187,7 @@ class PanelApiClient {
           ..._headers(),
           'X-ECY-Node-Providers': '1',
           'X-ECY-Node-Members': '1',
+          'X-ECY-Node-Catalog': '${NodeWorkingSet.copyBudget}',
         },
       ),
     );
@@ -1201,8 +1235,50 @@ class PanelApiClient {
       updateInterval: RemoteProfile.parseUpdateInterval(
         response.headers['profile-update-interval'],
       ),
+      catalog: NodeCatalog.fromJson(data['catalog']),
     );
   }
+
+  /// 按页、按搜索词（[provider] 是 [NodeCatalog.providers] 里的 key）或按名（[names]）取节点
+  Future<NodePage> fetchNodes({
+    String? provider,
+    int offset = 0,
+    int limit = 100,
+    String search = '',
+    List<String>? names,
+    int? fallbackProxyPort,
+  }) => _viaDirectThenProxy(
+    fallbackProxyPort: fallbackProxyPort,
+    host: _PanelHost.config,
+    run: (http.Client client) async {
+      final http.Response response = await _send(
+        () => client.post(
+          _configEndpoint('/config/nodes'),
+          headers: _headers(json: true),
+          body: jsonEncode(
+            names != null
+                ? <String, dynamic>{'names': names}
+                : <String, dynamic>{
+                    'provider': provider,
+                    'offset': offset,
+                    'limit': limit,
+                    if (search.isNotEmpty) 'search': search,
+                  },
+          ),
+        ),
+      );
+      final Map<String, dynamic> data = _unwrap(response);
+      final Object? nodes = data['nodes'];
+      return (
+        stamp: data['stamp'] as String? ?? '',
+        more: data['more'] == true,
+        nodes: <CatalogNode>[
+          if (nodes is List)
+            for (final Object? node in nodes) ?CatalogNode.fromJson(node),
+        ],
+      );
+    },
+  );
 
   static bool _canRetryViaProxy(Object error, bool repeatable) {
     if (!repeatable) {

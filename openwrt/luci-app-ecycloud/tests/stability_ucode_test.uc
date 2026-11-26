@@ -65,8 +65,11 @@ for (let item in cases) {
 	failedCommand = item.command ?? '';
 	failures = 1;
 	testState.failedWrite = item.path ?? '';
+	testState.commands = [];
 	const result = apply(settings());
 	check(!result.ok, `接管失败不能返回成功：${item.label}`);
+	check(item.command == dnsmasqRestart || !(dnsmasqRestart in testState.commands),
+		`还没写入 dnsmasq 片段就失败时撤销不能重启 dnsmasq：${item.label}`);
 	check(testState.files[NETWORK_FILE] == null, `恢复成功后不能残留网络记录：${item.label}`);
 	for (let path in paths)
 		check(testState.files[path] == null, `接管失败后必须清除 ${path}：${item.label}`);
@@ -175,6 +178,12 @@ check(revert() && length(filter(testState.commands, command => index(command, 'r
 delete testState.files['/proc/41/cmdline'];
 
 testState.config.local = '/lan/';
+const ruleList = '0:\tfrom all lookup local\n1937:\tfrom all iif br-lan goto 1939\n32765:\tfrom all fwmark 0x1f6 lookup 1936\n32766:\tfrom all lookup main\n';
+const flushedRules = { status: 0, text: '0:\tfrom all lookup local\n32766:\tfrom all lookup main\n' };
+for (let ip in [ 'ip', 'ip -6' ]) {
+	testState.responses[`${ip} rule show 2>/dev/null`] = { status: 0, text: ruleList };
+	testState.responses[`${ip} route show table 1936 2>/dev/null`] = { status: 0, text: 'local default dev lo scope host \n' };
+}
 for (let mode in [ 'tproxy', 'tun' ]) {
 	testState.config.mode = mode;
 	testState.commands = [];
@@ -199,6 +208,17 @@ for (let mode in [ 'tproxy', 'tun' ]) {
 	delete testState.files[routerDnsProcess];
 	check(!intact(readJson(NETWORK_FILE)), `${mode}：路由器自身的解析实例退出后接管必须视为失效`);
 	testState.files[routerDnsProcess] = routerDnsCmdline;
+	const ipv6Rules = testState.responses['ip -6 rule show 2>/dev/null'];
+	testState.responses[`${mode == 'tun' ? 'ip' : 'ip -6'} rule show 2>/dev/null`] = flushedRules;
+	check(!intact(readJson(NETWORK_FILE)), `${mode}：network restart 清空策略路由规则后接管必须视为失效`);
+	testState.responses['ip rule show 2>/dev/null'] = { status: 0, text: ruleList };
+	testState.responses['ip -6 rule show 2>/dev/null'] = ipv6Rules;
+	if (mode == 'tproxy') {
+		testState.responses['ip route show table 1936 2>/dev/null'] = { status: 0, text: '' };
+		check(!intact(readJson(NETWORK_FILE)), 'tproxy：lo 重启带走 1936 表的本地路由后接管必须视为失效');
+		testState.responses['ip route show table 1936 2>/dev/null'] = { status: 0, text: 'local default dev lo scope host \n' };
+	}
+	check(intact(readJson(NETWORK_FILE)), `${mode}：规则与路由都在时接管仍视为有效`);
 	testState.responses['nft list tables 2>/dev/null'] = { status: 0, text: 'table inet fw4\ntable inet ecycloud_dns\n' };
 	failedCommand = routerDnsDelete;
 	failures = 1;
@@ -302,6 +322,7 @@ testState.files[runtimePath] = sprintf('%J', tunConfig.config);
 check(apply(settings()).ok && readJson(NETWORK_FILE).router_dns == true, '看门狗自愈测试必须先以 TUN 接管');
 delete testState.files[routerDnsProcess];
 testState.commands = [];
+testState.response = { version: 'fixture', tun: { enable: true } };
 global.sleep = () => {
 	testState.files['/var/run/ecycloud/stopping'] = '';
 };
@@ -412,5 +433,37 @@ check(!invalidTun.ok && index(invalidTun.error, 'TUN 网卡名') >= 0 && readJso
 testState.config.mode = 'tproxy';
 delete testState.config.tun_device;
 testState.config.run_dir = runDir;
+
+const runtimeBeforeFake = testState.files[runtimePath];
+testState.files[runtimePath] = sprintf('%J', { dns: { enable: true, 'enhanced-mode': 'fake-ip', 'fake-ip-range': '198.18.0.1/16' } });
+testState.config.mode = 'tproxy';
+check(apply(settings()).ok && index(testState.files[paths[0]], '198.18.0.1/16') < 0 && revert(),
+	'判定不出内网区（防火墙没有可用区域）时不能对任何未列入 LAN 接口的设备接管 Fake-IP');
+testState.uci = {
+	firewall: { zone: [ { name: 'lan', network: [ 'lan' ] }, { name: 'guest', network: [ 'guest' ], device: [ 'wlan-iot' ] },
+		{ name: 'wan', network: [ 'wan', 'wan6' ], masq: '1' }, { name: 'up', device: [ 'eth9' ] } ] },
+	network: { guest: { device: 'br-guest' }, wan: { device: 'eth1' }, wan6: { device: 'eth1' } }
+};
+testState.responses['ip route show default 2>/dev/null'] = { status: 0, text: 'default via 192.0.2.1 dev eth9 proto static\n' };
+check(apply(settings()).ok && index(testState.files[paths[0]], 'iifname { "br-guest", "wlan-iot" } ip daddr 198.18.0.1/16 jump ecycloud_tproxy\n') >= 0 &&
+	!match(testState.files[paths[0]], /(eth1|eth9)/) && revert(),
+	'tproxy：访客等内网区的 Fake-IP 流量要接管，开了 masq 的 WAN 区与默认路由出口进来的不能命中');
+testState.config.mode = 'tun';
+testState.commands = [];
+check(apply(settings()).ok && 'ip rule add pref 1936 iif br-guest to 198.18.0.1/16 lookup 1937' in testState.commands &&
+	'ip rule add pref 1936 iif wlan-iot to 198.18.0.1/16 lookup 1937' in testState.commands &&
+	!length(filter(testState.commands, c => match(c, /^ip rule add pref 1936 .*(eth1|eth9|to 198)/) && !match(c, /iif (br-guest|wlan-iot) /))) &&
+	index(testState.files[paths[2]], 'iifname { "br-guest", "wlan-iot" } oifname "ECYCloud" ip daddr 198.18.0.1/16 accept') >= 0 &&
+	!match(testState.files[paths[2]], /(eth1|eth9)/) && revert(),
+	'tun：只有内网区设备发往 Fake-IP 的流量进 TUN、被放行转发，WAN 侧不能借道');
+testState.responses['ip route show default 2>/dev/null'] = { status: 0, text: 'default via 192.0.2.1 dev eth9\ndefault via 192.0.2.1 dev br-guest metric 10\ndefault dev wlan-iot scope link\n' };
+testState.config.mode = 'tproxy';
+check(apply(settings()).ok && index(testState.files[paths[0]], '198.18.0.1/16') < 0 && revert(), '默认路由出口所在的接口即便在内网区也算上级网络，不能接管');
+delete testState.responses['ip route show default 2>/dev/null'];
+testState.files[runtimePath] = sprintf('%J', { dns: { enable: true, 'enhanced-mode': 'redir-host', 'fake-ip-range': '198.18.0.1/16' } });
+check(apply(settings()).ok && index(testState.files[paths[0]], '198.18.0.1/16') < 0 && revert(), '没开 Fake-IP 时不能多接管这段地址');
+delete testState.uci;
+testState.config.mode = 'tproxy';
+testState.files[runtimePath] = runtimeBeforeFake;
 
 print('OpenWrt 稳定性回归通过：接管失败恢复、原子写入、TUN 断开与启动中断、恢复重试、快速重连及面板任务隔离。\n');

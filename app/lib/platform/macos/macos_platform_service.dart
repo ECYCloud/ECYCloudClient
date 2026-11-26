@@ -30,6 +30,9 @@ class MacosPlatformService extends UnixPlatformService {
   String get tunInterfaceName => '';
 
   @override
+  bool get tunSetsSystemDns => true;
+
+  @override
   Future<({String model, String os})> deviceProfile() async => (
     model: 'Mac（Flutter）',
     os: 'macOS ${RegExp(r'\d+(\.\d+)*').stringMatch(Platform.operatingSystemVersion) ?? ''}'

@@ -1,6 +1,7 @@
 package com.ecycloud.client;
 
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import com.ecycloud.client.IUiCallback;
 
 interface IKernelService {
@@ -8,11 +9,11 @@ interface IKernelService {
 
     Bundle status(int logCursor);
 
-    Bundle check(String config);
+    Bundle check(in ParcelFileDescriptor config);
 
-    void reload(String config);
+    void reload(in ParcelFileDescriptor config);
 
-    void start(String config);
+    void start(in ParcelFileDescriptor config);
 
     void stop();
 

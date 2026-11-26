@@ -9,8 +9,8 @@ import * as network from 'ecycloud.network';
 import * as panel from 'ecycloud.panel';
 import * as profile from 'ecycloud.profile';
 
-import { RUNTIME_VIEW, STATE_DIR, build, clearKicked, commitConfig, coreRunning, ensureConfig, ensurePrivateDir, instances, kickReason, lanDevices, log, origins,
-		 settings, state, wasKicked, writeAtomic } from 'ecycloud.common';
+import { RUNTIME_VIEW, STATE_DIR, build, clearKicked, commitConfig, coreRunning, ensureConfig, ensurePrivateDir, forgetRemembered, instances, kickReason, lanDevices, log, origins,
+		 remembered, saveRemembered, settings, state, wasKicked, writeAtomic } from 'ecycloud.common';
 import * as release from 'ecycloud.release';
 import * as service from 'ecycloud.service';
 import * as statistics from 'ecycloud.statistics';
@@ -563,6 +563,42 @@ function collectLeavesFromCache(groupName) {
 	return { names, type: groupType };
 };
 
+function reserveSpeeds(names) {
+	const local = service.speedQuota(names);
+	if (!length(local.allowed))
+		return { ok: false, msg: local.msg };
+
+	// 面板单次请求最多处理 256 个节点，超出的既不放行也不拒绝
+	const allowed = [], denied = [];
+	for (let start = 0; start < length(local.allowed); start += 256) {
+		const reserved = panel.reserveSpeedTest(slice(local.allowed, start, start + 256));
+		if (!reserved.ok)
+			return { ok: false, msg: reserved.msg ?? '' };
+		push(allowed, ...(reserved.data?.allowed ?? []));
+		push(denied, ...(reserved.data?.denied ?? []));
+	}
+
+	// 面板只对次数用尽的拒绝给出 reset_at；无权测试、非官方节点不算次数用尽
+	let skipped = length(names) - length(local.allowed), refusal = '';
+	for (let item in denied) {
+		if (+item.reset_at > 0) {
+			service.noteSpeedDenied(item.proxy_name, item.reset_at);
+			skipped++;
+		}
+		else if (!length(refusal))
+			refusal = item.msg ?? '';
+	}
+
+	if (!length(allowed))
+		return { ok: false, msg: denied[0]?.msg ?? '测速次数已达上限' };
+
+	return {
+		ok: true,
+		allowed,
+		msg: skipped > 0 ? `已跳过 ${skipped} 个达到测速次数上限的节点` : refusal
+	};
+}
+
 function collectLeaves(groupName) {
 	if (!clash.ready())
 		return collectLeavesFromCache(groupName);
@@ -597,7 +633,75 @@ function presentGroups(result) {
 	return result;
 };
 
-function groupsFromCache() {
+function cachedNode(member, cfg, kind, labels) {
+	const isGroup = kind != null;
+
+	return {
+		label: shownName(member, labels),
+		type: isGroup ? kind : proxyType(cfg.type ?? ''),
+		protocol: isGroup ? '' : proxyType(cfg.type ?? ''),
+		network: isGroup ? '' : (cfg.network ?? ''),
+		tls: isGroup ? '' : proxyTls(cfg),
+		udp: udpTag(null, null, cfg, isGroup),
+		is_group: isGroup,
+		group_selectable: kind == 'Selector',
+		via: '',
+		via_label: '',
+		delay: 0
+	};
+};
+
+const SEARCH_LIMIT = 100;
+/* 一页里全是已有的节点时接着取下一页，免得界面点了没有新内容 */
+const SEARCH_PAGES = 5;
+
+/* 节点很多时缓存、内核与节点页只有在用的节点：给还有未装入成员的分组标上 partial。
+   其余成员在面板上（remote）时由界面另经 search_nodes 取；在本机目录里时把匹配搜索词的补进列表 */
+function addUnloaded(groups, nodes, cache, search) {
+	if (type(cache?.partial) != 'object')
+		return;
+	const remote = type(cache.catalog) == 'object';
+	const use = {};
+	for (let group in cache.config['proxy-groups'])
+		use[group.name] = filter(group.use ?? [], name => cache.partial[name]);
+
+	let catalog;
+	for (let group in groups) {
+		if (!length(use[group.name]))
+			continue;
+		group.partial = true;
+		group.remote = remote;
+		const keyword = lc(trim(`${search?.[group.name] ?? ''}`));
+		if (remote || !length(keyword))
+			continue;
+		catalog ??= profile.catalog(cache, true) ?? {};
+		const listed = {};
+		for (let member in group.members)
+			listed[member] = true;
+		let found = 0;
+		for (let name in use[group.name]) {
+			for (let member in (catalog.members?.[name] ?? [])) {
+				if (found >= SEARCH_LIMIT)
+					break;
+				if (listed[member] || index(lc(shownName(member, catalog.labels)), keyword) < 0)
+					continue;
+				listed[member] = true;
+				found++;
+				push(group.members, member);
+				nodes[member] ??= cachedNode(member, {}, null, catalog.labels);
+			}
+		}
+	}
+};
+
+/* 整组测试时界面一并交来的、搜索或翻页列出的节点：只在节点目录分页时接受 */
+function listedNodes(names) {
+	if (type(profile.cached(access(profile.PENDING_FILE))?.catalog) != 'object' || type(names) != 'array')
+		return [];
+	return slice(uniq(filter(names, name => type(name) == 'string' && match(name, /^node-[0-9]+$/))), 0, SEARCH_LIMIT * SEARCH_PAGES);
+};
+
+function groupsFromCache(search) {
 	const cache = profile.cached();
 	const labels = { ...(cache?.node_labels ?? {}), ...(cache?.group_labels ?? {}) };
 	const extras = {};
@@ -620,24 +724,7 @@ function groupsFromCache() {
 		const members = [];
 		for (let member in profile.membersOf(cache.config, group)) {
 			push(members, member);
-			if (nodes[member] != null)
-				continue;
-			const cfg = extras[member] ?? {};
-			const isGroup = member in nested;
-
-			nodes[member] = {
-				label: shownName(member, labels),
-				type: isGroup ? nested[member] : proxyType(cfg.type ?? ''),
-				protocol: isGroup ? '' : proxyType(cfg.type ?? ''),
-				network: isGroup ? '' : (cfg.network ?? ''),
-				tls: isGroup ? '' : proxyTls(cfg),
-				udp: udpTag(null, null, cfg, isGroup),
-				is_group: isGroup,
-				group_selectable: isGroup && nested[member] == 'Selector',
-				via: '',
-				via_label: '',
-				delay: 0
-			};
+			nodes[member] ??= cachedNode(member, extras[member] ?? {}, nested[member], labels);
 		}
 
 		push(groups, {
@@ -650,13 +737,14 @@ function groupsFromCache() {
 		});
 	}
 
+	addUnloaded(groups, nodes, cache, search);
 	return presentGroups({ groups, nodes });
 };
 
-function groupsView() {
+function groupsView(search) {
 	const snapshot = clash.proxies();
 	if (!snapshot.ok)
-		return coreRunning() ? { error: snapshot.error } : groupsFromCache();
+		return coreRunning() ? { error: snapshot.error } : groupsFromCache(search);
 
 	const proxies = snapshot.data?.proxies ?? {};
 	const cache = profile.cached();
@@ -728,6 +816,7 @@ function groupsView() {
 		});
 	}
 
+	addUnloaded(groups, nodes, cache, search);
 	return presentGroups({ groups, nodes });
 };
 
@@ -808,10 +897,11 @@ const methods = {
 	},
 
 	groups: {
-		call: function() {
+		args: { search: {} },
+		call: function(request) {
 			const job = service.delayJob();
 			const speed = service.speedJob();
-			const view = groupsView();
+			const view = groupsView(request.args.search);
 			return view.error ? view : annotateGroups(view, job, speed);
 		}
 	},
@@ -853,11 +943,31 @@ const methods = {
 	},
 
 	login: {
-		args: { email: '', password: '', code: '' },
+		args: { email: '', password: '', code: '', remember: false },
 		call: function(request) {
 			const res = panel.login(request.args.email, request.args.password, request.args.code);
 
+			/* 与客户端一致：密码登录成功后，勾选“记住账号密码”就保存这一对，未勾选就清掉 */
+			if (res.ok == true) {
+				if (request.args.remember === true)
+					saveRemembered(trim(request.args.email), request.args.password);
+				else
+					forgetRemembered();
+			}
 			return { ok: res.ok == true, msg: res.msg ?? '', need_code: res.need_code == true };
+		}
+	},
+
+	remembered: {
+		call: function() {
+			const saved = remembered();
+			return { ok: true, email: saved?.email ?? '', password: saved?.password ?? '' };
+		}
+	},
+
+	forget_remembered: {
+		call: function() {
+			return { ok: forgetRemembered() == true, msg: '' };
 		}
 	},
 
@@ -918,7 +1028,7 @@ const methods = {
 			const res = panel.refreshAccount();
 			if (res.restricted)
 				service.block(res.msg);
-			if (!res.ok && res.status == 0 && profile.cached() && panel.account())
+			if (!res.ok && (res.status == 0 || res.status == 429 || res.status >= 500) && profile.cached())
 				return { ok: true, offline: true, account: accountView(), msg: '' };
 			return { ok: res.ok == true, msg: res.msg ?? '', account: accountView(res.data) };
 		}
@@ -1020,10 +1130,52 @@ const methods = {
 			if (what == 'check_kernel')
 				return release.checkKernel('');
 
+			if (what == 'announcements' && request.args.path == 'refresh') {
+				const language = panel.announceLanguage(request.args.locale);
+				return language == null ? { ok: false, msg: '语言不合法' } : service.enqueueUpdate('announcements', language);
+			}
+
 			if (what == 'announcements')
 				return panel.announcements(request.args.path, request.args.locale);
 
 			return service.enqueueUpdate(what == 'language' ? 'language' : 'profile', `${request.args.locale ?? ''}`);
+		}
+	},
+
+	search_nodes: {
+		args: { group: '', keyword: '', offset: -1 },
+		call: function(request) {
+			const cache = profile.cached(access(profile.PENDING_FILE));
+			const catalog = cache?.catalog;
+			const group = filter(cache?.config?.['proxy-groups'] ?? [], item => item?.name == request.args.group && item.hidden != true)[0];
+			const provider = filter(group?.use ?? [], name => catalog?.providers?.[name] != null && cache.partial?.[name])[0];
+			if (provider == null)
+				return { ok: true, msg: '', nodes: [], more: false, next: 0 };
+
+			const keyword = trim(`${request.args.keyword ?? ''}`);
+			const known = {};
+			for (let node in profile.nodesOf(cache.config))
+				known[node.name] = true;
+			let offset = int(request.args.offset);
+			if (!(offset >= 0))
+				offset = length(keyword) ? 0 : catalog.providers[provider].head;
+			const nodes = [];
+			let more = true;
+			for (let page = 0; page < SEARCH_PAGES && more && !length(nodes); page++) {
+				const res = panel.nodes({ provider: catalog.providers[provider].key, offset, limit: SEARCH_LIMIT,
+					...(length(keyword) ? { search: keyword } : {}) }, null, 15);
+				if (!res.ok)
+					return { ok: false, msg: res.msg ?? '' };
+				/* 面板的节点或模板已变：这页对不上手里的配置，改走正常的配置刷新 */
+				if (res.data?.stamp != catalog.stamp)
+					return service.enqueueUpdate('profile', '');
+				for (let node in (type(res.data.nodes) == 'array' ? res.data.nodes : []))
+					if (type(node?.name) == 'string' && !known[node.name] && type(node.proxy) == 'object')
+						push(nodes, { name: node.name, ...cachedNode(node.name, node.proxy, null, { [node.name]: `${node.label ?? ''}` }) });
+				more = res.data.more == true;
+				offset += SEARCH_LIMIT;
+			}
+			return { ok: true, msg: '', nodes, more, next: offset };
 		}
 	},
 
@@ -1041,14 +1193,20 @@ const methods = {
 				   落地，与客户端 selectProxy 先 _ensureControlPlane 同一口径；
 				   内核答了但拒了（组已不存在等）要原样报出，不能当成待落地的选择存下来 */
 				const current = clash.proxy(group);
+				const cache = profile.cached(access(profile.PENDING_FILE));
 				if (!current.ok) {
 					if (current.status != 0)
 						return { ok: false, msg: current.error ?? '' };
+					if (type(cache?.partial) == 'object' && !length(filter(profile.nodesOf(cache.config), node => node.name == name)))
+						return service.enqueueUpdate('select', '', group, name);
 
 					service.rememberSelector(group, name);
 					service.startStandby();
 					return { ok: true, msg: '' };
 				}
+
+				if (type(cache?.partial) == 'object' && !(name in (current.data?.all ?? [])))
+					return service.enqueueUpdate('select', '', group, name);
 
 				const previous = current.data?.now ?? '';
 
@@ -1088,7 +1246,7 @@ const methods = {
 	},
 
 	test_group: {
-		args: { group: '' },
+		args: { group: '', names: [] },
 		call: function(request) {
 			const group = request.args.group;
 			if (!length(group))
@@ -1099,7 +1257,7 @@ const methods = {
 				return { ok: false, msg: 'empty group' };
 
 			service.startStandby();
-			const queued = service.enqueueDelay(collected.names,
+			const queued = service.enqueueDelay(uniq([ ...collected.names, ...listedNodes(request.args.names) ]),
 				collected.type == 'Selector' ? '' : group,
 				group);
 			return { ok: queued.ok, msg: '' };
@@ -1112,29 +1270,17 @@ const methods = {
 			if (!length(request.args.name))
 				return { ok: false, msg: 'missing name' };
 
-			const local = service.speedQuota([ request.args.name ]);
-			if (!length(local.allowed))
-				return { ok: false, msg: local.msg };
-
-			const reserved = panel.reserveSpeedTest(local.allowed);
+			const reserved = reserveSpeeds([ request.args.name ]);
 			if (!reserved.ok)
-				return { ok: false, msg: reserved.msg ?? '' };
-
-			const allowed = reserved.data?.allowed ?? [];
-			const denied = reserved.data?.denied ?? [];
-			for (let item in denied)
-				service.noteSpeedDenied(item.proxy_name, item.reset_at);
-
-			if (!length(allowed))
-				return { ok: false, msg: denied[0]?.msg ?? '测速次数已达上限' };
+				return reserved;
 
 			service.startStandby();
-			return { ok: service.enqueueSpeed(allowed, '').ok, msg: '' };
+			return { ok: service.enqueueSpeed(reserved.allowed, '').ok, msg: '' };
 		}
 	},
 
 	test_group_speed: {
-		args: { group: '' },
+		args: { group: '', names: [] },
 		call: function(request) {
 			const group = request.args.group;
 			if (!length(group))
@@ -1142,35 +1288,19 @@ const methods = {
 
 			const collected = collectLeaves(group);
 			const names = [];
-			for (let name in collected.names)
+			for (let name in uniq([ ...collected.names, ...listedNodes(request.args.names) ]))
 				if (match(name, /^node-[0-9]+$/))
 					push(names, name);
 			if (!length(names))
 				return { ok: false, msg: 'empty group' };
 
-			const local = service.speedQuota(names);
-			if (!length(local.allowed))
-				return { ok: false, msg: local.msg };
-
-			const reserved = panel.reserveSpeedTest(local.allowed);
+			const reserved = reserveSpeeds(names);
 			if (!reserved.ok)
-				return { ok: false, msg: reserved.msg ?? '' };
-
-			const allowed = reserved.data?.allowed ?? [];
-			const denied = reserved.data?.denied ?? [];
-			for (let item in denied)
-				service.noteSpeedDenied(item.proxy_name, item.reset_at);
-
-			if (!length(allowed))
-				return { ok: false, msg: denied[0]?.msg ?? '测速次数已达上限' };
+				return reserved;
 
 			service.startStandby();
-			const queued = service.enqueueSpeed(allowed, group);
-			const skipped = length(names) - length(allowed);
-			return {
-				ok: queued.ok,
-				msg: queued.ok && skipped > 0 ? `已跳过 ${skipped} 个达到测速次数上限的节点` : ''
-			};
+			const queued = service.enqueueSpeed(reserved.allowed, group);
+			return { ok: queued.ok, msg: queued.ok ? reserved.msg : '' };
 		}
 	},
 
@@ -1231,6 +1361,8 @@ const methods = {
 const GUEST_OK = {
 	status: true,
 	login: true,
+	remembered: true,
+	forget_remembered: true,
 	send_login_verify: true,
 	login_code: true,
 	logout: true

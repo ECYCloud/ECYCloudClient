@@ -45,7 +45,7 @@ public struct TunnelLogs: Decodable, Sendable {
     public let entries: [Entry]
     public let total: Int
 }
-public struct NodeProbe: Decodable, Sendable {
+public struct NodeProbe: Decodable, Equatable, Sendable {
     public enum Kind: String, Sendable { case delay, speed, reselect }
     public let running: Bool, failed: Bool
     public let delay: Int
@@ -63,6 +63,7 @@ struct SpeedTestAllowance: Decodable, Sendable {
     fileprivate var generation = 0
     fileprivate var measuringSpeed = false
     fileprivate var activeDelays = 0
+    fileprivate var probing = false
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var quotaScope: String?
@@ -120,7 +121,7 @@ struct SpeedTestAllowance: Decodable, Sendable {
     func clear(keepingResults: Bool = false) {
         generation += 1
         if !keepingResults { values = [:] }
-        testing = []; testingGroups = []; measuringSpeed = false; activeDelays = 0
+        testing = []; testingGroups = []; measuringSpeed = false; activeDelays = 0; probing = false
     }
 }
 extension ClientSession {
@@ -132,29 +133,83 @@ extension ClientSession {
         let generation = nodeProbes.generation
         defer { if generation == nodeProbes.generation { nodeProbes.testingGroups.remove(key) } }
         var seen = Set<String>()
-        let nodes = group.members.map { NodeProbeState.resolve($0, selections: selections) }.filter {
+        // 只测当前列出的成员，不为测试去翻完整个分组
+        let nodes = members(of: group).map { NodeProbeState.resolve($0, selections: selections) }.filter {
             !$0.isEmpty && seen.insert($0).inserted && (kind != .speed || NodeProbeState.isOfficial($0))
         }
         if nodes.isEmpty { return nil }
         if kind == .speed { return try await measureSpeeds(nodes) }
+        try await absorb(nodes)
+        // 对应 connection_controller.dart 的 _testNodes：先测内核里已有的，未装入的分批放进探测节点文件再测
+        let loaded = try await kernelNodes()
+        func missing(_ node: String) -> Bool { loaded?.contains(node) == false && catalog?.node(node) != nil }
+        let waiting = nodes.filter(missing)
+        await measureDelays(nodes.filter { !missing($0) }, generation: generation)
+        for start in stride(from: 0, to: waiting.count, by: NodeWorkingSet.probeBatch) {
+            try Task.checkCancellation()
+            guard generation == nodeProbes.generation else { throw CancellationError() }
+            let batch = Array(waiting[start..<min(start + NodeWorkingSet.probeBatch, waiting.count)])
+            try await withProbe(batch, kind: .delay, generation: generation) { await self.measureDelays(batch, generation: generation) }
+        }
+        try Task.checkCancellation()
+        guard generation == nodeProbes.generation else { throw CancellationError() }
+        if !group.selectable { _ = try await measureLoaded(group.id, kind: .reselect) }
+        return nil
+    }
+
+    private func measureDelays(_ nodes: [String], generation: Int) async {
         await withTaskGroup(of: Void.self) { tasks in
             var next = 0
             for node in nodes.prefix(8) {
-                tasks.addTask { _ = try? await self.measureNode(node, kind: .delay) }
+                tasks.addTask { _ = try? await self.measureLoaded(node, kind: .delay) }
                 next += 1
             }
             for await _ in tasks {
                 guard generation == nodeProbes.generation, !Task.isCancelled else { tasks.cancelAll(); break }
                 if next < nodes.count {
                     let node = nodes[next]; next += 1
-                    tasks.addTask { _ = try? await self.measureNode(node, kind: .delay) }
+                    tasks.addTask { _ = try? await self.measureLoaded(node, kind: .delay) }
                 }
             }
         }
-        try Task.checkCancellation()
+    }
+
+    // 内核里已装入的节点，nil 为全部装入。以内核报告的分组成员为准：界面重启后接管仍在运行的内核时没有装配这一步。
+    // GLOBAL 连探测节点文件一并引用，不算已装入
+    private func kernelNodes() async throws -> Set<String>? {
+        guard catalog?.partial == true else { return nil }
+        return Set(try await tunnelSnapshot().groups.filter { $0.id != "GLOBAL" }.flatMap(\.members))
+    }
+
+    // 对应 connection_controller.dart 的 _probe：探测节点文件同一时间只供一批测试用，换批会把上一批节点撤出内核
+    private func withProbe<Value>(_ names: [String], kind: NodeProbe.Kind, generation: Int, _ body: () async throws -> Value) async throws -> Value {
+        while nodeProbes.probing {
+            try await Task.sleep(for: .milliseconds(50))
+            guard generation == nodeProbes.generation else { throw CancellationError() }
+        }
+        nodeProbes.probing = true
+        defer { if generation == nodeProbes.generation { nodeProbes.probing = false } }
+        probeNodes = names
+        do { try await reloadNodes() } catch {
+            // 没装进内核就没有测量结果：徽标要给出失败，否则点了测试界面毫无反应
+            if generation == nodeProbes.generation, !(error is CancellationError) {
+                for name in names { nodeProbes.values[kind.rawValue + "/" + name] = NodeProbe(running: false, failed: true, delay: 0, speed: 0) }
+            }
+            throw error
+        }
         guard generation == nodeProbes.generation else { throw CancellationError() }
-        if !group.selectable { _ = try await measureNode(group.id, kind: .reselect) }
-        return nil
+        return try await body()
+    }
+
+    // 对应 connection_controller.dart 的 _loadNodes：要选的节点还没装进内核时先装入
+    private func installNode(_ node: String, into group: String) async throws {
+        try await absorb([node])
+        guard let catalog, catalog.partial, catalog.node(node) != nil,
+              try await tunnelSnapshot().groups.first(where: { $0.id == group })?.members.contains(node) != true else { return }
+        let previous = recentNodes
+        recentNodes = Array(([node] + recentNodes.filter { $0 != node }).prefix(NodeWorkingSet.recentLimit))
+        // 内核拒收的节点不能留在装入名单里：之后每次装配都会带上它，重启内核时整份配置校验不过
+        do { try await reloadNodes() } catch { recentNodes = previous; throw error }
     }
 
     public func measureNode(_ name: String, kind: NodeProbe.Kind) async throws -> NodeProbe {
@@ -165,6 +220,15 @@ extension ClientSession {
             return result
         }
         try await ensureControlPlane()
+        try await absorb([name])
+        if kind == .delay, catalog?.node(name) != nil, try await kernelNodes()?.contains(name) == false {
+            let generation = nodeProbes.generation
+            return try await withProbe([name], kind: kind, generation: generation) { try await self.measureLoaded(name, kind: kind) }
+        }
+        return try await measureLoaded(name, kind: kind)
+    }
+
+    private func measureLoaded(_ name: String, kind: NodeProbe.Kind) async throws -> NodeProbe {
         let key = kind.rawValue + "/" + name
         guard nodeProbes.testing.insert(key).inserted else { throw CancellationError() }
         let generation = nodeProbes.generation
@@ -227,11 +291,15 @@ extension ClientSession {
         if allowed.isEmpty {
             return denied.first?.msg ?? (localBlocked.isEmpty ? L10n.t("面板未允许本次测速") : L10n.t("该节点 1 小时内测速已达 5 次，请稍后再试"))
         }
+        try await absorb(pending.filter(allowed.contains))
+        let loaded = try await kernelNodes()
         for name in pending where allowed.contains(name) {
             try Task.checkCancellation()
             guard generation == nodeProbes.generation else { throw CancellationError() }
             do {
-                let result = try await runProbe(name, kind: .speed, generation: generation)
+                let result = try await loaded?.contains(name) == false
+                    ? withProbe([name], kind: .speed, generation: generation) { try await self.runProbe(name, kind: .speed, generation: generation) }
+                    : runProbe(name, kind: .speed, generation: generation)
                 if !unlimited { nodeProbes.recordSpeed(name) }
                 struct Report: Encodable { struct Result: Encodable { let proxy_name: String; let bytes_per_second: Int64 }; let results: [Result] }
                 let body = try JSONEncoder().encode(Report(results: [.init(proxy_name: name, bytes_per_second: result.speed)]))
@@ -254,8 +322,10 @@ extension ClientSession {
             }
             nodeProbes.testing.remove("speed/" + name)
         }
-        let skipped = localBlocked.count + denied.count
-        return skipped == 0 ? nil : pending.count == 1 ? denied.first?.msg : L10n.t("已跳过 {0} 个达到测速次数上限的节点", [String(describing: skipped)])
+        // 面板只对次数用尽的拒绝给出 reset_at；无权测试、非官方节点不算次数用尽
+        let skipped = localBlocked.count + denied.count { $0.resetAt != nil }
+        if pending.count == 1 { return denied.first?.msg }
+        return skipped > 0 ? L10n.t("已跳过 {0} 个达到测速次数上限的节点", [String(describing: skipped)]) : denied.first?.msg
     }
 
     private func runProbe(_ name: String, kind: NodeProbe.Kind, generation: Int) async throws -> NodeProbe {
@@ -292,7 +362,8 @@ extension ClientSession {
         // 与 Flutter 一致：只在接管连接期间记账，待机时取走的增量直接丢弃
         if let rank = value.rank, connection.state == .connected { trafficRank.add(rank) }
         for (node, delay) in value.delays ?? [:] where delay > 0 && !nodeProbes.isTesting(node, kind: .delay) {
-            nodeProbes.values["delay/" + node] = NodeProbe(running: false, failed: false, delay: delay, speed: 0)
+            let probe = NodeProbe(running: false, failed: false, delay: delay, speed: 0)
+            if nodeProbes.values["delay/" + node] != probe { nodeProbes.values["delay/" + node] = probe }
         }
         return value
     }
@@ -304,8 +375,10 @@ extension ClientSession {
     }
     public func selectActiveNode(group: String, node: String) async throws {
         guard let connection else { throw TunnelError.control }
+        try await installNode(node, into: group)
         _ = try await connection.request(.init(.select, group: group, node: node))
         selectNode(group: group, node: node)
+        await persistTunnelLease()
     }
     public func setMode(_ mode: ClientPreferences.Mode) async throws {
         guard phase == .signedIn else { throw CancellationError() }
@@ -313,6 +386,13 @@ extension ClientSession {
             _ = try await connection.request(.init(.mode, mode: mode.rawValue))
         } else if let connection, connection.state != .disconnected { throw CancellationError() }
         preferences.mode = mode
+        await persistTunnelLease()
+    }
+    // 系统按需连接重新拉起隧道时只读租约文件：运行中切换的模式与节点要写回去
+    private func persistTunnelLease() async {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+        if connection?.state == .connected { try? await reloadNodes() }
+        #endif
     }
     public func closeConnection(_ id: String?) async throws {
         guard let connection else { throw TunnelError.unavailable }

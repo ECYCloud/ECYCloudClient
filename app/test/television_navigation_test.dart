@@ -76,6 +76,8 @@ class _Platform implements PlatformService {
   @override
   Future<void> setImeEnabled({required bool enabled}) async {}
   @override
+  Future<bool> secretStoreAvailable() async => true;
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

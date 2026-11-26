@@ -46,7 +46,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  Timer? _ticker;
   Timer? _profileTicker;
   final FocusNode _connectFocus = FocusNode();
   final ScrollController _scrollController = ScrollController();
@@ -56,10 +55,6 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _scrollController.addListener(Tooltip.dismissAllToolTips);
-    _ticker = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => mounted ? setState(() {}) : null,
-    );
   }
 
   @override
@@ -87,7 +82,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    _ticker?.cancel();
     _profileTicker?.cancel();
     _connectFocus.dispose();
     _scrollController.dispose();
@@ -98,7 +92,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final AppScope scope = AppScope.of(context);
 
-    return ListenableBuilder(
+    return ShellListenableBuilder(
       listenable: Listenable.merge(<Listenable>[
         scope.auth,
         scope.connection,
@@ -159,6 +153,7 @@ class _HomePageState extends State<HomePage> {
                       connection: connection,
                       connectFocus: _connectFocus,
                     ),
+                    ?_sessionExpiryNotice(context, scope.auth.sessionExpiresAt),
                     if (connection.routeMode == 'direct' ||
                         connection.groupsForMode.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 10),
@@ -189,6 +184,27 @@ class _HomePageState extends State<HomePage> {
       },
     );
   }
+}
+
+// 与 OpenWrt 首页同一阈值与文案：令牌不续期，到期即退出登录并断开连接
+Widget? _sessionExpiryNotice(BuildContext context, DateTime? expiresAt) {
+  final DateTime? local = expiresAt?.toLocal();
+  if (local == null ||
+      local.difference(DateTime.now()) > const Duration(days: 7)) {
+    return null;
+  }
+  final ThemeData theme = Theme.of(context);
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+    child: Text(
+      L10n.t('登录将于 {0} 到期，到期后连接会断开，请在此之前退出并重新登录。', <Object>[
+        '${Format.date(local)} ${Format.clock(local)}',
+      ]),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    ),
+  );
 }
 
 class _Pair extends StatelessWidget {
@@ -301,7 +317,8 @@ class _ConnectionCard extends StatelessWidget {
       theme.colorScheme,
     );
 
-    final String detail = switch (phase) {
+    // 时长跟着每秒的统计刷新：另起定时器会与统计错开，每秒多排一帧
+    String detail() => switch (phase) {
       ConnectionPhase.connected =>
         connection.panelOffline
             ? L10n.t('已连接，面板暂不可达，正在使用有效的本地配置')
@@ -358,14 +375,17 @@ class _ConnectionCard extends StatelessWidget {
                                 );
                               }
                             : null,
-                        child: Text(
-                          detail,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: phase == ConnectionPhase.failed
-                                ? theme.colorScheme.error
-                                : theme.colorScheme.onSurfaceVariant,
+                        child: ShellListenableBuilder(
+                          listenable: connection.statsUpdates,
+                          builder: (BuildContext context, _) => Text(
+                            detail(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: phase == ConnectionPhase.failed
+                                  ? theme.colorScheme.error
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ),
@@ -900,7 +920,17 @@ class _TrafficCard extends StatelessWidget {
   final bool upload;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => SectionCard(
+    icon: upload ? Icons.north : Icons.south,
+    title: upload ? L10n.t('上传') : L10n.t('下载'),
+    padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+    child: ShellListenableBuilder(
+      listenable: connection.statsUpdates,
+      builder: (BuildContext context, _) => _figures(context),
+    ),
+  );
+
+  Widget _figures(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final TrafficSample traffic = connection.traffic;
     final TrafficSample total = connection.trafficTotal;
@@ -916,31 +946,26 @@ class _TrafficCard extends StatelessWidget {
         sample.at ?? DateTime.fromMillisecondsSinceEpoch(0),
     ];
 
-    return SectionCard(
-      icon: upload ? Icons.north : Icons.south,
-      title: upload ? L10n.t('上传') : L10n.t('下载'),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            Format.speed(upload ? traffic.up : traffic.down),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          Format.speed(upload ? traffic.up : traffic.down),
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
           ),
-          const SizedBox(height: 1),
-          Text(
-            L10n.t('累计 {0}', <Object>[
-              Format.bytes(upload ? total.up : total.down),
-            ]),
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          Sparkline(values: history, times: times, color: color),
-        ],
-      ),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          L10n.t('累计 {0}', <Object>[
+            Format.bytes(upload ? total.up : total.down),
+          ]),
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Sparkline(values: history, times: times, color: color),
+      ],
     );
   }
 }
@@ -960,10 +985,6 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final List<TrafficRankRow> groups = widget.connection.trafficRankGroups(
-      _day,
-    );
-    final List<TrafficRankRow> hosts = widget.connection.trafficRankHosts(_day);
 
     return SectionCard(
       icon: Icons.leaderboard_outlined,
@@ -995,22 +1016,25 @@ class _TrafficRankCardState extends State<_TrafficRankCard> {
             ),
           ),
           const SizedBox(height: 12),
-          _Pair(
-            left: _RankList(
-              title: L10n.t('策略组'),
-              icon: NodeLabels.groupIcon(selectable: true),
-              rows: groups,
-              color: theme.colorScheme.primary,
-            ),
-            right: _RankList(
-              title: L10n.t('域名/IP'),
-              icon: Icons.language,
-              rows: hosts,
-              color: theme.colorScheme.primary,
-            ),
-            stackedSeparator: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Divider(height: 1),
+          ShellListenableBuilder(
+            listenable: widget.connection.statsUpdates,
+            builder: (BuildContext context, _) => _Pair(
+              left: _RankList(
+                title: L10n.t('策略组'),
+                icon: NodeLabels.groupIcon(selectable: true),
+                rows: widget.connection.trafficRankGroups(_day),
+                color: theme.colorScheme.primary,
+              ),
+              right: _RankList(
+                title: L10n.t('域名/IP'),
+                icon: Icons.language,
+                rows: widget.connection.trafficRankHosts(_day),
+                color: theme.colorScheme.primary,
+              ),
+              stackedSeparator: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Divider(height: 1),
+              ),
             ),
           ),
         ],
@@ -1133,13 +1157,27 @@ class _KernelCard extends StatelessWidget {
   final ConnectionController connection;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => SectionCard(
+    icon: Icons.developer_board,
+    title: L10n.t('内核状态'),
+    child: ShellListenableBuilder(
+      listenable: connection.statsUpdates,
+      builder: (BuildContext context, _) => LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) => _Grid(
+          columns: constraints.maxWidth < 460 ? 2 : 3,
+          children: _metrics(),
+        ),
+      ),
+    ),
+  );
+
+  List<Widget> _metrics() {
     final KernelStats stats = connection.stats;
     final bool live = connection.state == ConnectionPhase.connected;
 
     // 内核只统计活跃连接，入站与出站是同一条连接的两端，两个数值天然相等，
     // 所以这里给的是「活跃」与客户端按快照差分留下的「已关闭」
-    final List<Widget> metrics = <Widget>[
+    return <Widget>[
       MetricTile(
         icon: Icons.memory,
         label: L10n.t('内存占用'),
@@ -1157,17 +1195,6 @@ class _KernelCard extends StatelessWidget {
         value: live ? '${connection.closedConnections.length}' : '—',
       ),
     ];
-
-    return SectionCard(
-      icon: Icons.developer_board,
-      title: L10n.t('内核状态'),
-      child: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints constraints) => _Grid(
-          columns: constraints.maxWidth < 460 ? 2 : 3,
-          children: metrics,
-        ),
-      ),
-    );
   }
 }
 
@@ -1215,7 +1242,7 @@ class _PreflightCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 1.5),
                 child: Text(
-                  '· $problem',
+                  '· ${L10n.message(problem)}',
                   style: Theme.of(context).textTheme.bodyMedium
                       ?.copyWith(color: scheme.onErrorContainer),
                 ),

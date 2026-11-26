@@ -171,6 +171,64 @@ struct OfflinePanelTests {
         }
     }
 
+    // 凭离线授权连上的隧道按离线到期时间写进租约；面板恢复后会话到期时间变了，运行中的租约要跟着重写
+    @Test func panelRecoveryRewritesRunningLeaseExpiry() async {
+        await withCache { cache in
+            seed(cache, until: 4_000_000_000)
+            let transport = Script([Offline.unreachable(.cannotConnectToHost), Offline.ok(Offline.status), Offline.ok(Offline.profile())])
+            let driver = RecordingTunnelDriver(); driver.updatesNodes = true
+            let value = session(transport, cache: cache, connection: ConnectionController(driver: driver))
+            await value.restore()
+            await value.connect()
+            driver.statusChanged?(.connected)
+            #expect(driver.starts.first?.expiresAt == Date(timeIntervalSince1970: 4_000_000_000) && driver.nodeUpdates.isEmpty)
+            while await transport.count() < 3 || value.busy { await Task.yield() }
+            #expect(!value.panelOffline && driver.nodeUpdates.last?.expiresAt == Offline.stored.expiresAt && value.connection?.state == .connected)
+            value.connection?.disconnect()
+        }
+    }
+
+    // 面板不可达时资料来自缓存：在线计数与自动超限通知早已过时，名额由节点实时判定，不拦离线启动（主动下线仍拦，见上一用例）
+    @Test(arguments: [nil, "limit", "limit_denied"] as [String?])
+    func cachedSlotStateDoesNotBlockOfflineStart(kick: String?) async {
+        await withCache { cache in
+            let api = PanelAPI(device: Offline.device, transport: Script([]))
+            let full = Offline.profile(kick: kick).replacingOccurrences(of: #""online_client_count":1"#, with: #""online_client_count":3,"online_client_self":false,"device_kick_notice":\#(kick != nil)"#)
+            cache.saveProfile(Offline.envelope(full), account: "member@example.test")
+            cache.saveConfig(Offline.envelope(Offline.catalog(until: 4_000_000_000)), account: "member@example.test", binding: api.cacheBinding(Offline.endpoints, token: "synthetic-token"),
+                             sealKey: api.cacheKey(token: "synthetic-token"), updateIntervalHours: nil)
+            let driver = PortDriver()
+            let value = session(Script([Offline.unreachable(.cannotConnectToHost)]), cache: cache, connection: ConnectionController(driver: driver))
+            await value.restore()
+            #expect(value.panelOffline && value.profile?.onlineClientCount == 3)
+            await value.connect()
+            #expect(driver.started)
+            value.connection?.disconnect()
+        }
+    }
+
+    // 离线授权到期或剩余不足一小时：面板恢复后 revision 未变也重拉完整配置（docs/server-api.md「配置戳变化或离线授权剩余不足一小时」）
+    @Test(arguments: [1_499_999_500, 1_500_001_800])
+    func panelRecoveryRefetchesExpiringOfflineAuthorization(until: Int) async {
+        await withCache { cache in
+            let api = PanelAPI(device: Offline.device, transport: Script([]))
+            func catalog(_ valid: Int) -> String { Offline.catalog(until: valid).replacingOccurrences(of: #""issued_at":1400000000"#, with: #""issued_at":1499999000"#) }
+            cache.saveProfile(Offline.envelope(Offline.profile()), account: "member@example.test")
+            cache.saveConfig(Offline.envelope(catalog(until)), account: "member@example.test", binding: api.cacheBinding(Offline.endpoints, token: "synthetic-token"),
+                             sealKey: api.cacheKey(token: "synthetic-token"), updateIntervalHours: nil)
+            let transport = Script([Offline.unreachable(.cannotConnectToHost), Offline.ok(Offline.status), Offline.ok(Offline.profile()), Offline.ok(catalog(4_000_000_000))])
+            let driver = PortDriver()
+            let value = session(transport, cache: cache, connection: ConnectionController(driver: driver))
+            await value.restore()
+            #expect(value.catalog != nil)
+            await value.refresh()
+            #expect(await transport.count() == 4 && value.nodesError == nil)
+            await value.connect()
+            #expect(driver.started)
+            value.connection?.disconnect()
+        }
+    }
+
     @Test func expiredOfflineWindowCannotStartKernelAndSaysWhy() async {
         await withCache { cache in
             seed(cache, until: 4_000_000_000)
@@ -355,7 +413,7 @@ struct OfflinePanelTests {
     }
 
     @Test func runtimeConfigurationShowsNodeAndGroupLabels() throws {
-        let catalog: NodeCatalog = try PanelAPI.decode(Offline.envelope(#"""
+        let catalog = try NodeCatalog(response: Offline.envelope(#"""
         {"revision":"r","config":{"proxies":[{"name":"node-12","type":"ss"}],"proxy-groups":[{"name":"main","type":"select","proxies":["node-12"]}]},
          "node_labels":{"node-12":"德国 \"A1\""},"group_labels":{"main":"主节点"}}
         """#))
@@ -363,9 +421,20 @@ struct OfflinePanelTests {
         #expect(text == #"{"proxies":["德国 \"A1\"",""],"rules":["MATCH,主节点"],"note":" via","host":"main.example"}"#)
     }
 
+    // 一个标识的显示名恰好是另一个标识时，逐个标识各扫一遍会把刚换上的显示名再换一次
+    @Test func runtimeConfigurationReplacesEachIdentifierOnce() throws {
+        let catalog = try NodeCatalog(response: Offline.envelope(#"""
+        {"revision":"r","config":{"proxies":[{"name":"node-12","type":"ss"},{"name":"模板节点","type":"ss"}],
+         "proxy-groups":[{"name":"alpha","type":"select","proxies":["node-12"]},{"name":"beta","type":"select","proxies":["alpha"]}]},
+         "node_labels":{"node-12":"beta","模板节点":"alpha"},"group_labels":{"alpha":"beta","beta":"gamma"}}
+        """#))
+        let text = catalog.annotateRuntimeConfiguration(#"{"proxies":["node-12","模板节点"],"proxy-groups":["alpha","beta"],"rules":["MATCH,alpha","DOMAIN,alpha.test,beta,no-resolve","alpha,x"]}"#)
+        #expect(text == #"{"proxies":["beta","alpha"],"proxy-groups":["beta","gamma"],"rules":["MATCH,beta","DOMAIN,alpha.test,gamma,no-resolve","alpha,x"]}"#)
+    }
+
     // 对应 assets_test.dart 的日志用例：完整标识才换，保留名字自带的国旗，名字为 node-数字 或空时换成空，空键不参与
     @Test func logsShowNodeAndGroupLabelsLikeFlutter() throws {
-        let catalog: NodeCatalog = try PanelAPI.decode(Offline.envelope(#"""
+        let catalog = try NodeCatalog(response: Offline.envelope(#"""
         {"revision":"r","config":{"proxies":[{"name":"node-120","type":"ss"},{"name":"node-12","type":"ss"},{"name":"node-9","type":"ss"},
          {"name":"node-5","type":"ss"},{"name":"node-6","type":"ss"}],
          "proxy-groups":[{"name":"主节点","type":"select","proxies":["node-120"]},{"name":"Google服务","type":"select","proxies":["主节点"]}]},
@@ -385,7 +454,7 @@ struct OfflinePanelTests {
 
     // 空标签键在每个边界都能匹配，运行配置里的空串与逗号会被改写成标签
     @Test func emptyLabelKeysDoNotRewriteRuntimeConfiguration() throws {
-        let catalog: NodeCatalog = try PanelAPI.decode(Offline.envelope(#"""
+        let catalog = try NodeCatalog(response: Offline.envelope(#"""
         {"revision":"r","config":{"proxies":[{"name":"node-12","type":"ss"}],"proxy-groups":[{"name":"main","type":"select","proxies":["node-12"]}]},
          "node_labels":{"node-12":"德国","":"空键节点"},"group_labels":{"":"空键分组"}}
         """#))

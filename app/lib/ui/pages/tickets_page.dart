@@ -662,6 +662,7 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
   final TextEditingController _content = TextEditingController();
   final List<_TicketAttachment> _attachments = <_TicketAttachment>[];
   bool _uploading = false;
+  bool _attachLog = false;
 
   @override
   void dispose() {
@@ -711,12 +712,11 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
     }
   }
 
-  Future<void> _uploadRuntimeLog() async {
+  Future<String?> _latestRuntimeLog() async {
     await Logger.instance.flush();
     final Directory dir = AppPaths.logs;
     if (!dir.existsSync()) {
-      _toast(L10n.t('暂无运行日志'));
-      return;
+      return null;
     }
     final List<File> logs = dir
         .listSync()
@@ -726,18 +726,17 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
         )
         .toList();
     if (logs.isEmpty) {
-      _toast(L10n.t('暂无运行日志'));
-      return;
+      return null;
     }
     logs.sort(
       (File a, File b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()),
     );
-    await _uploadPaths(<String>[logs.first.path]);
+    return logs.first.path;
   }
 
-  Future<void> _uploadPaths(List<String> paths) async {
+  Future<bool> _uploadPaths(List<String> paths) async {
     if (paths.isEmpty) {
-      return;
+      return true;
     }
     setState(() => _uploading = true);
     try {
@@ -745,7 +744,7 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
         final TicketUploadResult uploaded = await widget.api
             .uploadTicketAttachment(path);
         if (!mounted) {
-          return;
+          return false;
         }
         setState(() {
           _attachments.add(
@@ -759,8 +758,10 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
           );
         });
       }
+      return true;
     } on ApiException catch (e) {
       _toast(e.message);
+      return false;
     } finally {
       if (mounted) {
         setState(() => _uploading = false);
@@ -790,10 +791,25 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
 
   Future<void> _submit() async {
     final String title = _title.text.trim();
-    final String html = _buildHtml();
     if (widget.requireTitle && title.isEmpty) {
       return;
     }
+    if (_attachLog) {
+      final String? log = await _latestRuntimeLog();
+      if (!mounted) {
+        return;
+      }
+      if (log == null) {
+        setState(() => _attachLog = false);
+        _toast(L10n.t('暂无运行日志'));
+        return;
+      }
+      if (!await _uploadPaths(<String>[log]) || !mounted) {
+        return;
+      }
+      setState(() => _attachLog = false);
+    }
+    final String html = _buildHtml();
     if (html.trim().isEmpty) {
       return;
     }
@@ -853,6 +869,13 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             if (widget.requireTitle) ...<Widget>[
+              Text(
+                L10n.t(
+                  '请把问题表达清楚：出现时间、设备与客户端版本、节点名称、具体现象和已尝试的操作，最好附上截图或运行日志。信息过少（例如“用不了”“连不上”）可能会被忽略。',
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
               AppTextField(
                 controller: _title,
                 decoration: InputDecoration(labelText: L10n.t('标题')),
@@ -864,28 +887,36 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
               labelText: L10n.t('内容'),
             ),
             const SizedBox(height: 10),
+            Text(
+              L10n.t('如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 TextButton.icon(
-                  onPressed: _uploading
-                      ? null
-                      : () => _pickMedia(video: false),
+                  onPressed: _uploading ? null : () => _pickMedia(video: false),
                   icon: const Icon(Icons.image_outlined, size: 16),
                   label: Text(L10n.t('图片')),
                 ),
                 TextButton.icon(
-                  onPressed: _uploading
-                      ? null
-                      : () => _pickMedia(video: true),
+                  onPressed: _uploading ? null : () => _pickMedia(video: true),
                   icon: const Icon(Icons.videocam_outlined, size: 16),
                   label: Text(L10n.t('视频')),
                 ),
                 TextButton.icon(
-                  onPressed: _uploading ? null : _uploadRuntimeLog,
-                  icon: const Icon(Icons.bug_report_outlined, size: 16),
+                  onPressed: _uploading
+                      ? null
+                      : () => setState(() => _attachLog = !_attachLog),
+                  icon: Icon(
+                    _attachLog
+                        ? Icons.check_circle_outline
+                        : Icons.bug_report_outlined,
+                    size: 16,
+                  ),
                   label: Text(L10n.t('运行日志')),
                 ),
                 if (_uploading)

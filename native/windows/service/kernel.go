@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -595,6 +596,9 @@ func (k *kernelManager) start(config string) error {
 
 	cmd := exec.Command(kernelPath(), "-d", runDir(), "-f", configPath())
 	cmd.Dir = runDir()
+	// 内核在系统没有全局单播 IPv6 时会清空 tun.inet6-address（config/utils.go 的 verifyIP6），
+	// 严格路由随即在 WFP 封掉全部 IPv6，连 ::1 都不通；只有 IPv4 的网络很常见，跳过这项检查
+	cmd.Env = append(os.Environ(), "SKIP_SYSTEM_IPV6_CHECK=true")
 	cmd.SysProcAttr = &windows.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: windows.CREATE_NEW_CONSOLE,
@@ -744,18 +748,18 @@ func (k *kernelManager) status(cursor int) kernelStatus {
 	return status
 }
 
-func (k *kernelManager) check(config string) error {
+func (k *kernelManager) check(config string) (string, error) {
 	config, err := sanitizeKernelConfig(config)
 	if err != nil {
-		return err
+		return err.Error(), nil
 	}
 	if err := prepareRunDir(); err != nil {
-		return err
+		return "", err
 	}
 
 	path := filepath.Join(runDir(), "config.check.json")
 	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
-		return fmt.Errorf("写入待校验配置失败: %w", err)
+		return "", fmt.Errorf("写入待校验配置失败: %w", err)
 	}
 	defer os.Remove(path)
 
@@ -766,13 +770,23 @@ func (k *kernelManager) check(config string) error {
 	cmd.SysProcAttr = &windows.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 
 	out, err := cmd.CombinedOutput()
+	return kernelCheckResult(ctx, out, err)
+}
+
+// 只有内核自己跑完并报出错误才算配置不合法；超时、被结束、起不来必须走 error（GUI 把 valid=false 当成配置不合法、不再重试）。
+// Windows 上被其它程序结束的进程只剩退出码，只能靠有无错误行区分
+func kernelCheckResult(ctx context.Context, out []byte, err error) (string, error) {
 	if err == nil {
-		return nil
+		return "", nil
 	}
-	if message := kernelCheckFailure(string(out)); message != "" {
-		return fmt.Errorf("%s", message)
+	var exit *exec.ExitError
+	if reason := kernelCheckFailure(string(out)); reason != "" && ctx.Err() == nil && errors.As(err, &exit) {
+		return reason, nil
 	}
-	return err
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return "", fmt.Errorf("配置校验未能完成: %w", err)
 }
 
 // mihomo 校验失败时真正原因在最后一条 level=error，末行只是 “test failed”
@@ -784,10 +798,7 @@ func kernelCheckFailure(out string) string {
 			reason = message
 		}
 	}
-	if reason != "" {
-		return reason
-	}
-	return strings.TrimSpace(out)
+	return reason
 }
 
 func (k *kernelManager) kernelVersion() string {

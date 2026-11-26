@@ -47,6 +47,15 @@ class AndroidPlatformService implements PlatformService {
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
 
   @override
+  bool get tunSetsSystemDns => false;
+
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+
+  @override
+  bool get lanNamesViaSystemDns => true;
+
+  @override
   Future<void> initialize() async {
     _isTelevision =
         await _channel.invokeMethod<bool>('device.television') ?? false;
@@ -67,6 +76,9 @@ class AndroidPlatformService implements PlatformService {
     server: '',
     snapshotPresent: false,
   );
+
+  @override
+  Future<bool?> tunRoutesIntact({required int? tableIndex}) async => null;
 
   @override
   Future<bool> launchAtLoginEnabled() async =>
@@ -119,11 +131,21 @@ class AndroidPlatformService implements PlatformService {
   );
 
   @override
-  Future<bool> runInstaller(String path) async =>
-      await _channel.invokeMethod<bool>('installer.run', <String, dynamic>{
-        'path': path,
-      }) ??
-      false;
+  Future<bool> runInstaller(String path) async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'installer.run',
+            <String, dynamic>{'path': path},
+          ) ??
+          false;
+    } on PlatformException catch (e) {
+      // 与 PlatformBridge.kt 的 INSTALL_PERMISSION_REQUIRED 一致
+      if (e.message == 'install_permission_required') {
+        throw InstallPermissionRequired();
+      }
+      rethrow;
+    }
+  }
 
   @override
   Future<bool> openUrl(String url) async {
@@ -174,6 +196,9 @@ class AndroidPlatformService implements PlatformService {
       throw PlatformServiceException(e.message ?? '无法读取凭据');
     }
   }
+
+  @override
+  Future<bool> secretStoreAvailable() async => true;
 
   @override
   Future<void> deleteSecret(String name) async {

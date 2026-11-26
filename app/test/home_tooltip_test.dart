@@ -387,6 +387,130 @@ void main() {
       );
     }
   }
+
+  Future<_PagedConnection> showPagedNodes(
+    WidgetTester tester,
+    Size size,
+  ) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = _Auth();
+    final connection = _PagedConnection();
+    final announcements = AnnouncementController();
+    addTearDown(auth.dispose);
+    addTearDown(connection.dispose);
+    addTearDown(announcements.dispose);
+    await tester.pumpWidget(
+      AppScope(
+        auth: auth,
+        connection: connection,
+        announcements: announcements,
+        update: _Update(),
+        platform: _Platform(),
+        settingsStore: _Settings(),
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: NodesPage()),
+        ),
+      ),
+    );
+    await tester.pump();
+    return connection;
+  }
+
+  // 修复前：取到一页后列表变长，为算滚动条会把新增的行连同末尾那一行预先量一遍，
+  // 以「构建到末尾一行」为准就会不等滚动一页接一页取到底
+  // 与 OpenWrt 首页同一阈值：令牌剩余 7 天以内才在连接卡片下方提示
+  testWidgets('登录令牌 7 天内到期时首页提示到期时间，更晚到期不提示', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Auth auth = _Auth();
+    final _Connection connection = _Connection();
+    final AnnouncementController announcements = AnnouncementController();
+    addTearDown(auth.dispose);
+    addTearDown(connection.dispose);
+    addTearDown(announcements.dispose);
+    Future<void> pumpHome(DateTime? expiresAt) async {
+      auth.sessionExpiresAt = expiresAt;
+      await tester.pumpWidget(
+        AppScope(
+          auth: auth,
+          connection: connection,
+          announcements: announcements,
+          update: _Update(),
+          platform: _Platform(),
+          settingsStore: _Settings(),
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const Scaffold(body: HomePage()),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    final DateTime soon = DateTime.now().add(const Duration(days: 2));
+    await pumpHome(soon.toUtc());
+    final String local = soon.toLocal().toIso8601String();
+    expect(
+      find.text(
+        '登录将于 ${local.substring(0, 10)} ${local.substring(11, 19)} 到期，到期后连接会断开，请在此之前退出并重新登录。',
+      ),
+      findsOneWidget,
+    );
+
+    await pumpHome(DateTime.now().add(const Duration(days: 30)));
+    expect(find.textContaining('到期，到期后连接会断开'), findsNothing);
+    await pumpHome(null);
+    expect(find.textContaining('到期，到期后连接会断开'), findsNothing);
+  });
+
+  testWidgets('节点页只在滚到分组末尾时向面板取下一页', (WidgetTester tester) async {
+    final _PagedConnection connection = await showPagedNodes(
+      tester,
+      const Size(390, 844),
+    );
+    await tester.tap(find.text('主节点'));
+    for (int frame = 0; frame < 200; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(connection.loads, isEmpty);
+
+    final ScrollPosition position = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    for (int step = 0; step < 40 && connection.loads.isEmpty; step++) {
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(connection.loads, <String>['']);
+    for (int frame = 0; frame < 800; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(connection.loads, <String>['']);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('分组还有未列出的成员时，停止输入 400 毫秒后才向面板搜索', (WidgetTester tester) async {
+    final _PagedConnection connection = await showPagedNodes(
+      tester,
+      const Size(1100, 800),
+    );
+    await tester.tap(find.byTooltip('搜索节点名称'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'Ab');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.enterText(find.byType(TextField), 'Abc ');
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(connection.loads, isEmpty);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(connection.loads, <String>['abc']);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 class _Auth extends ChangeNotifier implements AuthController {
@@ -395,12 +519,16 @@ class _Auth extends ChangeNotifier implements AuthController {
   @override
   UserProfile? profile;
   @override
+  DateTime? sessionExpiresAt;
+  @override
   Future<void> refreshProfile() async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _Connection extends ChangeNotifier implements ConnectionController {
+  @override
+  Listenable get statsUpdates => this;
   @override
   List<String> get preflightProblems => <String>[];
   @override
@@ -462,9 +590,50 @@ class _NodeConnection extends _Connection {
         #delayOf || #speedOf => 0,
         #resolveNode => invocation.positionalArguments.first,
         #typeOf || #networkOf || #tlsOf || #udpOf => '',
-        #groupByName || #groupIconOf => null,
+        #groupByName || #groupIconOf || #nodesErrorOf => null,
+        #loadingNodes || #hasMoreNodes || #nodeMatched => false,
+        #memberTotalOf =>
+          (invocation.positionalArguments.first as ProxyGroup).members.length,
         _ => super.noSuchMethod(invocation),
       };
+}
+
+class _PagedConnection extends _NodeConnection {
+  final List<String> loads = <String>[];
+  int listed = 300;
+  @override
+  List<ProxyGroup> get groupsForMode => <ProxyGroup>[
+    ProxyGroup(
+      name: '主节点',
+      type: 'Selector',
+      now: 'node-1',
+      members: <String>[for (int id = 1; id <= listed; id++) 'node-$id'],
+    ),
+  ];
+  @override
+  int memberTotalOf(ProxyGroup group) => 5000;
+  @override
+  bool hasMoreNodes(String group, {String query = ''}) => true;
+  bool fetching = false;
+  @override
+  bool loadingNodes(String group) => fetching;
+  // 与控制器一致：一页没取完不再发下一次
+  @override
+  Future<void> loadMoreNodes(String group, {String query = ''}) async {
+    if (fetching) {
+      return;
+    }
+    loads.add(query);
+    if (query.isNotEmpty) {
+      return;
+    }
+    fetching = true;
+    notifyListeners();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    listed += 100;
+    fetching = false;
+    notifyListeners();
+  }
 }
 
 class _Platform implements PlatformService {

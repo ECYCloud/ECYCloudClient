@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -35,7 +36,7 @@ class SettingsPage extends StatelessWidget {
     final AppScope scope = AppScope.of(context);
     final ConnectionController connection = scope.connection;
 
-    return ListenableBuilder(
+    return ShellListenableBuilder(
       listenable: connection,
       builder: (BuildContext context, _) {
         final ThemeData theme = Theme.of(context);
@@ -84,7 +85,7 @@ class SettingsPage extends StatelessWidget {
                       SwitchTile(
                         title: L10n.t('严格路由'),
                         subtitle: L10n.t(
-                          '阻断绕过 TUN 的 DNS 查询防泄露，代价是打断本机回环通信，游戏与虚拟机可能不可用',
+                          '阻断绕过 TUN 的 DNS 查询防泄露，代价是直接查询局域网 DNS 的程序（如借宿主机网络上网的虚拟机）可能无法解析域名',
                         ),
                         value: settings.tunStrictRoute,
                         onChanged: settings.tunEnabled
@@ -405,7 +406,9 @@ class _AppUpdateTile extends StatelessWidget {
       context,
       title: L10n.t('更新客户端到 {0}', <Object>[version]),
       detail: L10n.t(
-        '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。',
+        Platform.isAndroid
+            ? '将从 GitHub 下载安装包并校验 SHA-256，随后打开系统安装程序；首次更新需按提示允许本应用安装未知应用。安装时客户端会退出，期间连接会断开。'
+            : '将从 GitHub 下载安装包并校验 SHA-256，随后启动安装程序并弹出管理员授权。客户端会自行退出让安装程序替换文件，期间连接会断开。',
       ),
       action: L10n.t('下载并安装'),
     );

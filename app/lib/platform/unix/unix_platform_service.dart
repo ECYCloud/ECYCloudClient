@@ -57,6 +57,18 @@ abstract class UnixPlatformService implements PlatformService {
   String get tunInterfaceName => LocalTemplateOptions.defaultTunInterfaceName;
 
   @override
+  bool get tunSetsSystemDns => false;
+
+  @override
+  bool get strictRouteNeedsTunIPv6 => false;
+
+  @override
+  bool get lanNamesViaSystemDns => false;
+
+  @override
+  Future<bool?> tunRoutesIntact({required int? tableIndex}) async => null;
+
+  @override
   Future<void> initialize() async {
     await channel.invokeMethod<void>('tray.install');
 
@@ -66,12 +78,22 @@ abstract class UnixPlatformService implements PlatformService {
 
   Future<void> leftoverProxyRestore = Future<void>.value();
 
+  /// 按快照还原上次残留的系统代理，没有还原（代理已被别的程序改走）时返回 false
+  Future<bool> restoreLeftoverProxy() async {
+    await restoreSystemProxy();
+    return true;
+  }
+
   Future<void> _restoreLeftoverProxy() async {
     try {
       final SystemProxyState state = await systemProxyState();
       if (state.snapshotPresent) {
-        Logger.instance.warn(source, '检测到上次未还原的系统代理，已自动还原');
-        await restoreSystemProxy();
+        Logger.instance.warn(
+          source,
+          await restoreLeftoverProxy()
+              ? '检测到上次未还原的系统代理，已自动还原'
+              : '检测到上次未还原的系统代理快照，代理已被其它程序修改，保留现有设置',
+        );
       }
     } on Object catch (e) {
       Logger.instance.warn(source, '检查上次未还原的系统代理失败: $e');
@@ -163,6 +185,9 @@ abstract class UnixPlatformService implements PlatformService {
       throw PlatformServiceException(e.message ?? '无法清除凭据');
     }
   }
+
+  @override
+  Future<bool> secretStoreAvailable() async => true;
 
   Future<String> _secretInvoke(String method, String name, String value) async {
     try {

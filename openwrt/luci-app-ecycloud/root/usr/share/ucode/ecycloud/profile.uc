@@ -2,12 +2,15 @@
 
 import { access, lstat, popen, readfile, realpath, stat, unlink } from 'fs';
 
-import { PROFILE_FILE, STATE_DIR, ROUTING_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX, appendNets, creds, ensureDir, lanDevices, mihomoBin, randomHex, readJson, settings, sessionBinding, timestamp,
+import { CONF_DIR, PROFILE_FILE, STATE_DIR, ROUTING_MARK, TUN_ROUTE_TABLE, TUN_RULE_INDEX, appendNets, creds, ensureDir, lanDevices, mihomoBin, randomHex, readJson, settings, sessionBinding, timestamp,
 		 ensurePrivateDir, instances, shellquote, writeAtomic, writePrivateJson } from 'ecycloud.common';
 
 export const SPEED_GROUP = 'ecy-speed';
 export const NODE_PROVIDER = 'ecy-panel-nodes';
 export const PENDING_FILE = `${STATE_DIR}/profile-pending.json`;
+/* 节点很多时面板配置缓存只留在用的节点；整份节点目录另存，只在装入节点时由后台进程读取（1 万个节点解析一次约占 70 MiB） */
+export const CATALOG_FILE = `${CONF_DIR}/catalog.json`;
+export const CATALOG_INDEX = `${CONF_DIR}/catalog-index.json`;
 
 export function nodeProviderNames(config) {
 	return filter(keys(config?.['proxy-providers'] ?? {}), name => index(name, 'ecy-panel-') == 0);
@@ -33,7 +36,11 @@ export function kernelConfig(config) {
 
 export function writeKernel(runDir, config) {
 	const path = `${runDir}/kernel.json`;
-	const text = sprintf('%J', kernelConfig(config));
+	const kernel = { ...kernelConfig(config) };
+	/* procd 重启内核只读这份文件：TUN 只能由看门狗核对授权与规则集后经控制面打开 */
+	if (type(kernel.tun) == 'object')
+		kernel.tun = { ...kernel.tun, enable: false };
+	const text = sprintf('%J', kernel);
 	if (readfile(path) != text && !writeAtomic(path, text))
 		return { ok: false, error: `无法写入 ${path}` };
 	return { ok: true };
@@ -64,16 +71,239 @@ export function membersOf(config, group) {
 		return { exact, nodeFilter, re };
 	});
 	const fixed = filter(map(patterns, pattern => pattern.exact), name => name != null);
+	const placed = {};
+	const place = member => {
+		placed[member] = true;
+		push(ordered, member);
+	};
 	for (let pattern in patterns) {
 		for (let member in members)
-			if (!(member in ordered) && (pattern.exact != null ? member == pattern.exact :
+			if (!placed[member] && (pattern.exact != null ? member == pattern.exact :
 			    pattern.nodeFilter ? !(member in fixed) : pattern.re != null && match(member, pattern.re)))
-				push(ordered, member);
+				place(member);
 	}
 	for (let member in members)
-		if (!(member in ordered))
-			push(ordered, member);
+		if (!placed[member])
+			place(member);
 	return ordered;
+};
+
+/* 内核每个节点副本常驻约 11 KiB，整份热载时新旧两份并存：256 MB 的路由器按每 128 KiB 装一个（1866 个副本）时，
+   热载中内核涨到 154 MB 被系统按内存不足杀掉。按每 192 KiB 装一个，至多与客户端同为 5000 */
+export function copyBudget() {
+	const total = +(match(readfile('/proc/meminfo') ?? '', /MemTotal:\s+(\d+)/)?.[1] ?? 0);
+	return total > 0 ? min(5000, int(total / 192)) : 5000;
+};
+
+/* 节点页一次列出全部已装入节点，ubus 单次应答上限 1 MiB：每个节点约 190 字节，分组每引用一次约 20 字节 */
+const REPLY_BUDGET = 700000;
+
+/* 分组的初始选中项，以及规则直接指向的节点（面板为每个这样的节点建一个 ecy-panel-target- 分组，filter 是 ^节点名$ 的转义形式）：
+   不装入的话前者落到别的成员上，后者整组清空 */
+function requiredNodes(config) {
+	const names = [];
+	for (let group in (config['proxy-groups'] ?? [])) {
+		if (type(group?.['default-selected']) == 'string')
+			push(names, group['default-selected']);
+		const pattern = group?.filter;
+		if (index(`${group?.name}`, 'ecy-panel-target-') == 0 && type(pattern) == 'string' && length(pattern) > 2 &&
+		    substr(pattern, 0, 1) == '^' && substr(pattern, -1) == '$')
+			push(names, replace(substr(pattern, 1, length(pattern) - 2), /\\(.)/g, '$1'));
+	}
+	return names;
+};
+
+/* 返回要装入内核的节点名；没超过上限时返回 null，表示全部装入（选取规则与 node_working_set.dart 相同） */
+export function workingSet(config, pinned, budget) {
+	const providers = config?.['proxy-providers'];
+	if (type(providers?.[NODE_PROVIDER]) != 'object')
+		return null;
+	const shown = {};
+	for (let group in (config['proxy-groups'] ?? []))
+		if (group?.hidden != true)
+			for (let name in (group?.use ?? []))
+				shown[name] = (shown[name] ?? 0) + 1;
+	const lists = [];
+	const copies = {};
+	const bytes = {};
+	let total = 0;
+	let size = 0;
+	for (let name in nodeProviderNames(config)) {
+		const list = [];
+		const spec = providers[name];
+		for (let node in (type(spec?.members) == 'array' ? spec.members : type(spec?.payload) == 'array' ? spec.payload : [])) {
+			const member = type(node) == 'object' ? node.name : node;
+			if (type(member) != 'string' || member == 'ecy-panel-empty')
+				continue;
+			push(list, member);
+			const refs = 20 * (shown[name] ?? 0);
+			copies[member] = (copies[member] ?? 0) + 1;
+			bytes[member] = (bytes[member] ?? 190) + refs;
+			size += refs + (copies[member] == 1 ? 190 : 0);
+			total++;
+		}
+		push(lists, list);
+	}
+	budget ??= copyBudget();
+	if (total <= budget && size <= REPLY_BUDGET)
+		return null;
+
+	const loaded = {};
+	let used = 0;
+	let reply = 0;
+	const add = name => {
+		if (copies[name] == null || loaded[name])
+			return;
+		loaded[name] = true;
+		used += copies[name];
+		reply += bytes[name];
+	};
+	const full = () => used >= budget || reply >= REPLY_BUDGET;
+	for (let name in pinned)
+		add(name);
+	for (let name in requiredNodes(config))
+		add(name);
+	/* 每个有成员的节点文件至少留一个：分组清空会回落成 REJECT，命中该组的流量全被拒 */
+	for (let list in lists) {
+		let kept = !length(list);
+		for (let name in list) {
+			if (loaded[name]) {
+				kept = true;
+				break;
+			}
+		}
+		if (!kept)
+			add(list[0]);
+	}
+	for (let i = 0; !full(); i++) {
+		let progressed = false;
+		for (let list in lists) {
+			if (i >= length(list))
+				continue;
+			progressed = true;
+			add(list[i]);
+			if (full())
+				break;
+		}
+		if (!progressed)
+			break;
+	}
+	return loaded;
+};
+
+/* remote 是面板下发的成员名单格式（未还原）；saved 为 null 表示这次全部装入，不需要目录 */
+export function storeCatalog(remote, saved) {
+	if (saved == null) {
+		unlink(CATALOG_FILE);
+		unlink(CATALOG_INDEX);
+		return true;
+	}
+	const members = {};
+	for (let name in nodeProviderNames(remote.config)) {
+		const spec = remote.config['proxy-providers'][name];
+		members[name] = type(spec.members) == 'array' ? spec.members :
+			filter(map(spec.payload, node => node.name), member => member != 'ecy-panel-empty');
+	}
+	const owner = { account: lc(trim(creds().email ?? '')), revision: remote.revision ?? '' };
+	return writePrivateJson(CATALOG_FILE, { ...owner, config: remote.config }) &&
+		writePrivateJson(CATALOG_INDEX, { ...owner, members, labels: remote.node_labels ?? {} });
+};
+
+/* 目录与缓存不是同一版配置时不能用：按旧目录装入的节点对不上新分组 */
+export function catalog(saved, index) {
+	const data = readJson(index ? CATALOG_INDEX : CATALOG_FILE);
+	return type(saved?.partial) == 'object' && data?.account == saved.account && data.revision == saved.revision ? data : null;
+};
+
+/* 面板只下发了一部分节点时附带的节点目录（docs/server-api.md「节点目录」）：没带返回 null，格式不对返回 false */
+export function catalogOf(remote) {
+	const catalog = remote?.catalog;
+	if (catalog == null)
+		return null;
+	if (type(catalog) != 'object' || type(catalog.stamp) != 'string' || type(catalog.providers) != 'object' || type(catalog.ranks) != 'object')
+		return false;
+	for (let name, meta in catalog.providers)
+		if (type(meta?.key) != 'string' || type(meta.total) != 'int' || type(meta.head) != 'int')
+			return false;
+	for (let name, rank in catalog.ranks)
+		if (type(rank) != 'int')
+			return false;
+	return catalog;
+};
+
+/* 把 /config/nodes 取到的节点并入面板配置，成员名单与已还原的格式都适用（三端同一规则，见 docs/architecture.md「节点目录分页」）：
+   写进 ecy-panel-nodes 和 key 出现在节点 providers 里的每个节点订阅，位置按 rank 插在带序号的成员之间，不带序号的成员不动 */
+export function mergeNodes(remote, nodes) {
+	const catalog = remote.catalog;
+	const providers = remote.config['proxy-providers'];
+	if (type(remote.node_labels) != 'object')
+		remote.node_labels = {};
+	for (let node in nodes) {
+		if (type(node?.name) != 'string' || type(node.rank) != 'int' || node.proxy?.name != node.name ||
+		    type(node.providers) != 'array' || catalog.ranks[node.name] != null)
+			continue;
+		for (let name in nodeProviderNames(remote.config)) {
+			const spec = providers[name];
+			const listed = type(spec?.members) == 'array';
+			const list = listed ? spec.members : spec?.payload;
+			if (type(list) != 'array' || !((name == NODE_PROVIDER ? name : catalog.providers[name]?.key) in node.providers))
+				continue;
+			let at = -1;
+			let last = -1;
+			for (let i = 0; i < length(list) && at < 0; i++) {
+				const rank = catalog.ranks[listed ? list[i] : list[i]?.name];
+				if (rank == null)
+					continue;
+				if (rank > node.rank)
+					at = i;
+				else
+					last = i;
+			}
+			if (!listed && length(list) == 1 && list[0]?.name == 'ecy-panel-empty')
+				splice(list, 0, 1);
+			splice(list, at >= 0 ? at : last >= 0 ? last + 1 : length(list), 0, listed ? node.name : node.proxy);
+		}
+		catalog.ranks[node.name] = node.rank;
+		remote.node_labels[node.name] = `${node.label ?? node.name}`;
+	}
+};
+
+/* 本机又按上限裁掉了一部分节点（loaded 是留下的）：目录里的序号与各节点订阅已带的前缀长度跟着收缩。remote 是裁剪前的配置 */
+export function trimCatalog(remote, loaded) {
+	const catalog = remote.catalog;
+	const ranks = {};
+	for (let name in keys(loaded))
+		if (catalog.ranks[name] != null)
+			ranks[name] = catalog.ranks[name];
+	const providers = {};
+	for (let name, meta in catalog.providers) {
+		const spec = remote.config['proxy-providers']?.[name];
+		let head = 0;
+		for (let node in (type(spec?.members) == 'array' ? spec.members : spec?.payload ?? [])) {
+			const member = type(node) == 'object' ? node.name : node;
+			if (catalog.ranks[member] == null)
+				continue;
+			if (head >= meta.head || !loaded[member])
+				break;
+			head++;
+		}
+		providers[name] = { ...meta, head };
+	}
+	return { ...catalog, providers, ranks };
+};
+
+/* 分页模式下还有成员留在面板没取回来的节点订阅 */
+function incomplete(remote) {
+	const partial = {};
+	for (let name, meta in remote.catalog.providers) {
+		let known = 0;
+		for (let node in (remote.config?.['proxy-providers']?.[name]?.payload ?? []))
+			if (remote.catalog.ranks[node?.name] != null)
+				known++;
+		if (known < meta.total)
+			partial[name] = true;
+	}
+	return partial;
 };
 
 function nodeSignature(config) {
@@ -99,6 +329,7 @@ export function speedPort(mixedPort) {
 	return mixedPort < 65535 ? mixedPort + 1 : mixedPort - 1;
 };
 
+/* 与 network.uc 的 RESERVED4 / RESERVED6 是同一组网段，Flutter 与 Apple 的 TUN 排除列表按此顺序 */
 const EXCLUDED_ROUTES = [
 	'127.0.0.0/8',
 	'10.0.0.0/8',
@@ -106,7 +337,13 @@ const EXCLUDED_ROUTES = [
 	'192.168.0.0/16',
 	'169.254.0.0/16',
 	'224.0.0.0/4',
+	'0.0.0.0/8',
+	'100.64.0.0/10',
+	'192.0.0.0/24',
+	'192.88.99.0/24',
+	'240.0.0.0/4',
 	'::1/128',
+	'100::/64',
 	'fc00::/7',
 	'fe80::/10',
 	'ff00::/8'
@@ -120,7 +357,12 @@ export function authorized(saved, margin) {
 	const until = timestamp(saved?.offline_authorization?.valid_until);
 	const binding = sessionBinding();
 	return length(binding) > 0 && saved?.binding == binding && issued > 0 &&
-		issued <= time() + ISSUED_SKEW && until > issued && until > time() + +(margin ?? 0);
+		until > issued && until > time() + +(margin ?? 0);
+};
+
+/* 签发时间只在离线复用缓存时核对（另两端 usableOffline 同口径）：刚从面板取到的配置不因本机时钟偏慢被拒 */
+export function issuedReached(saved) {
+	return timestamp(saved?.offline_authorization?.issued_at) <= time() + ISSUED_SKEW;
 };
 
 /* 响应头 profile-update-interval：1～8760 的正整数小时，其余视为未下发 */
@@ -162,6 +404,8 @@ export function store(remote, pending) {
 		group_labels: remote.group_labels ?? {},
 		group_icons: type(remote.group_icons) == 'object' ? remote.group_icons : null,
 		flag_regex: type(remote.flag_regex) == 'string' ? remote.flag_regex : '',
+		partial: type(remote.catalog) == 'object' ? incomplete(remote) : type(remote.partial) == 'object' ? remote.partial : null,
+		catalog: type(remote.catalog) == 'object' ? remote.catalog : null,
 		fetched_at: time()
 	});
 	if (ok && !pending) {
@@ -746,7 +990,7 @@ export function setRunTun(runDir, enabled) {
 	if (type(config?.tun) != 'object')
 		return false;
 	config.tun.enable = enabled;
-	return writeAtomic(`${runDir}/config.json`, sprintf('%J', config)) && writeKernel(runDir, config).ok;
+	return writeAtomic(`${runDir}/config.json`, sprintf('%J', config));
 };
 
 export function geodataMissing(runDir) {
@@ -758,7 +1002,9 @@ export function validate(runDir) {
 	if (type(config) != 'object')
 		return { ok: false, error: '无法读取待校验配置' };
 
-	const path = `${runDir}/.validate-${randomHex(6)}.json`;
+	/* 副本带节点凭据，放 tmpfs：校验中途断电或进程被杀也不会留在闪存里 */
+	ensurePrivateDir(STATE_DIR);
+	const path = `${STATE_DIR}/validate-${randomHex(6)}.json`;
 	config.profile = { ...config.profile, 'store-fake-ip': false };
 	for (let name in nodeProviderNames(config))
 		config['proxy-providers'][name] = { ...config['proxy-providers'][name], type: 'inline' };
@@ -780,12 +1026,27 @@ export function validate(runDir) {
 	if (code == 0)
 		return { ok: true };
 
-	let reason = '';
-	for (let line in split(out, '\n'))
-		if (length(trim(line)))
+	/* 最后一行只是「test failed」，真实原因在它前面最后一条 level=error / fatal 日志的 msg 里 */
+	let reason = '', logged = '';
+	for (let line in split(out, '\n')) {
+		const m = match(line, /level=(error|fatal) msg=(.+)$/);
+		if (m)
+			logged = trim(m[2]);
+		else if (length(trim(line)))
 			reason = trim(line);
+	}
+	if (match(logged, /^".*"$/)) {
+		try {
+			logged = json(logged);
+		} catch (e) {
+			logged = substr(logged, 1, length(logged) - 2);
+		}
+	}
+	if (length(logged))
+		reason = logged;
 
-	return { ok: false, error: length(reason) ? reason : `mihomo -t 退出码 ${code}` };
+	/* 只有内核自己跑完并报出错误才是配置不合法；被信号结束（负值）、起不来（126 / 127）都只是这次没校验成 */
+	return { ok: false, transient: !length(logged) || code < 0 || code >= 126, error: length(reason) ? reason : `mihomo -t 退出码 ${code}` };
 };
 
 function maskCredentials(value) {

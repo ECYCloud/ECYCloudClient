@@ -68,7 +68,9 @@ export function readfile(path, limit) {
 export function realpath(path) { return testState.paths[path]; };
 export function stat(path) { return testState.info[path]; };
 export function lstat(path) {
-	return testState.info[path] ?? (exists(testState.files, path) ? { type: 'file', nlink: 1 } :
+	if (testState.links?.[path] != null)
+		return { type: 'link', nlink: 1 };
+	return testState.info[path] ?? (exists(testState.files, path) ? { type: 'file', nlink: 1, size: length(testState.files[path]) } :
 		path == testState.config.run_dir ? { type: 'directory' } : null);
 };
 export function mkdir() { return true; };
@@ -81,7 +83,18 @@ export function rename(from, to) {
 export function unlink(path) {
 	if (path == testState.failedUnlink)
 		return false;
-	delete testState.files[path];
+	if (testState.links?.[path] != null)
+		delete testState.links[path];
+	else
+		delete testState.files[path];
+	return true;
+};
+export function readlink(path) { return testState.links?.[path]; };
+export function symlink(target, path) {
+	if (lstat(path) != null)
+		return null;
+	testState.links ??= {};
+	testState.links[path] = target;
 	return true;
 };
 export function writefile(path, value) {

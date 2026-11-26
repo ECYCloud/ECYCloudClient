@@ -162,6 +162,8 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  DateTime? get sessionExpiresAt => _credentials.load()?.expiresAt;
+
   String? get accountKey {
     final String? fromProfile = _profile?.email;
     if (fromProfile != null && fromProfile.isNotEmpty) {
@@ -299,19 +301,28 @@ class AuthController extends ChangeNotifier {
     required String email,
   }) async {
     try {
-      final String blob = await _platform.protectSecret(_secretToken, token);
+      final String stored = await _protectSessionToken(token);
       if (generation != _sessionGeneration) {
         return;
       }
       _credentials.save(
-        Credentials(
-          token: '$_rememberedPrefix$blob',
-          expiresAt: expiresAt,
-          email: email,
-        ),
+        Credentials(token: stored, expiresAt: expiresAt, email: email),
       );
     } on Object catch (e) {
       Logger.instance.warn(_source, '会话凭据写入失败: $e');
+    }
+  }
+
+  // 无前缀即明文：没有系统密钥库时令牌留在仅本人可读的凭据文件里，密钥库可用后由 restore 迁回
+  Future<String> _protectSessionToken(String token) async {
+    try {
+      return '$_rememberedPrefix${await _platform.protectSecret(_secretToken, token)}';
+    } on Object {
+      if (await _platform.secretStoreAvailable()) {
+        rethrow;
+      }
+      Logger.instance.warn(_source, '系统没有可用的密钥库，登录令牌改存本机凭据文件');
+      return token;
     }
   }
 
@@ -871,6 +882,12 @@ class AuthController extends ChangeNotifier {
       return;
     }
     await refreshProfile();
+    if (identical(client, _api) &&
+        _stage == AuthStage.accountRestricted &&
+        _profile != null) {
+      _accountStatus = null;
+      _set(AuthStage.loggedIn);
+    }
   }
 
   Future<String> checkin() async {

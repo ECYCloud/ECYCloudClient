@@ -104,7 +104,14 @@ class RichHtmlView extends StatelessWidget {
       data: withoutRemoteCss(source),
       doNotRenderTheseTags: _blockedTags,
       style: <String, Style>{
-        ...Style.fromThemeData(theme),
+        // 不用 Style.fromThemeData：它把 h1–h3 映射到 display 字阶（40 / 32 / 26），正文里过大
+        'h1': Style.fromTextStyle(
+          theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w600),
+        ),
+        'h2': Style.fromTextStyle(theme.textTheme.titleLarge!),
+        'h3': Style.fromTextStyle(theme.textTheme.titleMedium!),
+        for (final String tag in const <String>['h4', 'h5', 'h6'])
+          tag: Style.fromTextStyle(theme.textTheme.titleSmall!),
         'body': Style.fromTextStyle(body).copyWith(
           margin: Margins.zero,
           padding: HtmlPaddings.zero,

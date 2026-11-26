@@ -13,6 +13,7 @@ struct ClientHomeView: View {
     @State private var moreOpen = false
     @State private var nodeSnapshot: TunnelSnapshot?
     @State private var nodeActionError: String?
+    @State private var nodeListWidth: CGFloat = 0
     @State private var refreshAction: ProductRefreshAction?
     @State private var toast: String?
     @State private var hovered: Page?
@@ -65,7 +66,7 @@ struct ClientHomeView: View {
                                     #if os(tvOS)
                                     if active { pageView(page, wide: wide) }
                                     #else
-                                    pageView(page, wide: wide)
+                                    pageView(page, wide: wide).environment(\.productPageActive, active)
                                         .opacity(active ? 1 : 0).allowsHitTesting(active).disabled(!active).accessibilityHidden(!active)
                                         .transformPreference(ProductRefreshKey.self) { if !active { $0 = nil } }
                                     #endif
@@ -107,7 +108,7 @@ struct ClientHomeView: View {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
         }
-        .task(id: "\(session.profile?.deviceKickNotice == true)|\(session.profile?.deviceKickReason ?? "")") {
+        .task(id: "\(session.profile?.deviceKickNotice == true)|\(session.profile?.deviceKickReason ?? "")|\(session.updatedAt?.timeIntervalSince1970 ?? 0)") {
             guard session.phase == .signedIn, session.profile?.deviceKickNotice == true else { return }
             if session.profile?.deviceKickReason == "limit_denied" { await loadSlotDevices() } else { kickNotice = true }
         }
@@ -116,7 +117,7 @@ struct ClientHomeView: View {
         .navigationDestination(isPresented: $restrictedTickets) { FeatureSheet(title: L10n.t("工单")) { TicketsView(session: session) } }
         .productDialog(isPresented: $showAnnouncements) { AnnouncementsView(session: session) { showAnnouncements = false } }
         .alert(L10n.t("退出登录"), isPresented: Bindable(menu).confirmLogout) {
-            Button(L10n.t("退出")) { Task { await session.logout() } }
+            Button(L10n.t("退出登录")) { Task { await session.logout() } }
             Button(L10n.t("取消"), role: .cancel) {}
         } message: {
             Text(L10n.t("退出后将断开连接并清除本机保存的登录凭据。"))
@@ -196,7 +197,7 @@ struct ClientHomeView: View {
             let overflow = pages.dropFirst(5).contains(selection)
             Button { moreOpen.toggle() } label: {
                 VStack(spacing: 5) {
-                    ProductGlyph(name: "more_horiz", size: 24).frame(width: 64, height: 32)
+                    ProductGlyph(name: "more_horiz", size: 24).frame(maxWidth: 64).frame(height: 32)
                         .background(overflow ? colors.segment : Color.clear, in: Capsule())
                         .foregroundStyle(overflow ? colors.text : colors.secondary)
                     Text(L10n.t("更多")).font(.system(size: 12, weight: overflow ? .semibold : .medium))
@@ -216,10 +217,13 @@ struct ClientHomeView: View {
                 .overlay(alignment: .topTrailing) {
                     if page == .tickets && session.hasUnreadTicketReply { unreadDot.offset(x: 4, y: -2) }
                 }
-                .frame(width: 64, height: 32)
+                // 指示条最宽 64，窄屏六项平分不够时随格宽收窄，不撑出屏幕
+                .frame(maxWidth: 64).frame(height: 32)
                 .background(selected ? colors.segment : Color.clear, in: Capsule())
                 .foregroundStyle(selected ? colors.text : colors.secondary)
+            // iPhone Duo 竖向栏每项仅 72 宽，放不下英文 Connections 时缩字，不断词换行
             Text(verbatim: L10n.t(page.rawValue)).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .foregroundStyle(selected ? colors.text : colors.secondary)
         }
     }
@@ -319,6 +323,7 @@ struct ClientHomeView: View {
                     ForEach(groups) { group in
                         NodeGroupCard(session: session, group: group, catalog: catalog, selections: nodeSnapshot?.selections ?? [:],
                                       live: session.connection?.controlPlaneReady == true, wide: wide,
+                                      columns: max(1, min(6, Int((nodeListWidth + 8) / 268))),
                                       initiallyExpanded: session.preferences.mode == .global,
                                       locate: { node in withAnimation { scroll.scrollTo([group.id, node], anchor: .center) } }) { node in
                             do {
@@ -333,10 +338,12 @@ struct ClientHomeView: View {
                     ProductNotice(message: L10n.t("尚未获取节点"))
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { nodeListWidth = $0 }
             .padding(.leading, 14).padding(.trailing, 16).padding(.top, 20).padding(.bottom, 14)
         }
-        .task(id: session.connection?.controlPlaneReady) {
+        .task(id: "\(session.connection?.controlPlaneReady == true)|\(selection == .nodes)") {
             guard session.connection?.controlPlaneReady == true else { nodeSnapshot = nil; return }
+            guard selection == .nodes else { return }
             while !Task.isCancelled && session.connection?.controlPlaneReady == true {
                 do { nodeSnapshot = try await session.tunnelSnapshot(); nodeActionError = nil }
                 catch is CancellationError { break }
@@ -535,17 +542,19 @@ struct AccountInfoPage: View {
                     Spacer(minLength: 0)
                 }
                 divider.padding(.vertical, 8)
-                metric(L10n.t("余额"), L10n.t("¥ {0}", [String(format: "%.2f", profile.money)]))
-                metric(L10n.t("注册时间"), profile.regDate.flatMap { $0.isEmpty ? nil : $0 } ?? "—")
-                metric(L10n.t("套餐"), profile.plan?.name ?? (profile.class > 0 ? "VIP \(profile.class)" : L10n.t("免费用户")))
-                if let plan = profile.plan {
-                    metric(L10n.t("到期"), plan.expTime)
-                    metric(L10n.t("剩余天数"), L10n.t("{0} 天", [String(plan.remainingDays)]))
-                    metric(L10n.t("自动续费"), plan.autoRenew == true ? plan.renewAt ?? "—" : "-")
+                ProductGrid(horizontalSpacing: 32, verticalSpacing: 0) {
+                    metric(L10n.t("余额"), L10n.t("¥ {0}", [String(format: "%.2f", profile.money)]))
+                    metric(L10n.t("注册时间"), profile.regDate.flatMap { $0.isEmpty ? nil : $0 } ?? "—")
+                    metric(L10n.t("套餐"), profile.plan?.name ?? (profile.class > 0 ? "VIP \(profile.class)" : L10n.t("免费用户")))
+                    if let plan = profile.plan {
+                        metric(L10n.t("到期"), plan.expTime)
+                        metric(L10n.t("剩余天数"), L10n.t("{0} 天", [String(plan.remainingDays)]))
+                        metric(L10n.t("自动续费"), plan.autoRenew == true ? plan.renewAt ?? "—" : "-")
+                    }
+                    metric(L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit))
+                    metric(L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
+                        : "\(profile.onlineClientCount) / \(profile.nodeConnector)")
                 }
-                metric(L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit))
-                metric(L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
-                    : "\(profile.onlineClientCount) / \(profile.nodeConnector)")
             }
         }.headerAction {
             if allowDelete {
@@ -692,6 +701,7 @@ private struct NodeGroupCard: View {
     let selections: [String: String]
     let live: Bool
     let wide: Bool
+    let columns: Int
     let locate: (String) -> Void
     let select: (String) async -> Void
     @Environment(\.colorScheme) private var scheme
@@ -701,11 +711,16 @@ private struct NodeGroupCard: View {
     @State private var working = false
     @State private var sort = 0
     @State private var notice: String?
+    // 面板只下发了一部分节点时，其余成员按页、按搜索词向面板取（ClientSession 的 NodeBrowsing）
+    @State private var pageError: String?
+    @State private var searching = false
+    // 搜索下一页的偏移，没有更多时为 nil
+    @State private var searchNext: Int?
     init(session: ClientSession, group: NodeSelectionGroup, catalog: NodeCatalog, selections: [String: String],
-         live: Bool, wide: Bool, initiallyExpanded: Bool, locate: @escaping (String) -> Void,
+         live: Bool, wide: Bool, columns: Int, initiallyExpanded: Bool, locate: @escaping (String) -> Void,
          select: @escaping (String) async -> Void) {
         self.session = session; self.group = group; self.catalog = catalog; self.selections = selections
-        self.live = live; self.wide = wide; self.locate = locate; self.select = select
+        self.live = live; self.wide = wide; self.columns = columns; self.locate = locate; self.select = select
         _expanded = State(initialValue: initiallyExpanded)
     }
     private var selected: String? { selections[group.id] }
@@ -713,54 +728,102 @@ private struct NodeGroupCard: View {
         NodeProbeState.resolve(member, selections: selections)
     }
     private var sortedMembers: [String] {
-        guard sort != 0 else { return group.members }
-        let slots = group.members.indices.filter { group.members[$0].range(of: #"^node-[1-9][0-9]*$"#, options: .regularExpression) != nil }
-        let nodes = slots.map { group.members[$0] }.sorted { left, right in
+        let members = session.members(of: group)
+        guard sort != 0 else { return members }
+        let slots = members.indices.filter { members[$0].range(of: #"^node-[1-9][0-9]*$"#, options: .regularExpression) != nil }
+        let nodes = slots.map { members[$0] }.sorted { left, right in
             let a = session.nodeProbes.result(leaf(left), kind: sort == 1 ? .delay : .speed)
             let b = session.nodeProbes.result(leaf(right), kind: sort == 1 ? .delay : .speed)
             let x = sort == 1 ? Int64(a?.delay ?? 0) : a?.speed ?? 0
             let y = sort == 1 ? Int64(b?.delay ?? 0) : b?.speed ?? 0
             if (x > 0) != (y > 0) { return x > 0 }
             if x != y { return sort == 1 ? x < y : x > y }
-            return catalog.displayName(left).utf8.lexicographicallyPrecedes(catalog.displayName(right).utf8)
+            return session.displayName(left).utf8.lexicographicallyPrecedes(session.displayName(right).utf8)
         }
-        var result = group.members
+        var result = members
         for (slot, node) in zip(slots, nodes) { result[slot] = node }
         return result
+    }
+
+    private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var filteredMembers: [String] {
+        let query = query
+        return sortedMembers.filter { !searchOpen || query.isEmpty || session.displayName($0).localizedCaseInsensitiveContains(query) }
+    }
+    private var remoteQuery: String { searchOpen && session.hasUnlistedNodes(group) ? query : "" }
+    private var paging: Bool { remoteQuery.isEmpty ? session.hasMoreNodes(group) : searching || searchNext != nil }
+    private func loadPage() async {
+        do {
+            if remoteQuery.isEmpty { try await session.loadMoreNodes(group) }
+            else if let offset = searchNext { searchNext = try await session.searchNodes(group, query: remoteQuery, offset: offset) }
+        } catch is CancellationError {
+        } catch { pageError = message(error) }
+    }
+    // 搜索词停下 400 毫秒后才问面板
+    private func searchPanel() async {
+        searchNext = nil; pageError = nil
+        guard !remoteQuery.isEmpty else { return }
+        searching = true
+        defer { searching = false }
+        do {
+            try await Task.sleep(for: .milliseconds(400))
+            searchNext = try await session.searchNodes(group, query: remoteQuery, offset: 0)
+        } catch is CancellationError {
+        } catch { pageError = message(error) }
+    }
+    private struct Row: Identifiable {
+        let id: [String]
+        let members: ArraySlice<String>
+        let top: CGFloat
     }
 
     var body: some View {
         let colors = ProductPalette(scheme: scheme)
         let radius: CGFloat = wide ? 20 : 16
         Section {
-            VStack(alignment: .leading, spacing: 0) {
-                if expanded {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let notice { ProductNotice(message: notice).padding(.horizontal, 12) }
-                        if searchOpen {
-                            ProductSearchField(hint: L10n.t("搜索节点名称"), text: $search, autofocus: true).padding(.horizontal, 12)
-                        }
-                        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let filtered = sortedMembers.filter { !searchOpen || query.isEmpty || catalog.displayName($0).localizedCaseInsensitiveContains(query) }
-                        if !group.selectable {
-                            HStack(spacing: 6) {
-                                ProductGlyph(name: "auto_awesome_outlined", size: 13).foregroundStyle(colors.outline)
-                                Text(verbatim: automaticHint).frame(maxWidth: .infinity, alignment: .leading)
-                            }.font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 12)
-                        }
-                        if searchOpen && !query.isEmpty && filtered.isEmpty {
-                            Text(L10n.t("没有符合条件的节点")).font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 12)
-                        } else {
-                            ProductGrid(minimumWidth: 260, maximumColumns: 6, horizontalSpacing: 8, verticalSpacing: 8, includeSpacingInThreshold: true) {
-                                ForEach(filtered, id: \.self) { member in tile(member, colors: colors) }
-                            }
-                        }
-                    }.padding(.top, 10).padding(.bottom, 12)
-                        .background(colors.background, in: UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius))
-                } else if let notice {
-                    ProductNotice(message: notice).padding(.top, 6)
+            if expanded {
+                let filtered = filteredMembers
+                let unmatched = searchOpen && !query.isEmpty && filtered.isEmpty && !paging && pageError == nil
+                let leading = notice != nil || searchOpen || !group.selectable
+                VStack(alignment: .leading, spacing: 10) {
+                    if let notice { ProductNotice(message: notice).padding(.horizontal, 12) }
+                    if searchOpen {
+                        ProductSearchField(hint: L10n.t("搜索节点名称"), text: $search, autofocus: true).padding(.horizontal, 12)
+                    }
+                    if !group.selectable {
+                        HStack(spacing: 6) {
+                            ProductGlyph(name: "auto_awesome_outlined", size: 13).foregroundStyle(colors.outline)
+                            Text(verbatim: automaticHint).frame(maxWidth: .infinity, alignment: .leading)
+                        }.font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 12)
+                    }
+                    if unmatched {
+                        Text(L10n.t("没有符合条件的节点")).font(.system(size: 12)).foregroundStyle(colors.secondary).padding(.horizontal, 12)
+                    }
+                }.padding(.top, 10)
+                // 成员一行一行交给外层的懒加载列表：一次建出全部成员，几千个节点就会让界面卡住。行的标识同时供「定位到当前节点」滚动用
+                ForEach(stride(from: 0, to: filtered.count, by: columns).map { start in
+                    Row(id: [group.id, filtered[start]], members: filtered[start..<min(start + columns, filtered.count)], top: start > 0 ? 8 : leading ? 10 : 0)
+                }) { row in
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(row.members, id: \.self) { member in tile(member, colors: colors).frame(maxWidth: .infinity) }
+                        ForEach(row.members.count..<columns, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 0) }
+                    }.padding(.top, row.top)
                 }
-            }.padding(.bottom, 6)
+                if let pageError {
+                    VStack(spacing: 8) {
+                        ProductNotice(message: pageError)
+                        Button(L10n.t("重试")) { self.pageError = nil }.buttonStyle(ProductButtonStyle())
+                    }.frame(maxWidth: .infinity).padding(.top, 10).padding(.horizontal, 12)
+                } else if paging {
+                    // 成员数或搜索位置一变就重新判断：这一行可能一直留在屏幕里，不会再次出现
+                    ProgressView(L10n.t("正在获取节点…")).frame(maxWidth: .infinity).padding(12)
+                        .task(id: [remoteQuery, String(filtered.count), String(searchNext ?? -1), String(searching)]) { if !searching { await loadPage() } }
+                }
+                Color.clear.frame(height: 18)
+            } else {
+                if let notice { ProductNotice(message: notice).padding(.top, 6) }
+                Color.clear.frame(height: 6)
+            }
         } header: {
                 HStack(spacing: 10) {
                     Button { expanded.toggle() } label: {
@@ -769,10 +832,10 @@ private struct NodeGroupCard: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
                                     Text(verbatim: catalog.displayName(group.id)).fontWeight(.semibold).lineLimit(!wide && expanded ? nil : 1)
-                                    ProductTag(text: (group.selectable ? L10n.t("手动") : L10n.t("自动")) + (wide ? "" : " · \(group.members.count)"))
+                                    ProductTag(text: (group.selectable ? L10n.t("手动") : L10n.t("自动")) + (wide ? "" : " · \(session.memberCount(of: group))"))
                                 }
                                 if wide {
-                                    Text(verbatim: L10n.t("{0} 个节点{1}", [String(group.members.count), currentLabel]))
+                                    Text(verbatim: L10n.t("{0} 个节点{1}", [String(session.memberCount(of: group)), currentLabel]))
                                         .font(.system(size: 12)).foregroundStyle(colors.secondary).lineLimit(1)
                                 } else if !currentLabel.isEmpty {
                                     Text(verbatim: String(currentLabel.dropFirst(3)))
@@ -802,6 +865,7 @@ private struct NodeGroupCard: View {
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: expanded ? 0 : radius,
                                                 bottomTrailingRadius: expanded ? 0 : radius, topTrailingRadius: radius))
                 .padding(.top, 4).background(colors.background)
+                .task(id: remoteQuery) { await searchPanel() }
         }
     }
     private func tile(_ member: String, colors: ProductPalette) -> some View {
@@ -812,21 +876,21 @@ private struct NodeGroupCard: View {
             Button { Task { working = true; await select(member); working = false } } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        Text(verbatim: catalog.displayName(member)).lineLimit(1)
+                        Text(verbatim: session.displayName(member)).lineLimit(1)
                         if let nested { ProductTag(text: nested.selectable ? L10n.t("手动") : L10n.t("自动")) }
                     }.overlay(alignment: .leading) {
                         if member == selected { ProductGlyph(name: "check_circle", size: 12).foregroundStyle(colors.accent).offset(x: -16) }
                     }
                     if let via {
                         Text(verbatim: catalog.displayName(via)).foregroundStyle(colors.secondary).lineLimit(1)
-                    } else if let node = catalog.nodes.first(where: { $0.id == member }) {
+                    } else if let node = session.node(member) {
                         ProductFlow(spacing: 4) {
                             ForEach([node.protocolName, node.network, node.tls, node.udp].filter { !$0.isEmpty }, id: \.self) { ProductTag(text: $0) }
                         }
                     }
                 }.frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.productPlain).disabled(!live || !group.selectable || working)
-                .help(catalog.displayName(member) + (via.map { " → " + catalog.displayName($0) } ?? ""))
+                .help(session.displayName(member) + (via.map { " → " + catalog.displayName($0) } ?? ""))
             VStack(alignment: .trailing, spacing: 0) {
                 probeButton(member, kind: .delay)
                 probeButton(member, kind: .speed)
@@ -836,7 +900,6 @@ private struct NodeGroupCard: View {
             .background(member == selected ? colors.accent.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
             .background(colors.surface, in: RoundedRectangle(cornerRadius: 9))
             .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(member == selected ? colors.accent : Color.clear, lineWidth: 1) }
-            .id([group.id, member])
     }
     private var currentLabel: String {
         guard let selected, !selected.isEmpty else { return "" }
@@ -869,7 +932,13 @@ private struct NodeGroupCard: View {
                 .background(searchOpen && wide ? ProductPalette(scheme: scheme).secondary.opacity(0.08) : Color.clear, in: Circle()).productIconHover()
         }.help(L10n.t("搜索节点名称"))
         Button {
-            if let selected { expanded = true; Task { await Task.yield(); locate(selected) } }
+            if let selected {
+                expanded = true
+                // 成员按行懒加载，滚动只能落到行上：取当前节点所在行的行首成员
+                let members = filteredMembers
+                let anchor = members.firstIndex(of: selected).map { members[$0 - $0 % columns] }
+                Task { await Task.yield(); if let anchor { locate(anchor) } }
+            }
         } label: { Label { Text(L10n.t("定位到当前节点")) } icon: { actionIcon("my_location_outlined") }.frame(minWidth: ProductMetrics.tapTarget, minHeight: ProductMetrics.tapTarget).productIconHover() }
             .disabled(selected == nil || selected?.isEmpty == true).help(L10n.t("定位到当前节点"))
     }

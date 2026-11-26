@@ -210,7 +210,10 @@ public struct PanelAPI: Sendable {
         }
     }
 
-    private var userAgent: String { "ECYCloud/\(device.version.replacingOccurrences(of: "Pre ", with: "Pre")) (\(device.platform))" }
+    // macOS 另有 Flutter 客户端，分号后标明实现
+    private var userAgent: String {
+        "ECYCloud/\(device.version.replacingOccurrences(of: "Pre ", with: "Pre")) (\(device.platform == "macOS" ? "macOS; Swift" : device.platform))"
+    }
 
     func options(_ endpoints: PanelEndpoints) async throws -> AuthOptions {
         do {
@@ -325,37 +328,65 @@ public struct PanelAPI: Sendable {
         try await request("/user/account-status", origin: endpoints.site, token: token)
     }
 
-    func nodes(_ endpoints: PanelEndpoints, token: String) async throws -> (value: NodeCatalog, data: Data) {
-        let response = try await perform("/config/clash", origin: endpoints.config, token: token, nodeProviders: true)
-        let data = try Self.withNodePayloads(response.data)
-        var catalog: NodeCatalog = try Self.decode(data)
-        catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(response.profileUpdateInterval)
-        return (catalog, data)
+    // 面板只下发了一部分节点时，pinned 里没带上的（用户选过的节点）按名取回并入，见 docs/architecture.md「节点目录分页」。
+    // 结构检查也在这里做：这个函数不在主线程上跑
+    func nodes(_ endpoints: PanelEndpoints, token: String, pinned: [String] = []) async throws -> (value: NodeCatalog, data: Data) {
+        var retried = false
+        while true {
+            let response = try await perform("/config/clash", origin: endpoints.config, token: token, nodeProviders: true)
+            var catalog = try NodeCatalog(response: response.data), data = response.data
+            if let paging = catalog.paging {
+                let missing = Array(Set(pinned.filter { NodeCatalog.isNodeID($0) && catalog.node($0) == nil }))
+                var fetched: [CatalogNode] = [], current = true
+                for start in stride(from: 0, to: missing.count, by: Self.catalogNamesLimit) where current {
+                    let page = try await catalogNodes(endpoints, token: token, names: Array(missing[start..<min(start + Self.catalogNamesLimit, missing.count)]))
+                    current = page.stamp == paging.stamp
+                    fetched += page.nodes
+                }
+                // 两次请求之间面板换了目录：整份重取一次
+                if !current {
+                    guard !retried else { throw ClientError.invalidResponse }
+                    retried = true
+                    continue
+                }
+                if !fetched.isEmpty { (catalog, data) = try catalog.merging(fetched) }
+            }
+            try catalog.validate()
+            catalog.updateIntervalHours = NodeCatalog.updateIntervalHours(response.profileUpdateInterval)
+            return (catalog, data)
+        }
     }
 
-    // 对应 panel_api_client.dart 的 withNodePayloads：各组节点 provider 只带成员名单时，按 ecy-panel-nodes 还原成完整格式再校验与缓存
-    static func withNodePayloads(_ data: Data) throws -> Data {
-        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              var body = root["data"] as? [String: Any], var config = body["config"] as? [String: Any],
-              var providers = config["proxy-providers"] as? [String: Any],
-              providers.contains(where: { $0.key.hasPrefix("ecy-panel-") && ($0.value as? [String: Any])?["members"] != nil })
-        else { return data }
-        let source = (providers["ecy-panel-nodes"] as? [String: Any])?["payload"] as? [[String: Any]] ?? []
-        var nodes: [String: [String: Any]] = [:]
-        for node in source { if let name = node["name"] as? String, nodes[name] == nil { nodes[name] = node } }
-        for (name, value) in providers where name.hasPrefix("ecy-panel-") {
-            guard var provider = value as? [String: Any], let members = provider.removeValue(forKey: "members") else { continue }
-            guard let names = members as? [String], !names.isEmpty, provider["payload"] == nil else { throw ClientError.invalidResponse }
-            provider["payload"] = try names.map { name -> [String: Any] in
-                guard let node = nodes[name] else { throw ClientError.invalidResponse }
-                return node
-            }
-            providers[name] = provider
-        }
-        config["proxy-providers"] = providers
-        body["config"] = config
-        root["data"] = body
-        return try JSONSerialization.data(withJSONObject: root, options: [.withoutEscapingSlashes])
+    struct CatalogPage: Sendable {
+        let stamp: String
+        let more: Bool
+        let nodes: [CatalogNode]
+    }
+
+    static let catalogPageSize = 100
+    static let catalogNamesLimit = 500
+
+    func catalogNodes(_ endpoints: PanelEndpoints, token: String, names: [String]) async throws -> CatalogPage {
+        try await catalogNodes(endpoints, token: token, body: ["names": names])
+    }
+
+    func catalogNodes(_ endpoints: PanelEndpoints, token: String, key: String, offset: Int, search: String = "") async throws -> CatalogPage {
+        try await catalogNodes(endpoints, token: token, body: ["provider": key, "offset": offset, "limit": Self.catalogPageSize, "search": search])
+    }
+
+    private func catalogNodes(_ endpoints: PanelEndpoints, token: String, body: [String: Any]) async throws -> CatalogPage {
+        let response = try await perform("/config/nodes", origin: endpoints.config, token: token, jsonBody: JSONSerialization.data(withJSONObject: body))
+        guard let data = (try? JSONSerialization.jsonObject(with: response.data) as? [String: Any])?["data"] as? [String: Any],
+              let stamp = data["stamp"] as? String, !stamp.isEmpty, let more = data["more"] as? Bool,
+              let listed = data["nodes"] as? [[String: Any]], listed.count <= Self.catalogNamesLimit else { throw ClientError.invalidResponse }
+        return try CatalogPage(stamp: stamp, more: more, nodes: listed.map { entry in
+            guard let name = entry["name"] as? String, NodeCatalog.isNodeID(name), let rank = entry["rank"] as? Int, rank >= 0,
+                  let label = entry["label"] as? String, let providers = entry["providers"] as? [String],
+                  let proxy = entry["proxy"] as? [String: Any], proxy["name"] as? String == name,
+                  let node = NodeCatalog.cloudNode(proxy, label: label) else { throw ClientError.invalidResponse }
+            return CatalogNode(node: node, rank: rank, providers: providers,
+                               proxy: try JSONSerialization.data(withJSONObject: proxy, options: [.withoutEscapingSlashes]))
+        })
     }
 
     func logout(_ endpoints: PanelEndpoints, token: String) async throws {
@@ -416,6 +447,7 @@ public struct PanelAPI: Sendable {
         if nodeProviders {
             request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Providers")
             request.setValue("1", forHTTPHeaderField: "X-ECY-Node-Members")
+            request.setValue(String(NodeWorkingSet.copyBudget), forHTTPHeaderField: "X-ECY-Node-Catalog")
         }
         if body != nil || jsonBody != nil {
             request.httpBody = try jsonBody ?? JSONEncoder().encode(body!)

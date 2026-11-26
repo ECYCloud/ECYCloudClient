@@ -99,8 +99,11 @@ struct ContentView: View {
                 wait = ClientSession.updateCheckInterval
             }
         }
+        #if !os(macOS)
         .task { await session.start() }
+        #endif
         .task(id: scenePhase) { await session.setRuntimeActive(scenePhase != .background) }
+        #if !os(macOS)
         .task(id: "\(scenePhase)|\(session.connection?.state.rawValue ?? "none")") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -108,6 +111,7 @@ struct ContentView: View {
                 do { try await Task.sleep(for: .seconds(session.refreshInterval)) } catch { break }
             }
         }
+        #endif
     }
 }
 

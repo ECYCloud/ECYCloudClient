@@ -11,11 +11,16 @@ return view.extend({
 	handleReset: null,
 
 	load: function() {
+		var search = {};
+		(this.groups || []).forEach(L.bind(function(group) {
+			if (group.partial && !group.remote && this.searchOpen[group.name] && this.query[group.name])
+				search[group.name] = this.query[group.name];
+		}, this));
 		return api.status().then(function(status) {
 			if (!api.signedIn(status))
 				return [ { groups: [] }, status ];
 
-			return api.groups().then(function(groups) {
+			return api.groups(search).then(function(groups) {
 				return [ groups, status ];
 			});
 		});
@@ -56,7 +61,7 @@ return view.extend({
 			var updated = group.members.map(function(member) {
 				return Object.assign(members.get(member.name) || {}, member);
 			});
-			return Object.assign(saved, group, { members: updated });
+			return Object.assign(saved, group, { members: updated, partial: group.partial === true, remote: group.remote === true });
 		});
 		var content = this.renderGroups(Object.assign({}, reply, { groups: this.groups }));
 		if (this.body.firstChild)
@@ -118,6 +123,46 @@ return view.extend({
 
 	memberShown: function(member) {
 		return member.label || member.name || '';
+	},
+
+	/* 面板上还有、本机没装入的成员：按当前搜索词（没有就按顺序）取下一页，只留在这个页面里（至多 2000 个），用到时由后端按名装入。
+	   面板限制搜索词 64 个字符 */
+	fetchListed: function(group) {
+		var name = group.name;
+		var keyword = this.searchOpen[name] ? (this.query[name] || '') : '';
+		var listed = this.listed[name];
+		var fresh = !listed || listed.keyword != keyword;
+		if (this.listing[name] == keyword || (!fresh && !listed.more))
+			return Promise.resolve();
+
+		this.listing[name] = keyword;
+		this.repaint();
+		return api.searchNodes(name, Array.from(keyword).slice(0, 64).join(''), fresh ? null : listed.next).then(L.bind(function(res) {
+			if (this.listing[name] != keyword)
+				return;
+			delete this.listing[name];
+			if (!res.ok)
+				api.notify(res);
+			else {
+				if (res.restarted)
+					this.listed = {};
+				this.listed[name] = {
+					keyword: keyword,
+					nodes: (fresh || res.restarted ? [] : listed.nodes).concat(res.nodes).slice(-2000),
+					more: res.more === true,
+					next: res.next
+				};
+			}
+			return res.ok && res.restarted ? this.refresh() : this.repaint();
+		}, this));
+	},
+
+	listedNodes: function(group, query) {
+		var listed = this.listed[group.name];
+		if (!group.remote || !listed || listed.keyword != query)
+			return [];
+		var known = new Set(group.members.map(function(member) { return member.name; }));
+		return listed.nodes.filter(function(node) { return !known.has(node.name); });
 	},
 
 	patchNode: function(current, next) {
@@ -230,14 +275,22 @@ return view.extend({
 			'data-ico': 'locate',
 			disabled: !group.now
 		});
-		var members = api.sortGroupMembers(group.members, sortMode).filter(L.bind(function(member) {
+		var listed = opened ? this.listedNodes(group, query) : [];
+		var members = !opened ? [] : api.sortGroupMembers(group.members, sortMode).filter(L.bind(function(member) {
 			if (!query)
 				return true;
 			return String(this.memberShown(member)).toLowerCase().indexOf(query) != -1;
-		}, this));
+		}, this)).concat(listed);
 		var hint = '';
+		var partialHint = '';
 		var searchRow = '';
+		var moreRow = '';
 		var list;
+
+		if (group.partial)
+			partialHint = E('div', { 'class': 'ecycloud-group-hint', 'data-ecy-key': 'partial' }, [
+				_('Only nodes loaded into the kernel are listed here. Search to find the others.')
+			]);
 
 		if (!selectable)
 			hint = E('div', { 'class': 'ecycloud-group-hint', 'data-ecy-key': 'hint' }, [
@@ -257,6 +310,11 @@ return view.extend({
 						this.searchText[group.name] = text;
 						this.query[group.name] = text.trim().toLowerCase();
 						this.repaint();
+						if (group.partial) {
+							clearTimeout(this.searchTimer);
+							this.searchTimer = setTimeout(L.bind(group.remote && this.query[group.name]
+								? this.fetchListed : this.refresh, this, group), 400);
+						}
 					}, this)
 				})
 			]);
@@ -264,7 +322,17 @@ return view.extend({
 			searchRow.firstChild.setAttribute('data-ecy-search', group.name);
 		}
 
-		list = query && !members.length
+		var paging = this.listed[group.name];
+		var loading = this.listing[group.name] == query;
+		if (opened && group.partial && group.remote && (loading || !paging || paging.keyword != query || paging.more))
+			moreRow = E('div', { 'class': 'ecycloud-toolbar', 'data-ecy-key': 'more' }, [
+				api.pressable('ecycloud-jump', {
+					disabled: loading,
+					click: L.bind(this.fetchListed, this, group)
+				}, [ _('Load more') ])
+			]);
+
+		list = query && !members.length && !(group.partial && group.remote && (loading || !paging || paging.keyword != query))
 			? E('div', { 'class': 'ecycloud-group-empty', 'data-ecy-key': 'empty' }, [
 				_('No matching nodes')
 			])
@@ -274,9 +342,13 @@ return view.extend({
 		var bodyChildren = [];
 		if (searchRow)
 			bodyChildren.push(searchRow);
+		if (partialHint)
+			bodyChildren.push(partialHint);
 		if (hint)
 			bodyChildren.push(hint);
 		bodyChildren.push(list);
+		if (moreRow)
+			bodyChildren.push(moreRow);
 
 		var body = E('div', { 'class': 'ecycloud-group-body' }, bodyChildren);
 		var card = E('div', {
@@ -327,7 +399,7 @@ return view.extend({
 				return;
 
 			testBtn.classList.add('is-testing');
-			api.testGroup(group).then(L.bind(function(res) {
+			api.testGroup(group, false, listed.map(function(node) { return node.name; })).then(L.bind(function(res) {
 				if (res && !res.ok)
 					api.notify(res);
 				return this.refresh();
@@ -340,7 +412,7 @@ return view.extend({
 				return;
 
 			speedBtn.classList.add('is-testing');
-			api.testGroupSpeed(group).then(L.bind(function(res) {
+			api.testGroupSpeed(group, listed.map(function(node) { return node.name; })).then(L.bind(function(res) {
 				if (res && (!res.ok || res.msg))
 					api.notify(res);
 				return this.refresh();
@@ -367,18 +439,15 @@ return view.extend({
 		locateBtn.addEventListener('click', L.bind(function(ev) {
 			ev.stopPropagation();
 			this.open[group.name] = true;
-			card.classList.add('is-open');
-			body.style.display = '';
+			this.repaint();
 			var selected = card.querySelector('.ecycloud-node.is-selected');
 			if (selected)
 				selected.scrollIntoView({ behavior: 'smooth', block: 'center' });
 		}, this));
 
 		card.firstElementChild.addEventListener('click', L.bind(function() {
-			var next = !this.open[group.name];
-			this.open[group.name] = next;
-			card.classList.toggle('is-open', next);
-			body.style.display = next ? '' : 'none';
+			this.open[group.name] = !this.open[group.name];
+			this.repaint();
 		}, this));
 
 		return card;
@@ -462,6 +531,8 @@ return view.extend({
 			self.searchOpen = {};
 			self.searchText = {};
 			self.query = {};
+			self.listed = {};
+			self.listing = {};
 			self.update(data);
 			poll.add(L.bind(self.refresh, self), 2);
 			var refreshBtn = api.pressable('ecycloud-icon-btn', {
