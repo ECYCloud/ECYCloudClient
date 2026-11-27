@@ -574,6 +574,25 @@ struct MacKernelTests {
         #expect(calls.allSatisfy { $0.url?.host == "127.0.0.1" && $0.value(forHTTPHeaderField: "Authorization") == "Bearer " + String(repeating: "s", count: 48) })
     }
 
+    // 内核拨号失败只写策略组名：按报错里的节点地址或手动选择组的选中项补出节点，自动测速组停在组名，分不出就不补
+    @Test func dialFailureLogNamesTheNode() {
+        let selectors = ["Google服务": "主节点", "主节点": "node-1", "流媒体": "自动选择"]
+        let endpoints = ["chtcht.ecydns.com:10002": ["node-1"], "shared.example.test:443": ["node-1", "node-2"]]
+        func annotate(_ message: String) -> String { MacClashRuntime.dialNode(message, selectors: selectors, endpoints: endpoints) }
+        #expect(annotate("[UDP] dial Google服务 (match RuleSet/google) 172.19.0.1:56589 --> a.test:443 error: CHTCHT.ecydns.com:10002 connect error: context deadline exceeded")
+            == "[UDP] dial Google服务 → node-1 (match RuleSet/google) 172.19.0.1:56589 --> a.test:443 error: CHTCHT.ecydns.com:10002 connect error: context deadline exceeded")
+        #expect(annotate("[TCP] dial 主节点 1.1.1.1:1 --> a.test:443 error: shared.example.test:443 connect error: EOF")
+            == "[TCP] dial 主节点 → node-1 1.1.1.1:1 --> a.test:443 error: shared.example.test:443 connect error: EOF")
+        #expect(annotate("[TCP] dial Google服务 (match Match/) 1.1.1.1:1 --> a.test:443 error: context deadline exceeded")
+            .hasPrefix("[TCP] dial Google服务 → node-1 (match"))
+        #expect(annotate("[TCP] dial 流媒体 (match Match/) 1.1.1.1:1 --> a.test:443 error: EOF").hasPrefix("[TCP] dial 流媒体 → 自动选择 (match"))
+        for raw in ["[TCP] dial 流媒体 (match Match/) 1.1.1.1:1 --> a.test:443 error: shared.example.test:443 connect error: EOF",
+                    "[TCP] dial DIRECT (match GeoIP/cn) 1.1.1.1:1 --> a.test:443 error: dial tcp 1.2.3.4:443: i/o timeout",
+                    "[TCP] 1.1.1.1:1 --> a.test:443 match Match using 主节点[node-1]"] {
+            #expect(annotate(raw) == raw)
+        }
+    }
+
     // 内核的出站表随节点数增长：每秒采样只读连接表，出站表只在界面取快照或链路上出现没见过的出站时才取
     @Test func backgroundSamplingReadsTheProxyTableOnlyWhenNeeded() async throws {
         let transport = MacHTTPFixture(), runtime = try MacClashRuntime(configuration: configuration(), transport: transport)

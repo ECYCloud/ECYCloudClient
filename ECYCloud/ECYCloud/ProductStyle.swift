@@ -1222,9 +1222,15 @@ struct ProductGrid: Layout {
     var horizontalSpacing: CGFloat = 10
     var verticalSpacing: CGFloat = 10
     var includeSpacingInThreshold = false
+    // 按行数均分栏数：8 项可排 6 栏时排成 2 行 4 栏，而不是 6 + 2
+    var balanceRows = false
 
     private func metrics(_ width: CGFloat, _ subviews: Subviews) -> (Int, CGFloat, [CGFloat]) {
-        let columns = max(minimumColumns, min(maximumColumns, Int(includeSpacingInThreshold ? (width + horizontalSpacing) / (minimumWidth + horizontalSpacing) : width / minimumWidth)))
+        var columns = max(minimumColumns, min(maximumColumns, Int(includeSpacingInThreshold ? (width + horizontalSpacing) / (minimumWidth + horizontalSpacing) : width / minimumWidth)))
+        if balanceRows && !subviews.isEmpty {
+            let rows = (subviews.count + columns - 1) / columns
+            columns = (subviews.count + rows - 1) / rows
+        }
         let cell = max(0, (width - CGFloat(columns - 1) * horizontalSpacing) / CGFloat(columns))
         var heights: [CGFloat] = []
         for index in subviews.indices {

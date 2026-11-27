@@ -501,7 +501,7 @@ struct AccountInfoPage: View {
     private func account(_ profile: UserProfile?) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                if let profile { userCard(profile) }
+                if let profile { userCard(profile); planCard(profile) }
                 else { ProductCard(title: L10n.t("账号"), icon: "person_outline") { Text(verbatim: "—") } }
                 ProductSection(title: L10n.t("更多"), icon: "menu") {
                     accountLink(L10n.t("修改信息"), icon: "edit_outlined") { editAccount = true }
@@ -543,19 +543,7 @@ struct AccountInfoPage: View {
                     Spacer(minLength: 0)
                 }
                 divider.padding(.vertical, 8)
-                ProductGrid(horizontalSpacing: 32, verticalSpacing: 0) {
-                    metric(L10n.t("余额"), L10n.t("¥ {0}", [String(format: "%.2f", profile.money)]))
-                    metric(L10n.t("注册时间"), profile.regDate.flatMap { $0.isEmpty ? nil : $0 } ?? "—")
-                    metric(L10n.t("套餐"), profile.plan?.name ?? (profile.class > 0 ? "VIP \(profile.class)" : L10n.t("免费用户")))
-                    if let plan = profile.plan {
-                        metric(L10n.t("到期"), plan.expTime)
-                        metric(L10n.t("剩余天数"), L10n.t("{0} 天", [String(plan.remainingDays)]))
-                        metric(L10n.t("自动续费"), plan.autoRenew == true ? plan.renewAt ?? "—" : "-")
-                    }
-                    metric(L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit))
-                    metric(L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
-                        : "\(profile.onlineClientCount) / \(profile.nodeConnector)")
-                }
+                infoGrid(accountItems(profile))
             }
         }.headerAction {
             if allowDelete {
@@ -577,6 +565,53 @@ struct AccountInfoPage: View {
                 ProductGlyph(name: "chevron_right", size: 24).foregroundStyle(colors.secondary)
             }.padding(.leading, 16).padding(.trailing, 24).frame(minHeight: 48).contentShape(Rectangle()).productHoverLayer(Rectangle())
         }.buttonStyle(.productPlain)
+    }
+
+    private func planCard(_ profile: UserProfile) -> some View {
+        ProductCard(title: L10n.t("套餐"), icon: "inventory_2_outlined") {
+            infoGrid(planItems(profile))
+        }
+    }
+
+    private func accountItems(_ profile: UserProfile) -> [(String, String)] {
+        [
+            (L10n.t("余额"), L10n.t("¥ {0}", [String(format: "%.2f", profile.money)])),
+            (L10n.t("注册时间"), profile.regDate.flatMap { $0.isEmpty ? nil : $0 } ?? "—"),
+            (L10n.t("限速"), profile.nodeSpeedlimit <= 0 ? L10n.t("不限速") : String(format: "%.0f Mbps", profile.nodeSpeedlimit)),
+            (L10n.t("在线客户端"), profile.nodeConnector <= 0 ? L10n.t("{0} / 无限制", [String(profile.onlineClientCount)])
+                : "\(profile.onlineClientCount) / \(profile.nodeConnector)"),
+        ]
+    }
+
+    private func planItems(_ profile: UserProfile) -> [(String, String)] {
+        var items = [(L10n.t("套餐"), profile.plan?.name ?? (profile.class > 0 ? "VIP \(profile.class)" : L10n.t("免费用户")))]
+        if let plan = profile.plan {
+            items += [
+                (L10n.t("到期"), plan.expTime),
+                (L10n.t("剩余天数"), L10n.t("{0} 天", [String(plan.remainingDays)])),
+                (L10n.t("自动续费"), plan.autoRenew == true ? plan.renewAt ?? "—" : "-"),
+            ]
+        }
+        return items
+    }
+
+    // 宽屏排成标签在上、取值在下的小块，取值紧挨标签；放不下三栏时仍是逐行的标签与取值
+    private func infoGrid(_ items: [(String, String)]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            ProductGrid(minimumWidth: 180, maximumColumns: items.count, horizontalSpacing: 24, verticalSpacing: 12,
+                        includeSpacingInThreshold: true, balanceRows: true) {
+                ForEach(items, id: \.0) { infoTile($0.0, $0.1) }
+            }.frame(minWidth: 3 * 180 + 2 * 24).padding(.vertical, 4)
+            VStack(spacing: 0) { ForEach(items, id: \.0) { metric($0.0, $0.1) } }
+        }
+    }
+
+    // 与首页内核状态的小块同字号，但标签与取值都靠左：逐项阅读时居中会让各项左缘参差
+    private func infoTile(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: title).font(.system(size: 12)).foregroundStyle(colors.secondary)
+            Text(verbatim: value).fontWeight(.semibold).monospacedDigit().lineLimit(1)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func metric(_ title: String, _ value: String) -> some View {

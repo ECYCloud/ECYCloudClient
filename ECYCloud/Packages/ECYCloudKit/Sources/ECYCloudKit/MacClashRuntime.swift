@@ -20,6 +20,9 @@ import CryptoKit
     private var trafficSampled = false
     private var rates: (Int64, Int64) = (0, 0)
     private var servers: Set<String> = []
+    // 节点的 `服务器:端口` → 节点名、手动选择组 → 当前选中项，给拨号失败日志补出节点
+    private var endpoints: [String: [String]] = [:]
+    private var selectors: [String: String] = [:]
     private var rank: [String: [String: Int64]] = ["groups": [:], "hosts": [:]]
     private var memory: Int64 = 0
     private var memoryTask: Task<Void, Never>?
@@ -42,11 +45,47 @@ import CryptoKit
         self.port = port; mixedPort = mixed; self.secret = secret; self.transport = transport
         redactor = MacLogRedactor(configuration: configuration)
         servers = Self.nodeServers(configuration)
+        endpoints = Self.nodeEndpoints(configuration)
         nodeProviders = (configuration["proxy-providers"] as? [String: Any] ?? [:]).keys.filter { $0.hasPrefix("ecy-panel-") }.sorted()
         urlTests = (configuration["proxy-groups"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "url-test" }.compactMap { $0["name"] as? String }
         ruleFiles = (configuration["rule-providers"] as? [String: [String: Any]] ?? [:]).compactMapValues { $0["path"] as? String }
         self.logStore = logStore
     }
+
+    private static func nodeEndpoints(_ configuration: [String: Any]) -> [String: [String]] {
+        let payloads = (configuration["proxy-providers"] as? [String: [String: Any]] ?? [:]).values.flatMap { $0["payload"] as? [[String: Any]] ?? [] }
+        var result: [String: [String]] = [:]
+        for proxy in (configuration["proxies"] as? [[String: Any]] ?? []) + payloads {
+            guard let name = proxy["name"] as? String, let server = (proxy["server"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased(),
+                  !server.isEmpty, let port = proxy["port"] else { continue }
+            // 与 Go 的 net.JoinHostPort 同形：IPv6 地址带方括号
+            result[(server.contains(":") ? "[\(server)]" : server) + ":\(port)", default: []].append(name)
+        }
+        return result
+    }
+
+    // 对应 connection_controller.dart 的 dialNode：内核拨号失败只写策略组名，补成 `组 → 节点`。
+    // 报错带节点地址时按地址认节点；hysteria2 / tuic / anytls 不带地址，改沿手动选择组的选中项往下找，
+    // 自动测速等组的选中项随时会变，走到这类组就停在组名
+    static func dialNode(_ message: String, selectors: [String: String], endpoints: [String: [String]]) -> String {
+        let text = message as NSString
+        guard let match = dialFailure.firstMatch(in: message, range: NSRange(location: 0, length: text.length)) else { return message }
+        let targetRange = match.range(at: 2), target = text.substring(with: targetRange)
+        var chain: [String] = [], seen: Set<String> = [], current = target
+        while seen.insert(current).inserted, let next = selectors[current], !next.isEmpty {
+            current = next; chain.append(next)
+        }
+        if match.range(at: 3).location != NSNotFound, let named = endpoints[text.substring(with: match.range(at: 3)).lowercased()] {
+            // 多个节点共用同一地址时取选中链上的那个，仍分不出就不补，免得写错节点
+            guard let node = named.count == 1 ? named[0] : chain.first(where: named.contains) else { return message }
+            chain = [node]
+        }
+        guard let node = chain.last, node != target else { return message }
+        return text.replacingCharacters(in: targetRange, with: "\(target) → \(node)")
+    }
+
+    private static let dialFailure = try! NSRegularExpression(
+        pattern: #"^\[(TCP|UDP)\] dial (.+?) (?:\(match [^)]*\) )?\S+ --> \S+ error: (?:(\S+) connect error: )?"#)
 
     private static func nodeServers(_ configuration: [String: Any]) -> Set<String> {
         let payloads = (configuration["proxy-providers"] as? [String: [String: Any]] ?? [:]).values.flatMap { $0["payload"] as? [[String: Any]] ?? [] }
@@ -58,6 +97,7 @@ import CryptoKit
     func updateNodes(_ configuration: [String: Any], previous: Data) async throws {
         redactor = MacLogRedactor(configuration: configuration)
         servers = Self.nodeServers(configuration)
+        endpoints = Self.nodeEndpoints(configuration)
         let before = ((try? JSONSerialization.jsonObject(with: previous)) as? [String: Any])?["proxy-providers"] as? [String: Any] ?? [:]
         let after = configuration["proxy-providers"] as? [String: Any] ?? [:]
         for name in nodeProviders where (after[name] as? NSDictionary)?.isEqual(before[name]) != true {
@@ -180,7 +220,8 @@ import CryptoKit
         for line in lines {
             sequence += 1
             let level = line.range(of: #"(?<=level=)[a-z]+"#, options: .regularExpression).map { String(line[$0]) } ?? "info"
-            let time = ISO8601DateFormatter().string(from: .now), safe = redactor.redact(Self.message(line))
+            let time = ISO8601DateFormatter().string(from: .now)
+            let safe = redactor.redact(Self.dialNode(Self.message(line), selectors: selectors, endpoints: endpoints))
             logs.append(["id": sequence, "time": time, "level": level, "message": safe])
             logStore?.append(time: time, level: level, message: safe)
         }
@@ -237,6 +278,7 @@ import CryptoKit
         case .select:
             guard try await api("/proxies/" + encoded(command.group))["type"] as? String == "Selector" else { throw TunnelError.control }
             _ = try await api("/proxies/" + encoded(command.group), method: "PUT", body: ["name": command.node])
+            selectors[command.group] = command.node
             try? await closeConnections(via: command.group)
             result = ["ok": true]
         case .close:
@@ -285,6 +327,7 @@ import CryptoKit
                 for leaf in leaves where types[leaf] == nil { types[leaf] = "" }
                 proxyTypes = types
                 proxyGroups = Set(proxies.filter { $0.value["all"] != nil }.keys)
+                selectors = proxies.filter { $0.value["type"] as? String == "Selector" }.compactMapValues { $0["now"] as? String }
                 listing = (proxyResponse, providerResponse)
             }
             guard !stopped else { throw CancellationError() }

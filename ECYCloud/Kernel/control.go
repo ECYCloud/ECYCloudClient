@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -324,6 +325,86 @@ func logSecrets(config []byte) (secrets []string) {
 	return secrets
 }
 
+var dialFailure = regexp.MustCompile(`^\[(TCP|UDP)\] dial (.+?) (?:\(match [^)]*\) )?\S+ --> \S+ error: (?:(\S+) connect error: )?`)
+
+// 对应 connection_controller.dart 的 dialNode：内核拨号失败只写策略组名，补成 `组 → 节点`，
+// 与成功日志的 `组[节点]` 一致。日志与内核同进程，各组的选中项读的是此刻的实时值；
+// 报错带节点地址（`服务器:端口 connect error`）时再按地址核对，多个候选又分不出就不补
+func dialNode(message string, proxies map[string]C.Proxy) string {
+	match := dialFailure.FindStringSubmatchIndex(message)
+	if match == nil {
+		return message
+	}
+	target := message[match[4]:match[5]]
+	root := proxies[target]
+	if root == nil {
+		return message
+	}
+	if _, group := root.Adapter().(outboundgroup.ProxyGroup); !group {
+		return message
+	}
+	var selected []string
+	seen := map[string]bool{}
+	for proxy := root; proxy != nil && !seen[proxy.Name()]; {
+		seen[proxy.Name()] = true
+		group, ok := proxy.Adapter().(outboundgroup.ProxyGroup)
+		if !ok {
+			break
+		}
+		now := group.Now()
+		var next C.Proxy
+		for _, member := range group.Proxies() {
+			if member.Name() == now {
+				next = member
+				break
+			}
+		}
+		if next == nil {
+			break
+		}
+		selected = append(selected, next.Name())
+		proxy = next
+	}
+	if match[6] >= 0 {
+		address := strings.ToLower(message[match[6]:match[7]])
+		var named []string
+		visited := map[string]bool{}
+		var walk func(C.Proxy)
+		walk = func(proxy C.Proxy) {
+			if visited[proxy.Name()] {
+				return
+			}
+			visited[proxy.Name()] = true
+			if group, ok := proxy.Adapter().(outboundgroup.ProxyGroup); ok {
+				for _, member := range group.Proxies() {
+					walk(member)
+				}
+			} else if strings.ToLower(proxy.Addr()) == address {
+				named = append(named, proxy.Name())
+			}
+		}
+		walk(root)
+		node := ""
+		if len(named) == 1 {
+			node = named[0]
+		} else {
+			for _, name := range selected {
+				if slices.Contains(named, name) {
+					node = name
+				}
+			}
+		}
+		if node == "" {
+			return message
+		}
+		selected = []string{node}
+	}
+	if len(selected) == 0 {
+		return message
+	}
+	return message[:match[5]] + " → " + selected[len(selected)-1] + message[match[5]:]
+}
+
 func newLogBuffer(config []byte, geoSites map[string]string) *logBuffer {
 	b := &logBuffer{secrets: logSecrets(config)}
 	// 内核的规则命中日志写作 RuleSet(名) 与 (match RuleSet/名 ...)
@@ -340,7 +421,7 @@ func newLogBuffer(config []byte, geoSites map[string]string) *logBuffer {
 			b.mu.Lock()
 			secrets := b.secrets
 			b.mu.Unlock()
-			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(geoSiteNames.Replace(event.Payload), secrets)}
+			entry := logEntry{Time: time.Now().UTC(), Level: event.Type(), Message: redactLog(geoSiteNames.Replace(dialNode(event.Payload, tunnel.Proxies())), secrets)}
 			b.mu.Lock()
 			b.sequence++
 			entry.ID = b.sequence

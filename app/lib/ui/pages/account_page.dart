@@ -159,6 +159,10 @@ class _AccountPageState extends State<AccountPage> {
                             auth: auth,
                             enableKill: _enableKill,
                           ),
+                          if (profile != null) ...<Widget>[
+                            const SizedBox(height: 10),
+                            _PlanCard(profile: profile, auth: auth),
+                          ],
                           const SizedBox(height: 10),
                           Section(
                             icon: Icons.menu,
@@ -321,8 +325,6 @@ class _UserCard extends StatelessWidget {
       );
     }
 
-    final UserPlan? plan = user.plan;
-
     return SectionCard(
       icon: Icons.person_outline,
       title: L10n.t('账号'),
@@ -380,117 +382,237 @@ class _UserCard extends StatelessWidget {
             child: Divider(height: 1),
           ),
           _InfoGrid(
-            children: <Widget>[
-              InfoRow(
-                label: L10n.t('余额'),
-                value: L10n.t('¥ {0}', <Object>[user.money.toStringAsFixed(2)]),
+            items: <(String, String)>[
+              (
+                L10n.t('余额'),
+                L10n.t('¥ {0}', <Object>[user.money.toStringAsFixed(2)]),
               ),
-              InfoRow(
-                label: L10n.t('注册时间'),
-                value: user.regDate.isEmpty ? '—' : user.regDate,
-              ),
-              InfoRow(
-                label: L10n.t('套餐'),
-                value:
-                    plan?.name ??
-                    (user.userClass > 0
-                        ? 'VIP ${user.userClass}'
-                        : L10n.t('免费用户')),
-              ),
-              if (plan != null) ...<Widget>[
-                InfoRow(label: L10n.t('到期'), value: plan.expireAt),
-                InfoRow(
-                  label: L10n.t('剩余天数'),
-                  value: L10n.t('{0} 天', <Object>[plan.remainingDays]),
-                ),
-                InfoRow(
-                  label: L10n.t('自动续费'),
-                  value: plan.autoRenew ? plan.renewAt : '-',
-                ),
-              ],
-              InfoRow(
-                label: L10n.t('限速'),
-                value: user.speedLimitMbps <= 0
+              (L10n.t('注册时间'), user.regDate.isEmpty ? '—' : user.regDate),
+              (
+                L10n.t('限速'),
+                user.speedLimitMbps <= 0
                     ? L10n.t('不限速')
                     : '${user.speedLimitMbps.toStringAsFixed(0)} Mbps',
               ),
-              InfoRow(
-                label: L10n.t('在线客户端'),
-                value: user.connectorLimit <= 0
+              (
+                L10n.t('在线客户端'),
+                user.connectorLimit <= 0
                     ? L10n.t('{0} / 无限制', <Object>[user.onlineDeviceCount])
                     : '${user.onlineDeviceCount} / ${user.connectorLimit}',
               ),
             ],
           ),
-          if (plan != null &&
-              (plan.canToggleAutoRenew ||
-                  plan.autoRenewUnavailableReason.isNotEmpty)) ...<Widget>[
-            const SizedBox(height: 4),
-            // 不能开启时显示禁用开关与原因，与网页购买记录一致
-            SwitchTile(
-              contentPadding: EdgeInsets.zero,
-              title: L10n.t('自动续费'),
-              subtitle: plan.autoRenew
-                  ? plan.renewAt
-                  : plan.canToggleAutoRenew
-                  ? L10n.t('已关闭')
-                  : L10n.t(plan.autoRenewUnavailableReason),
-              value: plan.autoRenew,
-              mouseCursor: plan.canToggleAutoRenew
-                  ? null
-                  : SystemMouseCursors.forbidden,
-              onChanged: plan.canToggleAutoRenew
-                  ? (bool value) => unawaited(
-                      togglePurchaseAutoRenewDialog(
-                        context,
-                        auth: auth,
-                        purchaseId: plan.id,
-                        enable: value,
-                      ),
-                    )
-                  : null,
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
-class _InfoGrid extends StatelessWidget {
-  const _InfoGrid({required this.children});
+class _PlanCard extends StatelessWidget {
+  const _PlanCard({required this.profile, required this.auth});
 
-  final List<Widget> children;
+  final UserProfile profile;
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final UserProfile user = profile;
+    final UserPlan? plan = user.plan;
+    // 不能开启时显示禁用开关与原因，与网页购买记录一致
+    final bool showSwitch =
+        plan != null &&
+        (plan.canToggleAutoRenew || plan.autoRenewUnavailableReason.isNotEmpty);
+    final String renewStatus = plan == null
+        ? ''
+        : plan.autoRenew
+        ? plan.renewAt
+        : plan.canToggleAutoRenew
+        ? L10n.t('已关闭')
+        : L10n.t(plan.autoRenewUnavailableReason);
+    final MouseCursor? cursor = plan?.canToggleAutoRenew ?? false
+        ? null
+        : SystemMouseCursors.forbidden;
+    final ValueChanged<bool>? onChanged =
+        plan != null && plan.canToggleAutoRenew
+        ? (bool value) => unawaited(
+            togglePurchaseAutoRenewDialog(
+              context,
+              auth: auth,
+              purchaseId: plan.id,
+              enable: value,
+            ),
+          )
+        : null;
+
+    return SectionCard(
+      icon: Icons.inventory_2_outlined,
+      title: L10n.t('套餐'),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool wide = _InfoGrid.isWide(constraints.maxWidth);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _InfoGrid(
+                items: <(String, String)>[
+                  (
+                    L10n.t('套餐'),
+                    plan?.name ??
+                        (user.userClass > 0
+                            ? 'VIP ${user.userClass}'
+                            : L10n.t('免费用户')),
+                  ),
+                  if (plan != null) ...<(String, String)>[
+                    (L10n.t('到期'), plan.expireAt),
+                    (
+                      L10n.t('剩余天数'),
+                      L10n.t('{0} 天', <Object>[plan.remainingDays]),
+                    ),
+                    (L10n.t('自动续费'), plan.autoRenew ? plan.renewAt : '-'),
+                  ],
+                ],
+                // 宽屏时开关直接放进「自动续费」这一格，不再另起一行拉满整卡
+                wideValues: <String, Widget>{
+                  if (showSwitch)
+                    L10n.t('自动续费'): Row(
+                      children: <Widget>[
+                        Transform.scale(
+                          scale: AppTheme.switchScale,
+                          alignment: Alignment.centerLeft,
+                          child: Switch(
+                            value: plan.autoRenew,
+                            onChanged: onChanged,
+                            mouseCursor: cursor,
+                            splashRadius: 0,
+                          ),
+                        ),
+                        Flexible(
+                          child: Text(
+                            renewStatus,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                },
+              ),
+              if (showSwitch && !wide) ...<Widget>[
+                const SizedBox(height: 4),
+                SwitchTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: L10n.t('自动续费'),
+                  subtitle: renewStatus,
+                  value: plan.autoRenew,
+                  mouseCursor: cursor,
+                  onChanged: onChanged,
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _InfoGrid extends StatelessWidget {
+  const _InfoGrid({required this.items, this.wideValues = const {}});
+
+  final List<(String, String)> items;
+  // 宽屏小块里按标签换成控件显示取值
+  final Map<String, Widget> wideValues;
+
+  static const double _cell = 180;
+  static const double _gap = 24;
+
+  static int _fit(double width) => ((width + _gap) / (_cell + _gap)).floor();
+
+  static bool isWide(double width) => _fit(width) >= 3;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final int columns = (constraints.maxWidth / 320).floor().clamp(1, 3);
-        if (columns == 1) {
+        final int fit = _fit(constraints.maxWidth);
+        if (!isWide(constraints.maxWidth)) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
+            children: <Widget>[
+              for (final (String label, String value) in items)
+                InfoRow(label: label, value: value),
+            ],
           );
         }
-        return Column(
-          children: <Widget>[
-            for (int start = 0; start < children.length; start += columns)
-              Row(
-                children: <Widget>[
-                  for (int column = 0; column < columns; column++) ...<Widget>[
-                    if (column > 0) const SizedBox(width: 32),
-                    Expanded(
-                      child: start + column < children.length
-                          ? children[start + column]
-                          : const SizedBox.shrink(),
-                    ),
+        // 宽屏排成标签在上、取值在下的小块，取值紧挨标签；按行数均分栏数，
+        // 8 项可排 6 栏时排成 2 行 4 栏，而不是 6 + 2
+        final int rows = (items.length / fit).ceil();
+        final int columns = (items.length / rows).ceil();
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            spacing: 12,
+            children: <Widget>[
+              for (int start = 0; start < items.length; start += columns)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: _gap,
+                  children: <Widget>[
+                    for (int column = 0; column < columns; column++)
+                      Expanded(
+                        child: start + column < items.length
+                            ? _InfoTile(
+                                label: items[start + column].$1,
+                                value: items[start + column].$2,
+                                valueWidget:
+                                    wideValues[items[start + column].$1],
+                              )
+                            : const SizedBox.shrink(),
+                      ),
                   ],
-                ],
-              ),
-          ],
+                ),
+            ],
+          ),
         );
       },
+    );
+  }
+}
+
+// 与首页 MetricTile 同字号，但标签与取值都靠左：信息栏逐项阅读，居中会让各项左缘参差
+class _InfoTile extends StatelessWidget {
+  const _InfoTile({required this.label, required this.value, this.valueWidget});
+
+  final String label;
+  final String value;
+  final Widget? valueWidget;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 3),
+        ?valueWidget,
+        if (valueWidget == null)
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+          ),
+      ],
     );
   }
 }

@@ -108,7 +108,13 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
       Logger.instance.log(
         Logger.kernelLevel(line),
         'mihomo',
-        NodeLabels.annotateText(Logger.kernelChain(Logger.kernelMessage(line))),
+        NodeLabels.annotateText(
+          dialNode(
+            Logger.kernelChain(Logger.kernelMessage(line)),
+            _groups,
+            _proxyEndpoints,
+          ),
+        ),
       );
       _trackStartupStage(line);
     });
@@ -186,6 +192,8 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
   Map<String, bool> _proxyUdp = const <String, bool>{};
   Map<String, String> _proxyTls = const <String, String>{};
   Set<String> _proxyServers = const <String>{};
+  // 节点的 `服务器:端口` → 节点名，内核拨号失败日志只带地址，靠它补出节点
+  Map<String, List<String>> _proxyEndpoints = const <String, List<String>>{};
   Map<String, String> _groupIcons = const <String, String>{};
   AssembledProfile? _profile;
   ClashApiOptions? _clashApiOptions;
@@ -3945,11 +3953,71 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
             (remote!.updateInterval ?? _defaultProfileUpdateInterval);
   }
 
+  // 内核拨号失败只写策略组名（`dial 组 (match …) … error: …`），补成 `组 → 节点`，
+  // 与成功日志的 `using 组 → 节点` 一致。报错带节点地址（`服务器:端口 connect error`）
+  // 时按地址认节点；hysteria2 / tuic / anytls 的报错不带地址，改沿「手动选择」组的选中项
+  // 往下找。自动测速等组随时会换节点，缓存的选中项可能已过时，走到这类组就停在组名
+  @visibleForTesting
+  static String dialNode(
+    String message,
+    List<ProxyGroup> groups,
+    Map<String, List<String>> endpoints,
+  ) {
+    final RegExpMatch? match = _dialFailure.firstMatch(message);
+    if (match == null) {
+      return message;
+    }
+    final String target = match[2]!;
+    final List<String> chain = <String>[];
+    final Set<String> seen = <String>{};
+    String current = target;
+    while (seen.add(current)) {
+      final ProxyGroup? group = groups
+          .where((ProxyGroup item) => item.name == current)
+          .firstOrNull;
+      if (group == null || group.type != 'Selector' || group.now.isEmpty) {
+        break;
+      }
+      current = group.now;
+      chain.add(current);
+    }
+    final String? address = match[3];
+    final List<String>? named = address == null
+        ? null
+        : endpoints[address.toLowerCase()];
+    if (named != null) {
+      // 多个节点共用同一地址时取选中链上的那个，仍分不出就不补，免得写错节点
+      final String? node = named.length == 1
+          ? named.single
+          : chain.where(named.contains).firstOrNull;
+      if (node == null) {
+        return message;
+      }
+      chain
+        ..clear()
+        ..add(node);
+    }
+    if (chain.isEmpty || chain.last == target) {
+      return message;
+    }
+    final int start = '[${match[1]}] dial '.length;
+    return message.replaceRange(
+      start,
+      start + target.length,
+      '$target → ${chain.last}',
+    );
+  }
+
+  static final RegExp _dialFailure = RegExp(
+    r'^\[(TCP|UDP)\] dial (.+?) (?:\(match [^)]*\) )?\S+ --> \S+ error: (?:(\S+) connect error: )?',
+  );
+
   void _indexProxyExtra() {
     final Map<String, String> networks = <String, String>{};
     final Map<String, bool> udps = <String, bool>{};
     final Map<String, String> tlsTypes = <String, String>{};
     final Set<String> servers = <String>{};
+    final Map<String, List<String>> endpoints = <String, List<String>>{};
     final Map<String, dynamic>? remote = _listedRemote;
     final Object? proxies = remote == null
         ? null
@@ -3977,6 +4045,9 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
         final String server = '${proxy['server'] ?? ''}'.trim().toLowerCase();
         if (server.isNotEmpty) {
           servers.add(server);
+          // 与 Go 的 net.JoinHostPort 同形：IPv6 地址带方括号
+          final String host = server.contains(':') ? '[$server]' : server;
+          (endpoints['$host:${proxy['port']}'] ??= <String>[]).add(name);
         }
       }
     }
@@ -3984,6 +4055,7 @@ class ConnectionController extends ChangeNotifier with WidgetsBindingObserver {
     _proxyUdp = udps;
     _proxyTls = tlsTypes;
     _proxyServers = servers;
+    _proxyEndpoints = endpoints;
   }
 
   // clash 段里 hysteria / tuic / anytls 不写 tls: true，但协议本身就是 TLS

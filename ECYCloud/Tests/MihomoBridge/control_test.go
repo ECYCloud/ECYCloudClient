@@ -819,3 +819,38 @@ func TestUpdateNodesReloadsPanelNodesWithoutRestart(t *testing.T) {
 		t.Fatalf("kernel was restarted: %v", err)
 	}
 }
+func TestDialFailureLogNamesTheNode(t *testing.T) {
+	id := startPacketCore(t, packetProfile(9))
+	log.Warnln("[TCP] dial select (match Match/) 198.18.0.1:1 --> addr-needle.example.test:443 error: 127.0.0.1:9 connect error: EOF")
+	log.Warnln("[TCP] dial select (match Match/) 198.18.0.1:2 --> live-needle.example.test:443 error: context deadline exceeded")
+	log.Warnln("[TCP] dial select (match Match/) 198.18.0.1:3 --> other-needle.example.test:443 error: 192.0.2.9:1 connect error: EOF")
+	log.Warnln("[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:4 --> direct-needle.example.test:443 error: dial tcp 192.0.2.8:443: i/o timeout")
+	want := map[string]string{
+		"addr-needle":   "[TCP] dial select → synthetic (match Match/) 198.18.0.1:1 --> addr-needle.example.test:443 error: 127.0.0.1:9 connect error: EOF",
+		"live-needle":   "[TCP] dial select → synthetic (match Match/) 198.18.0.1:2 --> live-needle.example.test:443 error: context deadline exceeded",
+		"other-needle":  "[TCP] dial select (match Match/) 198.18.0.1:3 --> other-needle.example.test:443 error: 192.0.2.9:1 connect error: EOF",
+		"direct-needle": "[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:4 --> direct-needle.example.test:443 error: dial tcp 192.0.2.8:443: i/o timeout",
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := kernel.Control(id, []byte(`{"action":"logs","page":1,"level":"warning","query":"-needle.example.test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct{ Entries []struct{ Message string } }
+		if json.Unmarshal(data, &result) != nil {
+			t.Fatal("invalid logs")
+		}
+		if len(result.Entries) == len(want) {
+			for _, entry := range result.Entries {
+				key := strings.SplitN(strings.SplitN(entry.Message, "--> ", 2)[1], ".", 2)[0]
+				if entry.Message != want[key] {
+					t.Fatalf("%s: got %q", key, entry.Message)
+				}
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("dial failure logs were dropped")
+}
