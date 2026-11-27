@@ -628,7 +628,7 @@ jobs:
             "$tools/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
             "$tools/apksigner" sign --ks "$keystore" --ks-pass env:TEST_KEY_PASSWORD \
               --ks-key-alias test --key-pass env:TEST_KEY_PASSWORD \
-              --v1-signing-enabled false --v2-signing-enabled true \
+              --v1-signing-enabled true --v2-signing-enabled true \
               --v3-signing-enabled false --v4-signing-enabled false \
               --out "$signed" "$aligned"
             "$tools/zipalign" -c -P 16 4 "$signed"
@@ -721,7 +721,7 @@ jobs:
             "$tools/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
             "$tools/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:ANDROID_STORE_PASSWORD \
               --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD \
-              --v1-signing-enabled false --v2-signing-enabled true \
+              --v1-signing-enabled true --v2-signing-enabled true \
               --v3-signing-enabled false --v4-signing-enabled false \
               --out "$signed" "$aligned"
             "$tools/zipalign" -c -P 16 4 "$signed"

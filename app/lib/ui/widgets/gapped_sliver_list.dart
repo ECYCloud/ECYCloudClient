@@ -10,12 +10,15 @@ class GappedSliverList extends StatelessWidget {
     required this.itemBuilder,
     required this.gap,
     required this.rowEstimate,
+    this.listController,
   });
 
   final int itemCount;
   final NullableIndexedWidgetBuilder itemBuilder;
   final double gap;
   final double rowEstimate;
+  // 子项含分隔条：第 n 行的下标是 2n
+  final ListController? listController;
 
   static final ExtentPrecalculationPolicy _measureAll = _MeasureAll();
 
@@ -26,6 +29,7 @@ class GappedSliverList extends StatelessWidget {
     separatorBuilder: (_, _) => SizedBox(height: gap),
     addAutomaticKeepAlives: false,
     extentPrecalculationPolicy: _measureAll,
+    listController: listController,
     // 分隔条也是子项，须逐项按实际高度估；index 为 null 时返回正数会被当成所有子项的统一估值
     extentEstimation: (int? index, double _) => index == null
         ? 0

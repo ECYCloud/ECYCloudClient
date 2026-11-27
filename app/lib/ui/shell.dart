@@ -588,6 +588,10 @@ class _ShellState extends State<Shell> {
                                                   ),
                                             ),
                                             selected: _index == i,
+                                            // 与底栏、侧栏一致：选中只换底色，图标文字不变主题蓝
+                                            selectedColor: Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
                                             selectedTileColor: Theme.of(context)
                                                 .colorScheme
                                                 .surfaceContainerHighest,

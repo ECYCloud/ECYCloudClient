@@ -72,6 +72,8 @@ android {
                 storePassword = signing.getProperty("storePassword")
                 keyAlias = signing.getProperty("keyAlias")
                 keyPassword = signing.getProperty("keyPassword")
+                // minSdk 24 时默认只签 v2，部分国产系统安装器找不到 v1 证书会拒装
+                enableV1Signing = true
             }
         }
     }

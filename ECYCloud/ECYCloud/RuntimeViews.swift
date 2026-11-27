@@ -235,8 +235,9 @@ struct RuntimeLogsView: View {
     var body: some View {
         let colors = ProductPalette(scheme: scheme)
         GeometryReader { geometry in
+            let wide = geometry.size.width >= 640
             VStack(spacing: 0) {
-                filterBar(wide: geometry.size.width >= 640)
+                filterBar(wide: wide)
                 ScrollView {
                     VStack(spacing: 12) {
                         if let failure = state.failure { ProductNotice(message: failure) }
@@ -247,15 +248,28 @@ struct RuntimeLogsView: View {
                             }
                             ForEach(entries) { entry in
                                 let tone = color(entry.level, colors)
-                                HStack(alignment: .top, spacing: 0) {
-                                    Text(verbatim: entry.level).fontWeight(.semibold).foregroundStyle(tone)
-                                        .frame(width: 72, alignment: .leading).padding(.trailing, 6)
-                                    Text(verbatim: clock(entry.time)).foregroundStyle(colors.secondary).frame(width: 62, alignment: .leading)
-                                    Text(verbatim: "mihomo").lineLimit(1).foregroundStyle(colors.secondary).frame(width: 82, alignment: .leading)
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        if let inbound = entry.inbound, !inbound.isEmpty { ProductTag(text: inbound) }
-                                        Text(verbatim: shown[entry.id] ?? entry.message).foregroundStyle(tone).productTextSelection()
-                                    }.frame(maxWidth: .infinity, alignment: .leading)
+                                let level = Text(verbatim: entry.level).fontWeight(.semibold).foregroundStyle(tone)
+                                let time = Text(verbatim: clock(entry.time)).foregroundStyle(colors.secondary)
+                                let source = Text(verbatim: "mihomo").lineLimit(1).foregroundStyle(colors.secondary)
+                                let message = HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    if let inbound = entry.inbound, !inbound.isEmpty { ProductTag(text: inbound) }
+                                    Text(verbatim: shown[entry.id] ?? entry.message).foregroundStyle(tone).productTextSelection()
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                // 窄屏三列定宽会把正文挤到一百多宽：级别、时间、来源放一行，正文另起一行占满
+                                Group {
+                                    if wide {
+                                        HStack(alignment: .top, spacing: 0) {
+                                            level.frame(width: 72, alignment: .leading).padding(.trailing, 6)
+                                            time.frame(width: 62, alignment: .leading)
+                                            source.frame(width: 82, alignment: .leading)
+                                            message
+                                        }
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            HStack(spacing: 8) { level; time; source }
+                                            message
+                                        }
+                                    }
                                 }.font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 7).productScrollStop()
                             }
                         }.background(colors.surface, in: RoundedRectangle(cornerRadius: 20))

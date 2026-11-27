@@ -257,7 +257,8 @@ struct ClientHomeView: View {
                         Text(verbatim: L10n.t(page.rawValue)).font(.system(size: 15))
                         Spacer(minLength: 0)
                     }.padding(.horizontal, 16).frame(minHeight: 48).contentShape(Rectangle())
-                        .foregroundStyle(selected ? colors.accent : colors.text)
+                        // 与底栏、侧栏一致：选中只换底色，图标文字不变主题蓝
+                        .foregroundStyle(colors.text)
                         .background(selected ? colors.segment : Color.clear)
                 }.buttonStyle(.productPlain)
             }

@@ -140,15 +140,18 @@ if grep -qE '__SITE_URL__|__SUB_URL__|__VERSION__' "$build_json"; then
 	echo "build.json 仍有占位符" >&2
 	exit 1
 fi
-chmod 0755 \
-	"$sdk_root/package/luci-app-ecycloud/root/etc/init.d/ecycloud" \
-	"$sdk_root/package/luci-app-ecycloud/root/usr/libexec/ecycloud-ctl"
 # 国旗与地区表随包：SDK 里的副本找不到仓库的 app/assets，23.05 的 luci.mk 也不执行 Prepare 钩子
 resources="$sdk_root/package/luci-app-ecycloud/htdocs/luci-static/resources/ecycloud"
 mkdir -p "$resources/flags"
 cp -f "$root_dir/app/assets/flags/"*.svg "$resources/flags/"
 cp -f "$root_dir/app/assets/regions.json" "$resources/regions.json"
 test -s "$resources/flags/xx.svg" && test -s "$resources/regions.json"
+# cp 会带上工作区权限（本机检出可能是 0700，uhttpd 读不到就返回 403），按 git 记录统一成 644 / 755
+find "$sdk_root/package/luci-app-ecycloud" -type d -exec chmod 0755 {} +
+find "$sdk_root/package/luci-app-ecycloud" -type f -exec chmod 0644 {} +
+chmod 0755 \
+	"$sdk_root/package/luci-app-ecycloud/root/etc/init.d/ecycloud" \
+	"$sdk_root/package/luci-app-ecycloud/root/usr/libexec/ecycloud-ctl"
 
 if [[ "$package_format" == apk && ! -s "$sdk_root/private-key.pem" ]]; then
 	openssl ecparam -name prime256v1 -genkey -noout -out "$sdk_root/private-key.pem"

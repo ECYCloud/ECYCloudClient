@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
     show RenderAbstractViewport, SliverConstraints;
+import 'package:super_sliver_list/super_sliver_list.dart' show ListController;
 
 import '../../domain/kernel/clash_api_client.dart';
 import '../../domain/nodes/node_group_sort.dart';
@@ -28,8 +29,22 @@ import '../../l10n/l10n.dart';
 const double _groupCardGap = 10;
 const double _groupPinnedGap = 4;
 
-class NodesPage extends StatelessWidget {
+class NodesPage extends StatefulWidget {
   const NodesPage({super.key});
+
+  @override
+  State<NodesPage> createState() => _NodesPageState();
+}
+
+class _NodesPageState extends State<NodesPage> {
+  // 分组定位当前节点时要按行号跳到尚未构建的行，须拿到整页的滚动控制器
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +57,7 @@ class NodesPage extends StatelessWidget {
         final bool live = connection.controlPlaneReady;
 
         return CustomScrollView(
+          controller: _scrollController,
           slivers: <Widget>[
             SliverToBoxAdapter(
               child: PageHeader(
@@ -77,6 +93,7 @@ class NodesPage extends StatelessWidget {
                   group: groups[i],
                   live: live,
                   connection: connection,
+                  scrollController: _scrollController,
                   initiallyExpanded: connection.routeMode == 'global',
                 ),
               ],
@@ -94,6 +111,7 @@ class _GroupCard extends StatefulWidget {
     required this.group,
     required this.live,
     required this.connection,
+    required this.scrollController,
     this.initiallyExpanded = false,
     super.key,
   });
@@ -101,6 +119,7 @@ class _GroupCard extends StatefulWidget {
   final ProxyGroup group;
   final bool live;
   final ConnectionController connection;
+  final ScrollController scrollController;
   final bool initiallyExpanded;
 
   @override
@@ -114,6 +133,9 @@ class _GroupCardState extends State<_GroupCard> {
   static const double _tileEstimate = 52;
 
   final GlobalKey _selectedTileKey = GlobalKey();
+  final ListController _listController = ListController();
+  // 当前节点所在行，布局时按列数算出；不在列表里（如被搜索滤掉）为 null
+  int? _selectedRow;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
 
@@ -134,6 +156,7 @@ class _GroupCardState extends State<_GroupCard> {
     _searchTimer?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
+    _listController.dispose();
     super.dispose();
   }
 
@@ -166,6 +189,21 @@ class _GroupCardState extends State<_GroupCard> {
   Future<void> _locateSelected() async {
     if (!_expanded) {
       setState(() => _expanded = true);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        return;
+      }
+    }
+    // 成员按行懒加载，当前节点那行没滚到时还没构建：先按行高跳到附近让它构建，再精确居中
+    final int? row = _selectedRow;
+    if (_selectedTileKey.currentContext == null &&
+        row != null &&
+        _listController.isAttached) {
+      _listController.jumpToItem(
+        index: row * 2,
+        scrollController: widget.scrollController,
+        alignment: 0.5,
+      );
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) {
         return;
@@ -624,7 +662,12 @@ class _GroupCardState extends State<_GroupCard> {
 
                               final int rows =
                                   (members.length + columns - 1) ~/ columns;
+                              final int selected = members.indexOf(group.now);
+                              _selectedRow = selected < 0
+                                  ? null
+                                  : selected ~/ columns;
                               return GappedSliverList(
+                                listController: _listController,
                                 // 末尾多出的一行滚到才构建，构建即向面板取下一页
                                 itemCount: rows + (more ? 1 : 0),
                                 gap: _tileGap,

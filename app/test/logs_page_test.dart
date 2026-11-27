@@ -224,9 +224,13 @@ void main() {
       );
 
       final Rect page = tester.getRect(find.byType(LogsPage));
+      // 宽屏一行是 Row，窄屏级别、时间、来源与正文上下两行是 Column
       final Rect row = tester.getRect(
         find
-            .ancestor(of: find.text('日志留白探针'), matching: find.byType(Row))
+            .ancestor(
+              of: find.text('日志留白探针'),
+              matching: find.byWidgetPredicate((Widget w) => w is Flex),
+            )
             .first,
       );
       expect(

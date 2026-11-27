@@ -173,39 +173,52 @@ class _LogsPageState extends State<LogsPage> {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final List<LogEntry> visible = _visible;
-    final Widget filter = LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final bool narrow = constraints.maxWidth < 640;
-        if (narrow) {
-          return Padding(
-            padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _levelFilter(compact: true),
-                const SizedBox(height: 8),
-                _searchActions(theme, visible),
-              ],
-            ),
-          );
-        }
-        return Padding(
-          padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
-          child: Row(
-            children: <Widget>[
-              _levelFilter(compact: false),
-              const SizedBox(width: 10),
-              Expanded(child: _searchActions(theme, visible)),
-            ],
-          ),
-        );
-      },
-    );
 
     return ShellListenableBuilder(
       listenable: _connection,
-      builder: (BuildContext context, _) =>
-          _list(theme, scheme, visible, filter, _inboundTypes(_connection)),
+      builder: (BuildContext context, _) => LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool narrow = constraints.maxWidth < 640;
+          return _list(
+            theme,
+            scheme,
+            visible,
+            _filterBar(theme, visible, narrow: narrow),
+            _inboundTypes(_connection),
+            narrow: narrow,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _filterBar(
+    ThemeData theme,
+    List<LogEntry> visible, {
+    required bool narrow,
+  }) {
+    if (narrow) {
+      return Padding(
+        padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _levelFilter(compact: true),
+            const SizedBox(height: 8),
+            _searchActions(theme, visible),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: AppTheme.pageScrollPadding.copyWith(top: 10, bottom: 10),
+      child: Row(
+        children: <Widget>[
+          _levelFilter(compact: false),
+          const SizedBox(width: 10),
+          Expanded(child: _searchActions(theme, visible)),
+        ],
+      ),
     );
   }
 
@@ -214,8 +227,9 @@ class _LogsPageState extends State<LogsPage> {
     ColorScheme scheme,
     List<LogEntry> visible,
     Widget filter,
-    Map<String, String> inboundTypes,
-  ) {
+    Map<String, String> inboundTypes, {
+    required bool narrow,
+  }) {
     return CustomScrollView(
       slivers: <Widget>[
         PinnedHeaderSliver(
@@ -248,11 +262,12 @@ class _LogsPageState extends State<LogsPage> {
                 : GappedSliverList(
                     itemCount: visible.length,
                     gap: 2,
-                    // 一行正文加上下内边距
+                    // 一行正文加上下内边距；窄屏级别、时间、来源单独占一行
                     rowEstimate:
                         14 +
-                        MediaQuery.textScalerOf(context)
-                            .scale(theme.textTheme.bodyMedium!.fontSize!),
+                        (narrow ? 2 : 1) *
+                            MediaQuery.textScalerOf(context)
+                                .scale(theme.textTheme.bodyMedium!.fontSize!),
                     itemBuilder: (BuildContext context, int index) {
                       final LogEntry entry = visible[index];
                       final TextStyle messageStyle = theme.textTheme.bodyMedium!
@@ -263,71 +278,82 @@ class _LogsPageState extends State<LogsPage> {
                       final List<InlineSpan> spans = NodeLabels.flagSpans(
                         shown,
                       );
+                      final TextStyle metaStyle = theme.textTheme.bodySmall!
+                          .copyWith(fontSize: lineSize);
+                      final Widget level = Text(
+                        entry.level.label,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: lineSize,
+                          fontWeight: FontWeight.w600,
+                          color: _color(entry.level, scheme),
+                        ),
+                      );
+                      final Widget time = Text(
+                        _time(entry.time),
+                        style: metaStyle,
+                      );
+                      final Widget source = Text(
+                        entry.source,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: metaStyle,
+                      );
+                      // 节点名里的国旗与连接页一样画成旗帜图标；搜索、复制与日志文件仍是原文
+                      final Widget message =
+                          inbound == null && spans.length == 1
+                          ? Text(shown, style: messageStyle)
+                          : Text.rich(
+                              TextSpan(
+                                children: <InlineSpan>[
+                                  if (inbound != null)
+                                    WidgetSpan(
+                                      alignment: PlaceholderAlignment.middle,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 6,
+                                        ),
+                                        child: TagChip(label: inbound),
+                                      ),
+                                    ),
+                                  ...spans,
+                                ],
+                              ),
+                              style: messageStyle,
+                            );
                       return Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 14,
                           vertical: 7,
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            SizedBox(
-                              width: 72,
-                              child: Text(
-                                entry.level.label,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  fontSize: lineSize,
-                                  fontWeight: FontWeight.w600,
-                                  color: _color(entry.level, scheme),
-                                ),
+                        // 窄屏三列定宽会把正文挤到一百多宽：级别、时间、来源放一行，正文另起一行占满
+                        child: narrow
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Row(
+                                    spacing: 8,
+                                    children: <Widget>[
+                                      level,
+                                      time,
+                                      Flexible(child: source),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  message,
+                                ],
+                              )
+                            : Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  SizedBox(width: 72, child: level),
+                                  const SizedBox(width: 6),
+                                  // 时间按字形实际宽度排：Linux 回退字体比 62 宽，定宽会压到来源上
+                                  time,
+                                  const SizedBox(width: 8),
+                                  SizedBox(width: 82, child: source),
+                                  Expanded(child: message),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            SizedBox(
-                              width: 62,
-                              child: Text(
-                                _time(entry.time),
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontSize: lineSize,
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 82,
-                              child: Text(
-                                entry.source,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontSize: lineSize,
-                                ),
-                              ),
-                            ),
-                            // 节点名里的国旗与连接页一样画成旗帜图标；搜索、复制与日志文件仍是原文
-                            Expanded(
-                              child: inbound == null && spans.length == 1
-                                  ? Text(shown, style: messageStyle)
-                                  : Text.rich(
-                                      TextSpan(
-                                        children: <InlineSpan>[
-                                          if (inbound != null)
-                                            WidgetSpan(
-                                              alignment:
-                                                  PlaceholderAlignment.middle,
-                                              child: Padding(
-                                                padding: const EdgeInsets.only(
-                                                  right: 6,
-                                                ),
-                                                child: TagChip(label: inbound),
-                                              ),
-                                            ),
-                                          ...spans,
-                                        ],
-                                      ),
-                                      style: messageStyle,
-                                    ),
-                            ),
-                          ],
-                        ),
                       );
                     },
                   ),
