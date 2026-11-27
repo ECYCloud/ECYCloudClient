@@ -11,6 +11,8 @@ struct ClientHomeView: View {
     @State private var showTraffic = false
     @State private var showAnnouncements = false
     @State private var moreOpen = false
+    // iPhone 系统底栏的「更多」标签：显示自己的列表页还是从列表进入的页面
+    @State private var moreList = false
     @State private var nodeSnapshot: TunnelSnapshot?
     @State private var nodeActionError: String?
     @State private var nodeListWidth: CGFloat = 0
@@ -53,33 +55,35 @@ struct ClientHomeView: View {
             HStack(spacing: 0) {
                 if bar == .leading { verticalBarNavigation(.leading, width: insets.leading) }
                 if wide && !restricted && bar == nil { sidebar }
-                VStack(spacing: 0) {
-                    header
-                    Group {
-                        if restricted { restrictedAccount }
-                        else {
-                            // 对应 shell.dart 的 IndexedStack：各页常驻，切回时沿用已加载的数据与滚动位置
-                            ZStack {
-                                ForEach(pages, id: \.self) { page in
-                                    let active = selection == page
-                                    // tvOS 隐藏页切走后其中的控件仍能获得焦点，只保留当前页
-                                    #if os(tvOS)
-                                    if active { pageView(page, wide: wide) }
-                                    #else
-                                    pageView(page, wide: wide).environment(\.productPageActive, active)
-                                        .opacity(active ? 1 : 0).allowsHitTesting(active).disabled(!active).accessibilityHidden(!active)
-                                        .transformPreference(ProductRefreshKey.self) { if !active { $0 = nil } }
-                                    #endif
-                                }
-                            }.productFocusSection()
+                if Self.systemTabs && !wide && !restricted && bar == nil { systemTabBar } else {
+                    VStack(spacing: 0) {
+                        header
+                        Group {
+                            if restricted { restrictedAccount }
+                            else {
+                                // 对应 shell.dart 的 IndexedStack：各页常驻，切回时沿用已加载的数据与滚动位置
+                                ZStack {
+                                    ForEach(pages, id: \.self) { page in
+                                        let active = selection == page
+                                        // tvOS 隐藏页切走后其中的控件仍能获得焦点，只保留当前页
+                                        #if os(tvOS)
+                                        if active { pageView(page, wide: wide) }
+                                        #else
+                                        pageView(page, wide: wide).environment(\.productPageActive, active)
+                                            .opacity(active ? 1 : 0).allowsHitTesting(active).disabled(!active).accessibilityHidden(!active)
+                                            .transformPreference(ProductRefreshKey.self) { if !active { $0 = nil } }
+                                        #endif
+                                    }
+                                }.productFocusSection()
+                            }
                         }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .bottomTrailing) {
-                        if !wide && moreOpen && !restricted { moreNavigation.padding(.trailing, 16).padding(.bottom, 8) }
-                    }
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if !wide && !restricted && bar == nil { bottomNavigation.padding(.bottom, insets.bottom > 0 ? 0 : 8) }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .bottomTrailing) {
+                            if !wide && moreOpen && !restricted { moreNavigation.padding(.trailing, 16).padding(.bottom, 8) }
+                        }
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if !wide && !restricted && bar == nil { bottomNavigation.padding(.bottom, insets.bottom > 0 ? 0 : 8) }
+                        }
                     }
                 }
                 if bar == .trailing { verticalBarNavigation(.trailing, width: insets.trailing) }
@@ -134,6 +138,106 @@ struct ClientHomeView: View {
         }
         .productDialog(isPresented: Binding(get: { slotDevices != nil }, set: { if !$0 { cancelSlot() } })) { deviceSlotDialog }
     }
+
+    // iPhone 竖屏用系统 TabView 底栏：首页、节点、工单、邀请加「更多」，选中胶囊、切换动画与液态玻璃由系统负责。
+    // 「更多」标签放自己的列表页而不是系统列表：页头与其它页一致带头像、分割线铺满整行（与 Android 一致），
+    // 从列表进入的页面页头带返回键回到列表。iPad 与宽窗口走侧栏，iPhone Duo 走竖向栏，macOS / visionOS 窄窗口仍是自绘底栏
+    #if os(iOS)
+    private static let systemTabs = true
+    #else
+    private static let systemTabs = false
+    #endif
+    private static let barPages = 4
+
+    @ViewBuilder private var systemTabBar: some View {
+        #if os(iOS)
+        let pinned = Array(pages.prefix(Self.barPages))
+        let slot = Binding<Int>(
+            get: { moreList ? Self.barPages : pinned.firstIndex(of: selection) ?? Self.barPages },
+            set: { index in
+                if index < Self.barPages { moreList = false; selection = pinned[index] } else { moreList = true }
+            })
+        TabView(selection: slot) {
+            ForEach(Array(pinned.enumerated()), id: \.element) { index, page in
+                let active = slot.wrappedValue == index
+                VStack(spacing: 0) {
+                    header
+                    pageView(page, wide: false).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                // 系统 TabView 给每个标签铺系统背景（纯白 / 纯黑），盖住了外层的页面底色，须在标签内重设
+                .background(colors.background)
+                .environment(\.productPageActive, active)
+                .transformPreference(ProductRefreshKey.self) { if !active { $0 = nil } }
+                .tabItem {
+                    Label { Text(verbatim: L10n.t(page.rawValue)) } icon: {
+                        Self.tabIcon(page.icon(filled: active), unread: page == .tickets && !active && session.hasUnreadTicketReply, dark: scheme == .dark)
+                    }
+                }
+                .tag(index)
+                // 页面内的控件仍用主题色；只让底栏选中项与侧栏一致，不染主题蓝
+                .tint(colors.accent)
+            }
+            let inMore = slot.wrappedValue == Self.barPages
+            Group {
+                if moreList || pinned.contains(selection) {
+                    VStack(spacing: 0) {
+                        pageHeader(title: L10n.t("更多"), back: nil)
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                ForEach(Array(pages.dropFirst(Self.barPages).enumerated()), id: \.element) { index, page in
+                                    if index > 0 { Divider().overlay(colors.outline.opacity(0.5)) }
+                                    ProductLinkRow(title: L10n.t(page.rawValue), icon: page.icon(filled: false)) { selection = page; moreList = false }
+                                }
+                            }
+                            .background(colors.surface, in: RoundedRectangle(cornerRadius: 20)).clipShape(RoundedRectangle(cornerRadius: 20))
+                            .padding(.leading, 14).padding(.trailing, 16).padding(.top, 16)
+                        }
+                    }
+                    .background(colors.background)
+                } else {
+                    VStack(spacing: 0) {
+                        pageHeader(title: nil, back: { moreList = true })
+                        pageView(selection, wide: false).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .background(colors.background)
+                    .environment(\.productPageActive, inMore)
+                    .transformPreference(ProductRefreshKey.self) { if !inMore { $0 = nil } }
+                }
+            }
+            .tabItem { Label { Text(verbatim: L10n.t("更多")) } icon: { Self.tabIcon("more_horiz") } }
+            .tag(Self.barPages)
+            .tint(colors.accent)
+        }
+        .tint(colors.text)
+        #endif
+    }
+
+    // 部分图标资源原尺寸是 960，交给系统底栏前统一缩成 24 点模板图。
+    // 工单未读不用系统角标（空角标固定约 18 点，调字号也缩不小），在图标右上角画 8 点红点、周围挖一圈空隙；
+    // 带红点的图按原色交给系统，否则模板着色会把红点一起染掉，图标颜色取系统底栏未选中项用的 label 色
+    #if os(iOS)
+    private static var tabIcons: [String: Image] = [:]
+    private static func tabIcon(_ name: String, unread: Bool = false, dark: Bool = false) -> Image {
+        let key = unread ? "\(name)|unread|\(dark)" : name
+        if let cached = tabIcons[key] { return cached }
+        guard let source = UIImage(named: "product_" + name) else { return Image("product_" + name) }
+        let size = CGSize(width: 24, height: 24)
+        let drawn = UIGraphicsImageRenderer(size: size).image { context in
+            let rect = CGRect(origin: .zero, size: size)
+            guard unread else { source.draw(in: rect); return }
+            let label = UIColor.label.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+            source.withTintColor(label, renderingMode: .alwaysOriginal).draw(in: rect)
+            context.cgContext.setBlendMode(.clear)
+            context.cgContext.fillEllipse(in: CGRect(x: 14, y: -2, width: 12, height: 12))
+            context.cgContext.setBlendMode(.normal)
+            UIColor(red: 0xE5 / 255, green: 0x39 / 255, blue: 0x35 / 255, alpha: 1).setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 16, y: 0, width: 8, height: 8))
+        }
+        let image = Image(uiImage: drawn.withRenderingMode(unread ? .alwaysOriginal : .alwaysTemplate))
+        tabIcons[key] = image
+        return image
+    }
+    #endif
 
     @ViewBuilder private func pageView(_ page: Page, wide: Bool) -> some View {
         switch page {
@@ -266,19 +370,30 @@ struct ClientHomeView: View {
             .productGlass(colors.surface, in: RoundedRectangle(cornerRadius: 20))
     }
 
-    private var header: some View {
+    // title 与 back 只给 iPhone「更多」列表页及其进入的页面用：列表页只留头像，进入的页面左侧带返回键（对应 page_header.dart）
+    private var header: some View { pageHeader(title: nil, back: nil) }
+
+    private func pageHeader(title: String?, back: (() -> Void)?) -> some View {
         HStack(spacing: 0) {
-            Text(verbatim: restricted ? L10n.t("账户状态") : selection == .unlock ? L10n.t("解锁检测") : L10n.t(selection.rawValue))
+            if let back {
+                Button(action: back) {
+                    Image(systemName: "arrow.left").font(.system(size: 20))
+                        .frame(width: ProductMetrics.tapTarget, height: ProductMetrics.tapTarget).contentShape(Rectangle()).productIconHover()
+                }.buttonStyle(.productPlain).accessibilityLabel(L10n.t("返回"))
+                    .padding(.leading, -(ProductMetrics.tapTarget - 20) / 2).padding(.trailing, 8)
+            }
+            Text(verbatim: title ?? (restricted ? L10n.t("账户状态") : selection == .unlock ? L10n.t("解锁检测") : L10n.t(selection.rawValue)))
                 .font(.system(size: 22, weight: .semibold)).tracking(-0.66).lineLimit(1)
             Spacer(minLength: 0)
-            if !restricted && selection == .home {
+            if title == nil && !restricted && selection == .home {
                 Button { showAnnouncements = true } label: {
                     ProductGlyph(name: "notifications_outlined", size: 20).frame(width: 32, height: 32)
                         .overlay(alignment: .topTrailing) { if session.announcementState.hasUnread { unreadDot } }
                         .frame(width: ProductMetrics.tapTarget, height: ProductMetrics.tapTarget).contentShape(Rectangle()).productIconHover()
                 }.buttonStyle(.productPlain).help(L10n.t("公告")).accessibilityLabel(L10n.t("公告"))
             }
-            if !restricted && selection == .nodes {
+            if title != nil {
+            } else if !restricted && selection == .nodes {
                 refreshButton(L10n.t("刷新节点"), spinning: session.nodesLoading) { await session.loadNodes() }
             } else if !restricted, let refreshAction {
                 refreshButton(L10n.t("刷新"), spinning: refreshAction.disabled) { await refreshAction.run() }
@@ -472,6 +587,25 @@ struct ClientHomeView: View {
     }
 }
 
+// 账户页「更多」区块与 iPhone「更多」列表共用的一行：图标、名称、右箭头
+private struct ProductLinkRow: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let colors = ProductPalette(scheme: scheme)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ProductGlyph(name: icon, size: 20).foregroundStyle(colors.secondary)
+                Text(verbatim: title)
+                Spacer(minLength: 0)
+                ProductGlyph(name: "chevron_right", size: 24).foregroundStyle(colors.secondary)
+            }.padding(.leading, 16).padding(.trailing, 24).frame(minHeight: 48).contentShape(Rectangle()).productHoverLayer(Rectangle())
+        }.buttonStyle(.productPlain)
+    }
+}
+
 struct AccountInfoPage: View {
     let session: ClientSession
     @Environment(\.colorScheme) private var scheme
@@ -557,14 +691,7 @@ struct AccountInfoPage: View {
     private var divider: some View { Divider().overlay(colors.outline.opacity(0.5)) }
 
     private func accountLink(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                ProductGlyph(name: icon, size: 20).foregroundStyle(colors.secondary)
-                Text(verbatim: title)
-                Spacer(minLength: 0)
-                ProductGlyph(name: "chevron_right", size: 24).foregroundStyle(colors.secondary)
-            }.padding(.leading, 16).padding(.trailing, 24).frame(minHeight: 48).contentShape(Rectangle()).productHoverLayer(Rectangle())
-        }.buttonStyle(.productPlain)
+        ProductLinkRow(title: title, icon: icon, action: action)
     }
 
     private func planCard(_ profile: UserProfile) -> some View {

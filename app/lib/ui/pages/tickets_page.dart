@@ -888,7 +888,9 @@ class _TicketEditorDialogState extends State<_TicketEditorDialog> {
             ),
             const SizedBox(height: 10),
             Text(
-              L10n.t('如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。'),
+              widget.requireTitle
+                  ? L10n.t('如果是反馈客户端问题，请在提交工单时点击选中运行日志。')
+                  : L10n.t('如果是反馈客户端问题，请在回复工单时点击选中运行日志。'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 6),

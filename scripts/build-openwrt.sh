@@ -146,6 +146,7 @@ mkdir -p "$resources/flags"
 cp -f "$root_dir/app/assets/flags/"*.svg "$resources/flags/"
 cp -f "$root_dir/app/assets/regions.json" "$resources/regions.json"
 test -s "$resources/flags/xx.svg" && test -s "$resources/regions.json"
+"$script_dir/fetch-geodata.sh" "$sdk_root/package/luci-app-ecycloud/root/usr/share/ecycloud/geodata"
 # cp 会带上工作区权限（本机检出可能是 0700，uhttpd 读不到就返回 403），按 git 记录统一成 644 / 755
 find "$sdk_root/package/luci-app-ecycloud" -type d -exec chmod 0755 {} +
 find "$sdk_root/package/luci-app-ecycloud" -type f -exec chmod 0644 {} +

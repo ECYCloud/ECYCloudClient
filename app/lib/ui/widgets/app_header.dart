@@ -7,9 +7,11 @@ import 'page_header.dart';
 import 'user_avatar.dart';
 
 class AppHeader extends StatelessWidget {
-  const AppHeader({super.key, required this.bar});
+  const AppHeader({super.key, required this.bar, this.onBack});
 
   final ShellChromeBar bar;
+  // 窄屏从「更多」列表进入的页面带返回键，回到列表
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +29,8 @@ class AppHeader extends StatelessWidget {
             height: AppTheme.headerHeight,
             child: Padding(
               padding: EdgeInsets.fromLTRB(
-                AppTheme.pageScrollPadding.left,
+                AppTheme.pageScrollPadding.left -
+                    (onBack == null ? 0 : PageHeader.backButtonInset),
                 0,
                 AppTheme.pageScrollPadding.right,
                 0,
@@ -38,6 +41,10 @@ class AppHeader extends StatelessWidget {
                   final double titleSize = AppTheme.pageTitleSizeOf(context);
                   return Row(
                     children: <Widget>[
+                      if (onBack case final VoidCallback back) ...<Widget>[
+                        PageHeader.backButton(context, back),
+                        const SizedBox(width: PageHeader.actionGap),
+                      ],
                       Expanded(
                         child: bar.title.isEmpty
                             ? const SizedBox.shrink()

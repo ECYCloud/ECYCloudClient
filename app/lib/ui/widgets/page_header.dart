@@ -114,6 +114,22 @@ class PageHeader extends StatelessWidget {
   static const double _actionIconInset =
       (AppTheme.pointerTapTarget - _actionIconSize) / 2;
 
+  // 返回键左缘按图标内缩对齐页面边距，外壳页头（AppHeader）也用这一份
+  static const double backButtonInset = _actionIconInset;
+
+  static Widget backButton(BuildContext context, VoidCallback onPressed) =>
+      TouchBleed(
+        child: IconButton(
+          tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+          icon: const BackButtonIcon(),
+          iconSize: _actionIconSize,
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.standard,
+          constraints: AppTheme.iconButtonBox,
+          onPressed: onPressed,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final ShellChrome? chrome = ShellChrome.maybeOf(context);
@@ -145,19 +161,7 @@ class PageHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (showBackButton) ...<Widget>[
-              TouchBleed(
-                child: IconButton(
-                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-                  icon: const BackButtonIcon(),
-                  iconSize: _actionIconSize,
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.standard,
-                  constraints: AppTheme.iconButtonBox,
-                  onPressed: () {
-                    Navigator.maybePop(context);
-                  },
-                ),
-              ),
+              backButton(context, () => Navigator.maybePop(context)),
               const SizedBox(width: actionGap),
             ],
             Expanded(

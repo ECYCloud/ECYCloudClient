@@ -425,6 +425,7 @@ const RUN_RESERVE_KIB = 4 * 1024;
 
 /* geodata 与账号无关，存一份共享，再硬链接进账号目录；回收账号目录不会删掉它 */
 const GEO_DIR = `${CONF_DIR}/geodata`;
+const BUNDLED_GEO_DIR = '/usr/share/ecycloud/geodata';
 
 export function shareGeodata(runDir) {
 	ensurePrivateDir(GEO_DIR);
@@ -433,7 +434,7 @@ export function shareGeodata(runDir) {
 		const shared = `${GEO_DIR}/${name}`;
 		const local = `${runDir}/${name}`;
 		if (!access(shared))
-			for (let source in [ local, `${RUN_ROOT}/${name}` ])
+			for (let source in [ local, `${RUN_ROOT}/${name}`, `${BUNDLED_GEO_DIR}/${name}` ])
 				if (access(source) && system(`ln -f -- ${shellquote(source)} ${shellquote(shared)}`) == 0)
 					break;
 		if (access(shared) && !access(local) && system(`ln -f -- ${shellquote(shared)} ${shellquote(local)}`) != 0)

@@ -25,10 +25,11 @@ void main() {
     expect(src, contains("'邀请'"));
     expect(src, contains("L10n.t('更多')"));
     expect(src, contains('Icons.more_horiz'));
-    expect(src, contains('_moreOpen'));
-    expect(src, contains('Alignment.bottomRight'));
-    expect(src, contains('IntrinsicWidth'));
-    expect(src, contains('AppTheme.cardRadius'));
+    // 「更多」是整页列表，与 iOS 系统「更多」一致；列表里的页面页头带返回键，系统返回也回到列表
+    expect(src, contains('_moreListPage'));
+    expect(src, contains('Icons.chevron_right'));
+    expect(src, contains('onBack: morePage ? _openMoreList : null'));
+    expect(src, contains('canPop: !morePage'));
   });
 
   test('页顶描述走记录样式，字号 14', () {
@@ -123,39 +124,6 @@ void main() {
       File('linux/runner/my_application.cc').readAsStringSync(),
       contains('load_window_size'),
     );
-  });
-
-  testWidgets('更多面板贴在右下，不拉满整行', (WidgetTester tester) async {
-    await tester.binding.setSurfaceSize(const Size(400, 700));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: Stack(
-            children: <Widget>[
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Material(
-                  child: IntrinsicWidth(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        ListTile(title: Text('解锁')),
-                        ListTile(title: Text('设置')),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    final Rect panel = tester.getRect(find.byType(Material).last);
-    expect(panel.left, greaterThan(200));
-    expect(panel.right, closeTo(400, 0.5));
   });
 
   testWidgets('宽表解锁状态与表头左对齐', (WidgetTester tester) async {

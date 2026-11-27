@@ -163,6 +163,7 @@
 				EC200000000000000000006F /* Embed VPN Extension */,
 				04F8B3CF3086419A00B3E525 /* Sources */,
 				04F8B3D03086419A00B3E525 /* Frameworks */,
+				ECA400000000000000000001 /* Fetch Latest GeoData */,
 				04F8B3D13086419A00B3E525 /* Resources */,
 			);
 			buildRules = (
@@ -224,6 +225,7 @@
 				EC20000000000000000000D3 /* Embed VPN Extension */,
 				DB36AE4A962544A9B97D8864 /* Sources */,
 				E242A93B05914EF9A0D0A002 /* Frameworks */,
+				ECA400000000000000000002 /* Fetch Latest GeoData */,
 				2D866465862E49009D403A38 /* Resources */,
 			);
 			buildRules = (
@@ -320,6 +322,55 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		ECA400000000000000000001 /* Fetch Latest GeoData */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../scripts/fetch-geodata.sh",
+				"$(SRCROOT)/../scripts/kernel.lock.json",
+			);
+			name = "Fetch Latest GeoData";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(ECY_KERNEL_FRAMEWORK_DIR)/geoip.metadb",
+				"$(ECY_KERNEL_FRAMEWORK_DIR)/GeoSite.dat",
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$PLATFORM_NAME\" = macosx ]; then exit 0; fi\nECYCLOUD_BUILD_DIR=\"$DERIVED_FILE_DIR\" exec bash \"$SRCROOT/../scripts/fetch-geodata.sh\" \"$ECY_KERNEL_FRAMEWORK_DIR\"\n";
+		};
+		ECA400000000000000000002 /* Fetch Latest GeoData */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../scripts/fetch-geodata.sh",
+				"$(SRCROOT)/../scripts/kernel.lock.json",
+			);
+			name = "Fetch Latest GeoData";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(ECY_KERNEL_FRAMEWORK_DIR)/geoip.metadb",
+				"$(ECY_KERNEL_FRAMEWORK_DIR)/GeoSite.dat",
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$PLATFORM_NAME\" = macosx ]; then exit 0; fi\nECYCLOUD_BUILD_DIR=\"$DERIVED_FILE_DIR\" exec bash \"$SRCROOT/../scripts/fetch-geodata.sh\" \"$ECY_KERNEL_FRAMEWORK_DIR\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		04F8B3CF3086419A00B3E525 /* Sources */ = {

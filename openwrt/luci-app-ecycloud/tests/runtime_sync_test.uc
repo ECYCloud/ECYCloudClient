@@ -1014,6 +1014,18 @@ if (rpc != null) {
 	shareGeodata('/etc/ecycloud/run/new-account');
 	check(length(filter(testState.commands, c => index(c, "ln -f -- '/etc/ecycloud/geodata/GeoSite.dat' '/etc/ecycloud/run/new-account/GeoSite.dat'") == 0)) == 1,
 		'新账号目录必须从共享位置链接 geodata，首次连接不用在线下载');
+	testState.files['/usr/share/ecycloud/geodata/geoip.metadb'] = 'bundled';
+	testState.commands = [];
+	shareGeodata('/etc/ecycloud/run/fresh-install');
+	check(length(filter(testState.commands, c => index(c, "ln -f -- '/usr/share/ecycloud/geodata/geoip.metadb' '/etc/ecycloud/geodata/geoip.metadb'") == 0)) == 1,
+		'共享位置与账号目录都没有 geodata 时必须用随包文件，首次启动不用在线下载');
+	testState.files['/etc/ecycloud/geodata/geoip.metadb'] = 'updated';
+	testState.commands = [];
+	shareGeodata('/etc/ecycloud/run/fresh-install');
+	check(!length(filter(testState.commands, c => index(c, '/usr/share/ecycloud/geodata/') >= 0)),
+		'共享位置已有 geodata 时不能用随包文件覆盖');
+	delete testState.files['/usr/share/ecycloud/geodata/geoip.metadb'];
+	delete testState.files['/etc/ecycloud/geodata/geoip.metadb'];
 	testState.files['/etc/ecycloud/run/stale-account/.last-used'] = `${now - 31 * 86400}`;
 	testState.files['/etc/ecycloud/run/stale-account/cache.db'] = 'stale';
 	collectGarbage();

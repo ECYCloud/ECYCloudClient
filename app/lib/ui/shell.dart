@@ -83,7 +83,8 @@ class _ShellState extends State<Shell> {
   ];
 
   int _index = 0;
-  bool _moreOpen = false;
+  // 窄屏点「更多」显示整页列表（与 iOS 系统「更多」一致），从列表进入的页面页头带返回键
+  bool _moreList = false;
   final ShellChromeBar _chrome = ShellChromeBar();
   UpdateController? _update;
   ConnectionController? _connection;
@@ -152,9 +153,44 @@ class _ShellState extends State<Shell> {
     }
     setState(() {
       _index = index;
-      _moreOpen = false;
+      _moreList = false;
     });
     _chrome.set(title: L10n.t(_destinations[index].label));
+  }
+
+  void _openMoreList() {
+    setState(() => _moreList = true);
+    _chrome.set(title: L10n.t('更多'));
+  }
+
+  Widget _moreListPage(BuildContext context) {
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: ListView(
+        padding: AppTheme.pageScrollPadding.copyWith(top: 16),
+        children: <Widget>[
+          Card(
+            child: Column(
+              children: <Widget>[
+                for (
+                  int i = _mobilePinnedCount;
+                  i < _destinations.length;
+                  i++
+                ) ...<Widget>[
+                  if (i > _mobilePinnedCount) const Divider(),
+                  ListTile(
+                    leading: Icon(_destinations[i].icon, size: 20),
+                    title: Text(L10n.t(_destinations[i].label)),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _goToTab(i),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // IndexedStack 不停隐藏页的动画：转圈等会一直排帧，连带整窗重绘
@@ -490,17 +526,23 @@ class _ShellState extends State<Shell> {
                 ),
               );
 
+        final bool moreList = !wide && _moreList;
+        final bool morePage =
+            !wide && !_moreList && _index >= _mobilePinnedCount;
         final Widget headed = Stack(
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.only(top: AppTheme.headerHeight),
-              child: content,
+              child: moreList ? _moreListPage(context) : content,
             ),
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              child: AppHeader(bar: _chrome),
+              child: AppHeader(
+                bar: _chrome,
+                onBack: morePage ? _openMoreList : null,
+              ),
             ),
           ],
         );
@@ -515,134 +557,81 @@ class _ShellState extends State<Shell> {
                 .hasUnreadTicketReply;
             return ShellNavigator(
               goTo: _goToTab,
-              child: AppScaffold(
-                body: SafeArea(
-                  bottom: wide,
-                  child: wide
-                      ? Row(
-                          children: <Widget>[
-                            AppSidebar(
-                              selectedIndex: _index,
-                              onSelected: _goToTab,
-                              items: <AppSidebarItem>[
-                                for (int i = 0; i < _destinations.length; i++)
-                                  AppSidebarItem(
-                                    icon: _destinations[i].icon,
-                                    selectedIcon: _destinations[i].selectedIcon,
-                                    label: L10n.t(_destinations[i].label),
-                                    badge:
-                                        i == ShellNavigator.ticketsTab &&
-                                        ticketUnread,
-                                  ),
-                              ],
-                            ),
-                            Expanded(child: headed),
-                          ],
-                        )
-                      : Stack(
-                          children: <Widget>[
-                            headed,
-                            // 点菜单以外的空白处收起
-                            if (_moreOpen)
-                              Positioned.fill(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () =>
-                                      setState(() => _moreOpen = false),
-                                ),
-                              ),
-                            if (_moreOpen)
-                              Align(
-                                alignment: Alignment.bottomRight,
-                                child: Material(
-                                  color: Theme.of(context).colorScheme.surface,
-                                  clipBehavior: Clip.antiAlias,
-                                  borderRadius: BorderRadius.circular(
-                                    AppTheme.cardRadius,
-                                  ),
-                                  child: IntrinsicWidth(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: <Widget>[
-                                        for (
-                                          int i = _mobilePinnedCount;
-                                          i < _destinations.length;
-                                          i++
-                                        )
-                                          ListTile(
-                                            leading: NavGlyph(
-                                              _index == i
-                                                  ? _destinations[i]
-                                                        .selectedIcon
-                                                  : _destinations[i].icon,
-                                              filled: _index == i,
-                                            ),
-                                            title: Text(
-                                              L10n.t(_destinations[i].label),
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyLarge
-                                                  ?.copyWith(
-                                                    fontSize:
-                                                        AppTheme.navLabelSize,
-                                                  ),
-                                            ),
-                                            selected: _index == i,
-                                            // 与底栏、侧栏一致：选中只换底色，图标文字不变主题蓝
-                                            selectedColor: Theme.of(context)
-                                                .colorScheme
-                                                .onSurface,
-                                            selectedTileColor: Theme.of(context)
-                                                .colorScheme
-                                                .surfaceContainerHighest,
-                                            onTap: () => _goToTab(i),
-                                          ),
-                                      ],
+              // 系统返回手势与页头返回键一致：「更多」里的页面先回到列表
+              child: PopScope(
+                canPop: !morePage,
+                onPopInvokedWithResult: (bool didPop, Object? _) {
+                  if (!didPop) {
+                    _openMoreList();
+                  }
+                },
+                child: AppScaffold(
+                  body: SafeArea(
+                    bottom: wide,
+                    child: wide
+                        ? Row(
+                            children: <Widget>[
+                              AppSidebar(
+                                selectedIndex: _index,
+                                onSelected: _goToTab,
+                                items: <AppSidebarItem>[
+                                  for (int i = 0; i < _destinations.length; i++)
+                                    AppSidebarItem(
+                                      icon: _destinations[i].icon,
+                                      selectedIcon:
+                                          _destinations[i].selectedIcon,
+                                      label: L10n.t(_destinations[i].label),
+                                      badge:
+                                          i == ShellNavigator.ticketsTab &&
+                                          ticketUnread,
                                     ),
-                                  ),
-                                ),
+                                ],
                               ),
+                              Expanded(child: headed),
+                            ],
+                          )
+                        : headed,
+                  ),
+                  bottomNavigationBar: wide
+                      ? null
+                      : NavigationBar(
+                          selectedIndex:
+                              _index < _mobilePinnedCount && !_moreList
+                              ? _index
+                              : _mobilePinnedCount,
+                          onDestinationSelected: (int index) {
+                            if (index < _mobilePinnedCount) {
+                              _goToTab(index);
+                              return;
+                            }
+                            _openMoreList();
+                          },
+                          destinations: <NavigationDestination>[
+                            for (int i = 0; i < _mobilePinnedCount; i++)
+                              NavigationDestination(
+                                icon: _navIcon(
+                                  _destinations[i].icon,
+                                  badge:
+                                      i == ShellNavigator.ticketsTab &&
+                                      ticketUnread,
+                                ),
+                                selectedIcon: _navIcon(
+                                  _destinations[i].selectedIcon,
+                                  filled: true,
+                                  badge:
+                                      i == ShellNavigator.ticketsTab &&
+                                      ticketUnread,
+                                ),
+                                label: L10n.t(_destinations[i].label),
+                              ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.more_horiz),
+                              selectedIcon: const Icon(Icons.more_horiz),
+                              label: L10n.t('更多'),
+                            ),
                           ],
                         ),
                 ),
-                bottomNavigationBar: wide
-                    ? null
-                    : NavigationBar(
-                        selectedIndex: _index < _mobilePinnedCount
-                            ? _index
-                            : _mobilePinnedCount,
-                        onDestinationSelected: (int index) {
-                          if (index < _mobilePinnedCount) {
-                            _goToTab(index);
-                            return;
-                          }
-                          setState(() => _moreOpen = !_moreOpen);
-                        },
-                        destinations: <NavigationDestination>[
-                          for (int i = 0; i < _mobilePinnedCount; i++)
-                            NavigationDestination(
-                              icon: _navIcon(
-                                _destinations[i].icon,
-                                badge:
-                                    i == ShellNavigator.ticketsTab &&
-                                    ticketUnread,
-                              ),
-                              selectedIcon: _navIcon(
-                                _destinations[i].selectedIcon,
-                                filled: true,
-                                badge:
-                                    i == ShellNavigator.ticketsTab &&
-                                    ticketUnread,
-                              ),
-                              label: L10n.t(_destinations[i].label),
-                            ),
-                          NavigationDestination(
-                            icon: const Icon(Icons.more_horiz),
-                            selectedIcon: const Icon(Icons.more_horiz),
-                            label: L10n.t('更多'),
-                          ),
-                        ],
-                      ),
               ),
             );
           },

@@ -475,7 +475,7 @@ struct TicketComposerView: View {
                     ProductTextField(hint: L10n.t("标题"), text: $title, labeled: true).padding(.bottom, 12)
                 }
                 TicketEditor(text: $text)
-                Text(L10n.t("如果是反馈客户端问题，请在回复或提交工单时点击选中运行日志。")).font(.system(size: 12)).foregroundStyle(colors.secondary)
+                Text(replyTo == nil ? L10n.t("如果是反馈客户端问题，请在提交工单时点击选中运行日志。") : L10n.t("如果是反馈客户端问题，请在回复工单时点击选中运行日志。")).font(.system(size: 12)).foregroundStyle(colors.secondary)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                 picker.padding(.top, 6)
             }
